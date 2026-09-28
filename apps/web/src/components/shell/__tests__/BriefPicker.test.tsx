@@ -143,24 +143,25 @@ describe("BriefPicker create / duplicate", () => {
     expect(screen.getByRole("dialog", { name: "Load a campaign brief" })).toBeTruthy();
   });
 
-  test("duplicates a clean editor's entry, reloads, and navigates to the copy's route", async () => {
+  test("duplicates a clean editor's entry by name, reloads, and navigates to the copy's route (D177, D178)", async () => {
     const user = userEvent.setup();
     const copy = { id: "demo-copy", targetRegion: "DE", products: [{ id: "a" }] };
     route({
       failReload: true,
       post: (url, init) => {
         expect(url).toContain("/campaigns/briefs/demo/duplicate");
-        expect(JSON.parse(String(init.body))).toEqual({ newId: "demo-copy" });
+        expect(JSON.parse(String(init.body))).toEqual({ name: "Demo Copy" });
         return json({ file: "demo-copy.yaml", brief: copy }, 201);
       },
     });
     renderWithRun(<BriefPicker />);
     await screen.findByText("demo.yaml");
     await user.click(screen.getByText("Duplicate"));
-    await user.type(screen.getByLabelText("New brief id"), "demo-copy{Enter}");
+    await user.type(screen.getByLabelText("New campaign name"), "Demo Copy{Enter}");
     // D37: the copy is opened by navigating to it — the editor at that route loads
     // it and commits it to the shell, so the picker never sets the brief itself.
-    // D67: the clean editor's guard is silent, so the write runs at once.
+    // D67: the clean editor's guard is silent, so the write runs at once. The
+    // route is the SERVER-derived slug (`copy.brief.id`), never the typed name.
     await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/demo-copy"));
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "Load a campaign brief" })).toBeNull(),
@@ -180,7 +181,7 @@ describe("BriefPicker create / duplicate", () => {
     renderDirty(<BriefPicker />);
     await screen.findByText("demo.yaml");
     await user.click(screen.getByText("Duplicate"));
-    await user.type(screen.getByLabelText("New brief id"), "demo-copy{Enter}");
+    await user.type(screen.getByLabelText("New campaign name"), "Demo Copy{Enter}");
 
     // D67: the whole async sequence lives inside ONE guarded action — the question
     // comes first, and the navigation inside carries no second guard (a nested guard
@@ -205,7 +206,7 @@ describe("BriefPicker create / duplicate", () => {
     renderDirty(<BriefPicker />);
     await screen.findByText("demo.yaml");
     await user.click(screen.getByText("Duplicate"));
-    await user.type(screen.getByLabelText("New brief id"), "demo-copy{Enter}");
+    await user.type(screen.getByLabelText("New campaign name"), "Demo Copy{Enter}");
     const dialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
     await user.click(within(dialog).getByRole("button", { name: "Stay" }));
 
@@ -231,39 +232,28 @@ describe("BriefPicker create / duplicate", () => {
     expect(screen.getByRole("dialog", { name: "Load a campaign brief" })).toBeTruthy();
   });
 
-  test("rejects an unsafe duplicate id, surfaces API errors, and cancels", async () => {
+  test("rejects a blank name without calling the API, then surfaces an API error and cancels (D177)", async () => {
     const user = userEvent.setup();
-    route({
-      post: () => json({ error: 'Brief "taken" already exists.' }, 409),
-    });
+    const post = vi.fn((_url: string, _init: RequestInit) => json({ error: "boom" }, 500));
+    route({ post: (url, init) => post(url, init) });
     renderWithRun(<BriefPicker />);
     await screen.findByText("demo.yaml");
     await user.click(screen.getByText("Duplicate"));
-    await user.type(screen.getByLabelText("New brief id"), "Bad Id{Enter}");
-    expect(await screen.findByText(/path-safe slug/)).toBeTruthy();
-    await user.clear(screen.getByLabelText("New brief id"));
-    await user.type(screen.getByLabelText("New brief id"), "taken{Enter}");
-    expect(await screen.findByText(/already exists/)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByLabelText("New brief id")).toBeNull();
-  });
+    // A name of only whitespace is refused client-side — the server never sees it.
+    await user.type(screen.getByLabelText("New campaign name"), "   {Enter}");
+    expect(await screen.findByText("Name the duplicate before saving it.")).toBeTruthy();
+    expect(post).not.toHaveBeenCalled();
 
-  test.each(["cache", "jobs", "orgs", "packages"] as const)(
-    "rejects reserved duplicate id %s without calling API",
-    async (id) => {
-      const user = userEvent.setup();
-      const post = vi.fn((_url: string, _init: RequestInit) => json({}, 201));
-      route({ post: (url, init) => post(url, init) });
-      renderWithRun(<BriefPicker />);
-      await screen.findByText("demo.yaml");
-      await user.click(screen.getByText("Duplicate"));
-      await user.type(screen.getByLabelText("New brief id"), `${id}{Enter}`);
-      expect(
-        await screen.findByText(`"${id}" is reserved; choose another campaign id.`),
-      ).toBeTruthy();
-      expect(post).not.toHaveBeenCalled();
-    },
-  );
+    // A real name reaches the server; its failure surfaces here, not as a client
+    // id-pattern refusal — the server derives and dedupes the slug now (D178), so
+    // there is no client-side reserved-id or path-safe-slug check left to fail.
+    await user.clear(screen.getByLabelText("New campaign name"));
+    await user.type(screen.getByLabelText("New campaign name"), "Demo Copy{Enter}");
+    expect(await screen.findByText("boom")).toBeTruthy();
+    expect(post).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("New campaign name")).toBeNull();
+  });
 });
 
 describe("BriefPicker type chip (T4)", () => {
