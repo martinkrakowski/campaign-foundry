@@ -597,13 +597,27 @@ describe("the entry guard", () => {
   const cliPath = fileURLToPath(new URL("../cli.ts", import.meta.url));
 
   test("does nothing when the module is not the invoked script", async () => {
+    // Asserted, not assumed: if the guard ever starts executing on import —
+    // with or without throwing — the command's output or its exit code would
+    // give it away here, and this test fails.
     vi.resetModules();
     const saved = process.argv;
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     process.argv = [saved[0] ?? "node"];
     try {
       await import("../cli.js");
+      // The guard's command chain resolves asynchronously after the import;
+      // give the task queue a turn before demanding silence.
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(logSpy).not.toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
     } finally {
       process.argv = saved;
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+      process.exitCode = undefined;
     }
   });
 
