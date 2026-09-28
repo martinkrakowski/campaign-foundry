@@ -4216,11 +4216,9 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
 
   test("a never-saved brief is still runnable, and running it writes nothing", async () => {
     const user = userEvent.setup();
-    const calls = routes({});
-    renderWithRun(<Editor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
     await fillValidDraft(user, "fresh");
 
     // The capability D35 preserved when "Apply to run" was retired: a brand-new brief
@@ -4410,11 +4408,9 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
   test("a validation is closed by a listing that takes the id out from under it", async () => {
     const user = userEvent.setup();
     let listed: readonly ReturnType<typeof entry>[] = [];
-    routes({ list: () => json({ briefs: listed }) });
-    renderWithRun(<Editor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
+    routes({ list: () => json({ briefs: listed }), meta: () => json(blankCampaignMeta("fresh")) });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
     await fillValidDraft(user, "fresh");
 
     await user.click(slot(messages.editorValidate) as HTMLElement);
@@ -4448,11 +4444,10 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
         // identical content, nothing shared by reference with the last answer.
         return json({ briefs: listed.map((e) => ({ ...e })) });
       },
+      meta: () => json(blankCampaignMeta("fresh")),
     });
-    renderWithRun(<Editor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
     await waitFor(() => expect(lists).toBe(1));
     await fillValidDraft(user, "fresh");
 
