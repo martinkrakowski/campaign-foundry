@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "vitest";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   chmodSync,
   existsSync,
@@ -20,6 +20,42 @@ import {
 import { FsBriefStore } from "../fs-brief-store.js";
 import { dumpBrief, hashBytes } from "../../brief-files.js";
 
+// Hookable `writeFile`/`lstat`, each used by exactly one test below (the
+// createCampaign write-failure test, and the isCampaignDirUnsafe non-ENOENT
+// lstat test): every other test leaves both hooks undefined, which falls
+// straight through to the real implementation, so this mock changes nothing
+// for them.
+const fsHook = vi.hoisted(() => ({
+  writeFile: undefined as
+    | ((path: string, data: unknown, options?: unknown) => Promise<void>)
+    | undefined,
+  lstat: undefined as ((path: string) => Promise<unknown>) | undefined,
+  rmdir: undefined as ((path: string) => Promise<void>) | undefined,
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    writeFile: (path: string, data: unknown, options?: unknown) =>
+      fsHook.writeFile
+        ? fsHook.writeFile(path, data, options)
+        : (actual.writeFile as unknown as (p: string, d: unknown, o?: unknown) => Promise<void>)(
+            path,
+            data,
+            options,
+          ),
+    lstat: (path: string, options?: unknown) =>
+      fsHook.lstat
+        ? fsHook.lstat(path)
+        : (actual.lstat as unknown as (p: string, o?: unknown) => Promise<unknown>)(path, options),
+    rmdir: (path: string, options?: unknown) =>
+      fsHook.rmdir
+        ? fsHook.rmdir(path)
+        : (actual.rmdir as unknown as (p: string, o?: unknown) => Promise<void>)(path, options),
+  };
+});
+
 const minimalBrief: CampaignBrief = {
   schemaVersion: BRIEF_SCHEMA_VERSION,
   template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
@@ -40,6 +76,9 @@ describe("FsBriefStore", () => {
   });
 
   afterEach(() => {
+    fsHook.writeFile = undefined;
+    fsHook.lstat = undefined;
+    fsHook.rmdir = undefined;
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -226,6 +265,48 @@ describe("FsBriefStore", () => {
       expect(await store.findBriefById("fresh-slug")).toBeUndefined();
     });
 
+    test("writes the display name and type into campaign.json (PT-5b3, D168, D177)", async () => {
+      await store.createCampaign("named-slug", { name: "My Campaign", type: "paid-social" });
+      const raw = readFileSync(join(dir, "named-slug", "campaign.json"), "utf8");
+      expect(JSON.parse(raw)).toEqual({ name: "My Campaign", type: "paid-social" });
+    });
+
+    test("records null name and type when options omit them (PT-5b3)", async () => {
+      await store.createCampaign("blank-meta");
+      const raw = readFileSync(join(dir, "blank-meta", "campaign.json"), "utf8");
+      expect(JSON.parse(raw)).toEqual({ name: null, type: null });
+    });
+
+    // coderabbit PRRT_kwDOSzP1zc6miLda / qodo PRRT_kwDOSzP1zc6miLvn: a failed
+    // campaign.json write (ENOSPC, EACCES) must not leave the `mkdir`
+    // reservation behind — the caller never gets a `ResolvedCampaign` to
+    // `releaseCampaign`, so nothing else would ever free the slug.
+    test("a failed campaign.json write releases the reservation, freeing the slug", async () => {
+      fsHook.writeFile = async () => {
+        throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+      };
+      await expect(store.createCampaign("doomed", { name: "Doomed" })).rejects.toMatchObject({
+        code: "ENOSPC",
+      });
+      expect(existsSync(join(dir, "doomed"))).toBe(false);
+
+      fsHook.writeFile = undefined;
+      const created = await store.createCampaign("doomed", { name: "Retry" });
+      expect(created).toEqual({ campaignId: "doomed", slug: "doomed" });
+    });
+
+    test("a cleanup rmdir that also fails never masks the write's own error", async () => {
+      fsHook.writeFile = async () => {
+        throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+      };
+      fsHook.rmdir = async () => {
+        throw Object.assign(new Error("EBUSY: resource busy"), { code: "EBUSY" });
+      };
+      await expect(store.createCampaign("stuck", { name: "Stuck" })).rejects.toMatchObject({
+        code: "ENOSPC",
+      });
+    });
+
     test("a taken slug (an existing directory) is EEXIST", async () => {
       await store.createCampaign("taken-dir");
       await expect(store.createCampaign("taken-dir")).rejects.toMatchObject({ code: "EEXIST" });
@@ -307,10 +388,21 @@ describe("FsBriefStore", () => {
   });
 
   describe("releaseCampaign (PT-5b2 fix-round item 2)", () => {
-    test("removes an empty reserved directory and answers true", async () => {
-      await store.createCampaign("mint-only");
+    test("removes a reserved directory (with its campaign.json) and answers true", async () => {
+      await store.createCampaign("mint-only", { name: "Mint Only", type: "social-post" });
+      expect(existsSync(join(dir, "mint-only", "campaign.json"))).toBe(true);
       expect(await store.releaseCampaign("mint-only")).toBe(true);
       expect(existsSync(join(dir, "mint-only"))).toBe(false);
+    });
+
+    // Backward compatibility (PT-5b3): a directory reserved before this lane
+    // shipped never got a campaign.json — `entries` is `[]`, not
+    // `["campaign.json"]`, so the "nothing else is there" check must still
+    // pass and the unlink must be skipped rather than attempted.
+    test("removes a pre-lane reservation with no campaign.json", async () => {
+      mkdirSync(join(dir, "old-reservation"));
+      expect(await store.releaseCampaign("old-reservation")).toBe(true);
+      expect(existsSync(join(dir, "old-reservation"))).toBe(false);
     });
 
     test("leaves a real brief untouched and answers false", async () => {
@@ -330,15 +422,26 @@ describe("FsBriefStore", () => {
       expect(await store.releaseCampaign("nope")).toBe(false);
     });
 
+    // A plain file where the reservation directory should be: findBriefFileById
+    // skips it (no recognized brief extension), so this reaches
+    // `isCampaignDirUnsafe`, which now refuses it — `!isDirectory()` is true
+    // for a plain file exactly as it is for a symlink — before readdir ever runs.
+    test("answers false (not a crash) when <slug> is a plain file, not a directory", async () => {
+      writeFileSync(join(dir, "not-a-dir"), "x");
+      expect(await store.releaseCampaign("not-a-dir")).toBe(false);
+      expect(existsSync(join(dir, "not-a-dir"))).toBe(true);
+    });
+
     const canDenyWriteRelease = process.platform !== "win32" && process.getuid?.() !== 0;
     test.skipIf(!canDenyWriteRelease)(
-      "rethrows a non-ENOENT/ENOTEMPTY rmdir failure (e.g. EACCES) unchanged",
+      "rethrows a rmdir failure (e.g. EACCES) unchanged",
       async () => {
         await store.createCampaign("mint-only");
-        // 0o555 (read+execute, no write): findBriefFileById's own readdir
-        // still succeeds — only rmdir's need to unlink the entry from its
-        // parent fails, so this exercises releaseCampaign's own catch
-        // rather than an earlier read failing first.
+        // 0o555 (read+execute, no write): findBriefFileById's own readdir and
+        // this method's own readdir/unlink (mint-only's own permissions are
+        // untouched) still succeed — only rmdir's need to remove the "mint-only"
+        // entry from its parent fails, so this exercises rmdir's own rejection,
+        // propagated with no catch around it.
         chmodSync(dir, 0o555);
         try {
           await expect(store.releaseCampaign("mint-only")).rejects.toMatchObject({
@@ -349,6 +452,143 @@ describe("FsBriefStore", () => {
         }
       },
     );
+
+    const canDenyReadRelease = process.platform !== "win32" && process.getuid?.() !== 0;
+    test.skipIf(!canDenyReadRelease)(
+      "rethrows a non-ENOENT readdir failure (e.g. EACCES) unchanged",
+      async () => {
+        await store.createCampaign("unreadable-release");
+        // 0o000 on the reservation directory ITSELF (not its parent):
+        // `isCampaignDirUnsafe`'s `lstat` only needs to traverse `dir`
+        // (untouched) to see this entry and its type, which still succeeds —
+        // only this method's own `readdir` of the directory's own contents
+        // fails, the rethrow branch this test exists for.
+        chmodSync(join(dir, "unreadable-release"), 0o000);
+        try {
+          await expect(store.releaseCampaign("unreadable-release")).rejects.toMatchObject({
+            code: "EACCES",
+          });
+        } finally {
+          chmodSync(join(dir, "unreadable-release"), 0o755);
+        }
+      },
+    );
+
+    // qodo PRRT_kwDOSzP1zc6miLvm (security): a symlinked `<slug>` directory
+    // must be refused BEFORE any readdir/unlink — enumerating or deleting
+    // through it could touch a file outside the briefs root.
+    test("refuses a symlinked <slug> directory, leaving the outside file in place", async () => {
+      const outside = mkdtempSync(join(tmpdir(), "cf-outside-"));
+      try {
+        const outsideMeta = join(outside, "campaign.json");
+        writeFileSync(outsideMeta, JSON.stringify({ name: "Not Yours", type: "display-ad" }));
+        symlinkSync(outside, join(dir, "linked-slug"));
+
+        expect(await store.releaseCampaign("linked-slug")).toBe(false);
+        expect(existsSync(outsideMeta)).toBe(true);
+        expect(readFileSync(outsideMeta, "utf8")).toContain("Not Yours");
+        // The symlink itself is untouched too — never removed on the way to refusing.
+        expect(existsSync(join(dir, "linked-slug"))).toBe(true);
+      } finally {
+        rmSync(outside, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("campaignMeta (PT-5b3, D168, D177)", () => {
+    test("answers undefined for an unknown ref", async () => {
+      expect(await store.campaignMeta("nope")).toBeUndefined();
+    });
+
+    // qodo PRRT_kwDOSzP1zc6miLvl (security): a symlinked `<slug>` directory
+    // pointing outside the briefs root must never be read through — GET
+    // /campaigns/:id must not return that outside file's content.
+    test("never reads through a symlinked <slug> directory", async () => {
+      const outside = mkdtempSync(join(tmpdir(), "cf-outside-"));
+      try {
+        writeFileSync(
+          join(outside, "campaign.json"),
+          JSON.stringify({ name: "Not Yours", type: "display-ad" }),
+        );
+        symlinkSync(outside, join(dir, "linked-slug"));
+
+        expect(await store.campaignMeta("linked-slug")).toBeUndefined();
+      } finally {
+        rmSync(outside, { recursive: true, force: true });
+      }
+    });
+
+    // isCampaignDirUnsafe's own rethrow: a non-ENOENT lstat failure (e.g. EIO)
+    // propagates unchanged rather than being read as "safe" or "absent".
+    test("rethrows a non-ENOENT lstat failure from isCampaignDirUnsafe unchanged", async () => {
+      await store.createCampaign("lstat-fails", { name: "X" });
+      fsHook.lstat = async (path: string) => {
+        if (path.endsWith("lstat-fails")) {
+          throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" });
+        }
+        throw new Error(`unexpected lstat(${path}) in this test`);
+      };
+      await expect(store.campaignMeta("lstat-fails")).rejects.toMatchObject({ code: "EIO" });
+    });
+
+    test("a versionless create answers its recorded name/type and hasVersion: false", async () => {
+      await store.createCampaign("versionless", { name: "Versionless", type: "short-video" });
+      expect(await store.campaignMeta("versionless")).toEqual({
+        campaignId: "versionless",
+        slug: "versionless",
+        name: "Versionless",
+        type: "short-video",
+        hasVersion: false,
+      });
+    });
+
+    test("a versionless create with no name/type given answers null for both", async () => {
+      await store.createCampaign("no-meta-given");
+      expect(await store.campaignMeta("no-meta-given")).toEqual({
+        campaignId: "no-meta-given",
+        slug: "no-meta-given",
+        name: null,
+        type: null,
+        hasVersion: false,
+      });
+    });
+
+    test("a pre-lane campaign (a brief file, no reserved directory) answers null name/type and hasVersion: true", async () => {
+      await store.createBrief(minimalBrief);
+      expect(await store.campaignMeta("test-camp")).toEqual({
+        campaignId: "test-camp",
+        slug: "test-camp",
+        name: null,
+        type: null,
+        hasVersion: true,
+      });
+    });
+
+    test("saving a version never clears the name/type recorded at create (item 4)", async () => {
+      await store.createCampaign("first-save-meta", { name: "First Save", type: "display-ad" });
+      await store.createBrief({ ...minimalBrief, id: "first-save-meta" });
+      expect(await store.campaignMeta("first-save-meta")).toEqual({
+        campaignId: "first-save-meta",
+        slug: "first-save-meta",
+        name: "First Save",
+        type: "display-ad",
+        hasVersion: true,
+      });
+    });
+
+    test("rethrows a non-ENOENT campaign.json read failure unchanged", async () => {
+      await store.createCampaign("unreadable-meta");
+      // A directory in place of a file makes readFile fail with EISDIR, not
+      // ENOENT — this exercises the fail-closed rethrow, not the "no meta"
+      // branch. Overwriting campaign.json itself lets the store's own
+      // resolveConfined + readFile run unmolested up to that point.
+      const metaPath = join(dir, "unreadable-meta", "campaign.json");
+      rmSync(metaPath);
+      mkdirSync(metaPath);
+      await expect(store.campaignMeta("unreadable-meta")).rejects.toMatchObject({
+        code: "EISDIR",
+      });
+    });
   });
 
   test("rewriteBrief updates existing brief and checks revision when provided", async () => {

@@ -18,6 +18,7 @@ import {
   TeamsNotSupportedError,
   type BriefStorePort,
   type BriefWriteOptions,
+  type CampaignMeta,
   type CreateCampaignOptions,
   type ResolvedCampaign,
   type StoredBrief,
@@ -31,6 +32,14 @@ import {
   serializeBrief,
   SYMLINK_WRITE_ERROR,
 } from "../brief-files.js";
+
+/**
+ * The name/type meta file `createCampaign` writes inside a campaign's
+ * reserved directory (PT-5b3, D168, D177) — a sibling of the versioned
+ * `<slug>.yaml`, never touched by a Save, so it answers the same before and
+ * after the first version exists.
+ */
+const CAMPAIGN_META_FILE = "campaign.json";
 
 /**
  * D166 item 5: this backend has no team column at all — a non-undefined
@@ -194,26 +203,139 @@ export class FsBriefStore implements BriefStorePort {
       }
       throw error;
     }
+    // PT-5b3 (D168, D177): the display name and type the user typed at
+    // Create, recorded beside the reservation. `wx` matches `createBrief`'s
+    // own exclusive-create write — the `mkdir` just above already proved
+    // this directory (and so this file within it) didn't exist a moment ago,
+    // so nothing else could have raced it into existence.
+    //
+    // coderabbit PRRT_kwDOSzP1zc6miLda / qodo PRRT_kwDOSzP1zc6miLvn: a failed
+    // write (ENOSPC, EACCES) must not leave the `mkdir` above as an orphaned,
+    // permanent reservation — the caller never receives a `ResolvedCampaign`
+    // to `releaseCampaign`, so nothing else would ever clean it up. Undo only
+    // what THIS call created (the meta file, if it landed, then the now-empty
+    // directory) and propagate the original error unchanged; both cleanup
+    // steps swallow their own failure (e.g. the file never got written) so
+    // the caller sees the write's error, not a masking one.
+    try {
+      await writeFile(
+        resolveConfined(dirPath, CAMPAIGN_META_FILE),
+        JSON.stringify({ name: options?.name ?? null, type: options?.type ?? null }),
+        { encoding: "utf8", flag: "wx" },
+      );
+    } catch (error) {
+      await unlink(resolveConfined(dirPath, CAMPAIGN_META_FILE)).catch(() => undefined);
+      await rmdir(dirPath).catch(() => undefined);
+      throw error;
+    }
     return { campaignId: slug, slug };
   }
 
   /**
-   * See `BriefStorePort.releaseCampaign` (PT-5b2 fix-round item 2). "Holds no
-   * brief file" is `findBriefFileById`, the same id-parsed lookup
-   * `createCampaign` itself now checks; "nothing else" is `rmdir` (never
-   * recursive) refusing a non-empty directory outright — the caller deletes
-   * the campaign's pool (its own file inside this same directory) first, so
-   * a leftover `pools.json` alone never blocks the release.
+   * True when `briefs/<slug>` exists but is not a genuine directory — most
+   * concerningly a symlink, which could point outside the briefs root
+   * (coderabbit/qodo PRRT_kwDOSzP1zc6miLvl, PRRT_kwDOSzP1zc6miLvm). The same
+   * stance `FsPoolStore.isPoolDirSymlink` takes for a pool's own directory.
+   * `lstat` never follows the final component, so a symlink reports as
+   * `!isDirectory()` here without ever touching its target. ENOENT (never
+   * reserved) is absent, not unsafe.
+   */
+  private async isCampaignDirUnsafe(slug: string): Promise<boolean> {
+    let st;
+    try {
+      st = await lstat(resolveConfined(this.dir, slug));
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) return false;
+      throw error;
+    }
+    return !st.isDirectory();
+  }
+
+  /**
+   * `campaign.json`'s own reader (PT-5b3). `undefined` only for ENOENT — a
+   * pre-lane reservation (or a versioned brief with no reserved directory at
+   * all, the common case for every campaign that existed before this lane)
+   * has no meta file to read; any other read/parse failure propagates,
+   * fail-closed like the rest of this store. A symlinked `<slug>` directory
+   * (PRRT_kwDOSzP1zc6miLvl) is never read through: it answers "no metadata"
+   * exactly like ENOENT, the same fail-closed shape `campaignVisibility`
+   * already gives a hidden campaign.
+   */
+  private async readCampaignMeta(
+    slug: string,
+  ): Promise<{ name: string | null; type: string | null } | undefined> {
+    if (await this.isCampaignDirUnsafe(slug)) return undefined;
+    let raw: string;
+    try {
+      raw = await readFile(resolveConfined(this.dir, slug, CAMPAIGN_META_FILE), "utf8");
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) return undefined;
+      throw error;
+    }
+    const parsed = JSON.parse(raw) as { name?: unknown; type?: unknown };
+    return {
+      name: typeof parsed.name === "string" ? parsed.name : null,
+      type: typeof parsed.type === "string" ? parsed.type : null,
+    };
+  }
+
+  /**
+   * See `BriefStorePort.campaignMeta` (PT-5b3). `ref` IS the slug on this
+   * backend (D179): `campaign.json` lives inside the same reserved directory
+   * a Save never touches, so name/type answer the same whether or not a
+   * version has been saved yet (item 4: Saving never clears them). Absent
+   * both a version and any meta file → undefined (an unknown ref, 404 at the
+   * route).
+   */
+  async campaignMeta(ref: string): Promise<CampaignMeta | undefined> {
+    const hasVersion = Boolean(await this.findBriefFileById(ref));
+    const meta = await this.readCampaignMeta(ref);
+    if (!meta && !hasVersion) return undefined;
+    return {
+      campaignId: ref,
+      slug: ref,
+      name: meta?.name ?? null,
+      type: meta?.type ?? null,
+      hasVersion,
+    };
+  }
+
+  /**
+   * See `BriefStorePort.releaseCampaign` (PT-5b2 fix-round item 2; PT-5b3).
+   * "Holds no brief file" is `findBriefFileById`, the same id-parsed lookup
+   * `createCampaign` itself checks. "Nothing else is there" is now checked by
+   * `readdir` BEFORE anything is deleted: `campaign.json` (PT-5b3's own meta
+   * file) is part of the reservation and is removed with the directory, but
+   * any other entry (a leftover `pools.json`) still refuses the whole
+   * release, unchanged — reading first means a stray file is discovered
+   * before `campaign.json` is gone, never after. The ENOENT/ENOTEMPTY
+   * fallback the old unconditional `rmdir` needed lives in this `readdir`
+   * check now (a slug never reserved, or one with something else in it), so
+   * `rmdir` itself runs only once both are already ruled out — its own
+   * failure (e.g. EACCES on the parent) propagates unchanged. A symlinked
+   * `<slug>` directory (PRRT_kwDOSzP1zc6miLvm) is refused BEFORE any
+   * `readdir`/`unlink` — enumerating or deleting through it could touch a
+   * file outside the briefs root — so `isCampaignDirUnsafe` runs first, and
+   * a caller sees the same `false` a leftover-pool-file refusal gives, never
+   * a distinguishing error.
    */
   async releaseCampaign(slug: string): Promise<boolean> {
     if (await this.findBriefFileById(slug)) return false;
+    if (await this.isCampaignDirUnsafe(slug)) return false;
+    const dirPath = resolveConfined(this.dir, slug);
+    let entries: string[];
     try {
-      await rmdir(resolveConfined(this.dir, slug));
-      return true;
+      entries = await readdir(dirPath);
     } catch (error) {
-      if (isErrno(error, "ENOENT") || isErrno(error, "ENOTEMPTY")) return false;
+      if (isErrno(error, "ENOENT")) return false;
       throw error;
     }
+    if (entries.some((entry) => entry !== CAMPAIGN_META_FILE)) return false;
+    if (entries.includes(CAMPAIGN_META_FILE)) {
+      await unlink(resolveConfined(dirPath, CAMPAIGN_META_FILE));
+    }
+    await rmdir(dirPath);
+    return true;
   }
 
   /**

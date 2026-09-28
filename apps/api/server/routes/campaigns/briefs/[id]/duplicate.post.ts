@@ -124,6 +124,11 @@ async function withDerivedSlug<T>(name: string, attempt: (slug: string) => Promi
  * releases it (`releaseCampaign`, `deleteAssets`) and propagates as-is —
  * never retried onto a different suffix, even when the failure is itself
  * EEXIST-shaped (a concurrent writer's own Save racing this exact slug).
+ *
+ * PT-5b3 (D168, D177): the `name` path's `createCampaign` call also stores
+ * the typed name and the SOURCE's own type (`template.type`), the same rule
+ * `routes/campaigns/index.post.ts` uses for a sourced create — the legacy
+ * `newId` path never calls `createCampaign` and so never records either.
  */
 export default defineEventHandler(async (event) => {
   const scope = requestTenant(event);
@@ -341,10 +346,19 @@ export default defineEventHandler(async (event) => {
     }
     return false;
   };
-  /** The `name` path's claim (D177/D179): also sees an fs reserved directory. */
-  const reserveMinted = (targetSlug: string) => async (): Promise<boolean> => {
+  /**
+   * The `name` path's claim (D177/D179): also sees an fs reserved directory.
+   * `displayName` (PT-5b3, D168, D177) is the name the caller typed; `type`
+   * is the SOURCE's own (`template.type`), the same rule
+   * `routes/campaigns/index.post.ts` uses for a sourced create.
+   */
+  const reserveMinted = (targetSlug: string, displayName: string) => async (): Promise<boolean> => {
     try {
-      await getBriefStore(scope).createCampaign(targetSlug, { teamId: sourceTeamId });
+      await getBriefStore(scope).createCampaign(targetSlug, {
+        teamId: sourceTeamId,
+        name: displayName,
+        type: template.type,
+      });
     } catch (error) {
       if (isExistsError(error)) throw new SlugTakenError();
       throw error;
@@ -353,10 +367,19 @@ export default defineEventHandler(async (event) => {
   };
 
   try {
-    const created =
-      target.kind === "newId"
-        ? await attempt(target.value, reserveVisible(target.value))
-        : await withDerivedSlug(target.value, (slug) => attempt(slug, reserveMinted(slug)));
+    let created: StoredBrief;
+    if (target.kind === "newId") {
+      created = await attempt(target.value, reserveVisible(target.value));
+    } else {
+      // A local `const` (never the ternary form above) so TypeScript's
+      // narrowing of `target.kind === "name"` survives into the closure
+      // `withDerivedSlug` invokes — `target.value` itself does not narrow
+      // inside a nested function.
+      const displayName = target.value;
+      created = await withDerivedSlug(displayName, (slug) =>
+        attempt(slug, reserveMinted(slug, displayName)),
+      );
+    }
     setResponseStatus(event, 201);
     return { file: created.file, brief: created.brief };
   } catch (error) {

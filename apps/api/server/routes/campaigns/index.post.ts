@@ -76,15 +76,18 @@ async function withDerivedSlug<T>(name: string, attempt: (slug: string) => Promi
  *
  * With no `source`: mints the campaign with no version yet — a Postgres row
  * with no `brief_version`, or a reserved `briefs/<slug>/` directory on fs
- * (D179) — through `createCampaign`. `type` is validated against the known
- * campaign types but not stored anywhere yet (D177's correction: a blank
- * brief cannot be a version, and `campaign` has no `type` column); the
- * eventual first Save's own brief body carries it.
+ * (D179) — through `createCampaign`. `name` and `type` are stored on the
+ * campaign itself (PT-5b3, 0013): `type` is validated against the known
+ * campaign types first (D177's correction: a blank brief cannot be a
+ * version, so there is no brief body yet to carry it); a Save later never
+ * clears either.
  *
  * With a `source`: that campaign's latest version becomes version 1, exactly
  * as `duplicate.post.ts`'s `newId` path does today — brief-scoped assets and
- * the copy pool included. `type` is ignored; the copy carries the source
- * brief's own `type`. `teamId` omitted inherits the source's own team (PT-5b2
+ * the copy pool included. The caller's own `type` is ignored (never
+ * validated for a sourced create): `createCampaign` stores the SOURCE
+ * brief's own `type` instead (PT-5b3), while `name` is still the one the
+ * caller typed. `teamId` omitted inherits the source's own team (PT-5b2
  * fix-round item 1, security); an explicit value (including `null`, clearing
  * to org-wide) goes through `canAssignTeam` exactly like `createBrief`'s.
  *
@@ -106,6 +109,7 @@ export default defineEventHandler(async (event) => {
   let name: string;
   let source: string | undefined;
   let teamId: string | null | undefined;
+  let type: string | undefined;
   try {
     const body: unknown = await readBody(event);
     const record =
@@ -128,15 +132,16 @@ export default defineEventHandler(async (event) => {
       source = rawSource;
     }
 
-    // Validated, but not stored anywhere yet (see the doc comment above) —
-    // and not even validated for a sourced create: the copy carries the
-    // source brief's own `type`, so a caller need not get this right when
-    // `source` is set.
+    // Validated and stored on `createCampaign` (PT-5b3, see the doc comment
+    // above) — but not even validated for a sourced create: the copy carries
+    // the source brief's own `type`, so a caller need not get this right
+    // when `source` is set.
     const rawType = record?.type;
     if (source === undefined && rawType !== undefined) {
       if (typeof rawType !== "string" || !(CAMPAIGN_TYPES as readonly string[]).includes(rawType)) {
         throw new Error(`"type" must be one of: ${CAMPAIGN_TYPES.join(", ")}.`);
       }
+      type = rawType;
     }
 
     // `null` (PT-5b2 fix-round item 1) clears a sourced create to org-wide
@@ -175,7 +180,7 @@ export default defineEventHandler(async (event) => {
       const created = await withDerivedSlug(name, (slug) =>
         store.withBriefLock(slug, async () => {
           try {
-            return await store.createCampaign(slug, { teamId });
+            return await store.createCampaign(slug, { teamId, name, type });
           } catch (error) {
             if (isExistsError(error)) throw new SlugTakenError();
             throw error;
@@ -302,7 +307,15 @@ export default defineEventHandler(async (event) => {
         throw new Error(SYMLINK_WRITE_ERROR);
       }
       try {
-        await store.createCampaign(targetSlug, { teamId: effectiveTeamId });
+        // PT-5b3 (D168, D177): the display name is the one the user typed
+        // (`name`, the same value `withDerivedSlug` slugified); the type is
+        // the SOURCE's own (`template.type`), never validated against the
+        // caller's `type` above, which a sourced create ignores.
+        await store.createCampaign(targetSlug, {
+          teamId: effectiveTeamId,
+          name,
+          type: template.type,
+        });
       } catch (error) {
         if (isExistsError(error)) throw new SlugTakenError();
         throw error;
