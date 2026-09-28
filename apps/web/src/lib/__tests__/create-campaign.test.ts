@@ -19,7 +19,9 @@ describe("createCampaign — POST /campaigns (D177, D178)", () => {
   });
 
   test("a refused create rejects with the API's error — never a null contract", async () => {
-    mockPipelineApi({ post: () => json({ error: '"name" must contain at least one letter or digit.' }, 400) });
+    mockPipelineApi({
+      post: () => json({ error: '"name" must contain at least one letter or digit.' }, 400),
+    });
     const err: unknown = await createCampaign(seed).then(
       () => null,
       (e) => e,

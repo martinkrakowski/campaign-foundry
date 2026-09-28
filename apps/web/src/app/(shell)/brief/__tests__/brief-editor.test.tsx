@@ -204,7 +204,9 @@ const routes = (handlers: {
     // refusal still supplies its own `post`.
     if (method === "POST" && u === `${API}/campaigns`) {
       const name = typeof parsed?.name === "string" ? parsed.name : "x";
-      return Promise.resolve(handlers.post?.(u, parsed) ?? json({ campaignId: name, slug: name }, 201));
+      return Promise.resolve(
+        handlers.post?.(u, parsed) ?? json({ campaignId: name, slug: name }, 201),
+      );
     }
     // The defaults match what the real routes answer — `{ file, brief, revision }`:
     // a write mock less truthful than the route sends the next lane home green on
@@ -535,7 +537,8 @@ describe("BriefPage — data flow", () => {
     // failed for some other reason).
     routes({
       list: () => json({ briefs: [entry("camp", "r1")] }),
-      post: (url) => (url.endsWith("/campaigns") ? json({ error: "already exists" }, 409) : json({}, 201)),
+      post: (url) =>
+        url.endsWith("/campaigns") ? json({ error: "already exists" }, 409) : json({}, 201),
     });
     renderWithRun(<Editor id="camp" />);
     await waitForEditorReady();
@@ -820,7 +823,6 @@ describe("BriefPage — data flow", () => {
     });
     expect((mint.body as { name?: string }).name).toBe("my-brief");
   });
-
 
   test("two consecutive saves of a loaded brief both succeed — the second carries the revision the first was handed back", async () => {
     const user = userEvent.setup();
@@ -1583,7 +1585,8 @@ describe("BriefPage — data flow", () => {
     // (typing derives nothing, D178) — seed one the way W3's resume would find it.
     saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "fresh" });
     routes({
-      post: (url) => (url.endsWith("/campaigns") ? json({ error: "disk full" }, 500) : json({}, 201)),
+      post: (url) =>
+        url.endsWith("/campaigns") ? json({ error: "disk full" }, 500) : json({}, 201),
     });
     renderWithRun(<Editor />);
     await waitFor(() =>
@@ -1599,7 +1602,6 @@ describe("BriefPage — data flow", () => {
 
     expect(await screen.findByText(/disk full/)).toBeTruthy();
   });
-
 
   test("a route brief is re-attached to its file when the listing knows it", async () => {
     const calls = routes({

@@ -115,12 +115,8 @@ describe("listBriefs", () => {
   });
 
   test("carries campaignId (PT-5a) when the entry has one", async () => {
-    mockFetch(() =>
-      json({ briefs: [{ file: "camp.yaml", brief, campaignId: "3f9b" }] }),
-    );
-    await expect(listBriefs()).resolves.toEqual([
-      { file: "camp.yaml", brief, campaignId: "3f9b" },
-    ]);
+    mockFetch(() => json({ briefs: [{ file: "camp.yaml", brief, campaignId: "3f9b" }] }));
+    await expect(listBriefs()).resolves.toEqual([{ file: "camp.yaml", brief, campaignId: "3f9b" }]);
   });
 
   test("returns an empty list when the payload is missing or not an object", async () => {
@@ -269,13 +265,13 @@ describe("createCampaign — POST /campaigns (D177, D178)", () => {
 
   test("rejects an invalid or missing 201 body", async () => {
     mockFetch(() => json({ slug: "x" }, 201));
-    await expect(
-      createCampaign({ name: "X", type: "social-post" }),
-    ).rejects.toMatchObject({ message: "Invalid response" });
+    await expect(createCampaign({ name: "X", type: "social-post" })).rejects.toMatchObject({
+      message: "Invalid response",
+    });
     mockFetch(() => json(null, 201));
-    await expect(
-      createCampaign({ name: "X", type: "social-post" }),
-    ).rejects.toMatchObject({ message: "Invalid response" });
+    await expect(createCampaign({ name: "X", type: "social-post" })).rejects.toMatchObject({
+      message: "Invalid response",
+    });
   });
 
   test("surfaces the API's error (a 400 unslugifiable name, a 409 race)", async () => {

@@ -241,9 +241,7 @@ describe("CreateCampaignDialog", () => {
     await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
 
     expect(create).toHaveBeenCalledWith({ name: "Summer Spark", type: "social-post" });
-    await waitFor(() =>
-      expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("c1")),
-    );
+    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute("c1")));
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull(),
     );

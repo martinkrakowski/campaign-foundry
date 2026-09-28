@@ -765,7 +765,9 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     if (briefsFailed) return;
     // PT-5a added `campaignId` to each listing item: a uuid-addressed route
     // matches on it, a slug-addressed one on `brief.id` (fs and Postgres both).
-    const match = briefs.find((entry) => entry.brief.id === routeId || entry.campaignId === routeId);
+    const match = briefs.find(
+      (entry) => entry.brief.id === routeId || entry.campaignId === routeId,
+    );
     if (match) {
       setUnknownId(null);
       resolvedSlugRef.current = { routeId, slug: match.brief.id };
@@ -843,7 +845,8 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * listing handleSave issues after a successful write — changes nothing on
    * screen, and `/brief/new` never needs the listing at all.
    */
-  const failedRouteId = briefsFailed && routeId !== undefined && !routeMatchesLoaded ? routeId : null;
+  const failedRouteId =
+    briefsFailed && routeId !== undefined && !routeMatchesLoaded ? routeId : null;
 
   // Arriving here means the last campaign is no longer the one being worked on. Let go
   // of it in the shell too: while it stayed active the selector kept advertising it and

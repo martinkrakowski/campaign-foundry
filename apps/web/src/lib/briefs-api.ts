@@ -3,7 +3,10 @@ import type {
   CopyPool,
   CopyPoolEntryStatus,
 } from "@campaignfoundry/CampaignOrchestration";
-import { CAMPAIGN_TYPES, type CampaignType } from "@campaignfoundry/CampaignOrchestration/campaign-types";
+import {
+  CAMPAIGN_TYPES,
+  type CampaignType,
+} from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { handleAuthError, type NoMembershipError } from "./auth-errors";
 
 export type {

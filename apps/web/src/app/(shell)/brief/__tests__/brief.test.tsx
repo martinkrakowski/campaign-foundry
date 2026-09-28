@@ -2,7 +2,11 @@ import { describe, test, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { ShellProviders, renderWithRun, nextMock, storedTemplate } from "@/__tests__/helpers";
 import { CreateCampaignProvider, useCreateCampaign } from "@/lib/create-campaign-context";
-import { editorReducer, initialEditorState, saveDraftToStorage } from "@/components/campaign/editor-state";
+import {
+  editorReducer,
+  initialEditorState,
+  saveDraftToStorage,
+} from "@/components/campaign/editor-state";
 import BriefIndexPage from "../page";
 import BriefIdPage from "../[id]/page";
 import NewBriefPage from "../new/page";
