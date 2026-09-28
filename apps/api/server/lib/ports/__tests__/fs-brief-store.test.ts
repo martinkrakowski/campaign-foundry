@@ -30,6 +30,7 @@ const fsHook = vi.hoisted(() => ({
     | ((path: string, data: unknown, options?: unknown) => Promise<void>)
     | undefined,
   lstat: undefined as ((path: string) => Promise<unknown>) | undefined,
+  rmdir: undefined as ((path: string) => Promise<void>) | undefined,
 }));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -48,6 +49,10 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       fsHook.lstat
         ? fsHook.lstat(path)
         : (actual.lstat as unknown as (p: string, o?: unknown) => Promise<unknown>)(path, options),
+    rmdir: (path: string, options?: unknown) =>
+      fsHook.rmdir
+        ? fsHook.rmdir(path)
+        : (actual.rmdir as unknown as (p: string, o?: unknown) => Promise<void>)(path, options),
   };
 });
 
@@ -73,6 +78,7 @@ describe("FsBriefStore", () => {
   afterEach(() => {
     fsHook.writeFile = undefined;
     fsHook.lstat = undefined;
+    fsHook.rmdir = undefined;
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -287,6 +293,18 @@ describe("FsBriefStore", () => {
       fsHook.writeFile = undefined;
       const created = await store.createCampaign("doomed", { name: "Retry" });
       expect(created).toEqual({ campaignId: "doomed", slug: "doomed" });
+    });
+
+    test("a cleanup rmdir that also fails never masks the write's own error", async () => {
+      fsHook.writeFile = async () => {
+        throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+      };
+      fsHook.rmdir = async () => {
+        throw Object.assign(new Error("EBUSY: resource busy"), { code: "EBUSY" });
+      };
+      await expect(store.createCampaign("stuck", { name: "Stuck" })).rejects.toMatchObject({
+        code: "ENOSPC",
+      });
     });
 
     test("a taken slug (an existing directory) is EEXIST", async () => {
