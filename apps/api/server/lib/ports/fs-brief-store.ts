@@ -1,5 +1,14 @@
 import { randomBytes } from "node:crypto";
-import { lstat, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rmdir,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
 import { isReservedCampaignId, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
@@ -9,6 +18,7 @@ import {
   TeamsNotSupportedError,
   type BriefStorePort,
   type BriefWriteOptions,
+  type CreateCampaignOptions,
   type ResolvedCampaign,
   type StoredBrief,
 } from "./brief-store.port.js";
@@ -139,6 +149,74 @@ export class FsBriefStore implements BriefStorePort {
   }
 
   /**
+   * D177/D179 (PT-5b2): `POST /campaigns`'s blank-create path. A directory,
+   * never a file — `<slug>.yaml` is what `createBrief` writes for the first
+   * Save, a different filesystem entry that a bare `<slug>/` directory never
+   * blocks (no shared inode, no shared parent-of-the-file check). "Taken"
+   * (the Dedupe note) is a brief file at any allowed extension OR an
+   * already-reserved directory. No lock here — house convention (`createBrief`
+   * doesn't lock either): the caller wraps this in `withBriefLock` itself,
+   * because a caller that also copies assets and calls `createBrief`
+   * afterwards (duplicate, a sourced `POST /campaigns`) needs THAT whole
+   * sequence, not just this reservation, to be one critical section — nesting
+   * a second `withBriefLock` call on the same slug inside that caller's own
+   * would deadlock on this store's per-id chain. `mkdir` with no
+   * `{ recursive: true }` is itself an atomic reservation, so even an
+   * unlocked call is safe against another unlocked call of the same slug —
+   * only the check-then-mkdir sequence needs the caller's lock.
+   */
+  async createCampaign(slug: string, options?: CreateCampaignOptions): Promise<ResolvedCampaign> {
+    assertNoTeam(options?.teamId);
+    if (isReservedCampaignId(slug)) {
+      throw new Error(`"${slug}" is reserved; choose another campaign id.`);
+    }
+    // "Taken" is a file NAMED after the slug (`findBriefFile`) OR an existing
+    // brief whose `id` IS the slug but lives in a differently named file
+    // (`findBriefFileById`, an id-parsed lookup over `listBriefs()` — the
+    // same one `campaignVisibility` already relies on). A filename check
+    // alone missed that second case (coderabbit PRRT_kwDOSzP1zc6mgBu7 / qodo
+    // PRRT_kwDOSzP1zc6mgEyH): the legacy `reserveVisible` check in
+    // `duplicate.post.ts` was id-based and never had this gap.
+    if ((await this.findBriefFile(slug)) || (await this.findBriefFileById(slug))) {
+      const err = new Error(`Brief "${slug}" already exists.`);
+      (err as { code?: string }).code = "EEXIST";
+      throw err;
+    }
+    const dirPath = resolveConfined(this.dir, slug);
+    try {
+      await mkdir(this.dir, { recursive: true });
+      await mkdir(dirPath);
+    } catch (error) {
+      if (isErrno(error, "EEXIST")) {
+        const err = new Error(`Brief "${slug}" already exists.`);
+        (err as { code?: string }).code = "EEXIST";
+        throw err;
+      }
+      throw error;
+    }
+    return { campaignId: slug, slug };
+  }
+
+  /**
+   * See `BriefStorePort.releaseCampaign` (PT-5b2 fix-round item 2). "Holds no
+   * brief file" is `findBriefFileById`, the same id-parsed lookup
+   * `createCampaign` itself now checks; "nothing else" is `rmdir` (never
+   * recursive) refusing a non-empty directory outright — the caller deletes
+   * the campaign's pool (its own file inside this same directory) first, so
+   * a leftover `pools.json` alone never blocks the release.
+   */
+  async releaseCampaign(slug: string): Promise<boolean> {
+    if (await this.findBriefFileById(slug)) return false;
+    try {
+      await rmdir(resolveConfined(this.dir, slug));
+      return true;
+    } catch (error) {
+      if (isErrno(error, "ENOENT") || isErrno(error, "ENOTEMPTY")) return false;
+      throw error;
+    }
+  }
+
+  /**
    * Non-destructive writer for Save and `POST ?replace=1` (R4.1): read the
    * existing bytes, patch the changed paths in place as a YAML Document, and
    * atomically replace the file via a temp rename. Comments, blank lines, key
@@ -227,6 +305,11 @@ export class FsBriefStore implements BriefStorePort {
   /** Never "hidden": the filesystem store has no team column (D166 item 5). */
   async campaignVisibility(id: string): Promise<"absent" | "visible"> {
     return (await this.findBriefFileById(id)) ? "visible" : "absent";
+  }
+
+  /** See `BriefStorePort.campaignTeam` (PT-5b2 fix-round item 1): no team column (D166 item 5). */
+  async campaignTeam(slug: string): Promise<string | null | undefined> {
+    return (await this.findBriefFileById(slug)) ? null : undefined;
   }
 
   /**

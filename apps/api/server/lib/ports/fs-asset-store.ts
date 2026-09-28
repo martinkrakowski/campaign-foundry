@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
 import { resolveConfined } from "../confined-path.js";
 import { ASSET_NAME_PATTERN, assetContentType } from "../asset-files.js";
@@ -162,5 +162,16 @@ export class FsAssetStore implements AssetStorePort {
     }
 
     return pathMap;
+  }
+
+  /** See `AssetStorePort.deleteAssets` (PT-5b2 fix-round item 2). */
+  async deleteAssets(briefId: string): Promise<void> {
+    let dir: string;
+    try {
+      dir = this.briefDir(briefId);
+    } catch {
+      return;
+    }
+    await rm(dir, { recursive: true, force: true });
   }
 }

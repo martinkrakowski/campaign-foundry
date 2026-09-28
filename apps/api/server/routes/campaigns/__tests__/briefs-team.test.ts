@@ -1,4 +1,4 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi } from "vitest";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -8,6 +8,9 @@ import {
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
 import type { TenantContext } from "../../../lib/tenant.js";
+import * as pools from "../../../lib/pools.js";
+import { InvalidCopyPoolError } from "../../../lib/ports/pool-store.port.js";
+import { getAssetStore, getBriefStore, getPoolStore } from "../../../lib/ports/index.js";
 import { PgBriefStore } from "../../../lib/ports/pg-brief-store.js";
 import briefsPostHandler from "../briefs.post.js";
 import briefsPutHandler from "../briefs/[id].put.js";
@@ -135,6 +138,96 @@ describe("POST/PUT /campaigns/briefs — teamId (D166, PT-2c item 3)", () => {
     } finally {
       await harness.cleanup();
     }
+  });
+
+  describe("first Save of a blank-created campaign (D177, PT-5b2)", () => {
+    test("POST without replace adds version 1 to a versionless row, and preserves its team", async () => {
+      const harness = await setupPgHarness();
+      try {
+        await harness.db.query(
+          `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+          ["t1", "Team One", "local"],
+        );
+        await new PgBriefStore(harness.db, "local", "local").createCampaign("camp", {
+          teamId: "t1",
+        });
+
+        const res = await mount(t1Member).create(postReq(sampleBrief));
+        expect(res.status).toBe(201);
+        expect(await res.json()).toMatchObject({ file: "camp.yaml" });
+
+        const { rows } = await harness.db.query<{ team_id: string | null }>(
+          `select team_id from campaign where org_id = 'local' and slug = 'camp'`,
+        );
+        expect(rows[0]!.team_id).toBe("t1");
+
+        // A second create of the same slug — now versioned — is still refused.
+        const again = await mount(owner).create(postReq(sampleBrief));
+        expect(again.status).toBe(409);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    test("a versionless row hidden from this caller by team still answers 409, and is never written into", async () => {
+      const harness = await setupPgHarness();
+      try {
+        await harness.db.query(
+          `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+          ["t1", "Team One", "local"],
+        );
+        await new PgBriefStore(harness.db, "local", "local").createCampaign("camp", {
+          teamId: "t1",
+        });
+
+        const res = await mount(t2Member).create(postReq(sampleBrief));
+        expect(res.status).toBe(409);
+
+        const { rows } = await harness.db.query<{ count: number }>(
+          `select count(*)::int from brief_version bv
+             join campaign c on c.id = bv.campaign_id
+            where c.org_id = 'local' and c.slug = 'camp'`,
+        );
+        expect(rows[0]!.count).toBe(0);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    // Coordinator follow-up: POST /campaigns is what makes a versionless row
+    // possible at all, which made rewriteBriefInternal's "versions[0]!"
+    // crash (PgBriefStore) reachable through both callers below. Neither may
+    // ever 500.
+    test("PUT against a blank-created (versionless) campaign 404s, never 500s", async () => {
+      const harness = await setupPgHarness();
+      try {
+        await new PgBriefStore(harness.db, "local", "local").createCampaign("camp");
+
+        const res = await mount(owner).update(putReq(sampleBrief));
+        expect(res.status).toBe(404);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    test("POST ?replace=1 against a blank-created (versionless) campaign adds version 1, never 500s", async () => {
+      const harness = await setupPgHarness();
+      try {
+        await new PgBriefStore(harness.db, "local", "local").createCampaign("camp");
+
+        const res = await mount(owner).create(postReq(sampleBrief, "?replace=1"));
+        expect(res.status).toBe(201);
+
+        const { rows } = await harness.db.query<{ version: number }>(
+          `select bv.version from brief_version bv
+             join campaign c on c.id = bv.campaign_id
+            where c.org_id = 'local' and c.slug = 'camp'`,
+        );
+        expect(rows).toEqual([{ version: 1 }]);
+      } finally {
+        await harness.cleanup();
+      }
+    });
   });
 
   test("creating with a team the caller does not belong to, and is not owner/admin, answers 403", async () => {
@@ -411,6 +504,244 @@ describe("POST/PUT /campaigns/briefs — teamId (D166, PT-2c item 3)", () => {
   });
 });
 
+describe("duplicate by name on Postgres (D177/D178, PT-5b2)", () => {
+  const duplicateByNameReq = (sourceId: string, name: string) =>
+    new Request(`http://x/campaigns/briefs/${sourceId}/duplicate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+
+  test("derives the slug and dedupes against a taken one, including a versionless row", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      // "camp" itself is taken (the source); mint a versionless row at the
+      // FIRST candidate the name would derive, so the dedupe loop must skip
+      // it exactly like an already-versioned campaign.
+      await new PgBriefStore(harness.db, "local", "local").createCampaign("my-copy");
+
+      const res = await mount(owner).duplicate(duplicateByNameReq("camp", "My Copy"));
+      expect(res.status).toBe(201);
+      const json = (await res.json()) as { brief: { id: string } };
+      expect(json.brief.id).toBe("my-copy-2");
+
+      // The versionless row is untouched — no version was ever added to it.
+      const { rows } = await harness.db.query<{ count: number }>(
+        `select count(*)::int from brief_version bv
+           join campaign c on c.id = bv.campaign_id
+          where c.org_id = 'local' and c.slug = 'my-copy'`,
+      );
+      expect(rows[0]!.count).toBe(0);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("a reserved-word name is skipped and lands on the next suffix", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      const res = await mount(owner).duplicate(duplicateByNameReq("camp", "Cache"));
+      expect(res.status).toBe(201);
+      expect(((await res.json()) as { brief: { id: string } }).brief.id).toBe("cache-2");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("an unexpected createCampaign failure (not EEXIST) surfaces as 500", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      const spy = vi
+        .spyOn(getBriefStore(owner), "createCampaign")
+        .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+      const res = await mount(owner).duplicate(duplicateByNameReq("camp", "Broken"));
+      expect(res.status).toBe(500);
+      spy.mockRestore();
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  // PT-5b2 fix-round item 2 (coderabbit PRRT_kwDOSzP1zc6mgBvA / qodo
+  // PRRT_kwDOSzP1zc6mgEyP): a failure AFTER createCampaign reserved the slug
+  // must release it — a retry gets the SAME slug, never "-2".
+  test("copyAssets failing after reservation releases it: a retry gets the same slug", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      const spy = vi
+        .spyOn(getAssetStore(LOCAL_TENANT), "copyAssets")
+        .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+      const failed = await mount(owner).duplicate(duplicateByNameReq("camp", "Copy"));
+      expect(failed.status).toBe(500);
+      spy.mockRestore();
+
+      expect(await getBriefStore(owner).campaignTeam("copy")).toBeUndefined();
+
+      const retried = await mount(owner).duplicate(duplicateByNameReq("camp", "Copy"));
+      expect(retried.status).toBe(201);
+      expect(((await retried.json()) as { brief: { id: string } }).brief.id).toBe("copy");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("createBrief failing after reservation releases it and the assets already copied", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      const spy = vi
+        .spyOn(getBriefStore(owner), "createBrief")
+        .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+      const failed = await mount(owner).duplicate(duplicateByNameReq("camp", "Copy"));
+      expect(failed.status).toBe(500);
+      spy.mockRestore();
+
+      expect(await getBriefStore(owner).campaignTeam("copy")).toBeUndefined();
+      expect(await getAssetStore(LOCAL_TENANT).listAssets("copy")).toEqual([]);
+
+      const retried = await mount(owner).duplicate(duplicateByNameReq("camp", "Copy"));
+      expect(retried.status).toBe(201);
+      expect(((await retried.json()) as { brief: { id: string } }).brief.id).toBe("copy");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  // A source pool that becomes malformed only when copyPool re-reads it
+  // (a narrow race — copyPool rewrites its briefId, C9/D71) hits the outer
+  // catch's InvalidCopyPoolError branch post-reservation. The pool is written
+  // before version 1 (coderabbit PRRT_kwDOSzP1zc6mg8ci), so nothing is
+  // versioned yet and the reservation is released.
+  test("a source pool that only fails validation during the copy answers 422 and releases the reservation", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      await getPoolStore(LOCAL_TENANT).writePool({
+        briefId: "camp",
+        generatedAt: new Date().toISOString(),
+        model: "test-model",
+        entries: [{ id: "e1", text: "Hi", status: "approved" }],
+      });
+      const spy = vi
+        .spyOn(pools, "copyPool")
+        .mockRejectedValueOnce(new InvalidCopyPoolError("camp", "raced invalid"));
+
+      const res = await mount(owner).duplicate(duplicateByNameReq("camp", "Copy"));
+      expect(res.status).toBe(422);
+      spy.mockRestore();
+
+      expect(await getBriefStore(LOCAL_TENANT).campaignTeam("copy")).toBeUndefined();
+      expect(await getBriefStore(LOCAL_TENANT).findBriefById("copy")).toBeUndefined();
+      const retried = await mount(owner).duplicate(duplicateByNameReq("camp", "Copy"));
+      expect(retried.status).toBe(201);
+      expect(((await retried.json()) as { brief: { id: string } }).brief.id).toBe("copy");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  // PT-5b2 fix-round item 3 (qodo PRRT_kwDOSzP1zc6mgEyM): an EEXIST raised
+  // AFTER the reservation held (a concurrent writer's own Save landing
+  // version 1 on the SAME slug) must answer 409, never be mistaken for a
+  // taken candidate and retried onto "-2".
+  test("a Save racing between reservation and the first-version write answers 409, not a retry", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      const store = getBriefStore(LOCAL_TENANT);
+      const assetStore = getAssetStore(LOCAL_TENANT);
+      const originalCopyAssets = assetStore.copyAssets.bind(assetStore);
+      const spy = vi
+        .spyOn(assetStore, "copyAssets")
+        .mockImplementationOnce(async (from: string, to: string) => {
+          await store.createBrief({ ...sampleBrief, id: to, campaignMessage: "Racer's own save" });
+          return originalCopyAssets(from, to);
+        });
+
+      const res = await mount(owner).duplicate(duplicateByNameReq("camp", "Copy"));
+      expect(res.status).toBe(409);
+      spy.mockRestore();
+
+      const raced = await store.findBriefById("copy");
+      expect(raced?.brief.campaignMessage).toBe("Racer's own save");
+      expect(await store.campaignTeam("copy-2")).toBeUndefined();
+    } finally {
+      await harness.cleanup();
+    }
+  });
+});
+
+// qodo PRRT_kwDOSzP1zc6mgEyD (HIGH, security): a copy of a team-scoped source
+// made through either duplicate path must inherit the source's team, not
+// default to org-wide. The legacy `newId` path never inherited a team either
+// (createBrief(brief) with no options) — a pre-existing hole PT-2c left, not
+// one PT-5b2 opened; both paths are fixed together.
+describe("duplicate inherits the source campaign's team (PT-5b2 fix-round item 1)", () => {
+  test("legacy newId: the copy is still team-1, and hidden from a team-B member", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await harness.db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values
+           ($1, $2, 0, $3, now()), ($4, $5, 0, $3, now())`,
+        ["t1", "Team One", "local", "t2", "Team Two"],
+      );
+      await new PgBriefStore(harness.db, "local", "owner", ["owner"], []).createBrief(sampleBrief, {
+        teamId: "t1",
+      });
+
+      const res = await mount(t1Member).duplicate(duplicateReq("camp", "camp-copy"));
+      expect(res.status).toBe(201);
+
+      const { rows } = await harness.db.query<{ team_id: string | null }>(
+        `select team_id from campaign where org_id = 'local' and slug = 'camp-copy'`,
+      );
+      expect(rows[0]!.team_id).toBe("t1");
+
+      const t2Store = new PgBriefStore(harness.db, "local", "u2", [], ["t2"]);
+      expect(await t2Store.campaignVisibility("camp-copy")).toBe("hidden");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("by name: the copy is still team-1, and hidden from a team-B member", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await harness.db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values
+           ($1, $2, 0, $3, now()), ($4, $5, 0, $3, now())`,
+        ["t1", "Team One", "local", "t2", "Team Two"],
+      );
+      await new PgBriefStore(harness.db, "local", "owner", ["owner"], []).createBrief(sampleBrief, {
+        teamId: "t1",
+      });
+
+      const res = await mount(t1Member).duplicate(
+        new Request(`http://x/campaigns/briefs/camp/duplicate`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Camp Copy" }),
+        }),
+      );
+      expect(res.status).toBe(201);
+
+      const { rows } = await harness.db.query<{ team_id: string | null }>(
+        `select team_id from campaign where org_id = 'local' and slug = 'camp-copy'`,
+      );
+      expect(rows[0]!.team_id).toBe("t1");
+
+      const t2Store = new PgBriefStore(harness.db, "local", "u2", [], ["t2"]);
+      expect(await t2Store.campaignVisibility("camp-copy")).toBe("hidden");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+});
+
 describe("Save as / duplicate refuse a hidden asset source or target (D166, PT-2c items 2 and 3)", () => {
   test("Save as (POST /campaigns/briefs) 404s when a logoPath names a campaign hidden by team, and copies nothing", async () => {
     const harness = await setupPgHarness();
@@ -531,6 +862,51 @@ describe("Save as / duplicate refuse a hidden asset source or target (D166, PT-2
       const res = await mount(t2Member).duplicate(duplicateReq("t2-source", "dup-dest"));
       expect(res.status).toBe(404);
       expect(existsSync(join(harness.projectRoot, "assets", "inputs", "dup-dest"))).toBe(false);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("an unexpected assertSourceVisible failure (not CampaignNotFoundError) surfaces as 500", async () => {
+    const harness = await setupPgHarness();
+    try {
+      const ownerStore = new PgBriefStore(harness.db, "local", "owner", ["owner"], []);
+      await ownerStore.createBrief({ ...sampleBrief, id: "other-camp" });
+      await ownerStore.createBrief({
+        ...sampleBrief,
+        id: "multi-source",
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#1473E6",
+            logoPath: "assets/inputs/other-camp/shared.png",
+          },
+        ],
+      });
+      const spy = vi
+        .spyOn(getBriefStore(owner), "campaignVisibility")
+        .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+
+      const res = await mount(owner).duplicate(duplicateReq("multi-source", "dup-dest"));
+      expect(res.status).toBe(500);
+      expect(spy).toHaveBeenCalledWith("other-camp");
+      spy.mockRestore();
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("an unexpected preflight readPool failure (not InvalidCopyPoolError) surfaces as 500", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      const spy = vi
+        .spyOn(getPoolStore(owner), "readPool")
+        .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+      const res = await mount(owner).duplicate(duplicateReq("camp", "copy"));
+      expect(res.status).toBe(500);
+      spy.mockRestore();
     } finally {
       await harness.cleanup();
     }

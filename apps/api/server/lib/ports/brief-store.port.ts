@@ -22,6 +22,15 @@ export interface ResolvedCampaign {
 }
 
 /**
+ * `createCampaign`'s own options (D177, PT-5b2): a fresh mint has no
+ * revision to guard, so it takes only the team a caller who already ran
+ * `canAssignTeam` authorized — same meaning as `BriefWriteOptions.teamId`.
+ */
+export interface CreateCampaignOptions {
+  readonly teamId?: string | null;
+}
+
+/**
  * Team assignment options shared by `createBrief`, `rewriteBrief` and
  * `replaceBrief` (D166, PT-2c item 4). `teamId` is Postgres-only: `undefined`
  * means "leave as it is" for a rewrite/replace, or "no team" (null) for a
@@ -101,10 +110,43 @@ export interface BriefStorePort {
 
   /**
    * Exclusively create a new brief in storage.
-   * Fails with an EEXIST error if a brief or file with the same id already exists.
+   * Fails with an EEXIST error if a brief or file with the same id already exists,
+   * UNLESS that row is a `createCampaign` mint with no version yet (D177,
+   * PT-5b2): this write is then its first Save, adding version 1 to the
+   * existing row rather than refusing the slug as taken. A row hidden from
+   * this caller by team (D166) is refused as EEXIST either way, never
+   * written into.
    * `options.teamId` (D166 item 4): see `BriefWriteOptions`.
    */
   createBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief>;
+
+  /**
+   * Mint a campaign with no version yet (D177: Create mints the campaign
+   * row; version 1 is the first Save) — the blank-create path of
+   * `POST /campaigns` (PT-5b2). A Postgres row with no `brief_version`, or a
+   * reserved `briefs/<slug>/` directory on the filesystem backend (D179: the
+   * fs id IS the slug). Fails with an EEXIST error if the slug already names
+   * a campaign (any state: versionless, versioned, or a plain brief file) or
+   * a reserved directory on fs — the caller's own dedupe loop retries the
+   * next suffix on that signal, the same one two concurrent callers of the
+   * same name race on, rather than a separate check-then-act read.
+   */
+  createCampaign(slug: string, options?: CreateCampaignOptions): Promise<ResolvedCampaign>;
+
+  /**
+   * Undo a `createCampaign` reservation that a later step (asset copy, the
+   * first-version `createBrief`) failed to complete (PT-5b2 fix-round item
+   * 2): deletes the Postgres row, or removes the fs reserved directory,
+   * ONLY if it still holds no version/brief — never touches one a
+   * concurrent writer's own Save has since completed. Answers whether it
+   * actually removed anything, so the caller knows whether to also clean up
+   * copied assets (only ever correct when the campaign itself is gone too —
+   * never after a real, versioned brief). On fs, delete the campaign's pool
+   * first (`deletePool`, a no-op when absent): the pool file lives inside
+   * the same reserved directory this removes, and removing a non-empty
+   * directory must fail closed, not silently take the pool with it.
+   */
+  releaseCampaign(slug: string): Promise<boolean>;
 
   /**
    * Rewrite an existing brief in its own format.
@@ -152,4 +194,17 @@ export interface BriefStorePort {
    * Answers `{ campaignId, slug }` or `undefined` if absent or hidden by team.
    */
   resolveCampaign(ref: string): Promise<ResolvedCampaign | undefined>;
+
+  /**
+   * A campaign's own team assignment, for a caller that already resolved and
+   * owns it (duplicate, a sourced `POST /campaigns`, PT-5b2 fix-round item
+   * 1): `null` for org-wide, a team id, or `undefined` when the slug is
+   * absent or hidden from this caller by team. A copy with no explicit
+   * `teamId` inherits this value, so a member's team-scoped source never
+   * becomes an org-wide copy by omission — the same visibility the caller
+   * could already see, carried forward, no extra permission check needed.
+   * The fs backend has no team column (D166 item 5): `null` when the brief
+   * exists, `undefined` otherwise.
+   */
+  campaignTeam(slug: string): Promise<string | null | undefined>;
 }

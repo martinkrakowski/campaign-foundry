@@ -314,6 +314,48 @@ describe("authoring briefs", () => {
     expect(readFileSync(campYaml())).toEqual(original);
   });
 
+  // D177/D179 (PT-5b2): `POST /campaigns`'s blank create leaves a reserved
+  // `briefs/camp/` directory, not a file — the first Save's own `camp.yaml`
+  // write is a different filesystem entry the directory never blocks.
+  test("POST without replace succeeds as the first Save onto a reserved (blank-created) slug", async () => {
+    mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+    const { create, list } = await api();
+    const res = await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ file: "camp.yaml", brief: brief() });
+    expect(existsSync(join(dir, "briefs", "camp"))).toBe(true);
+
+    const listed = await list()(new Request("http://x/campaigns/briefs"));
+    const json = (await listed.json()) as { briefs: { brief: { id: string } }[] };
+    expect(json.briefs.map((b) => b.brief.id)).toEqual(["camp"]);
+
+    // A second create of the same slug — now that it has a version — is
+    // still refused exactly as before.
+    const again = await create()(
+      jsonReq("http://x/campaigns/briefs", "POST", brief({ campaignMessage: "Nope" })),
+    );
+    expect(again.status).toBe(409);
+  });
+
+  // Coordinator follow-up (D177, PT-5b2): the same crash the fix (pg-brief-
+  // store.ts) closes cannot happen on fs — a reserved directory has no
+  // "versions" concept to read past — but pin the same never-500 contract on
+  // both backends anyway.
+  test("PUT against a blank-created (versionless) campaign 404s, never 500s", async () => {
+    mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+    const { update } = await api();
+    const res = await update()(jsonReq("http://x/campaigns/briefs/camp", "PUT", brief()));
+    expect(res.status).toBe(404);
+  });
+
+  test("POST ?replace=1 against a blank-created (versionless) campaign adds version 1, never 500s", async () => {
+    mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+    const { create } = await api();
+    const res = await create()(jsonReq("http://x/campaigns/briefs?replace=1", "POST", brief()));
+    expect(res.status).toBe(201);
+    expect(existsSync(campYaml())).toBe(true);
+  });
+
   test("POST without replace 409s when the id lives in a differently named file", async () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     const original = validBrief.replace("id: good", "id: camp");
@@ -814,6 +856,78 @@ describe("authoring briefs", () => {
     expect(await loadBrief(yamlPath("camp-copy.yaml"))).toMatchObject({ id: "camp-copy" });
   });
 
+  test("duplicate by name derives the slug (D178) instead of taking a client id", async () => {
+    const { create, duplicate } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const res = await duplicate()(
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "My Copy!" }),
+    );
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as { file: string; brief: { id: string } };
+    expect(json.file).toBe("my-copy.yaml");
+    expect(json.brief.id).toBe("my-copy");
+  });
+
+  test("duplicate with neither newId nor name answers 400", async () => {
+    const { create, duplicate } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const res = await duplicate()(
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { overrides: {} }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("duplicate with both newId and name answers 400", async () => {
+    const { create, duplicate } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const res = await duplicate()(
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", {
+        newId: "camp-copy",
+        name: "Camp Copy",
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("duplicate by name that slugifies to empty answers 400", async () => {
+    const { create, duplicate } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const res = await duplicate()(
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "!!!" }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  test("duplicate by name dedupes against an existing brief file", async () => {
+    const { create, duplicate } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief({ id: "my-copy" })));
+
+    const res = await duplicate()(
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "My Copy" }),
+    );
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { file: string }).file).toBe("my-copy-2.yaml");
+  });
+
+  // D179: a blank `POST /campaigns` create leaves a reserved `briefs/<slug>/`
+  // directory, invisible to `campaignVisibility` (file-existence only) — only
+  // `createCampaign` sees it. Without that, duplicate-by-name would silently
+  // land its copy inside that campaign's own reserved directory namespace.
+  test("duplicate by name skips a slug reserved by a blank-created (versionless) campaign", async () => {
+    mkdirSync(join(dir, "briefs", "my-copy"), { recursive: true });
+    const { create, duplicate } = await api();
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+
+    const res = await duplicate()(
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "My Copy" }),
+    );
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { file: string }).file).toBe("my-copy-2.yaml");
+    // The reserved directory itself is untouched — no brief was written into it.
+    expect(existsSync(yamlPath("my-copy.yaml"))).toBe(false);
+  });
+
   test("duplicate loads a JSON source", async () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     writeFileSync(yamlPath("camp.json"), JSON.stringify(brief()));
@@ -1102,6 +1216,21 @@ describe("authoring briefs", () => {
       );
       expect(existsSync(yamlPath("dest.yaml"))).toBe(false);
       expect(existsSync(yamlPath("dest", "pools.json"))).toBe(false);
+    });
+
+    // withDerivedSlug's retry loop only ever retries an EEXIST (a slug
+    // collision); anything else — InvalidCopyPoolError here — must propagate
+    // on the FIRST candidate, never masked as "taken" and retried past.
+    test("duplicate by name of a brief whose source pool is malformed answers 422, not retried", async () => {
+      const { create, duplicate } = await api();
+      await create()(jsonReq("http://x/campaigns/briefs", "POST", pooledSource()));
+      mkdirSync(yamlPath("camp"), { recursive: true });
+      writeFileSync(yamlPath("camp", "pools.json"), "{not-json");
+      const res = await duplicate()(
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "Dest" }),
+      );
+      expect(res.status).toBe(422);
+      expect(existsSync(yamlPath("dest.yaml"))).toBe(false);
     });
 
     test("duplicate of a source pool whose briefId does not match its directory answers 422", async () => {

@@ -93,8 +93,20 @@ export default defineEventHandler(async (event) => {
       // hidden or already visible-and-not-replacing, refused) BEFORE any
       // asset copy or write below — never after, which would let a copy land
       // in a hidden campaign's asset directory ahead of the eventual EEXIST.
+      //
+      // D177 (PT-5b2): a `POST /campaigns` blank create leaves a campaign row
+      // with no version yet — `campaignVisibility` still answers "visible"
+      // for it (unchanged: `resolveCampaign` and this method are the two
+      // that see a versionless row, unlike the version-joined reads), so
+      // "visible" alone can no longer mean "taken" here. `getRevision`
+      // (undefined for a versionless row on both backends — the fs one has
+      // no file at all, only a reserved directory) tells the two apart: this
+      // Save is that row's first, not a collision, and `store.createBrief`
+      // below now knows to add version 1 to it instead of refusing.
       const targetVisibility = await store.campaignVisibility(brief.id);
-      if (targetVisibility === "hidden" || (targetVisibility === "visible" && !replace)) {
+      const hasVersion =
+        targetVisibility === "visible" ? (await store.getRevision(brief.id)) !== undefined : false;
+      if (targetVisibility === "hidden" || (hasVersion && !replace)) {
         const existErr = new Error(`Brief "${brief.id}" already exists.`);
         (existErr as { code?: string }).code = "EEXIST";
         throw existErr;

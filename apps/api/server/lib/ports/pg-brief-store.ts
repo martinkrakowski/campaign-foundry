@@ -10,6 +10,7 @@ import { parseBriefText, type ParseBriefOptions } from "../load-brief.js";
 import type {
   BriefStorePort,
   BriefWriteOptions,
+  CreateCampaignOptions,
   ResolvedCampaign,
   StoredBrief,
 } from "./brief-store.port.js";
@@ -159,6 +160,17 @@ export class PgBriefStore implements BriefStorePort {
     return this.visible(row.team_id) ? "visible" : "hidden";
   }
 
+  /** See `BriefStorePort.campaignTeam` (PT-5b2 fix-round item 1). */
+  async campaignTeam(slug: string): Promise<string | null | undefined> {
+    const { rows } = await this.db.query<{ team_id: string | null }>(
+      `select team_id from campaign where org_id = $1 and slug = $2`,
+      [this.orgId, slug],
+    );
+    const row = rows[0];
+    if (!row || !this.visible(row.team_id)) return undefined;
+    return row.team_id;
+  }
+
   /**
    * Resolve a campaign reference (canonical uuid OR slug) within the caller's scope (D178, D179).
    * Tries canonical uuid first, then falls back to slug.
@@ -281,30 +293,66 @@ export class PgBriefStore implements BriefStorePort {
   }
 
   /**
-   * `teamId` is `null` unless the route has already run the caller-side
-   * permission check (D166 item 3) and passed one through `createBrief`'s
-   * `options.teamId`. The fs backend has no team column to set (item 5) and
-   * refuses any non-undefined `teamId` instead.
+   * `teamId` stays three-state all the way to the write (D177, PT-5b2):
+   * `undefined` (the route passed none) must NOT become `createCampaign`'s
+   * "no team" default when this write turns out to be the first Save onto an
+   * ALREADY-EXISTING versionless row — that would reset a team-scoped
+   * campaign to org-wide the moment its first Save omits `teamId`, exactly
+   * the failure mode `rewriteBrief` already avoids for every later Save. It
+   * becomes `null` only for a genuinely fresh insert, where "no team" IS the
+   * default (unchanged from before this lane).
    */
   private async createBriefInternal(
     brief: CampaignBrief,
-    teamId: string | null,
+    teamId: string | null | undefined,
   ): Promise<StoredBrief> {
     assertSafeSlug(brief.id);
     assertNotReserved(brief.id);
     return this.db.transaction(async (tx) => {
-      if (teamId !== null) await this.assertTeamInOrg(tx, teamId);
-      const { rows } = await tx.query<{ id: string }>(
+      if (teamId !== null && teamId !== undefined) await this.assertTeamInOrg(tx, teamId);
+      const { rows: inserted } = await tx.query<{ id: string }>(
         `insert into campaign (org_id, slug, team_id) values ($1, $2, $3)
          on conflict (org_id, slug) do nothing
          returning id`,
-        [this.orgId, brief.id, teamId],
+        [this.orgId, brief.id, teamId ?? null],
       );
-      const campaignId = rows[0]?.id;
-      if (!campaignId) {
-        const err = new Error(`Brief "${brief.id}" already exists.`);
-        (err as { code?: string }).code = "EEXIST";
-        throw err;
+      let campaignId = inserted[0]?.id;
+      if (campaignId === undefined) {
+        // The slug already names a campaign row — either a blank
+        // `POST /campaigns` mint with no version yet (this Save is its
+        // first: D177) or a genuinely existing brief (refused, unchanged).
+        // Locked with `for update`, the same compare-and-swap shape
+        // `rewriteBriefInternal` uses, so a concurrent write to this exact
+        // row serialises on it rather than reading a version count this
+        // transaction is about to invalidate.
+        const { rows: existing } = await tx.query<{ id: string; team_id: string | null }>(
+          `select id, team_id from campaign where org_id = $1 and slug = $2 for update`,
+          [this.orgId, brief.id],
+        );
+        const row = existing[0]!; // the insert's own conflict proves this row exists
+        if (!this.visible(row.team_id)) {
+          // D166: hidden from this caller by team — answers exactly like an
+          // existing brief (EEXIST), never written into, versionless or not.
+          const err = new Error(`Brief "${brief.id}" already exists.`);
+          (err as { code?: string }).code = "EEXIST";
+          throw err;
+        }
+        campaignId = row.id;
+        const { rows: versions } = await tx.query<{ version: number }>(
+          `select version from brief_version where campaign_id = $1 limit 1`,
+          [campaignId],
+        );
+        if (versions.length > 0) {
+          const err = new Error(`Brief "${brief.id}" already exists.`);
+          (err as { code?: string }).code = "EEXIST";
+          throw err;
+        }
+        // Versionless: this Save is its first. `teamId === undefined` (the
+        // route passed none) leaves the row's team exactly as
+        // `createCampaign` set it — see this method's own doc comment.
+        if (teamId !== undefined) {
+          await tx.query(`update campaign set team_id = $1 where id = $2`, [teamId, campaignId]);
+        }
       }
       const yaml = dumpBrief(brief);
       const revision = hashBytes(Buffer.from(yaml, "utf8"));
@@ -318,7 +366,59 @@ export class PgBriefStore implements BriefStorePort {
   }
 
   async createBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
-    return this.createBriefInternal(brief, options?.teamId ?? null);
+    return this.createBriefInternal(brief, options?.teamId);
+  }
+
+  /**
+   * D177 (PT-5b2): `POST /campaigns`'s blank-create path. No lock: the
+   * unique `(org_id, slug)` constraint is the whole race guard (the Dedupe
+   * note in the plan) — the caller's own dedupe loop retries the next suffix
+   * on the EEXIST this throws, never a separate check-then-act read.
+   */
+  async createCampaign(slug: string, options?: CreateCampaignOptions): Promise<ResolvedCampaign> {
+    assertSafeSlug(slug);
+    assertNotReserved(slug);
+    const teamId = options?.teamId ?? null;
+    return this.db.transaction(async (tx) => {
+      if (teamId !== null) await this.assertTeamInOrg(tx, teamId);
+      const { rows } = await tx.query<{ id: string }>(
+        `insert into campaign (org_id, slug, team_id) values ($1, $2, $3)
+         on conflict (org_id, slug) do nothing
+         returning id`,
+        [this.orgId, slug, teamId],
+      );
+      const campaignId = rows[0]?.id;
+      if (!campaignId) {
+        const err = new Error(`Brief "${slug}" already exists.`);
+        (err as { code?: string }).code = "EEXIST";
+        throw err;
+      }
+      return { campaignId, slug };
+    });
+  }
+
+  /**
+   * See `BriefStorePort.releaseCampaign` (PT-5b2 fix-round item 2). One
+   * statement: the `not exists` guard is the same "still zero versions"
+   * check `createBriefInternal`'s conflict branch reads, so a concurrent
+   * first-version `createBrief` racing this delete either wins outright (a
+   * version already exists, so this deletes nothing and answers `false`) or
+   * this delete wins first (the row is gone before that transaction's own
+   * `select … for update` can see it). The caller's own `withBriefLock`
+   * already rules the second case out for two requests on the same
+   * process — campaigns are never otherwise deleted, so this delete only
+   * ever fires from the same request that reserved the row moments before,
+   * inside the SAME lock.
+   */
+  async releaseCampaign(slug: string): Promise<boolean> {
+    const { rows } = await this.db.query<{ id: string }>(
+      `delete from campaign
+        where org_id = $1 and slug = $2
+          and not exists (select 1 from brief_version where campaign_id = campaign.id)
+       returning id`,
+      [this.orgId, slug],
+    );
+    return rows.length > 0;
   }
 
   /**
@@ -356,7 +456,16 @@ export class PgBriefStore implements BriefStorePort {
         `select version, revision from brief_version where campaign_id = $1 order by version desc limit 1`,
         [campaignId],
       );
-      const current = versions[0]!; // createBrief always writes version 1
+      // D177 (PT-5b2): a `POST /campaigns` blank create leaves a campaign row
+      // with no version yet — rewriteBrief has nothing to rewrite. Answering
+      // `notFound` (ENOENT) here, exactly like a genuinely missing row, lets
+      // both callers already keyed on that code do the right thing: PUT
+      // /campaigns/briefs/:id 404s (its own contract — it never creates), and
+      // `replaceBrief`'s ENOENT catch falls through to `createBrief`, which
+      // completes the row's first Save. Without this, `versions[0]!` below
+      // would throw an uncaught TypeError (500) instead.
+      const current = versions[0];
+      if (!current) throw notFound(brief.id);
       if (expectedRevision && expectedRevision !== current.revision) {
         const err = new Error("Brief was modified by another user.");
         (err as { code?: string; revision?: string }).code = "ECONFLICT";

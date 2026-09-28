@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   writeFileSync,
@@ -205,6 +206,149 @@ describe("FsBriefStore", () => {
     expect(created.revision).toBeTruthy();
 
     await expect(store.createBrief(minimalBrief)).rejects.toMatchObject({ code: "EEXIST" });
+  });
+
+  describe("campaignTeam (PT-5b2 fix-round item 1)", () => {
+    test("answers null for an existing brief (no team column), undefined for absent", async () => {
+      await store.createBrief(minimalBrief);
+      expect(await store.campaignTeam("test-camp")).toBeNull();
+      expect(await store.campaignTeam("nope")).toBeUndefined();
+    });
+  });
+
+  describe("createCampaign (D177/D179, PT-5b2)", () => {
+    test("mints a reserved directory, never a file", async () => {
+      const created = await store.createCampaign("fresh-slug");
+      expect(created).toEqual({ campaignId: "fresh-slug", slug: "fresh-slug" });
+      expect(existsSync(join(dir, "fresh-slug"))).toBe(true);
+      expect(existsSync(join(dir, "fresh-slug.yaml"))).toBe(false);
+      expect(await store.campaignVisibility("fresh-slug")).toBe("absent");
+      expect(await store.findBriefById("fresh-slug")).toBeUndefined();
+    });
+
+    test("a taken slug (an existing directory) is EEXIST", async () => {
+      await store.createCampaign("taken-dir");
+      await expect(store.createCampaign("taken-dir")).rejects.toMatchObject({ code: "EEXIST" });
+    });
+
+    test("a taken slug (an existing brief file) is EEXIST", async () => {
+      await store.createBrief({ ...minimalBrief, id: "taken-file" });
+      await expect(store.createCampaign("taken-file")).rejects.toMatchObject({ code: "EEXIST" });
+    });
+
+    // coderabbit PRRT_kwDOSzP1zc6mgBu7 / qodo PRRT_kwDOSzP1zc6mgEyH: a brief's
+    // id can live in a differently named file — findBriefFile(slug) alone
+    // (a filename check) misses it; findBriefFileById (an id-parsed lookup,
+    // same one campaignVisibility already relies on) must be checked too.
+    test("a taken slug (an id living in a differently-named file) is EEXIST", async () => {
+      writeFileSync(
+        join(dir, "sample-campaign.yaml"),
+        "id: my-copy\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n",
+      );
+      await expect(store.createCampaign("my-copy")).rejects.toMatchObject({ code: "EEXIST" });
+    });
+
+    test.each(["cache", "jobs", "orgs", "packages"] as const)(
+      "refuses a reserved campaign id %s",
+      async (id) => {
+        await expect(store.createCampaign(id)).rejects.toThrow(
+          `"${id}" is reserved; choose another campaign id.`,
+        );
+      },
+    );
+
+    test("throws TeamsNotSupportedError for a non-undefined teamId", async () => {
+      await expect(store.createCampaign("teamed", { teamId: "t1" })).rejects.toMatchObject({
+        name: "TeamsNotSupportedError",
+      });
+      await expect(store.createCampaign("teamed", { teamId: null })).rejects.toMatchObject({
+        name: "TeamsNotSupportedError",
+      });
+    });
+
+    test("the reserved directory never blocks the first Save's <slug>.yaml write", async () => {
+      await store.createCampaign("first-save");
+      const created = await store.createBrief({ ...minimalBrief, id: "first-save" });
+      expect(created.file).toBe("first-save.yaml");
+      expect(existsSync(join(dir, "first-save"))).toBe(true);
+      expect(existsSync(join(dir, "first-save.yaml"))).toBe(true);
+      expect((await store.findBriefById("first-save"))?.brief.id).toBe("first-save");
+    });
+
+    test("two concurrent creates of the same slug: exactly one wins, the other is EEXIST", async () => {
+      const results = await Promise.allSettled([
+        store.createCampaign("race-slug"),
+        store.createCampaign("race-slug"),
+      ]);
+      const fulfilled = results.filter((r) => r.status === "fulfilled");
+      const rejected = results.filter((r) => r.status === "rejected");
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: "EEXIST" });
+    });
+
+    const canDenyWrite = process.platform !== "win32" && process.getuid?.() !== 0;
+    test.skipIf(!canDenyWrite)(
+      "rethrows a non-EEXIST mkdir failure (e.g. EACCES) unchanged",
+      async () => {
+        // 0o555 (read+execute, no write): the findBriefFile/findBriefFileById
+        // "taken" checks (readdir/lstat, read-only) still succeed — chmod
+        // 0o000 made THOSE throw EACCES first, so the mkdir catch this test
+        // means to exercise was never reached. Only mkdir's own need to
+        // write a new entry into this.dir fails.
+        chmodSync(dir, 0o555);
+        try {
+          await expect(store.createCampaign("denied")).rejects.toMatchObject({ code: "EACCES" });
+        } finally {
+          chmodSync(dir, 0o755);
+        }
+      },
+    );
+  });
+
+  describe("releaseCampaign (PT-5b2 fix-round item 2)", () => {
+    test("removes an empty reserved directory and answers true", async () => {
+      await store.createCampaign("mint-only");
+      expect(await store.releaseCampaign("mint-only")).toBe(true);
+      expect(existsSync(join(dir, "mint-only"))).toBe(false);
+    });
+
+    test("leaves a real brief untouched and answers false", async () => {
+      await store.createBrief(minimalBrief);
+      expect(await store.releaseCampaign("test-camp")).toBe(false);
+      expect(existsSync(join(dir, "test-camp.yaml"))).toBe(true);
+    });
+
+    test("answers false, not a crash, for a non-empty directory (a leftover pool file)", async () => {
+      await store.createCampaign("mint-only");
+      writeFileSync(join(dir, "mint-only", "pools.json"), "{}");
+      expect(await store.releaseCampaign("mint-only")).toBe(false);
+      expect(existsSync(join(dir, "mint-only"))).toBe(true);
+    });
+
+    test("answers false for a slug that was never reserved", async () => {
+      expect(await store.releaseCampaign("nope")).toBe(false);
+    });
+
+    const canDenyWriteRelease = process.platform !== "win32" && process.getuid?.() !== 0;
+    test.skipIf(!canDenyWriteRelease)(
+      "rethrows a non-ENOENT/ENOTEMPTY rmdir failure (e.g. EACCES) unchanged",
+      async () => {
+        await store.createCampaign("mint-only");
+        // 0o555 (read+execute, no write): findBriefFileById's own readdir
+        // still succeeds — only rmdir's need to unlink the entry from its
+        // parent fails, so this exercises releaseCampaign's own catch
+        // rather than an earlier read failing first.
+        chmodSync(dir, 0o555);
+        try {
+          await expect(store.releaseCampaign("mint-only")).rejects.toMatchObject({
+            code: "EACCES",
+          });
+        } finally {
+          chmodSync(dir, 0o755);
+        }
+      },
+    );
   });
 
   test("rewriteBrief updates existing brief and checks revision when provided", async () => {
