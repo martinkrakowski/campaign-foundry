@@ -696,6 +696,21 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       (resolvedSlug !== null &&
         resolvedSlug.routeId === routeId &&
         resolvedSlug.slug === routeLoadedId));
+  /**
+   * Whether the load-matching effect below has ALREADY resolved this exact
+   * `routeId` — broader than `routeMatchesLoaded`, which a blank-at-route
+   * campaign (PT-5c1) can never satisfy: `source.kind` stays `"new"` until its
+   * first Save (D177), so `routeLoadedId` stays undefined the whole time.
+   * Deliberately NOT used to gate the D11 recovery effect above — recovery
+   * must stay blocked for a blank-at-route campaign (a reload comes from the
+   * server, never localStorage, D177); this one only stops the effect below
+   * from re-running its `GET /campaigns/:id` on every listing refresh (a
+   * window focus, `loadBriefs()` after an unrelated Save elsewhere) and
+   * re-dispatching a fresh blank `load` over whatever the user has typed.
+   */
+  const routeAlreadyResolved =
+    routeMatchesLoaded ||
+    (state.source.kind === "new" && resolvedSlug !== null && resolvedSlug.routeId === routeId);
 
   // D11 recovery: reinstate an auto-saved draft, once per draft key and only when it
   // actually differs from what is on screen. Keying on the draft rather than on mount
@@ -742,7 +757,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // Wait for the listing: loading before it arrives would miss the entry, and the
     // entry is where the file identity and revision come from.
     if (!briefsLoaded) return;
-    if (routeMatchesLoaded) return;
+    if (routeAlreadyResolved) return;
     // D83/F-A: a listing that failed says nothing about which ids exist — an id is
     // unknown only when a listing that *succeeded* does not contain it. Leave the
     // editor's state alone: the failure state below answers instead, with a retry,
@@ -819,7 +834,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [routeId, routeMatchesLoaded, briefs, briefsLoaded, briefsFailed, setRunBrief]);
+  }, [routeId, routeAlreadyResolved, briefs, briefsLoaded, briefsFailed, setRunBrief]);
 
   /**
    * D83/F-A — where a failed listing is allowed to speak: exactly where the
