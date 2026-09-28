@@ -1,18 +1,11 @@
 "use client";
 
-import {
-  useState,
-  useEffect,
-  useMemo,
-  useCallback,
-  useRef,
-  useLayoutEffect,
-  type ReactNode,
-} from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, type ReactNode } from "react";
 // SG4 — the reveal flips the column view and then scrolls, and the scroll needs a
 // DOM that already has the section in it. See `reveal`.
 import { flushSync } from "react-dom";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { Button, Input, OverflowMenu, ConfirmDialog, useDialogFocusTrap } from "@/components/ui";
 import { useRun } from "@/lib/run-context";
 import { useRouter } from "next/navigation";
@@ -22,6 +15,8 @@ import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import {
   listBriefs,
   createBrief,
+  createCampaign,
+  getCampaign,
   updateBrief,
   getCapabilities,
   isTransientCapabilities,
@@ -32,6 +27,7 @@ import {
   type BriefEntry,
   type PlanVariant,
 } from "@/lib/briefs-api";
+import { campaignRoute } from "@/lib/campaign-route";
 import {
   initialEditorState,
   toBrief,
@@ -45,7 +41,6 @@ import {
   loadDraftFromStorage,
   purgeDraftFromStorage,
   blankBrief,
-  slugify,
   asCopyTimeline,
   timelineDurations,
   draftOccupancy,
@@ -59,7 +54,6 @@ import {
   getTotalErrorCount,
   motionUnavailableReason,
   SAFE_ID_PATTERN,
-  isReservedCampaignId,
   type FieldErrors,
 } from "@/components/campaign/validate";
 import {
@@ -82,7 +76,6 @@ import {
 import { ErrorPill } from "@/components/ui";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
-import { takeSeed } from "@/lib/create-campaign";
 import { FloatingBar } from "@/components/shell/FloatingBar";
 import { SectionModeContext } from "@/components/campaign/SectionModeContext";
 import { useEditorPanelPublisher } from "@/lib/editor-panels-context";
@@ -489,7 +482,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const router = useRouter();
   const { guardedPush, guardedAction } = useGuardedNavigation();
   const { setDirty } = useEditorDirty();
-  const { openCreateDialog, seedVersion } = useCreateCampaign();
+  const { openCreateDialog } = useCreateCampaign();
   const { setPanels, setTopPanels, setRail } = useEditorPanelPublisher();
   // VE1 — history lives in the hook, never in `EditorState` (R6): `state` is the
   // present draft, so persistence and the stored-draft diff see exactly what they
@@ -507,17 +500,8 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const [briefsFailed, setBriefsFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [persistError, setPersistError] = useState<string | undefined>();
-  const [saveAsId, setSaveAsId] = useState<string | null>(null);
-  // D9 — the Save-as overwrite decision, parked between attempt and answer. Set when
-  // the first write attempt finds the id taken (the listing knew, or the API's 409
-  // said so); the dialog's confirm is what sends `{ replace: true }`.
-  const [pendingOverwrite, setPendingOverwrite] = useState<string | null>(null);
-  // Synchronous latch for the overwrite retry. `saving` is React state, so a second
-  // confirm in the same frame still reads the pre-setSaving closure and would POST
-  // `{ replace: true }` twice and run `adoptSavedCopy` twice. The ref is set at
-  // entry and cleared in `finally` — a `saving` check is the stale-closure trap.
-  const overwriteInFlightRef = useRef(false);
-  // The Save-as dialog's field: where the invalid-id guard hands focus back (D3).
+  const [saveAsName, setSaveAsName] = useState<string | null>(null);
+  // The Save-as dialog's field: where the empty-name guard hands focus back (D3).
   const saveAsFieldRef = useRef<HTMLInputElement | null>(null);
   const saveAsDialogRef = useRef<HTMLDivElement | null>(null);
   // The Save-as dialog is `aria-modal` but was hand-rolled, so it had no Escape and
@@ -525,14 +509,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // editor behind the scrim. The kit hook every other overlay uses supplies both,
   // plus focus restoration to whatever opened it.
   useDialogFocusTrap({
-    open: saveAsId !== null,
-    // Not while the write is in flight. `handleSaveAs` captures the draft before it
-    // awaits and dispatches `load` — a full state replace — when the server answers,
-    // so any edit typed between a dismissal and that answer is silently discarded.
-    // The door was already open via Cancel, which `main` never gated either; adding
-    // Escape without this would have widened a live data-loss race.
+    open: saveAsName !== null,
+    // Not while the write is in flight — the mint and the first-save write are
+    // two requests, and a dismissal mid-sequence must not race `router.replace`.
     onClose: () => {
-      if (!saving) setSaveAsId(null);
+      if (!saving) setSaveAsName(null);
     },
     dialogRef: saveAsDialogRef,
     initialFocusRef: saveAsFieldRef,
@@ -684,6 +665,36 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     };
   }, []);
 
+  const routeLoadedId = state.source.kind === "file" ? state.source.loadedId : undefined;
+  /**
+   * PT-5c1 (D178) — the slug the CURRENT `routeId` resolves to, once known: from
+   * the listing's `campaignId`/`brief.id` match, or `GET /campaigns/:id`'s `slug`
+   * for a versionless campaign (D179). A ref, not state: it has to be visible to
+   * `routeMatchesLoaded` (below) in the SAME render its effect resolves it — a
+   * second `useState` reset-on-`routeId`-change effect would still read the OLD
+   * value on the render where `routeId` first moves, because sibling effects in
+   * one commit see state as it stood when the commit started, not each other's
+   * writes. Keying the cache on `routeId` itself (not just clearing it) gets the
+   * same "never stale" property from a value that updates synchronously instead.
+   */
+  const resolvedSlugRef = useRef<{ routeId: string; slug: string } | null>(null);
+  /**
+   * Whether the state currently loaded IS the campaign this route names.
+   * `routeLoadedId` (the file source's own id) is always the SLUG — never the
+   * uuid `POST /campaigns` may have minted and the URL may carry (D178) —
+   * so comparing only against `routeId` would never match a uuid-addressed
+   * route once loaded, and the load effect below would re-dispatch `load` on
+   * every listing refresh (a window focus, the refetch `handleSave` issues
+   * after its own write), clobbering whatever the user typed since — the
+   * exact thing the `save` action's snapshot-not-replace design exists to
+   * prevent.
+   */
+  const resolvedSlug = resolvedSlugRef.current;
+  const routeMatchesLoaded =
+    routeLoadedId !== undefined &&
+    (routeLoadedId === routeId ||
+      (resolvedSlug?.routeId === routeId && resolvedSlug.slug === routeLoadedId));
+
   // D11 recovery: reinstate an auto-saved draft, once per draft key and only when it
   // actually differs from what is on screen. Keying on the draft rather than on mount
   // matters — on a named route the draft key only becomes the brief's own once the
@@ -691,12 +702,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // editor has settled on the brief it belongs to (H6: `/brief/new`'s key is stable,
   // so a reload there finds its draft immediately).
   const draftKey = getDraftKey(state);
-  const routeLoadedId = state.source.kind === "file" ? state.source.loadedId : undefined;
   useEffect(() => {
     // On a named route, wait for the route's brief: before it lands the draft key is
     // not yet the route's, and restoring against it would seed the editor with a
-    // draft the URL says nothing about.
-    if (routeId !== undefined && routeLoadedId !== routeId) return;
+    // draft the URL says nothing about. A blank-at-route campaign (PT-5c1: `source.kind`
+    // stays "new" until its first Save) never satisfies this either, by the same
+    // logic that makes its reload come from the server, not from localStorage
+    // (`routeMatchesLoaded` requires a file source).
+    if (routeId !== undefined && !routeMatchesLoaded) return;
     const draft = loadDraftFromStorage(state);
     // The same `valuesEqual` the dirty checks use, not a second stringified
     // comparison: a key-order-sensitive stringify here would restore a draft
@@ -705,7 +718,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     if (draft && !valuesEqual(draft, state)) {
       dispatch({ type: "restore", state: draft });
     }
-  }, [draftKey, routeId, routeLoadedId]);
+  }, [draftKey, routeId, routeMatchesLoaded]);
 
   // D37 — the route drives the load, and nothing else does. `routeId` is the URL's
   // word for which brief is open, and it is the only source of truth: the editor
@@ -727,34 +740,84 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // Wait for the listing: loading before it arrives would miss the entry, and the
     // entry is where the file identity and revision come from.
     if (!briefsLoaded) return;
-    if (routeLoadedId === routeId) return;
+    if (routeMatchesLoaded) return;
     // D83/F-A: a listing that failed says nothing about which ids exist — an id is
     // unknown only when a listing that *succeeded* does not contain it. Leave the
     // editor's state alone: the failure state below answers instead, with a retry,
     // and a later successful listing re-runs this effect and decides then.
     if (briefsFailed) return;
-    const match = briefs.find((entry) => entry.brief.id === routeId);
-    // M3: an id the listing does not know is answered where the user landed — the
-    // empty state below — never a silent new unsaved draft.
-    if (!match) {
-      setUnknownId(routeId);
+    // PT-5a added `campaignId` to each listing item: a uuid-addressed route
+    // matches on it, a slug-addressed one on `brief.id` (fs and Postgres both).
+    const match = briefs.find((entry) => entry.brief.id === routeId || entry.campaignId === routeId);
+    if (match) {
+      setUnknownId(null);
+      resolvedSlugRef.current = { routeId, slug: match.brief.id };
+      dispatch({
+        type: "load",
+        brief: match.brief,
+        entry: { file: match.file, revision: match.revision },
+      });
+      // The file identity rides the load, so the canonical projection is what `apply`
+      // snapshots — and committing the shell here (never before) is what makes
+      // Generate run the brief the URL named.
+      dispatch({ type: "apply" });
+      setRunBrief(match.brief);
+      // A loaded brief shows its real errors at once: they are the file's, not the
+      // user's, and the user asked for this brief by opening the route.
+      setAttempted(true);
       return;
     }
-    setUnknownId(null);
-    dispatch({
-      type: "load",
-      brief: match.brief,
-      entry: { file: match.file, revision: match.revision },
-    });
-    // The file identity rides the load, so the canonical projection is what `apply`
-    // snapshots — and committing the shell here (never before) is what makes
-    // Generate run the brief the URL named.
-    dispatch({ type: "apply" });
-    setRunBrief(match.brief);
-    // A loaded brief shows its real errors at once: they are the file's, not the
-    // user's, and the user asked for this brief by opening the route.
-    setAttempted(true);
-  }, [routeId, routeLoadedId, briefs, briefsLoaded, briefsFailed, setRunBrief]);
+    // PT-5c1 (D177) — not in the listing: a versionless campaign never is
+    // (PT-5b2 fix-round item 3), so this is the common path for a just-minted
+    // blank create, not an edge case. Resolve it through `GET /campaigns/:id`,
+    // which answers a uuid or a slug alike (D178, D179) — before concluding the
+    // id is unknown, since that answer must wait for THIS call, not the listing.
+    let cancelled = false;
+    void (async () => {
+      let meta;
+      try {
+        meta = await getCampaign(routeId);
+      } catch {
+        // A transient failure reads as "could not tell", same as a failed
+        // listing — never as "no such campaign". Nothing to show here beyond
+        // what the listing's own failure state already offers a retry for.
+        return;
+      }
+      if (cancelled) return;
+      if (!meta) {
+        setUnknownId(routeId);
+        return;
+      }
+      if (meta.hasVersion) {
+        // A race: the listing was read before this campaign's version landed
+        // (or landed since). Refresh it rather than opening a blank draft over
+        // real content — the refreshed listing re-runs this effect and finds
+        // the match the ordinary way.
+        void loadBriefs();
+        return;
+      }
+      // The blank editor a versionless campaign opens: exactly what the
+      // retired seed effect used to produce, seeded from the server instead
+      // of a `localStorage` payload, and reproducible on every reload — a
+      // `source.kind: "new"` draft (never `dispatch({ type: "apply" })`, the
+      // same restraint the seed effect kept), so its Save is a first Save
+      // (`createBrief` with the minted slug, which the API turns into
+      // version 1).
+      setUnknownId(null);
+      resolvedSlugRef.current = { routeId, slug: meta.slug };
+      const brief: CampaignBrief = { ...blankBrief(), id: meta.slug };
+      dispatch({ type: "load", brief });
+      dispatch({ type: "patch", patch: { campaignName: meta.name ?? "" } });
+      dispatch({ type: "applyPreset", campaignType: meta.type ?? DEFAULT_CAMPAIGN_TYPE });
+      setRunBrief(brief);
+      setAttempted(false);
+      setTouched(new Set());
+      setTouchedSections(new Set());
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [routeId, routeMatchesLoaded, briefs, briefsLoaded, briefsFailed, setRunBrief]);
 
   /**
    * D83/F-A — where a failed listing is allowed to speak: exactly where the
@@ -763,8 +826,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * listing handleSave issues after a successful write — changes nothing on
    * screen, and `/brief/new` never needs the listing at all.
    */
-  const failedRouteId =
-    briefsFailed && routeId !== undefined && routeLoadedId !== routeId ? routeId : null;
+  const failedRouteId = briefsFailed && routeId !== undefined && !routeMatchesLoaded ? routeId : null;
 
   // Arriving here means the last campaign is no longer the one being worked on. Let go
   // of it in the shell too: while it stayed active the selector kept advertising it and
@@ -902,50 +964,6 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     }
     if (draftDivergedRef.current) purgeDraftFromStorage(state);
   }, [state]);
-
-  // W1 — the create dialog's seed (D65/D66). The editor consumes it on mount on the
-  // blank route AND while already mounted there: the same-URL push resets nothing
-  // (F8), so an in-place create needs the watch, and the seed key is persisted
-  // exactly so a create that navigated here is still found on mount. The read
-  // happens in an effect, never a `useState` initializer — the server has no
-  // localStorage, and a read during render would make the first client render
-  // disagree with it (the trap `Disclosure` documents). The baton is spent by a
-  // read: `takeSeed()` is `takeStashedStep`'s pattern.
-  // Layout, not passive: a refused seed spends its companion step baton inside
-  // `takeSeed`, and that spend must happen before the navigation hook's mount
-  // effect applies a leftover `"copy"` from a previous build. A `useEffect` here
-  // is declared after that hook and would lose the race.
-  useLayoutEffect(() => {
-    // A seed arriving while a named brief is open must never load a blank draft in
-    // place — the gate is the route's own statement about what this editor is.
-    if (!blank) return;
-    const seed = takeSeed();
-    if (!seed) return;
-    // Never through `requestReplace`: the guard already asked before the dialog
-    // opened (D67) and does not clear the dirty flag, so asking again here would
-    // pop "Unsaved edits" a second time on a dirty blank route.
-    purgeDraftFromStorage(state);
-    dispatch({ type: "load", brief: blankBrief() });
-    // `patch` actions — not a hand-built state — so slug derivation stays in the
-    // reducer (F18), exactly as the Identity step's own controls dispatch. D108 —
-    // the seed carries the name and the campaign type; region and audience are
-    // the Identity step's answers, and no seed may half-answer them. The type's
-    // preset (platforms, formats, mode) is resolved by the `applyPreset` action,
-    // exactly once, here on arrival (D109) — the seed is spent by the `takeSeed`
-    // read above, so no remount, load or presentation switch can re-apply it.
-    dispatch({ type: "patch", patch: { campaignName: seed.name } });
-    dispatch({ type: "applyPreset", campaignType: seed.type });
-    // The reset createNew performed (L1.1): an in-place seed after a refused Save
-    // would otherwise inherit `attempted` and paint Identity red on arrival.
-    setAttempted(false);
-    setTouched(new Set());
-    setTouchedSections(new Set());
-    // SG1 — D98's cursor move ("land on Identity, not Copy") is gone with the step
-    // cursor. It is not a behaviour this lane dropped: Identity is the first
-    // section of the one column, so a seeded draft arrives at the top of it by
-    // construction, with nothing to move and nothing that can land one step past
-    // two empty required fields.
-  }, [seedVersion, blank]);
 
   // The projection, exactly once: `toBrief(state)` is what Save sends, and the D35
   // handoff, the rail's YAML view and `draftDiffers` all read this one object rather
@@ -1806,7 +1824,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * prompt does not navigate.
    */
   const loadBrief = (entry: BriefEntry) => {
-    guardedPush(`/brief/${entry.brief.id}`);
+    guardedPush(campaignRoute(entry.campaignId ?? entry.brief.id));
   };
 
   /**
@@ -1895,15 +1913,15 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       await loadBriefs();
       // D37: the URL is the source of truth for which brief is open. A first save
       // turned "new" into a named brief, so the route must stop calling it new —
-      // otherwise a reload would blank the brief that was just saved. (A save of a
-      // file-backed brief is already at its own route; nothing to move.)
-      if (state.source.kind === "new") {
-        // SG1: H5's step baton is gone with the step cursor. It existed because a
-        // first save moves `/brief/new` to `/brief/{id}` — different route
-        // segments, so the page remounts and the cursor was rebuilt from scratch,
-        // throwing the user back to step one with nothing said. A column has no
-        // cursor to rebuild, so there is nothing to carry across the change.
-        router.replace(`/brief/${stored.brief.id}`);
+      // otherwise a reload would blank the brief that was just saved. Only the
+      // W3 resume path (`routeId === undefined`, the last surface `/brief/new`
+      // still mounts a blank editor on) needs this: a blank-at-route campaign
+      // (PT-5c1) already sits at its own `/brief/<campaignId>` URL before its
+      // first Save — `routeMatchesLoaded` resolves against it through
+      // `resolvedSlugRef`, which the meta fetch already populated, so there is
+      // nothing to move.
+      if (routeId === undefined) {
+        router.replace(campaignRoute(stored.brief.id));
       }
       return stored.brief;
     } catch (error) {
@@ -1934,100 +1952,56 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   };
 
   /**
-   * D37 — the copy is adopted once, for both Save-as attempts (the first, and the
-   * overwrite retry): a copy that took the id this route already names is loaded
-   * in place — the SERVER's stored brief, whose asset paths were rewritten during
-   * the copy and whose revision is the guard for the next save (an absent revision
-   * leaves the guard untouched, the `save` action's rule) — and any other copy is
-   * adopted by navigating to it, the route driving the load. The listing is
-   * refreshed first, so the route's load finds the copy the moment the URL changes.
-   * SG1: H5's step stash went with the wizard — there is no cursor for the segment
-   * change to reset.
+   * D9, PT-5c1 (D177, D178) — Save as… mints a blank campaign under the
+   * typed NAME (`POST /campaigns`, no source) and then saves the CURRENT
+   * draft into it as that campaign's first Save (`createBrief` with the
+   * minted slug — the same first-save path a blank create completes). This
+   * is deliberately NOT `duplicateCampaign`: duplicate copies the source's
+   * STORED version, and Save as… has never required the source to be saved
+   * first (D9's original contract) — it saves whatever is in the editor
+   * right now, dirty or never-saved alike, exactly as the single-step
+   * `createBrief({ ...brief, id: newId })` it replaces did.
+   *
+   * No id is client-picked any more (D177, D178): the server derives and
+   * dedupes the slug from the name, so a name collision is never a 409 to
+   * resolve — it is a different slug — and the overwrite confirm (D9's old
+   * `pendingOverwrite`/`retrySaveAsOverwrite` pair) retires with the client
+   * id it existed to retry, and `SAFE_ID_PATTERN`/`isReservedCampaignId`
+   * with it — nothing left in this flow to validate an id against.
+   *
+   * A step-2 failure (the mint held, the first-save write did not) leaves an
+   * orphan versionless campaign server-side — a known, accepted gap of this
+   * two-step client flow (recorded under Deviations), the same shape
+   * `index.post.ts`'s own sourced-create already guards against for ITS
+   * single request, which this one is not.
    */
-  const adoptSavedCopy = async (created: BriefEntry) => {
-    purgeDraftFromStorage(state);
-    if (created.brief.id === routeId) {
-      dispatch({
-        type: "load",
-        brief: created.brief,
-        entry: { file: created.file, revision: created.revision },
-      });
-      setRunBrief(created.brief);
-      setSaveAsId(null);
-      return;
-    }
-    await loadBriefs();
-    setSaveAsId(null);
-    router.replace(`/brief/${created.brief.id}`);
-  };
-
-  const handleSaveAs = async (rawId: string) => {
+  const handleSaveAs = async (rawName: string) => {
     if (refuseInvalid()) return;
-    // B1: the dialog asks for an id while the user is thinking of a name — "Trail
-    // Blaze 2026" once reached the server verbatim and came back a 400 nobody
-    // explained. The field shows the rule as it is typed (below); this guard is the
-    // backstop, so no unvalidated id reaches createBrief, and trimming happens here
-    // where an invisible trailing space would otherwise be a server 400.
-    const newId = rawId.trim();
-    // D3: a live button answers. The field shows the rule as it is typed, so this
-    // backstop usually finds the error already on screen — the press still has to
-    // produce a response, so it hands focus back to the field.
-    if (!SAFE_ID_PATTERN.test(newId) || isReservedCampaignId(newId)) {
+    const name = rawName.trim();
+    if (name === "") {
       saveAsFieldRef.current?.focus();
       return;
     }
     setSaving(true);
     setPersistError(undefined);
     try {
+      const minted = await createCampaign({ name, type: state.type });
       const brief = toBrief(state);
-      const newBrief = { ...brief, id: newId };
-      // D9: Save as… posts the *current draft* under the new id. A collision is
-      // never written and never silently failed: the attempt ends here and the
-      // overwrite dialog asks — whether the listing already knew the id, or the
-      // API's 409 backstop caught a brief that appeared since it was fetched. (The
-      // two `window.confirm` calls that used to gate this decision blocked the
-      // thread and fought the app's own overlays; the kit's ConfirmDialog is the
-      // house pattern.) The confirm retries with `{ replace: true }` — the
-      // overwrite is a visible user decision, never an automatic re-send.
-      if (briefs.some((entry) => entry.brief.id === newId)) {
-        setPendingOverwrite(newId);
-        return;
-      }
-      await adoptSavedCopy(await createBrief(newBrief));
-    } catch (error) {
-      if (!isBriefsApiError(error) || error.status !== 409) {
-        setPersistError(unknownErrorMessage(error, "Save as failed"));
-        return;
-      }
-      setPendingOverwrite(newId);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  /**
-   * D9 — the overwrite dialog's confirm. The retry is the user's own decision,
-   * posting with `{ replace: true }`, and it adopts what the server stored exactly
-   * as a first-attempt success does. A failed retry is answered the way any save
-   * failure is: the error surfaces and the Save-as dialog stays open.
-   */
-  const retrySaveAsOverwrite = async (newId: string) => {
-    if (overwriteInFlightRef.current) return;
-    overwriteInFlightRef.current = true;
-    setSaving(true);
-    setPersistError(undefined);
-    try {
-      const brief = toBrief(state);
-      await adoptSavedCopy(await createBrief({ ...brief, id: newId }, { replace: true }));
-      // Same-id overwrite adopts in place (no navigation unmounts this editor), so
-      // the dialog must clear here too. After adoptSavedCopy, while `saving` still
-      // holds #163's gate — a dismissal window must not open mid-adoption.
-      setPendingOverwrite(null);
+      // The write, not its answer: the copy is opened by navigating to it — the
+      // route's own load effect reads it back from the server, the same as any
+      // other campaign this editor opens (D37) — so nothing here needs to adopt
+      // the response in place.
+      await createBrief({ ...brief, id: minted.slug });
+      purgeDraftFromStorage(state);
+      // Refreshed before the navigation, so the destination's own load effect
+      // finds the copy in the listing the moment the URL changes, rather than
+      // falling through to a second `GET /campaigns/:id` round trip.
+      await loadBriefs();
+      setSaveAsName(null);
+      router.replace(campaignRoute(minted.campaignId));
     } catch (error) {
       setPersistError(unknownErrorMessage(error, "Save as failed"));
-      setPendingOverwrite(null);
     } finally {
-      overwriteInFlightRef.current = false;
       setSaving(false);
     }
   };
@@ -2130,19 +2104,6 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     void execute(draftBrief);
     router.push("/grid");
   };
-
-  // The Save-as field speaks the same rule as the briefId field (messages.briefId),
-  // evaluated on the *trimmed* value so the verdict matches what Save would send.
-  // Because the field asks for an id while the user is thinking of a name, the
-  // slugified form of what was typed is offered as a click — shown, never applied
-  // silently: an id that slugifies to nothing gets the refusal but no suggestion.
-  const saveAsTrimmed = (saveAsId ?? "").trim();
-  const saveAsPatternInvalid =
-    saveAsId !== null && saveAsTrimmed !== "" && !SAFE_ID_PATTERN.test(saveAsTrimmed);
-  const saveAsReservedInvalid =
-    saveAsId !== null && saveAsTrimmed !== "" && isReservedCampaignId(saveAsTrimmed);
-  const saveAsInvalid = saveAsPatternInvalid || saveAsReservedInvalid;
-  const saveAsSlug = slugify(saveAsId ?? "");
 
   /**
    * D40 — the exit verb. Cancel leaves the editor for the grid, and the dirty guard
@@ -2256,7 +2217,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
             who left the column on YAML through this item comes back to the form
             after a reload. */
           { label: messages.editorYamlItem, onSelect: () => chooseColumnView("yaml") },
-          { label: messages.editorSaveAs, onSelect: () => setSaveAsId("") },
+          { label: messages.editorSaveAs, onSelect: () => setSaveAsName("") },
           { label: messages.editorRevert, onSelect: handleRevert },
         ]}
       />
@@ -2855,27 +2816,10 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         onClose={() => setRunConfirmOpen(false)}
       />
 
-      {/* D9 — the Save-as overwrite decision. The confirm is what sends
-           `{ replace: true }`; the cancel clears the pending id and returns to the
-           Save-as dialog. Escape and Cancel are held while the retry write is in
-           flight (the #163 `saving` guard) — a dismissal would hand the user an
-           editable page whose pending adoption is about to discard their edits. */}
-      {pendingOverwrite !== null && (
-        <ConfirmDialog
-          open
-          title={messages.saveAsOverwriteTitle}
-          message={messages.saveAsOverwritePrompt(pendingOverwrite)}
-          confirmLabel={messages.saveAsOverwriteConfirm}
-          cancelLabel={messages.confirmCancel}
-          onConfirm={() => void retrySaveAsOverwrite(pendingOverwrite)}
-          onClose={() => {
-            if (!saving) setPendingOverwrite(null);
-          }}
-        />
-      )}
-
-      {/* Save as dialog */}
-      {saveAsId !== null && (
+      {/* Save as dialog — PT-5c1 (D177, D178): a NAME, not an id. The server
+           derives and dedupes the slug, so there is no overwrite decision left
+           to confirm — a name collision is a different slug, never a 409. */}
+      {saveAsName !== null && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-scrim/80 p-4 backdrop-blur-sm">
           <div
             ref={saveAsDialogRef}
@@ -2888,47 +2832,31 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               Save as...
             </h3>
             <p className="mb-4 text-[12px] text-text-muted">
-              This creates a copy. The original file stays on disk until deleted.
+              This creates a copy under a new name. The original stays as it is.
             </p>
             {/* The kit's input, so the Save-as field has the same focus halo as
                 every other field in the editor — this one had none at all. */}
             <Input
               type="text"
-              aria-label="New brief id"
-              placeholder="New brief id"
-              value={saveAsId}
-              invalid={saveAsInvalid}
-              onChange={(e) => setSaveAsId(e.target.value)}
+              aria-label="New campaign name"
+              placeholder="e.g. Summer Spark copy"
+              value={saveAsName}
+              onChange={(e) => setSaveAsName(e.target.value)}
               className="mb-4"
               ref={saveAsFieldRef}
               autoFocus
             />
-            {saveAsInvalid ? (
-              <>
-                <p className="mb-2 text-[12px] text-error" role="alert">
-                  {saveAsReservedInvalid
-                    ? messages.briefIdReserved(saveAsTrimmed)
-                    : messages.briefId}
-                </p>
-                {saveAsSlug !== "" && !isReservedCampaignId(saveAsSlug) ? (
-                  <button
-                    type="button"
-                    onClick={() => setSaveAsId(saveAsSlug)}
-                    className="mb-4 block text-left text-[12px] text-text-primary underline hover:text-text-emphasis"
-                  >
-                    {messages.saveAsIdSuggestion(saveAsSlug)}
-                  </button>
-                ) : null}
-              </>
-            ) : null}
             <div className="flex gap-2">
-              <Button onClick={() => handleSaveAs(saveAsId)} disabled={saving || !saveAsId}>
+              {/* D3: never a dead primary button — a blank name is how the press
+                  answers, in `handleSaveAs`'s own refusal, never a disabled
+                  attribute that would make the button silent. */}
+              <Button onClick={() => void handleSaveAs(saveAsName)} disabled={saving}>
                 Save
               </Button>
               {/* Held back only while the write is in flight, for the reason the
                   focus trap's `onClose` gives — and visibly, so a press that does
                   nothing is not the answer a user gets. */}
-              <Button variant="ghost" disabled={saving} onClick={() => setSaveAsId(null)}>
+              <Button variant="ghost" disabled={saving} onClick={() => setSaveAsName(null)}>
                 Cancel
               </Button>
             </div>
