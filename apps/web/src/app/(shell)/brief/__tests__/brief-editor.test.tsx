@@ -682,21 +682,28 @@ describe("BriefPage — data flow", () => {
 
   test("Save as... on the blank route also stops the URL calling it new", async () => {
     const user = userEvent.setup();
+    // PT-5c1 (D178): the ONLY blank editor at routeId === undefined is W3's resume
+    // of an abandoned draft now (a fresh, routeless mount can never gain a briefId,
+    // D178) — seed one with an id already, the shape a pre-lane build would have
+    // left, and Save as... still mints a BRAND NEW campaign from the typed name.
+    saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "fresh" });
     routes({});
     renderWithRun(<Editor />);
     await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh"),
     );
     await fillValidDraft(user, "fresh");
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "elsewhere");
+    await user.type(screen.getByLabelText("New campaign name"), "elsewhere");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
 
-    // D37: the copy's identity lives in the URL — the route must stop calling it new.
-    await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief/elsewhere"));
+    // D37: the copy's identity lives in the URL — the mint's own campaignId names it.
+    await waitFor(() =>
+      expect(nextMock().router.replace).toHaveBeenCalledWith(campaignRoute("elsewhere")),
+    );
   });
 
   test("Save as... keeps the copy's revision, so the next save still guards the write", async () => {
@@ -706,7 +713,9 @@ describe("BriefPage — data flow", () => {
     let listed: BriefEntry[] = [entry("camp", "r1")];
     const calls = routes({
       list: () => json({ briefs: listed }),
-      post: (_url, body) => {
+      meta: () => json(blankCampaignMeta("copy")),
+      post: (url, body) => {
+        if (url.endsWith("/campaigns")) return json({ campaignId: "copy", slug: "copy" }, 201);
         const stored = { file: "copy.yaml", brief: body as never, revision: "rev-copy" };
         listed = [...listed, stored];
         return json(stored, 201);
@@ -716,11 +725,11 @@ describe("BriefPage — data flow", () => {
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.type(screen.getByLabelText("New campaign name"), "Copy");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
-    await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText("New campaign name")).toBeNull());
     // W1: the rerender keeps the wrapper's tree shape (provider + dialog), so the
     // editor instance survives and the route prop change is what drives the load.
     view.rerender(
@@ -745,85 +754,24 @@ describe("BriefPage — data flow", () => {
     );
   });
 
-  test("Save as... onto the id this route already names adopts the stored copy in place", async () => {
-    const user = userEvent.setup();
-    const calls = routes({
-      list: () => json({ briefs: [entry("camp", "r1")] }),
-      // a stored answer without a revision is the `entry`-less shape the load path
-      // must tolerate (the same case "a write response without a revision" covers
-      // for handleSave)
-      post: (_url, body) => json({ file: "camp.yaml", brief: body as never }, 201),
-    });
-    renderWithRun(
-      <>
-        <RunBriefProbe />
-        <Editor id="camp" />
-      </>,
-    );
-    await waitForEditorReady();
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "camp");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    // the id is taken (the listing knows it): the overwrite dialog asks, and the
-    // user's accept is what retries with ?replace=1 (D9)
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
-    await waitFor(() =>
-      expect(calls.some((c) => c.method === "POST" && c.url.includes("replace=1"))).toBe(true),
-    );
-
-    // ...and the stored copy was adopted in place: both dialogs close, the shell
-    // follows it, and the URL never needed to move. Same-id overwrite does not
-    // unmount the editor, so the overwrite dialog has to clear on the success path.
-    await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: messages.saveAsOverwriteTitle })).toBeNull(),
-    );
-    await waitFor(() => expect(screen.getByTestId("run-brief").textContent).toBe("camp"));
-    expect(nextMock().router.replace).not.toHaveBeenCalled();
-  });
-
-  test("Save as... with a non-slug id never reaches createBrief, and the field says why", async () => {
-    const user = userEvent.setup();
-    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<Editor id="camp" />);
-    await waitForEditorReady();
-
-    // a campaign *name* where a slug is wanted — the exact input that once left the
-    // page as a 288-byte POST and came back a bare 400
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "Trail Blaze 2026");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    expect(writes(calls)).toEqual([]);
-    expect(screen.getByText(messages.briefId)).toBeTruthy();
-    expect(screen.getByLabelText("New brief id")).toBeTruthy();
-  });
-
   test("neither Escape nor Cancel dismisses Save as… while the write is in flight", async () => {
     const user = userEvent.setup();
-    // A POST that never answers, so the dialog stays mid-write for the whole test.
+    // A mint POST that never answers, so the dialog stays mid-write for the whole test.
     routes({
       list: () => json({ briefs: [entry("camp", "r1")] }),
-      post: () => new Promise<Response>(() => {}),
+      post: (url) => (url.endsWith("/campaigns") ? new Promise<Response>(() => {}) : json({}, 201)),
     });
     renderWithRun(<Editor id="camp" />);
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "trail-blaze-2026");
+    await user.type(screen.getByLabelText("New campaign name"), "Trail Blaze 2026");
     const dialog = screen.getByRole("dialog", { name: /Save as/ });
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
-    // `handleSaveAs` captured the draft before awaiting and dispatches `load` — a
-    // full state replace — when the server answers. Dismissing here would hand the
-    // user an editable page whose edits that pending load is about to discard.
+    // `handleSaveAs` captured the draft before awaiting and mints, then saves, before
+    // navigating away. Dismissing here would hand the user an editable page whose
+    // pending adoption is about to discard their edits.
     await user.keyboard("{Escape}");
     expect(screen.getByRole("dialog", { name: /Save as/ })).toBeTruthy();
     expect(
@@ -831,101 +779,48 @@ describe("BriefPage — data flow", () => {
     ).toBe(true);
   });
 
-  test("Save as... offers the slugified form of a name as a click, never a silent rewrite", async () => {
+  test("pressing Save with a blank name hands focus back to the field, and posts nothing", async () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "Trail Blaze 2026");
-    await user.click(await screen.findByRole("button", { name: 'Try "trail-blaze-2026" instead' }));
-
-    // the offer fills the field with the slug the user can see and accept
-    expect((screen.getByLabelText("New brief id") as HTMLInputElement).value).toBe(
-      "trail-blaze-2026",
-    );
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
-  });
-
-  test("Save as... refuses an id that slugifies to nothing, with no suggestion to offer", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<Editor id="camp" />);
-    await waitForEditorReady();
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "!!!");
-    expect(screen.getByText(messages.briefId)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /instead/ })).toBeNull();
-  });
-
-  test("pressing Save with an invalid id answers by handing focus back to the field", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<Editor id="camp" />);
-    await waitForEditorReady();
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "!!!");
-    // the press comes from somewhere else on the page, not the already-focused field
+    // D3: never a dead primary button — the Save button stays pressable on an
+    // empty name (PT-5c1: no client-side id validation is left to gate it on),
+    // and the press is how the refusal answers.
     const saveButton = within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", {
       name: "Save",
     });
-    saveButton.focus();
     await user.click(saveButton);
 
-    // D3: a live button answers — the guard hands focus back to the field the rule
-    // is about, so the press produces a visible response instead of silence
-    expect(document.activeElement).toBe(screen.getByLabelText("New brief id"));
+    expect(document.activeElement).toBe(screen.getByLabelText("New campaign name"));
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
   });
 
-  test.each(["cache", "jobs", "orgs", "packages"] as const)(
-    "Save as... refuses reserved campaign id %s, showing reserved message and not posting",
-    async (id) => {
-      const user = userEvent.setup();
-      const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-      renderWithRun(<Editor id="camp" />);
-      await waitForEditorReady();
-
-      await saveVia(user, "Save as");
-      await user.type(screen.getByLabelText("New brief id"), id);
-      expect(screen.getByText(messages.briefIdReserved(id))).toBeTruthy();
-
-      const saveButton = within(screen.getByRole("dialog", { name: /Save as/ })).getByRole(
-        "button",
-        {
-          name: "Save",
-        },
-      );
-      await user.click(saveButton);
-      expect(document.activeElement).toBe(screen.getByLabelText("New brief id"));
-      expect(calls.some((c) => c.method === "POST")).toBe(false);
-    },
-  );
-
-  test("Save as... trims the id before posting", async () => {
+  test("Save as... trims the name before posting", async () => {
     const user = userEvent.setup();
-    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    const calls = routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      meta: () => json(blankCampaignMeta("my-brief")),
+    });
     renderWithRun(<Editor id="camp" />);
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), " my-brief ");
+    await user.type(screen.getByLabelText("New campaign name"), " my-brief ");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
 
-    const post = await waitFor(() => {
-      const call = calls.find((c) => c.method === "POST");
+    const mint = await waitFor(() => {
+      const call = calls.find((c) => c.method === "POST" && c.url.endsWith("/campaigns"));
       expect(call).toBeTruthy();
       return call!;
     });
-    expect((post.body as { id?: string }).id).toBe("my-brief");
+    expect((mint.body as { name?: string }).name).toBe("my-brief");
   });
+
 
   test("two consecutive saves of a loaded brief both succeed — the second carries the revision the first was handed back", async () => {
     const user = userEvent.setup();
