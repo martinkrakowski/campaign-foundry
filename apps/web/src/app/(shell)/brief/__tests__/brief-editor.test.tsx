@@ -1644,9 +1644,16 @@ describe("BriefPage — data flow", () => {
     const saveBtn = within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", {
       name: "Save",
     });
-    // Two activations before React's own `disabled` re-render can land.
-    fireEvent.click(saveBtn);
-    fireEvent.click(saveBtn);
+    // Two activations before React's own `disabled` re-render can land — both
+    // dispatched inside ONE `act`, so the first click's `setSaving(true)`
+    // does not flush (and disable the real DOM button) between them. That is
+    // what actually exercises `saveAsInFlightRef`'s own early return: two
+    // separate `fireEvent.click` calls would let the first click's re-render
+    // disable the button before the second ever reached the handler.
+    act(() => {
+      fireEvent.click(saveBtn);
+      fireEvent.click(saveBtn);
+    });
     await waitFor(() => expect(mintCalls).toBeGreaterThan(0));
     expect(mintCalls).toBe(1);
 

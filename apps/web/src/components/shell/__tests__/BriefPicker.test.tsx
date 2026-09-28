@@ -4,7 +4,7 @@ import { render } from "@testing-library/react";
 import { ShellProviders } from "@/__tests__/helpers";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
-import { screen, waitFor, within, fireEvent } from "@testing-library/react";
+import { screen, waitFor, within, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   EMPTY_REPORT,
@@ -197,9 +197,16 @@ describe("BriefPicker create / duplicate", () => {
     const submit = screen
       .getAllByRole("button", { name: "Duplicate" })
       .find((el) => el.getAttribute("type") === "submit")!;
-    // Two rapid activations before `duplicating` can re-render the button.
-    fireEvent.click(submit);
-    fireEvent.click(submit);
+    // Two rapid activations, both inside ONE `act`, so the first click's
+    // `setDuplicating(true)` does not flush (and disable the real DOM
+    // button) between them — two separate `fireEvent.click` calls would let
+    // the first click's re-render disable the button before the second ever
+    // reached the handler, and `duplicatingRef`'s own early return would go
+    // untested.
+    act(() => {
+      fireEvent.click(submit);
+      fireEvent.click(submit);
+    });
     await waitFor(() => expect(duplicateCalls).toBeGreaterThan(0));
     expect(duplicateCalls).toBe(1);
 
