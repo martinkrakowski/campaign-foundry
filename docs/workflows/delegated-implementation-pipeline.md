@@ -273,8 +273,9 @@ Rules:
 - Never hand-edit generated files; change the generator/manifest and regenerate.
 - Do not reference paths that do not exist. If the plan and the code disagree, implement the
   smallest faithful interpretation and record it under Deviations — never improvise silently.
-- Conventional Commits, one logical change per commit, each ending with:
-  Co-Authored-By: <AGENT NAME> <noreply@…>
+- Conventional Commits, one logical change per commit, with NO attribution lines: no
+  `Co-Authored-By`, no "Generated with", no `Claude-Session` (owner rule; squash-merge would carry
+  them onto `main`).
 - Open a PR against main with `gh pr create` (title = commit summary; body = what/why,
   verification incl. the coverage line, and a **Deviations** section). Do NOT merge.
 - Append a session-log entry (Mode / Changes / Decisions / Left open).
@@ -288,11 +289,14 @@ Rules:
   not evidence.
 - If `test:cov` fails ONLY with timeouts in test files you did not touch, and the host's load
   average is far above its core count (`uptime`), do not retry more than once. Show those files pass
-  alone, report the load, push, and let CI's clean runner be the gate. Never raise a test timeout to
-  get through.
+  alone, report the load, and push **only to obtain CI evidence**. In that case your local gate
+  counts as FAILED: say so in the PR body and in your final message, and the lane is unverified
+  until CI's full gate passes on the pushed head (the orchestrator merges only on that). Never raise
+  a test timeout to get through.
 
 Final message: PR URL, files changed, coverage line, deviations. Nothing else.
-If you cannot produce a PR URL and a passing gate, say **STUCK** and what blocks it —
+If you cannot produce a PR URL and a passing gate (or, under the loaded-host rule, a PR whose
+local gate is reported as failed and awaits CI), say **STUCK** and what blocks it —
 do not report progress. The orchestrator verifies both independently either way.
 ```
 

@@ -20,6 +20,11 @@ fail with a misleading error rather than "no such model".
   It is not a first-pass implementer: the weekly quota drains fast. For reviews, run
   `grok --prompt-file <brief> --model grok-4.7 --effort high --permission-mode plan` (read-only)
   in a detached worktree. Record each call's usage in the wave record.
+- **Stage-2 reviewer (always, every PR):** an in-house `Agent` that is **not** the implementer,
+  read-only, per the skill's Review stage; this is unchanged, and grok's pre-PR review is
+  **in addition** for high-risk lanes, not a replacement.
+- **Plan reviewer:** `grok-4.7` read-only (above), or the in-house `Plan` agent when grok's weekly
+  quota is spent; required before dispatching any rewritten lane row (SKILL.md, Before you dispatch).
 - **Local LM Studio models are not a lane seat.** The 30B at 10.10.0.220 runs on the orchestrator's
   own machine and made it unresponsive under memory pressure. Evaluated 2026-09-28; one-off text
   jobs only.
