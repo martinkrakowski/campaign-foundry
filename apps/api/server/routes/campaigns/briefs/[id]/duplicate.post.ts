@@ -269,13 +269,14 @@ export default defineEventHandler(async (event) => {
    */
   const attempt = async (
     targetSlug: string,
-    reserve: () => Promise<void>,
+    reserve: () => Promise<boolean>,
   ): Promise<StoredBrief> => {
     return getBriefStore(scope).withBriefLock(targetSlug, async () => {
       if (await isPoolDirSymlink(scope, targetSlug)) {
         throw new Error(SYMLINK_WRITE_ERROR);
       }
-      await reserve();
+      // Whether THIS attempt minted the target: only then may a failure undo it.
+      const minted = await reserve();
       try {
         let brief: CampaignBrief = { ...template, id: targetSlug };
         const sourceMap = await getAssetStore(scope).copyAssets(sourceSlug, targetSlug);
@@ -285,54 +286,70 @@ export default defineEventHandler(async (event) => {
           brief = rewriteAssetPaths(brief, fromId, targetSlug, addMap);
         }
 
-        const created = await getBriefStore(scope).createBrief(brief, { teamId: sourceTeamId });
         // The dest pool write (or the stale-pool delete when the source has
         // none) runs under withPoolLock(targetSlug) as well as the brief
         // lock: they are different maps, so without it a concurrent
         // POST /campaigns/pools/:targetSlug could interleave. The source
         // pool needs no lock: writePool renames atomically.
-        await withPoolLock(scope, targetSlug, async () => {
+        const writeDestPool = async () => {
           if (sourcePool) {
             await copyPool(scope, sourceSlug, targetSlug);
           } else {
             await deletePool(scope, targetSlug);
           }
-        });
+        };
+        if (minted) {
+          // The `name` path: the pool first and version 1 last, both under the
+          // pool lock, so a pool failure leaves nothing versioned and the
+          // reservation below can still be released.
+          return await withPoolLock(scope, targetSlug, async () => {
+            await writeDestPool();
+            return getBriefStore(scope).createBrief(brief, { teamId: sourceTeamId });
+          });
+        }
+        // The legacy `newId` path keeps its order until PT-5c2 removes it.
+        const created = await getBriefStore(scope).createBrief(brief, { teamId: sourceTeamId });
+        await withPoolLock(scope, targetSlug, writeDestPool);
         return created;
       } catch (error) {
-        // Only `reserveMinted` (the `name` path) ever mints anything to
-        // release; `reserveVisible` (the legacy path) mutates nothing, so
-        // `releaseCampaign` is always a safe no-op there. The pool lives
+        // Only a reservation THIS attempt minted is undone. The legacy path's
+        // `reserveVisible` mints nothing, and on fs it cannot see another
+        // request's reserved directory (`campaignVisibility` answers on brief
+        // files alone), so releasing there could delete someone else's blank
+        // campaign; the legacy path keeps main's no-cleanup behaviour. The pool lives
         // inside the same reserved directory `releaseCampaign` removes on
         // fs (D177/D179): deleted first (a no-op if nothing was ever
         // written), or its own `rmdir` would refuse a non-empty directory.
-        await withPoolLock(scope, targetSlug, () => deletePool(scope, targetSlug));
-        const released = await getBriefStore(scope).releaseCampaign(targetSlug);
-        // Only when the campaign itself is gone too — never after a real,
-        // versioned brief (e.g. createBrief succeeded and only the pool
-        // write after it failed).
-        if (released) await getAssetStore(scope).deleteAssets(targetSlug);
+        if (minted) {
+          await withPoolLock(scope, targetSlug, () => deletePool(scope, targetSlug));
+          const released = await getBriefStore(scope).releaseCampaign(targetSlug);
+          // Only when the campaign itself is gone too, never after a real,
+          // versioned brief.
+          if (released) await getAssetStore(scope).deleteAssets(targetSlug);
+        }
         throw error;
       }
     });
   };
 
   /** The legacy path's own check (D166 item 3), unchanged. */
-  const reserveVisible = (targetSlug: string) => async (): Promise<void> => {
+  const reserveVisible = (targetSlug: string) => async (): Promise<boolean> => {
     if ((await getBriefStore(scope).campaignVisibility(targetSlug)) !== "absent") {
       const existErr = new Error(`Brief "${targetSlug}" already exists.`);
       (existErr as { code?: string }).code = "EEXIST";
       throw existErr;
     }
+    return false;
   };
   /** The `name` path's claim (D177/D179): also sees an fs reserved directory. */
-  const reserveMinted = (targetSlug: string) => async (): Promise<void> => {
+  const reserveMinted = (targetSlug: string) => async (): Promise<boolean> => {
     try {
       await getBriefStore(scope).createCampaign(targetSlug, { teamId: sourceTeamId });
     } catch (error) {
       if (isExistsError(error)) throw new SlugTakenError();
       throw error;
     }
+    return true;
   };
 
   try {

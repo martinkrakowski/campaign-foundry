@@ -14,6 +14,7 @@ import { InvalidCopyPoolError } from "../../../lib/ports/pool-store.port.js";
 import { getAssetStore, getBriefStore, getPoolStore } from "../../../lib/ports/index.js";
 import { PgBriefStore } from "../../../lib/ports/pg-brief-store.js";
 import createHandler from "../index.post.js";
+import duplicateHandler from "../briefs/[id]/duplicate.post.js";
 import briefsGetHandler from "../briefs.get.js";
 import resultGetHandler from "../result.get.js";
 import decisionsGetHandler from "../decisions.get.js";
@@ -330,6 +331,49 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
     });
 
     describe("sourced create (copies the source's latest version as version 1)", () => {
+      // coderabbit PRRT_kwDOSzP1zc6mg8cg: the legacy `newId` path mints
+      // nothing, and on fs its visibility check cannot see a reserved
+      // directory, so a failure there must never release a reservation that
+      // another request (this blank create) made.
+      test("a failed legacy newId duplicate leaves another request's reservation in place", async () => {
+        const harness = await setup();
+        try {
+          const { create, createBrief } = mount();
+          await createBrief(
+            new Request("http://x/campaigns/briefs", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(sampleBrief("source-camp")),
+            }),
+          );
+          const blank = await create(createReq({ name: "Held", type: "social-post" }));
+          expect(((await blank.json()) as { slug: string }).slug).toBe("held");
+
+          const duplicate = mountTenantRoute(duplicateHandler, {
+            method: "POST",
+            path: "/campaigns/briefs/:id/duplicate",
+            tenant: LOCAL_TENANT,
+          });
+          const spy = vi
+            .spyOn(getAssetStore(LOCAL_TENANT), "copyAssets")
+            .mockRejectedValue(Object.assign(new Error("EIO"), { code: "EIO" }));
+          await duplicate(
+            new Request("http://x/campaigns/briefs/source-camp/duplicate", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ newId: "held" }),
+            }),
+          );
+          spy.mockRestore();
+
+          // "held" is still reserved, so the same name dedupes past it.
+          const again = await create(createReq({ name: "Held", type: "social-post" }));
+          expect(((await again.json()) as { slug: string }).slug).toBe("held-2");
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
       test("mints the campaign, writes version 1, and answers a revision", async () => {
         const harness = await setup();
         try {
@@ -714,11 +758,10 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
         // call reads it again (a narrow, real race — copyPool re-reads the
         // source to rewrite its briefId, C9/D71) — that failure lands
         // post-reservation and must release it too.
-        // copyPool runs AFTER createBrief, so this race hits when the brief
-        // itself is already real and versioned — releaseCampaign correctly
-        // leaves it alone (never after a real, versioned brief) even though
-        // this specific write (the pool) never landed.
-        test("a source pool that only fails validation during the copy answers 422, leaving the already-written brief alone", async () => {
+        // The pool is written BEFORE version 1 (coderabbit
+        // PRRT_kwDOSzP1zc6mg8ci), so this failure leaves nothing versioned:
+        // the reservation is released, and a retry gets the same slug.
+        test("a source pool that only fails validation during the copy answers 422 and releases the reservation", async () => {
           const harness = await setup();
           try {
             const { create, createBrief } = mount();
@@ -743,10 +786,14 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
             expect(res.status).toBe(422);
             spy.mockRestore();
 
-            expect(await getBriefStore(LOCAL_TENANT).campaignTeam("copy-of-source")).toBeNull();
             expect(
-              (await getBriefStore(LOCAL_TENANT).findBriefById("copy-of-source"))?.brief.id,
-            ).toBe("copy-of-source");
+              await getBriefStore(LOCAL_TENANT).findBriefById("copy-of-source"),
+            ).toBeUndefined();
+            const retried = await create(
+              createReq({ name: "Copy Of Source", source: "source-camp" }),
+            );
+            expect(retried.status).toBe(201);
+            expect(((await retried.json()) as { slug: string }).slug).toBe("copy-of-source");
           } finally {
             await harness.cleanup();
           }

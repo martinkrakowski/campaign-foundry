@@ -316,13 +316,16 @@ export default defineEventHandler(async (event) => {
           brief = rewriteAssetPaths(brief, fromId, targetSlug, addMap);
         }
 
-        const created: StoredBrief = await store.createBrief(brief, { teamId: effectiveTeamId });
-        await withPoolLock(scope, targetSlug, async () => {
+        // The pool first and version 1 last, both under the pool lock: a pool
+        // failure then leaves nothing versioned, so the reservation below is
+        // still releasable, and no other pool write can interleave.
+        const created: StoredBrief = await withPoolLock(scope, targetSlug, async () => {
           if (sourcePool) {
             await copyPool(scope, sourceSlug, targetSlug);
           } else {
             await deletePool(scope, targetSlug);
           }
+          return store.createBrief(brief, { teamId: effectiveTeamId });
         });
         return { campaignId: created.campaignId, slug: targetSlug, revision: created.revision };
       } catch (error) {
@@ -333,9 +336,9 @@ export default defineEventHandler(async (event) => {
         await withPoolLock(scope, targetSlug, () => deletePool(scope, targetSlug));
         const released = await store.releaseCampaign(targetSlug);
         // Only when the campaign itself is gone too: `releaseCampaign`
-        // answers false once a real, versioned brief exists (e.g. `createBrief`
-        // succeeded and only the pool write after it failed) — an asset
-        // directory that belongs to that real brief must never be deleted.
+        // answers false once a real, versioned brief exists (a concurrent
+        // Save won the slug), and an asset directory that belongs to that
+        // real brief must never be deleted.
         if (released) await getAssetStore(scope).deleteAssets(targetSlug);
         throw error;
       }

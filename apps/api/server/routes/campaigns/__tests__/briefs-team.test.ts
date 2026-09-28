@@ -613,8 +613,10 @@ describe("duplicate by name on Postgres (D177/D178, PT-5b2)", () => {
 
   // A source pool that becomes malformed only when copyPool re-reads it
   // (a narrow race — copyPool rewrites its briefId, C9/D71) hits the outer
-  // catch's InvalidCopyPoolError branch post-reservation.
-  test("a source pool that only fails validation during the copy answers 422, leaving the already-written brief alone", async () => {
+  // catch's InvalidCopyPoolError branch post-reservation. The pool is written
+  // before version 1 (coderabbit PRRT_kwDOSzP1zc6mg8ci), so nothing is
+  // versioned yet and the reservation is released.
+  test("a source pool that only fails validation during the copy answers 422 and releases the reservation", async () => {
     const harness = await setupPgHarness();
     try {
       await mount(owner).create(postReq(sampleBrief));
@@ -632,8 +634,11 @@ describe("duplicate by name on Postgres (D177/D178, PT-5b2)", () => {
       expect(res.status).toBe(422);
       spy.mockRestore();
 
-      expect(await getBriefStore(LOCAL_TENANT).campaignTeam("copy")).toBeNull();
-      expect((await getBriefStore(LOCAL_TENANT).findBriefById("copy"))?.brief.id).toBe("copy");
+      expect(await getBriefStore(LOCAL_TENANT).campaignTeam("copy")).toBeUndefined();
+      expect(await getBriefStore(LOCAL_TENANT).findBriefById("copy")).toBeUndefined();
+      const retried = await mount(owner).duplicate(duplicateByNameReq("camp", "Copy"));
+      expect(retried.status).toBe(201);
+      expect(((await retried.json()) as { brief: { id: string } }).brief.id).toBe("copy");
     } finally {
       await harness.cleanup();
     }
