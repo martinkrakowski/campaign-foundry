@@ -161,7 +161,14 @@ export class FsBriefStore implements BriefStorePort {
     if (isReservedCampaignId(slug)) {
       throw new Error(`"${slug}" is reserved; choose another campaign id.`);
     }
-    if (await this.findBriefFile(slug)) {
+    // "Taken" is a file NAMED after the slug (`findBriefFile`) OR an existing
+    // brief whose `id` IS the slug but lives in a differently named file
+    // (`findBriefFileById`, an id-parsed lookup over `listBriefs()` — the
+    // same one `campaignVisibility` already relies on). A filename check
+    // alone missed that second case (coderabbit PRRT_kwDOSzP1zc6mgBu7 / qodo
+    // PRRT_kwDOSzP1zc6mgEyH): the legacy `reserveVisible` check in
+    // `duplicate.post.ts` was id-based and never had this gap.
+    if ((await this.findBriefFile(slug)) || (await this.findBriefFileById(slug))) {
       const err = new Error(`Brief "${slug}" already exists.`);
       (err as { code?: string }).code = "EEXIST";
       throw err;

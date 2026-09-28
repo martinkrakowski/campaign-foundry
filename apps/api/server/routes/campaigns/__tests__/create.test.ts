@@ -185,6 +185,27 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
       }
     });
 
+    if (backend === "fs") {
+      // coderabbit PRRT_kwDOSzP1zc6mgBu7 / qodo PRRT_kwDOSzP1zc6mgEyH:
+      // FsBriefStore.createCampaign must see an id living in a differently
+      // named file, not just a file named after the slug.
+      test("dedupes past a slug already taken by an id in a differently-named file", async () => {
+        const harness = await setup();
+        try {
+          const fsHarness = harness as Awaited<ReturnType<typeof setupFsHarness>>;
+          mkdirSync(join(fsHarness.projectRoot, "briefs"), { recursive: true });
+          writeFileSync(
+            join(fsHarness.projectRoot, "briefs", "sample-campaign.yaml"),
+            "id: my-copy\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n",
+          );
+          const res = await mount().create(createReq({ name: "My Copy" }));
+          expect(((await res.json()) as { slug: string }).slug).toBe("my-copy-2");
+        } finally {
+          await harness.cleanup();
+        }
+      });
+    }
+
     test("skips a uuid-shaped slug (D178: it would collide with ref resolution)", async () => {
       const harness = await setup();
       try {

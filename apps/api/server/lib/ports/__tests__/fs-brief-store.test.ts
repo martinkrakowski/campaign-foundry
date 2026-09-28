@@ -228,6 +228,18 @@ describe("FsBriefStore", () => {
       await expect(store.createCampaign("taken-file")).rejects.toMatchObject({ code: "EEXIST" });
     });
 
+    // coderabbit PRRT_kwDOSzP1zc6mgBu7 / qodo PRRT_kwDOSzP1zc6mgEyH: a brief's
+    // id can live in a differently named file — findBriefFile(slug) alone
+    // (a filename check) misses it; findBriefFileById (an id-parsed lookup,
+    // same one campaignVisibility already relies on) must be checked too.
+    test("a taken slug (an id living in a differently-named file) is EEXIST", async () => {
+      writeFileSync(
+        join(dir, "sample-campaign.yaml"),
+        "id: my-copy\ntargetRegion: DE\ntargetAudience: a\ncampaignMessage: Hi\nproducts:\n  - id: alpha\n",
+      );
+      await expect(store.createCampaign("my-copy")).rejects.toMatchObject({ code: "EEXIST" });
+    });
+
     test.each(["cache", "jobs", "orgs", "packages"] as const)(
       "refuses a reserved campaign id %s",
       async (id) => {
