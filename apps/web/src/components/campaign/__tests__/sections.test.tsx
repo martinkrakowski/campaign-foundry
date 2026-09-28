@@ -52,7 +52,7 @@ describe("IdentitySection", () => {
     const dispatch = vi.fn();
     render(
       <IdentitySection
-        state={state({ briefId: "server-minted-slug", campaignName: "" })}
+        state={state({ briefId: "server-minted-slug", campaignName: "My Campaign" })}
         dispatch={dispatch}
         errors={{}}
       />,
@@ -62,8 +62,14 @@ describe("IdentitySection", () => {
       expect((call[0] as { patch?: Record<string, unknown> }).patch).not.toHaveProperty("briefId");
     }
     // The id readout is a span with a copy button, never an input the typed name
-    // could reach — the slug is server-derived and display-only (D178).
-    expect(screen.getByText("server-minted-slug").tagName).not.toBe("INPUT");
+    // could reach — the slug is server-derived and display-only (D178). Asserting
+    // on the tag name of `getByText`'s own match cannot fail: `getByText` matches
+    // TEXT NODES, so an editable input holding this value would make the lookup
+    // itself throw (naming a missing element, not this defect) rather than fail
+    // this assertion — mscc-. Assert the absence directly instead: the value is
+    // visible as text, and no textbox anywhere holds it.
+    expect(screen.getByText("server-minted-slug")).toBeTruthy();
+    expect(screen.queryByDisplayValue("server-minted-slug")).toBeNull();
   });
 
   test("the brief id is editable on a new draft and read-only once loaded from a file", () => {
