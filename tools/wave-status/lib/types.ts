@@ -54,7 +54,13 @@ export type PrThreadSignal = number | "unknown";
 export interface PlanReviewObservation {
   /** The ts of the lane's `dispatch started` event, when there was one. */
   readonly dispatchedAt?: string;
-  /** The lane's row hash from the latest clear review that preceded the dispatch. */
+  /**
+   * The plan file the review that governed the dispatch named — the one
+   * `rowHash` is taken against, never whichever plan another review in the
+   * directory mentioned.
+   */
+  readonly reviewedPlan?: string;
+  /** The lane's row hash from the governing review, when its verdict was clear. */
   readonly reviewedHash?: string;
   /** The lane row's hash, taken from the plan at collection time. */
   readonly rowHash?: string;

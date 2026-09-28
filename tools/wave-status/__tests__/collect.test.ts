@@ -2088,4 +2088,39 @@ describe("collect — the plan-review gate (FU-plan-review-gate)", () => {
     const status = await laneAt(reviewLine({ "PT-5a": "aa" }));
     expect(laneRow(status, "_plan")?.derived.planReview).toBeUndefined();
   });
+
+  test("the row hash comes from the plan the governing review named, not the directory's latest review", async () => {
+    // Review 1 (wave R, plan A, clear) precedes the dispatch; reviews 2 and 3
+    // follow it — one for another wave naming plan C, one for this wave
+    // naming plan B. The lane's reviewed hash and the plan hashed are review
+    // 1's: a later review of a different plan, in this wave or another,
+    // hijacks neither.
+    const { rowHash } = await import("../../plan-review/lib/rows.js");
+    const planB = PLAN.replace("exposed and resolvable", "rewritten in plan B");
+    const planC = PLAN.replace("exposed and resolvable", "rewritten in plan C");
+    const line = (wave: string, plan: string, hash: string, ts: string): string =>
+      `${JSON.stringify({
+        ts,
+        wave,
+        lane: "_plan",
+        stage: "plan-review",
+        event: "settled",
+        detail: { plan, reviewer: "plan-review-seat", rows: { "PT-5a": hash }, verdict: "clear" },
+      })}\n`;
+    const tree = {
+      dirs: { [ROOT]: ["waveR"], [`${ROOT}/waveR`]: ["events.jsonl"] },
+      files: {
+        [`${ROOT}/waveR/events.jsonl`]:
+          line("R", "docs/planning/plan.md", rowHash(PLAN, "PT-5a"), "2026-09-28T10:00:00Z") +
+          dispatchLine("PT-5a") +
+          line("OTHER", "docs/planning/plan-c.md", rowHash(planC, "PT-5a"), "2026-09-28T12:00:00Z") +
+          line("R", "docs/planning/plan-b.md", rowHash(planB, "PT-5a"), "2026-09-28T13:00:00Z"),
+        "docs/planning/plan.md": PLAN,
+        "docs/planning/plan-b.md": planB,
+        "docs/planning/plan-c.md": planC,
+      },
+    };
+    const status = await collect(fakeDeps(tree), ROOT, "2026-09-28T14:00:00Z");
+    expect(laneRow(status, "PT-5a")?.derived.planReview).toBeUndefined();
+  });
 });

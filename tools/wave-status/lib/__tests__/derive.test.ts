@@ -1,7 +1,6 @@
 import { describe, test, expect } from "vitest";
 import {
   deriveLane,
-  latestPlanReviewPlan,
   parseGateLog,
   parseLastExit,
   planReviewFacts,
@@ -270,7 +269,7 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
     expect(derived.planReview).toBeUndefined();
   });
 
-  test("planReviewFacts reads the dispatch ts and the latest clear review's hash for the lane", () => {
+  test("planReviewFacts reads the dispatch ts and the governing review's hash and plan for the lane", () => {
     const events = [
       dispatch("pt-5b1", "2026-09-28T09:00:00Z"),
       review({ "pt-5b1": "old" }, "clear", "2026-09-28T08:00:00Z"),
@@ -279,6 +278,7 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
     ];
     expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
+      reviewedPlan: "docs/planning/p.md",
       reviewedHash: "aa",
     });
   });
@@ -290,10 +290,52 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
     });
   });
 
+  test("a review logged after the dispatch in the SAME second never counts — log order, not timestamps", () => {
+    // wave-event.sh records seconds: a review written after a dispatch in
+    // that same second carries an equal ts. Order in the log is the only
+    // "before" the gate trusts, so the review behind the dispatch governs
+    // nothing — the lane stays unreviewed.
+    const events = [
+      dispatch("pt-5a", "2026-09-28T11:00:00Z"),
+      review({ "pt-5a": "aa" }, "clear", "2026-09-28T11:00:00Z"),
+    ];
+    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+      dispatchedAt: "2026-09-28T11:00:00Z",
+    });
+  });
+
+  test("a review logged before the dispatch in the same second still counts — order decides, not the clock", () => {
+    const events = [
+      review({ "pt-5a": "aa" }, "clear", "2026-09-28T11:00:00Z"),
+      dispatch("pt-5a", "2026-09-28T11:00:00Z"),
+    ];
+    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+      dispatchedAt: "2026-09-28T11:00:00Z",
+      reviewedPlan: "docs/planning/p.md",
+      reviewedHash: "aa",
+    });
+  });
+
+  test("a later changes-required review supersedes an earlier clear one", () => {
+    // The gate's standing is the latest settled review, whatever its
+    // verdict: an older clear never survives it, or the page would bless a
+    // dispatch the CLI's own check blocks.
+    const events = [
+      review({ "pt-5a": "aa" }, "clear", "2026-09-28T09:00:00Z"),
+      review({ "pt-5a": "bb" }, "changes-required", "2026-09-28T10:00:00Z"),
+      dispatch("pt-5a"),
+    ];
+    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
+      dispatchedAt: "2026-09-28T11:00:00Z",
+      reviewedPlan: "docs/planning/p.md",
+    });
+  });
+
   test("a review whose verdict is not clear never counts as reviewed", () => {
     const events = [review({ "pt-5a": "aa" }, "changes-required"), dispatch("pt-5a")];
     expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
+      reviewedPlan: "docs/planning/p.md",
     });
   });
 
@@ -301,6 +343,7 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
     const events = [review({ "pt-5b1": "aa" }), dispatch("pt-5a")];
     expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
+      reviewedPlan: "docs/planning/p.md",
     });
   });
 
@@ -319,47 +362,19 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
     expect(planReviewFacts(events, "W", "pt-5a")).toEqual({});
   });
 
-  test("an unparseable dispatch ts is silence: the lane is never read as reviewed", () => {
+  test("an unparseable ts on either side is irrelevant — the log's order decides", () => {
+    // The old rule parsed timestamps and read silence on failure; the rule
+    // now consults only the order the lines were written in, so a broken
+    // clock neither hides nor invents a review.
     const events = [
-      review({ "pt-5a": "aa" }, "clear", "2026-09-28T10:00:00Z"),
-      dispatch("pt-5a", "not-a-date"),
+      review({ "pt-5a": "aa" }, "clear", "not-a-date"),
+      dispatch("pt-5a", "not-a-date-either"),
     ];
     expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
-      dispatchedAt: "not-a-date",
+      dispatchedAt: "not-a-date-either",
+      reviewedPlan: "docs/planning/p.md",
+      reviewedHash: "aa",
     });
-  });
-
-  test("an unparseable review ts never counts as before the dispatch", () => {
-    const events = [review({ "pt-5a": "aa" }, "clear", "not-a-date"), dispatch("pt-5a")];
-    expect(planReviewFacts(events, "W", "pt-5a")).toEqual({
-      dispatchedAt: "2026-09-28T11:00:00Z",
-    });
-  });
-
-  test("latestPlanReviewPlan names the plan the latest review carried", () => {
-    const events = [
-      review({ "pt-5a": "aa" }, "clear", "2026-09-28T10:00:00Z"),
-      review({ "pt-5a": "bb" }, "clear", "2026-09-28T11:00:00Z"),
-    ];
-    const withPlan = events.map((event, i) => ({
-      ...event,
-      detail: { ...event.detail, plan: i === 0 ? "docs/planning/old.md" : "docs/planning/new.md" },
-    }));
-    expect(latestPlanReviewPlan(withPlan)).toBe("docs/planning/new.md");
-    expect(latestPlanReviewPlan([dispatch()])).toBeUndefined();
-  });
-
-  test("a review event that names no plan is no plan path", () => {
-    const noPlan: WaveEvent = {
-      ...review({ "pt-5a": "aa" }),
-      detail: { rows: { "pt-5a": "aa" }, verdict: "clear" },
-    };
-    expect(latestPlanReviewPlan([noPlan])).toBeUndefined();
-    const emptyPlan: WaveEvent = {
-      ...review({ "pt-5a": "aa" }),
-      detail: { plan: "", rows: { "pt-5a": "aa" }, verdict: "clear" },
-    };
-    expect(latestPlanReviewPlan([emptyPlan])).toBeUndefined();
   });
 
   test("a review event with no detail at all covers nothing", () => {
@@ -375,6 +390,25 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
     });
   });
 
+  test("a review event that names no plan carries no plan to hash", () => {
+    const noPlan: WaveEvent = {
+      ...review({ "pt-5a": "aa" }),
+      detail: { rows: { "pt-5a": "aa" }, verdict: "clear" },
+    };
+    expect(planReviewFacts([noPlan, dispatch("pt-5a")], "W", "pt-5a")).toEqual({
+      dispatchedAt: "2026-09-28T11:00:00Z",
+      reviewedHash: "aa",
+    });
+    const emptyPlan: WaveEvent = {
+      ...review({ "pt-5a": "aa" }),
+      detail: { plan: "", rows: { "pt-5a": "aa" }, verdict: "clear" },
+    };
+    expect(planReviewFacts([emptyPlan, dispatch("pt-5a")], "W", "pt-5a")).toEqual({
+      dispatchedAt: "2026-09-28T11:00:00Z",
+      reviewedHash: "aa",
+    });
+  });
+
   test("a _plan event that is not a settled review is skipped", () => {
     const started: WaveEvent = {
       ts: "2026-09-28T10:00:00Z",
@@ -386,6 +420,5 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
     expect(planReviewFacts([started, dispatch("pt-5a")], "W", "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
     });
-    expect(latestPlanReviewPlan([started])).toBeUndefined();
   });
 });

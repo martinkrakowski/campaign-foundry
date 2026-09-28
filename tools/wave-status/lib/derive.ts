@@ -1,4 +1,5 @@
-import { asHashRecord, PLAN_REVIEW_LANE } from "../../plan-review/lib/rows.js";
+import { asHashRecord } from "../../plan-review/lib/rows.js";
+import { governingPlanReview } from "../../plan-review/lib/review.js";
 import type { DerivedLane, LaneObservation, PlanReviewObservation, WaveEvent } from "./types.js";
 
 export function parseLastExit(tail: string): number | undefined {
@@ -85,28 +86,14 @@ export function deriveLane(obs: LaneObservation): DerivedLane {
 }
 
 /**
- * The plan the wave's reviews were taken against: the `plan` the latest
- * `plan-review settled` event in the directory named. `undefined` when no
- * review was recorded there — there is no plan path to read, and the flag for
- * a dispatched lane is then exactly the no-review case.
- */
-export function latestPlanReviewPlan(events: readonly WaveEvent[]): string | undefined {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i];
-    if (event.stage !== "plan-review" || event.event !== "settled") continue;
-    const plan = event.detail?.plan;
-    if (typeof plan === "string" && plan !== "") return plan;
-  }
-  return undefined;
-}
-
-/**
  * The plan-review facts the collector gathers for one lane: when it
- * dispatched, and the row hash the wave's clear review recorded for it. A
- * review counts only when it was `settled` with verdict `clear` under the
- * reserved `_plan` lane, for this wave, and precedes the dispatch in ts — an
- * unparseable ts on either side is silence, and silence is never read as
- * reviewed. The latest qualifying review wins.
+ * dispatched, the plan file of the review that governed the dispatch, and
+ * the row hash that review recorded for the lane. The governing review is
+ * the gate's one rule (`governingPlanReview`): the latest `plan-review
+ * settled` event for the wave that precedes the dispatch in LOG ORDER —
+ * never a timestamp comparison, which an equal second can hide — and its
+ * verdict must be `clear` for the lane to count as reviewed: an earlier
+ * clear never survives a later settled review of any verdict.
  */
 export function planReviewFacts(
   events: readonly WaveEvent[],
@@ -114,27 +101,29 @@ export function planReviewFacts(
   lane: string,
 ): PlanReviewObservation {
   let dispatchedAt: string | undefined;
-  for (const event of events) {
+  let dispatchIndex = -1;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
     if (event.wave !== wave || event.lane !== lane) continue;
-    if (event.stage === "dispatch" && event.event === "started") dispatchedAt = event.ts;
+    if (event.stage === "dispatch" && event.event === "started") {
+      dispatchedAt = event.ts;
+      dispatchIndex = i;
+      break;
+    }
   }
   if (dispatchedAt === undefined) return {};
 
-  // An unparseable dispatch ts is silence, and silence is never read as
-  // reviewed: "before" cannot be established, so no review qualifies.
-  const dispatchMs = Date.parse(dispatchedAt);
-  if (Number.isNaN(dispatchMs)) return { dispatchedAt };
-  let reviewedHash: string | undefined;
-  for (const event of events) {
-    if (event.wave !== wave || event.lane !== PLAN_REVIEW_LANE) continue;
-    if (event.stage !== "plan-review" || event.event !== "settled") continue;
-    if (event.detail?.verdict !== "clear") continue;
-    const ts = Date.parse(event.ts);
-    if (Number.isNaN(ts) || ts > dispatchMs) continue;
-    const hash = asHashRecord(event.detail?.rows)?.[lane];
-    if (hash !== undefined) reviewedHash = hash;
-  }
-  return { dispatchedAt, ...(reviewedHash !== undefined ? { reviewedHash } : {}) };
+  const review = governingPlanReview(events, wave, dispatchIndex);
+  if (review === undefined) return { dispatchedAt };
+  const reviewedHash =
+    review.event.detail?.verdict === "clear"
+      ? asHashRecord(review.event.detail?.rows)?.[lane]
+      : undefined;
+  return {
+    dispatchedAt,
+    ...(review.plan !== undefined ? { reviewedPlan: review.plan } : {}),
+    ...(reviewedHash !== undefined ? { reviewedHash } : {}),
+  };
 }
 
 /**

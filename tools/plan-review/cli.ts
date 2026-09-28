@@ -1,5 +1,6 @@
 import { readEvents } from "../wave-status/lib/events.js";
-import { asHashRecord, PLAN_REVIEW_LANE, rowHash } from "./lib/rows.js";
+import { asHashRecord, rowHash } from "./lib/rows.js";
+import { governingPlanReview } from "./lib/review.js";
 import { relative, resolve } from "node:path";
 import type { WaveEvent } from "../wave-status/lib/types.js";
 
@@ -162,29 +163,16 @@ async function check(args: readonly string[], io: PlanReviewIo): Promise<number>
   }
 
   const log = readLog(eventsText);
-  let reviewIndex = -1;
-  for (let i = log.events.length - 1; i >= 0; i--) {
-    const event = log.events[i];
-    if (
-      event.wave === wave &&
-      event.lane === PLAN_REVIEW_LANE &&
-      event.stage === "plan-review" &&
-      event.event === "settled"
-    ) {
-      reviewIndex = i;
-      break;
-    }
-  }
-  if (reviewIndex === -1) {
+  const review = governingPlanReview(log.events, wave);
+  if (review === undefined) {
     io.logError(`no plan-review settled event for wave ${wave} in ${logPath}`);
     return 2;
   }
-  const review = log.events[reviewIndex];
 
   // Fail closed on an unreadable tail: a line the reader cannot accept that
   // is newer than the chosen review leaves the log's own word unknown — the
   // chosen review may already have been superseded by one that never parsed.
-  const tornAfter = log.unreadable.filter((line) => line > log.lineOf[reviewIndex]);
+  const tornAfter = log.unreadable.filter((line) => line > log.lineOf[review.index]);
   if (tornAfter.length > 0) {
     io.logError(
       `${logPath} has unreadable line(s) ${tornAfter.map((line) => line + 1).join(", ")} after the latest plan-review event — the log tail cannot be read`,
@@ -196,8 +184,8 @@ async function check(args: readonly string[], io: PlanReviewIo): Promise<number>
   // latest review of a different plan file is no review for this lane, even
   // when the two plans' rows coincide — the row hashes would match while the
   // verdict was never asked about this file.
-  const reviewedPlan = review.detail?.plan;
-  if (typeof reviewedPlan !== "string" || reviewedPlan === "") {
+  const reviewedPlan = review.plan;
+  if (reviewedPlan === undefined) {
     io.logError(
       `the latest plan-review settled event for wave ${wave} names no plan file — no review for this lane`,
     );
@@ -210,7 +198,7 @@ async function check(args: readonly string[], io: PlanReviewIo): Promise<number>
     return 2;
   }
 
-  const rows = asHashRecord(review.detail?.rows);
+  const rows = asHashRecord(review.event.detail?.rows);
   if (rows === undefined) {
     io.logError(`the latest plan-review event for wave ${wave} carries no usable rows map`);
     return 2;
@@ -221,7 +209,7 @@ async function check(args: readonly string[], io: PlanReviewIo): Promise<number>
     return 2;
   }
 
-  const verdict = review.detail?.verdict;
+  const verdict = review.event.detail?.verdict;
   if (typeof verdict !== "string") {
     io.logError(`the review of wave ${wave} carries no verdict`);
     return 2;
@@ -243,7 +231,7 @@ async function check(args: readonly string[], io: PlanReviewIo): Promise<number>
     return 2;
   }
 
-  const decisionsDetail = review.detail?.decisions;
+  const decisionsDetail = review.event.detail?.decisions;
   let decisions: Record<string, string> = {};
   if (decisionsDetail !== undefined) {
     // An absent decisions field is a review that recorded none; a present

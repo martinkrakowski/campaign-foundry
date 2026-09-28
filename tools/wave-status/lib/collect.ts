@@ -3,7 +3,7 @@ import { open as fsOpen, readdir as fsReaddir, readFile as fsReadFile } from "no
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { readEvents } from "./events.js";
-import { latestPlanReviewPlan, planReviewFacts } from "./derive.js";
+import { planReviewFacts } from "./derive.js";
 import { mergeStatus } from "./merge.js";
 import { readBacklog } from "./backlog.js";
 import { artifactPathFor } from "../../plan-verify/lib/artifact.js";
@@ -246,20 +246,10 @@ export async function collect(
         }
       }
 
-      // The plan-review gate's input, read once per wave directory: the plan
-      // file the wave's review named. Everything else about the gate is
-      // derived from the events — the collector only reads, it does not
-      // conclude.
-      const planPath = latestPlanReviewPlan(dirEvents);
-      let planText: string | undefined;
-      let planMissing: string | undefined;
-      if (planPath !== undefined) {
-        try {
-          planText = await deps.readFile(planPath);
-        } catch {
-          planMissing = "the plan file could not be read";
-        }
-      }
+      // The plan-review gate's input is per lane: the plan file the review
+      // that governed THAT lane's dispatch named, read by planReviewFor.
+      // Everything else about the gate is derived from the events — the
+      // collector only reads, it does not conclude.
 
       for (const lane of [...eventLanes].sort()) {
         const logName = `${lane}.log`;
@@ -294,7 +284,7 @@ export async function collect(
           lane,
           worktrees,
           log,
-          planReviewFor(dirEvents, wave, lane, planPath, planText, planMissing),
+          await planReviewFor(deps, dirEvents, wave, lane),
         );
         rows.push({ wave, lane, reportedPr, obs });
       }
@@ -336,30 +326,35 @@ export async function collect(
 
 /**
  * The plan-review facts one lane carries on its observation: the dispatch and
- * review facts from the wave's events, plus the lane row's hash when the plan
- * could be read. A lane that never dispatched carries nothing — the gate is
- * about dispatches. An unreadable plan or a plan without an unambiguous row
- * for the lane says why, instead of guessing a hash.
+ * review facts from the wave's events, plus the lane row's hash taken from
+ * the plan THE GOVERNING REVIEW named — the review `planReviewFacts` chose,
+ * not whichever plan any other review in the directory mentioned. A lane that
+ * never dispatched carries nothing — the gate is about dispatches. An
+ * unreadable plan, a review that named no plan, or a plan without an
+ * unambiguous row for the lane says why, instead of guessing a hash.
  */
-function planReviewFor(
+async function planReviewFor(
+  deps: CollectDeps,
   dirEvents: readonly WaveEvent[],
   wave: string,
   lane: string,
-  planPath: string | undefined,
-  planText: string | undefined,
-  planMissing: string | undefined,
-): PlanReviewObservation | undefined {
+): Promise<PlanReviewObservation | undefined> {
   const facts = planReviewFacts(dirEvents, wave, lane);
   if (facts.dispatchedAt === undefined) return undefined;
-  if (planText !== undefined) {
-    try {
-      return { ...facts, rowHash: rowHash(planText, lane) };
-    } catch {
-      return { ...facts, rowHashMissing: "the plan holds no unambiguous row for this lane" };
-    }
+  if (facts.reviewedPlan === undefined) {
+    return { ...facts, rowHashMissing: "the governing review named no plan file" };
   }
-  if (planPath !== undefined) return { ...facts, rowHashMissing: planMissing };
-  return facts;
+  let planText: string | undefined;
+  try {
+    planText = await deps.readFile(facts.reviewedPlan);
+  } catch {
+    return { ...facts, rowHashMissing: "the plan file could not be read" };
+  }
+  try {
+    return { ...facts, rowHash: rowHash(planText, lane) };
+  } catch {
+    return { ...facts, rowHashMissing: "the plan holds no unambiguous row for this lane" };
+  }
 }
 
 /**
