@@ -2230,8 +2230,11 @@ describe("BriefPage — capabilities and motion", () => {
     // reason (a non-empty id and a never-saved source). What this test still
     // proves is everything AFTER that: a real edit keeps it dirty, a no-op edit
     // does not toggle it, Save clears it, and unmount clears it too.
-    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
-    expect(screen.getByTestId("dirty-probe").textContent).toBe("dirty");
+    // A single combined wait, not "fresh" then a synchronous assertion: the id
+    // landing and the dirty flag publishing are two different effects, and a
+    // poll that only waits for the first can catch the DOM between them.
+    await waitFor(() => expect(screen.getByTestId("dirty-probe").textContent).toBe("dirty"));
+    expect(screen.getByText("fresh")).toBeTruthy();
 
     // A no-op edit — replaying the value a field already holds — still dispatches
     // a `patch` (a new `state` object), but `isPristine`/`isDirtySinceSave`
