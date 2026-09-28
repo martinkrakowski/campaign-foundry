@@ -337,6 +337,25 @@ describe("authoring briefs", () => {
     expect(again.status).toBe(409);
   });
 
+  // Coordinator follow-up (D177, PT-5b2): the same crash the fix (pg-brief-
+  // store.ts) closes cannot happen on fs — a reserved directory has no
+  // "versions" concept to read past — but pin the same never-500 contract on
+  // both backends anyway.
+  test("PUT against a blank-created (versionless) campaign 404s, never 500s", async () => {
+    mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+    const { update } = await api();
+    const res = await update()(jsonReq("http://x/campaigns/briefs/camp", "PUT", brief()));
+    expect(res.status).toBe(404);
+  });
+
+  test("POST ?replace=1 against a blank-created (versionless) campaign adds version 1, never 500s", async () => {
+    mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
+    const { create } = await api();
+    const res = await create()(jsonReq("http://x/campaigns/briefs?replace=1", "POST", brief()));
+    expect(res.status).toBe(201);
+    expect(existsSync(campYaml())).toBe(true);
+  });
+
   test("POST without replace 409s when the id lives in a differently named file", async () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     const original = validBrief.replace("id: good", "id: camp");

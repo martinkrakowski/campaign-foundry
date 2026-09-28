@@ -190,6 +190,41 @@ describe("POST/PUT /campaigns/briefs — teamId (D166, PT-2c item 3)", () => {
         await harness.cleanup();
       }
     });
+
+    // Coordinator follow-up: POST /campaigns is what makes a versionless row
+    // possible at all, which made rewriteBriefInternal's "versions[0]!"
+    // crash (PgBriefStore) reachable through both callers below. Neither may
+    // ever 500.
+    test("PUT against a blank-created (versionless) campaign 404s, never 500s", async () => {
+      const harness = await setupPgHarness();
+      try {
+        await new PgBriefStore(harness.db, "local", "local").createCampaign("camp");
+
+        const res = await mount(owner).update(putReq(sampleBrief));
+        expect(res.status).toBe(404);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    test("POST ?replace=1 against a blank-created (versionless) campaign adds version 1, never 500s", async () => {
+      const harness = await setupPgHarness();
+      try {
+        await new PgBriefStore(harness.db, "local", "local").createCampaign("camp");
+
+        const res = await mount(owner).create(postReq(sampleBrief, "?replace=1"));
+        expect(res.status).toBe(201);
+
+        const { rows } = await harness.db.query<{ version: number }>(
+          `select bv.version from brief_version bv
+             join campaign c on c.id = bv.campaign_id
+            where c.org_id = 'local' and c.slug = 'camp'`,
+        );
+        expect(rows).toEqual([{ version: 1 }]);
+      } finally {
+        await harness.cleanup();
+      }
+    });
   });
 
   test("creating with a team the caller does not belong to, and is not owner/admin, answers 403", async () => {
