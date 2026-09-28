@@ -1,5 +1,6 @@
 import { readEvents } from "../wave-status/lib/events.js";
 import { asHashRecord, PLAN_REVIEW_LANE, rowHash } from "./lib/rows.js";
+import { relative, resolve } from "node:path";
 
 /**
  * The plan-review gate's command face. `hashes` fingerprints the rows an
@@ -35,6 +36,16 @@ export function errorText(thrown: unknown): string {
 /** Decision ids sort under `decisions`; every other id is a lane row. */
 function isDecisionId(id: string): boolean {
   return /^D\d+/.test(id);
+}
+
+/**
+ * The form plan paths are compared in: resolved against the working
+ * directory, then made relative to it, so a review recorded as
+ * `docs/planning/p.md` and a command line naming the same file absolutely
+ * agree, and a sibling file never does.
+ */
+function normalisePlanPath(plan: string): string {
+  return relative(process.cwd(), resolve(plan));
 }
 
 export async function runCli(io: PlanReviewIo): Promise<number> {
@@ -130,6 +141,24 @@ async function check(args: readonly string[], io: PlanReviewIo): Promise<number>
   const review = reviews[reviews.length - 1];
   if (review === undefined) {
     io.logError(`no plan-review settled event for wave ${wave} in ${logPath}`);
+    return 2;
+  }
+
+  // The review governs the plan it was taken against, and nothing else: the
+  // latest review of a different plan file is no review for this lane, even
+  // when the two plans' rows coincide — the row hashes would match while the
+  // verdict was never asked about this file.
+  const reviewedPlan = review.detail?.plan;
+  if (typeof reviewedPlan !== "string" || reviewedPlan === "") {
+    io.logError(
+      `the latest plan-review settled event for wave ${wave} names no plan file — no review for this lane`,
+    );
+    return 2;
+  }
+  if (normalisePlanPath(reviewedPlan) !== normalisePlanPath(plan)) {
+    io.logError(
+      `the latest review for wave ${wave} is of ${reviewedPlan}, not ${plan} — no review for this lane`,
+    );
     return 2;
   }
 

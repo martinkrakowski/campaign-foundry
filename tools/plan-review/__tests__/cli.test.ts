@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runCli, errorText } from "../cli.js";
 import { asHashRecord, PLAN_REVIEW_LANE, rowHash } from "../lib/rows.js";
@@ -276,6 +276,73 @@ describe("runCli check", () => {
     expect(errors.join("\n")).toContain("no plan-review settled event");
   });
 
+  test("a review of a different plan is no review for this lane, even with identical rows", async () => {
+    const dir = tempDir();
+    const planPath = writePlan(dir);
+    const other = join(dir, "other.md");
+    writeFileSync(other, plan);
+    const logdir = writeLog(join(dir, "waves"), [
+      reviewLine("W", {
+        plan: other,
+        reviewer: "plan-review-seat",
+        rows: { "PT-5a": rowHash(plan, "PT-5a") },
+        verdict: "clear",
+      }),
+    ]);
+    const errors: string[] = [];
+    const code = await runCli({
+      ...io([], errors),
+      argv: ["check", planPath, "--logdir", logdir, "--wave", "W", "PT-5a"],
+    });
+    expect(code).toBe(2);
+    expect(errors.join("\n")).toContain("no review for this lane");
+    expect(errors.join("\n")).toContain("other.md");
+  });
+
+  test("a review that names no plan file is no review for this lane", async () => {
+    const dir = tempDir();
+    const planPath = writePlan(dir);
+    const logdir = writeLog(join(dir, "waves"), [
+      `${JSON.stringify({
+        ts: "2026-09-28T10:00:00Z",
+        wave: "W",
+        lane: PLAN_REVIEW_LANE,
+        stage: "plan-review",
+        event: "settled",
+        detail: {
+          reviewer: "plan-review-seat",
+          rows: { "PT-5a": rowHash(plan, "PT-5a") },
+          verdict: "clear",
+        },
+      })}\n`,
+    ]);
+    const errors: string[] = [];
+    const code = await runCli({
+      ...io([], errors),
+      argv: ["check", planPath, "--logdir", logdir, "--wave", "W", "PT-5a"],
+    });
+    expect(code).toBe(2);
+    expect(errors.join("\n")).toContain("names no plan file");
+  });
+
+  test("the plan compares resolved and cwd-relative, so an absolute command line matches a relative review", async () => {
+    const dir = tempDir();
+    const planPath = writePlan(dir);
+    const logdir = writeLog(join(dir, "waves"), [
+      reviewLine("W", {
+        plan: relative(process.cwd(), planPath),
+        reviewer: "plan-review-seat",
+        rows: { "PT-5a": rowHash(plan, "PT-5a") },
+        verdict: "clear",
+      }),
+    ]);
+    const code = await runCli({
+      ...io(),
+      argv: ["check", planPath, "--logdir", logdir, "--wave", "W", "PT-5a"],
+    });
+    expect(code).toBe(0);
+  });
+
   test("exit 2 when the events log is missing", async () => {
     const dir = tempDir();
     const planPath = writePlan(dir);
@@ -318,7 +385,7 @@ describe("runCli check", () => {
         lane: PLAN_REVIEW_LANE,
         stage: "plan-review",
         event: "settled",
-        detail: { rows: { "PT-5a": 7 }, verdict: "clear" },
+        detail: { plan: planPath, rows: { "PT-5a": 7 }, verdict: "clear" },
       })}\n`,
     ]);
     const errors: string[] = [];
@@ -340,7 +407,7 @@ describe("runCli check", () => {
         lane: PLAN_REVIEW_LANE,
         stage: "plan-review",
         event: "settled",
-        detail: { rows: { "PT-5a": rowHash(plan, "PT-5a") } },
+        detail: { plan: planPath, rows: { "PT-5a": rowHash(plan, "PT-5a") } },
       })}\n`,
     ]);
     const errors: string[] = [];
