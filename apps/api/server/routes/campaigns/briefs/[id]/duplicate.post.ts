@@ -28,6 +28,15 @@ import { requestTenant } from "../../../../lib/tenant.js";
 
 const CANONICAL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Marks an EEXIST raised while claiming the CANDIDATE slug itself (via
+ * `reserveMinted`) — the only failure `withDerivedSlug`'s retry loop may
+ * retry past (PT-5b2 fix-round item 3). A conflict raised AFTER a
+ * successful reservation is a real, reportable conflict, never a taken
+ * candidate to skip past.
+ */
+class SlugTakenError extends Error {}
+
 /** The duplicate contract's overrides: `targetRegion` and `targetAudience` only. */
 function overrideValues(overrides: unknown): Record<string, unknown> {
   if (overrides === undefined || overrides === null) return {};
@@ -51,10 +60,10 @@ function overrideValues(overrides: unknown): Record<string, unknown> {
  * in step by eye) and hand each candidate to `attempt` until one is not
  * taken: the base, then `-2`, `-3`, … — skipping a reserved id and a
  * uuid-shaped candidate (D178: it would collide with ref resolution, #613) —
- * staying within 64 characters by trimming the base before the suffix.
- * `attempt` performs the actual write; a collision is ITS conflict signal
- * (`isExistsError`), the same one two concurrent callers of the same name
- * race on, never a separate check-then-act read here. The caller guarantees
+ * staying within 64 characters by trimming the base before the suffix. Only
+ * a `SlugTakenError` retries the next suffix; any other failure — including
+ * an ordinary EEXIST `attempt` raises for a reason other than the candidate
+ * itself being taken — propagates immediately. The caller guarantees
  * `slugify(name)` is non-empty before calling.
  */
 async function withDerivedSlug<T>(name: string, attempt: (slug: string) => Promise<T>): Promise<T> {
@@ -66,7 +75,7 @@ async function withDerivedSlug<T>(name: string, attempt: (slug: string) => Promi
     try {
       return await attempt(candidate);
     } catch (error) {
-      if (!isExistsError(error)) throw error;
+      if (!(error instanceof SlugTakenError)) throw error;
     }
   }
 }
@@ -87,23 +96,34 @@ async function withDerivedSlug<T>(name: string, attempt: (slug: string) => Promi
  * and rewrites logoPath and inputAsset, while leaving shared root assets untouched (L5.5).
  * The copy pool is copied too (D71/C9), rewritten to name the new brief — a
  * duplicated `pool://copy` source otherwise plans against a file that never existed.
+ * The copy inherits the source campaign's own team (PT-5b2 fix-round item 1,
+ * security) — neither path in this route accepts an explicit `teamId`.
  *
  * D166 item 2: the source brief's own asset-scoped fields may in turn name a
  * THIRD campaign's id as an asset source (`extractSourceAssetBriefIds`) —
  * each such id is checked with `assertSourceVisible` before its assets are
- * copied, same as `briefs.post.ts`'s "Save as…".
+ * copied, same as `briefs.post.ts`'s "Save as…". PT-5b2 fix-round item 2:
+ * this check, and resolving the source pool, run ONCE against `sourceSlug`/
+ * `template` before any target slug is ever claimed — a hidden reference or
+ * a malformed pool answers 404/422 without minting anything to release.
  *
  * D166 item 3 / D177 (PT-5b2): the target's own availability is claimed
  * BEFORE any copy or write, rather than relying on `createBrief`'s eventual
  * EEXIST — an existing-but-hidden target must never have its asset directory
  * written into ahead of that conflict. The legacy `newId` path claims it the
  * way this route always has, `campaignVisibility` — unchanged, so an
- * existing-but-hidden `newId` still 409s here exactly as before. A
+ * existing-but-hidden `newId` still 409s here exactly as before; it mutates
+ * nothing, so there is never anything to release if a later step fails. A
  * server-derived `name` claims it with `createCampaign` instead: the only
  * check that also sees an fs reserved directory (D179, a blank
  * `POST /campaigns` create) — `campaignVisibility` cannot, since it answers
  * on file existence alone — and, on Postgres, mints the versionless row this
  * write's own `createBrief` call then completes as its first Save (D177).
+ * PT-5b2 fix-round items 2/3: once that reservation succeeds, a later
+ * failure (asset copy, the first-version `createBrief`, the pool write)
+ * releases it (`releaseCampaign`, `deleteAssets`) and propagates as-is —
+ * never retried onto a different suffix, even when the failure is itself
+ * EEXIST-shaped (a concurrent writer's own Save racing this exact slug).
  */
 export default defineEventHandler(async (event) => {
   const scope = requestTenant(event);
@@ -154,11 +174,10 @@ export default defineEventHandler(async (event) => {
   const briefs = getBriefStore(scope);
   let sourceSlug = id;
   // PT-5b2 fix-round item 1 (security): a copy inherits the SOURCE's own
-  // team when the caller supplies none — the same visibility the caller
-  // could already see (they just proved they own `sourceSlug`), never a
-  // widening to org-wide by omission. `undefined` here (fs, or the
-  // theoretically-unreachable "hidden after we just asserted ownership")
-  // behaves like "no team" for a fresh insert, same as before this fix.
+  // team — the same visibility the caller could already see (they just
+  // proved they own `sourceSlug`), never a widening to org-wide by omission.
+  // `undefined` here (fs, or the theoretically-unreachable "hidden after we
+  // just asserted ownership") behaves like "no team" for a fresh insert.
   let sourceTeamId: string | null | undefined;
   if (briefs.supportsTeams) {
     try {
@@ -187,19 +206,19 @@ export default defineEventHandler(async (event) => {
   // D71 — overrides are merged and validated HERE, before any write attempt,
   // in their own try/catch, so parseBrief's answer is a 400 — never inside
   // `attempt` below, where the outer catch only maps SYMLINK/EEXIST/
-  // CampaignNotFoundError/InvalidCopyPoolError, and a parse failure would
-  // surface as an uncaught 500 instead. Validated once against the SOURCE's
-  // own (already-safe) id as a placeholder: every candidate this route ever
-  // tries is SAFE_ID-shaped by construction (the legacy `newId`, asserted
-  // above; a derived slug, by `withDerivedSlug`), and nothing else parseBrief
-  // checks depends on `id`'s value (`load-brief.ts:1216` only checks its
-  // shape) — so each attempt just swaps `id` into the validated object,
-  // rather than re-parsing per candidate. `mode` is deliberately NOT an
-  // override: a classic source overridden to "variation" needs a
-  // `variation.count` that parseBrief requires and that is an editor default
-  // ("12"), not this route's to invent; the reverse direction leaves the
-  // source's `variation` block in the file, structurally valid but inert.
-  // The copy inherits the source's mode.
+  // InvalidCopyPoolError, and a parse failure would surface as an uncaught
+  // 500 instead. Validated once against the SOURCE's own (already-safe) id
+  // as a placeholder: every candidate this route ever tries is SAFE_ID-shaped
+  // by construction (the legacy `newId`, asserted above; a derived slug, by
+  // `withDerivedSlug`), and nothing else parseBrief checks depends on `id`'s
+  // value (`load-brief.ts:1216` only checks its shape) — so each attempt
+  // just swaps `id` into the validated object, rather than re-parsing per
+  // candidate. `mode` is deliberately NOT an override: a classic source
+  // overridden to "variation" needs a `variation.count` that parseBrief
+  // requires and that is an editor default ("12"), not this route's to
+  // invent; the reverse direction leaves the source's `variation` block in
+  // the file, structurally valid but inert. The copy inherits the source's
+  // mode.
   let template: CampaignBrief;
   try {
     template = parseBrief({ ...source.brief, ...overrideValues(overrides), id: sourceSlug });
@@ -208,62 +227,93 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
+  // PT-5b2 fix-round item 2 (coderabbit PRRT_kwDOSzP1zc6mgBvA): resolve the
+  // source pool and check every additional source id's visibility BEFORE any
+  // target slug is ever claimed — these depend only on `sourceSlug`/
+  // `template`, not on which candidate eventually wins, so a malformed pool
+  // or a hidden reference 422s/404s without minting (and then having to
+  // release) a versionless row or directory for nothing.
+  let sourcePool;
+  try {
+    sourcePool = await readPool(scope, sourceSlug);
+  } catch (error) {
+    if (!(error instanceof InvalidCopyPoolError)) throw error;
+    setResponseStatus(event, 422);
+    return { error: error.message };
+  }
+  const additionalSourceIds = extractSourceAssetBriefIds(template, sourceSlug).filter(
+    (fromId) => fromId !== sourceSlug,
+  );
+  try {
+    for (const fromId of additionalSourceIds) {
+      await assertSourceVisible(scope, fromId);
+    }
+  } catch (error) {
+    if (error instanceof CampaignNotFoundError) {
+      setResponseStatus(event, 404);
+      return { error: `Brief "${error.campaignId}" not found.` };
+    }
+    throw error;
+  }
+
   /**
    * Claim `targetSlug` (via `reserve`), then copy the source's assets and
-   * pool into it and write it as version 1. `reserve` throws an EEXIST-coded
-   * error on a collision — the retry loop's own signal for the `name` path,
-   * and this route's usual 409 for the legacy `newId` path.
+   * pool into it and write it as version 1. `reserve` throws on a
+   * collision: `SlugTakenError` from `reserveMinted` (the `name` path,
+   * retried by `withDerivedSlug`), or a plain EEXIST from `reserveVisible`
+   * (the legacy path — no retry loop wraps this call at all, so the shape
+   * does not matter, only that the outer catch's `isExistsError` still
+   * recognises it via `errorMessage`). Once `reserve` succeeds, ANY later
+   * failure releases it and propagates unmodified — never retried, since it
+   * is never a `SlugTakenError`.
    */
   const attempt = async (
     targetSlug: string,
     reserve: () => Promise<void>,
   ): Promise<StoredBrief> => {
-    if (await isPoolDirSymlink(scope, targetSlug)) {
-      throw new Error(SYMLINK_WRITE_ERROR);
-    }
-    let brief: CampaignBrief = { ...template, id: targetSlug };
     return getBriefStore(scope).withBriefLock(targetSlug, async () => {
+      if (await isPoolDirSymlink(scope, targetSlug)) {
+        throw new Error(SYMLINK_WRITE_ERROR);
+      }
       await reserve();
-
-      // Resolve the source pool first so a malformed source throws
-      // InvalidCopyPoolError before any dest write (the 422 path must leave
-      // the destination brief absent). createBrief is exclusive (wx); writing
-      // the dest pool first left an orphan when the dest file existed but was
-      // unparseable — findBriefById skips those, then wx turns into a 409.
-      const sourcePool = await readPool(scope, sourceSlug);
-
-      // D166 item 2 (PT-2c, greptile thread U90U): every additional source id
-      // — extracted from the brief, before the primary source's own paths
-      // below are rewritten off `id` — is checked for visibility BEFORE any
-      // copy runs, including the primary source's `copyAssets` just below.
-      const additionalSourceIds = extractSourceAssetBriefIds(brief, targetSlug).filter(
-        (fromId) => fromId !== sourceSlug,
-      );
-      for (const fromId of additionalSourceIds) {
-        await assertSourceVisible(scope, fromId);
-      }
-
-      // Copy assets from source brief to new brief, and any referenced brief-scoped assets
-      const sourceMap = await getAssetStore(scope).copyAssets(sourceSlug, targetSlug);
-      brief = rewriteAssetPaths(brief, sourceSlug, targetSlug, sourceMap);
-      for (const fromId of additionalSourceIds) {
-        const addMap = await getAssetStore(scope).copyAssets(fromId, targetSlug);
-        brief = rewriteAssetPaths(brief, fromId, targetSlug, addMap);
-      }
-
-      const created = await getBriefStore(scope).createBrief(brief, { teamId: sourceTeamId });
-      // The dest pool write (or the stale-pool delete when the source has none)
-      // runs under withPoolLock(targetSlug) as well as the brief lock: they are
-      // different maps, so without it a concurrent POST /campaigns/pools/:targetSlug
-      // could interleave. The source pool needs no lock: writePool renames atomically.
-      await withPoolLock(scope, targetSlug, async () => {
-        if (sourcePool) {
-          await copyPool(scope, sourceSlug, targetSlug);
-        } else {
-          await deletePool(scope, targetSlug);
+      try {
+        let brief: CampaignBrief = { ...template, id: targetSlug };
+        const sourceMap = await getAssetStore(scope).copyAssets(sourceSlug, targetSlug);
+        brief = rewriteAssetPaths(brief, sourceSlug, targetSlug, sourceMap);
+        for (const fromId of additionalSourceIds) {
+          const addMap = await getAssetStore(scope).copyAssets(fromId, targetSlug);
+          brief = rewriteAssetPaths(brief, fromId, targetSlug, addMap);
         }
-      });
-      return created;
+
+        const created = await getBriefStore(scope).createBrief(brief, { teamId: sourceTeamId });
+        // The dest pool write (or the stale-pool delete when the source has
+        // none) runs under withPoolLock(targetSlug) as well as the brief
+        // lock: they are different maps, so without it a concurrent
+        // POST /campaigns/pools/:targetSlug could interleave. The source
+        // pool needs no lock: writePool renames atomically.
+        await withPoolLock(scope, targetSlug, async () => {
+          if (sourcePool) {
+            await copyPool(scope, sourceSlug, targetSlug);
+          } else {
+            await deletePool(scope, targetSlug);
+          }
+        });
+        return created;
+      } catch (error) {
+        // Only `reserveMinted` (the `name` path) ever mints anything to
+        // release; `reserveVisible` (the legacy path) mutates nothing, so
+        // `releaseCampaign` is always a safe no-op there. The pool lives
+        // inside the same reserved directory `releaseCampaign` removes on
+        // fs (D177/D179): deleted first (a no-op if nothing was ever
+        // written), or its own `rmdir` would refuse a non-empty directory.
+        await withPoolLock(scope, targetSlug, () => deletePool(scope, targetSlug));
+        const released = await getBriefStore(scope).releaseCampaign(targetSlug);
+        // Only when the campaign itself is gone too — never after a real,
+        // versioned brief (e.g. createBrief succeeded and only the pool
+        // write after it failed).
+        if (released) await getAssetStore(scope).deleteAssets(targetSlug);
+        throw error;
+      }
     });
   };
 
@@ -277,7 +327,12 @@ export default defineEventHandler(async (event) => {
   };
   /** The `name` path's claim (D177/D179): also sees an fs reserved directory. */
   const reserveMinted = (targetSlug: string) => async (): Promise<void> => {
-    await getBriefStore(scope).createCampaign(targetSlug, { teamId: sourceTeamId });
+    try {
+      await getBriefStore(scope).createCampaign(targetSlug, { teamId: sourceTeamId });
+    } catch (error) {
+      if (isExistsError(error)) throw new SlugTakenError();
+      throw error;
+    }
   };
 
   try {
@@ -294,17 +349,13 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 400);
       return { error: errorMessage(error) };
     }
+    // The legacy path's own reserveVisible conflict, or (PT-5b2 fix-round
+    // items 3/5) a post-reservation conflict on the `name` path — never
+    // retried, and the message already names the slug that conflicted
+    // (the store's own error), never the raw `name` (qodo PRRT_kwDOSzP1zc6mgAEv).
     if (isExistsError(error)) {
-      // Only the legacy `newId` path can reach this: `withDerivedSlug` retries
-      // an EEXIST from `reserveMinted` on the next candidate rather than
-      // surfacing it.
       setResponseStatus(event, 409);
-      return { error: `Brief "${target.value}" already exists.` };
-    }
-    // D166 item 2: an additional source id hidden from this caller by team.
-    if (error instanceof CampaignNotFoundError) {
-      setResponseStatus(event, 404);
-      return { error: `Brief "${error.campaignId}" not found.` };
+      return { error: errorMessage(error) };
     }
     if (!(error instanceof InvalidCopyPoolError)) throw error;
     setResponseStatus(event, 422);

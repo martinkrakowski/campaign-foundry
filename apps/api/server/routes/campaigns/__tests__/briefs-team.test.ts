@@ -1,4 +1,4 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi } from "vitest";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -8,6 +8,9 @@ import {
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
 import type { TenantContext } from "../../../lib/tenant.js";
+import * as pools from "../../../lib/pools.js";
+import { InvalidCopyPoolError } from "../../../lib/ports/pool-store.port.js";
+import { getAssetStore, getBriefStore, getPoolStore } from "../../../lib/ports/index.js";
 import { PgBriefStore } from "../../../lib/ports/pg-brief-store.js";
 import briefsPostHandler from "../briefs.post.js";
 import briefsPutHandler from "../briefs/[id].put.js";
@@ -546,6 +549,125 @@ describe("duplicate by name on Postgres (D177/D178, PT-5b2)", () => {
       await harness.cleanup();
     }
   });
+
+  test("an unexpected createCampaign failure (not EEXIST) surfaces as 500", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      const spy = vi
+        .spyOn(getBriefStore(owner), "createCampaign")
+        .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+      const res = await mount(owner).duplicate(duplicateByNameReq("camp", "Broken"));
+      expect(res.status).toBe(500);
+      spy.mockRestore();
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  // PT-5b2 fix-round item 2 (coderabbit PRRT_kwDOSzP1zc6mgBvA / qodo
+  // PRRT_kwDOSzP1zc6mgEyP): a failure AFTER createCampaign reserved the slug
+  // must release it — a retry gets the SAME slug, never "-2".
+  test("copyAssets failing after reservation releases it: a retry gets the same slug", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      const spy = vi
+        .spyOn(getAssetStore(LOCAL_TENANT), "copyAssets")
+        .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+      const failed = await mount(owner).duplicate(duplicateByNameReq("camp", "Copy"));
+      expect(failed.status).toBe(500);
+      spy.mockRestore();
+
+      expect(await getBriefStore(owner).campaignTeam("copy")).toBeUndefined();
+
+      const retried = await mount(owner).duplicate(duplicateByNameReq("camp", "Copy"));
+      expect(retried.status).toBe(201);
+      expect(((await retried.json()) as { brief: { id: string } }).brief.id).toBe("copy");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("createBrief failing after reservation releases it and the assets already copied", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      const spy = vi
+        .spyOn(getBriefStore(owner), "createBrief")
+        .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+      const failed = await mount(owner).duplicate(duplicateByNameReq("camp", "Copy"));
+      expect(failed.status).toBe(500);
+      spy.mockRestore();
+
+      expect(await getBriefStore(owner).campaignTeam("copy")).toBeUndefined();
+      expect(await getAssetStore(LOCAL_TENANT).listAssets("copy")).toEqual([]);
+
+      const retried = await mount(owner).duplicate(duplicateByNameReq("camp", "Copy"));
+      expect(retried.status).toBe(201);
+      expect(((await retried.json()) as { brief: { id: string } }).brief.id).toBe("copy");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  // A source pool that becomes malformed only when copyPool re-reads it
+  // (a narrow race — copyPool rewrites its briefId, C9/D71) hits the outer
+  // catch's InvalidCopyPoolError branch post-reservation.
+  test("a source pool that only fails validation during the copy answers 422, leaving the already-written brief alone", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      await getPoolStore(LOCAL_TENANT).writePool({
+        briefId: "camp",
+        generatedAt: new Date().toISOString(),
+        model: "test-model",
+        entries: [{ id: "e1", text: "Hi", status: "approved" }],
+      });
+      const spy = vi
+        .spyOn(pools, "copyPool")
+        .mockRejectedValueOnce(new InvalidCopyPoolError("camp", "raced invalid"));
+
+      const res = await mount(owner).duplicate(duplicateByNameReq("camp", "Copy"));
+      expect(res.status).toBe(422);
+      spy.mockRestore();
+
+      expect(await getBriefStore(LOCAL_TENANT).campaignTeam("copy")).toBeNull();
+      expect((await getBriefStore(LOCAL_TENANT).findBriefById("copy"))?.brief.id).toBe("copy");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  // PT-5b2 fix-round item 3 (qodo PRRT_kwDOSzP1zc6mgEyM): an EEXIST raised
+  // AFTER the reservation held (a concurrent writer's own Save landing
+  // version 1 on the SAME slug) must answer 409, never be mistaken for a
+  // taken candidate and retried onto "-2".
+  test("a Save racing between reservation and the first-version write answers 409, not a retry", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      const store = getBriefStore(LOCAL_TENANT);
+      const assetStore = getAssetStore(LOCAL_TENANT);
+      const originalCopyAssets = assetStore.copyAssets.bind(assetStore);
+      const spy = vi
+        .spyOn(assetStore, "copyAssets")
+        .mockImplementationOnce(async (from: string, to: string) => {
+          await store.createBrief({ ...sampleBrief, id: to, campaignMessage: "Racer's own save" });
+          return originalCopyAssets(from, to);
+        });
+
+      const res = await mount(owner).duplicate(duplicateByNameReq("camp", "Copy"));
+      expect(res.status).toBe(409);
+      spy.mockRestore();
+
+      const raced = await store.findBriefById("copy");
+      expect(raced?.brief.campaignMessage).toBe("Racer's own save");
+      expect(await store.campaignTeam("copy-2")).toBeUndefined();
+    } finally {
+      await harness.cleanup();
+    }
+  });
 });
 
 // qodo PRRT_kwDOSzP1zc6mgEyD (HIGH, security): a copy of a team-scoped source
@@ -735,6 +857,51 @@ describe("Save as / duplicate refuse a hidden asset source or target (D166, PT-2
       const res = await mount(t2Member).duplicate(duplicateReq("t2-source", "dup-dest"));
       expect(res.status).toBe(404);
       expect(existsSync(join(harness.projectRoot, "assets", "inputs", "dup-dest"))).toBe(false);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("an unexpected assertSourceVisible failure (not CampaignNotFoundError) surfaces as 500", async () => {
+    const harness = await setupPgHarness();
+    try {
+      const ownerStore = new PgBriefStore(harness.db, "local", "owner", ["owner"], []);
+      await ownerStore.createBrief({ ...sampleBrief, id: "other-camp" });
+      await ownerStore.createBrief({
+        ...sampleBrief,
+        id: "multi-source",
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#1473E6",
+            logoPath: "assets/inputs/other-camp/shared.png",
+          },
+        ],
+      });
+      const spy = vi
+        .spyOn(getBriefStore(owner), "campaignVisibility")
+        .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+
+      const res = await mount(owner).duplicate(duplicateReq("multi-source", "dup-dest"));
+      expect(res.status).toBe(500);
+      expect(spy).toHaveBeenCalledWith("other-camp");
+      spy.mockRestore();
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  test("an unexpected preflight readPool failure (not InvalidCopyPoolError) surfaces as 500", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await mount(owner).create(postReq(sampleBrief));
+      const spy = vi
+        .spyOn(getPoolStore(owner), "readPool")
+        .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+      const res = await mount(owner).duplicate(duplicateReq("camp", "copy"));
+      expect(res.status).toBe(500);
+      spy.mockRestore();
     } finally {
       await harness.cleanup();
     }
