@@ -379,6 +379,27 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
       expect(rejected).toHaveLength(1);
       expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: "EEXIST" });
     });
+
+    test("stores the display name and type (PT-5b3, D168, D177)", async () => {
+      const created = await store.createCampaign("named-slug", {
+        name: "My Campaign",
+        type: "paid-social",
+      });
+      const { rows } = await db.query<{ name: string | null; type: string | null }>(
+        `select name, type from campaign where id = $1`,
+        [created.campaignId],
+      );
+      expect(rows[0]).toEqual({ name: "My Campaign", type: "paid-social" });
+    });
+
+    test("stores null name and type when options omit them (PT-5b3)", async () => {
+      const created = await store.createCampaign("blank-meta");
+      const { rows } = await db.query<{ name: string | null; type: string | null }>(
+        `select name, type from campaign where id = $1`,
+        [created.campaignId],
+      );
+      expect(rows[0]).toEqual({ name: null, type: null });
+    });
   });
 
   describe("releaseCampaign (PT-5b2 fix-round item 2)", () => {
@@ -399,6 +420,80 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
 
     test("answers false for a slug that was never reserved", async () => {
       expect(await store.releaseCampaign("nope")).toBe(false);
+    });
+  });
+
+  describe("campaignMeta (PT-5b3, D168, D177)", () => {
+    test("answers undefined for an unknown slug or uuid", async () => {
+      expect(await store.campaignMeta("nope")).toBeUndefined();
+      expect(await store.campaignMeta("00000000-0000-0000-0000-000000000000")).toBeUndefined();
+    });
+
+    test("a versionless create answers its recorded name/type by slug and by uuid, hasVersion: false", async () => {
+      const created = await store.createCampaign("versionless", {
+        name: "Versionless",
+        type: "short-video",
+      });
+      const expected = {
+        campaignId: created.campaignId,
+        slug: "versionless",
+        name: "Versionless",
+        type: "short-video",
+        hasVersion: false,
+      };
+      expect(await store.campaignMeta("versionless")).toEqual(expected);
+      expect(await store.campaignMeta(created.campaignId)).toEqual(expected);
+    });
+
+    test("a pre-lane campaign (created with no name/type) answers null name/type and hasVersion: true", async () => {
+      const created = await store.createBrief(minimalBrief);
+      expect(await store.campaignMeta("test-camp")).toEqual({
+        campaignId: created.campaignId,
+        slug: "test-camp",
+        name: null,
+        type: null,
+        hasVersion: true,
+      });
+    });
+
+    test("saving a version never clears the name/type recorded at create (item 4)", async () => {
+      await store.createCampaign("first-save-meta", { name: "First Save", type: "display-ad" });
+      const created = await store.createBrief(brief("first-save-meta"));
+      expect(await store.campaignMeta("first-save-meta")).toEqual({
+        campaignId: created.campaignId,
+        slug: "first-save-meta",
+        name: "First Save",
+        type: "display-ad",
+        hasVersion: true,
+      });
+    });
+
+    test("another org's and a hidden campaign's refs are undefined, by slug and by uuid", async () => {
+      await db.query("insert into org (id, name) values ($1, $2)", ["other", "Other"]);
+      const otherStore = new PgBriefStore(db, "other", "local");
+      const otherCreated = await otherStore.createCampaign("other-camp", { name: "Other" });
+      expect(await store.campaignMeta("other-camp")).toBeUndefined();
+      expect(await store.campaignMeta(otherCreated.campaignId)).toBeUndefined();
+
+      await db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+        ["t-secret", "Secret", "local"],
+      );
+      const adminStore = new PgBriefStore(db, "local", "admin", ["admin"]);
+      const hidden = await adminStore.createCampaign("hidden-camp", {
+        name: "Hidden",
+        teamId: "t-secret",
+      });
+      const outsider = new PgBriefStore(db, "local", "u2", [], ["t-other"]);
+      expect(await outsider.campaignMeta("hidden-camp")).toBeUndefined();
+      expect(await outsider.campaignMeta(hidden.campaignId)).toBeUndefined();
+      expect(await adminStore.campaignMeta("hidden-camp")).toEqual({
+        campaignId: hidden.campaignId,
+        slug: "hidden-camp",
+        name: "Hidden",
+        type: null,
+        hasVersion: false,
+      });
     });
   });
 
@@ -885,6 +980,43 @@ describe("0011_campaign_team migration (D166, PT-2c)", () => {
         `select conname from pg_constraint where conname = 'campaign_team_id_fkey'`,
       );
       expect(fk).toHaveLength(1);
+    } finally {
+      await db.end();
+    }
+  });
+});
+
+describe("0013_campaign_meta migration (PT-5b3, D168, D177)", () => {
+  test("adds nullable name and type columns; an existing row gets null for both", async () => {
+    const db = pgliteClient();
+    try {
+      const all = await loadMigrations();
+      // Everything below 0013: a later migration applied first would make
+      // migrate() refuse 0013 as out of order.
+      const upTo0012 = all.filter((m) => m.id < "0013");
+      await migrate(db, upTo0012);
+
+      const { rows: inserted } = await db.query<{ id: string }>(
+        `insert into campaign (org_id, slug) values ('local', 'pre-migration') returning id`,
+      );
+
+      expect((await migrate(db, all))[0]).toBe("0013_campaign_meta");
+
+      const { rows } = await db.query<{ name: string | null; type: string | null }>(
+        `select name, type from campaign where id = $1`,
+        [inserted[0]!.id],
+      );
+      expect(rows[0]).toEqual({ name: null, type: null });
+
+      const { rows: cols } = await db.query<{ column_name: string; is_nullable: string }>(
+        `select column_name, is_nullable from information_schema.columns
+          where table_name = 'campaign' and column_name in ('name', 'type')
+          order by column_name`,
+      );
+      expect(cols).toEqual([
+        { column_name: "name", is_nullable: "YES" },
+        { column_name: "type", is_nullable: "YES" },
+      ]);
     } finally {
       await db.end();
     }

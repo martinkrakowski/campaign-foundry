@@ -25,9 +25,35 @@ export interface ResolvedCampaign {
  * `createCampaign`'s own options (D177, PT-5b2): a fresh mint has no
  * revision to guard, so it takes only the team a caller who already ran
  * `canAssignTeam` authorized — same meaning as `BriefWriteOptions.teamId`.
+ * `name` and `type` (PT-5b3, D168, D177) are the display name and campaign
+ * type the user typed at Create: a blank Create mints no version, so these
+ * are the only place they are recorded until the first Save. `type` is a
+ * sourced create's SOURCE type (the route reads it off the copied brief),
+ * never the caller's own; a blank create's `type` is whatever the caller
+ * validated against `CAMPAIGN_TYPES` (or omitted).
  */
 export interface CreateCampaignOptions {
   readonly teamId?: string | null;
+  readonly name?: string;
+  readonly type?: string;
+}
+
+/**
+ * A campaign's own display name, type and whether it has any saved version
+ * (PT-5b3, D168, D177): `GET /campaigns/:id`'s answer for a campaign that
+ * exists, versioned or not. `campaignId` echoes what `resolveCampaign` would
+ * (the uuid on Postgres, `ref` itself on fs, D179), so a caller needs no
+ * second resolve. `name`/`type` are null for a campaign minted before this
+ * lane, or for an fs reservation with no recorded meta. `undefined` only
+ * when `ref` (a uuid or a slug) names no campaign this caller may see —
+ * absent or hidden by team (D166), indistinguishable on purpose (PT-2d).
+ */
+export interface CampaignMeta {
+  readonly campaignId: string;
+  readonly slug: string;
+  readonly name: string | null;
+  readonly type: string | null;
+  readonly hasVersion: boolean;
 }
 
 /**
@@ -207,4 +233,11 @@ export interface BriefStorePort {
    * exists, `undefined` otherwise.
    */
   campaignTeam(slug: string): Promise<string | null | undefined>;
+
+  /**
+   * Resolve `ref` (a uuid or a slug, D178, D179) to its display name, type
+   * and whether it has a saved version — see `CampaignMeta`. `undefined` for
+   * a ref absent or hidden by team; never throws for an unknown ref.
+   */
+  campaignMeta(ref: string): Promise<CampaignMeta | undefined>;
 }

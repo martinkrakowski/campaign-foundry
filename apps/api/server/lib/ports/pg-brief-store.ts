@@ -10,6 +10,7 @@ import { parseBriefText, type ParseBriefOptions } from "../load-brief.js";
 import type {
   BriefStorePort,
   BriefWriteOptions,
+  CampaignMeta,
   CreateCampaignOptions,
   ResolvedCampaign,
   StoredBrief,
@@ -374,6 +375,12 @@ export class PgBriefStore implements BriefStorePort {
    * unique `(org_id, slug)` constraint is the whole race guard (the Dedupe
    * note in the plan) — the caller's own dedupe loop retries the next suffix
    * on the EEXIST this throws, never a separate check-then-act read.
+   * `options.name`/`options.type` (PT-5b3, D168, D177) are the display name
+   * and campaign type the user typed at Create, stored on `campaign` itself
+   * (0013) so a later Save — which only ever inserts a `brief_version` row —
+   * cannot touch them (item 4: Saving never clears them). Both are nullable,
+   * so a caller that omits either (or the whole `options` object) stores
+   * null, exactly like a campaign minted before this migration.
    */
   async createCampaign(slug: string, options?: CreateCampaignOptions): Promise<ResolvedCampaign> {
     assertSafeSlug(slug);
@@ -382,10 +389,10 @@ export class PgBriefStore implements BriefStorePort {
     return this.db.transaction(async (tx) => {
       if (teamId !== null) await this.assertTeamInOrg(tx, teamId);
       const { rows } = await tx.query<{ id: string }>(
-        `insert into campaign (org_id, slug, team_id) values ($1, $2, $3)
+        `insert into campaign (org_id, slug, team_id, name, type) values ($1, $2, $3, $4, $5)
          on conflict (org_id, slug) do nothing
          returning id`,
-        [this.orgId, slug, teamId],
+        [this.orgId, slug, teamId, options?.name ?? null, options?.type ?? null],
       );
       const campaignId = rows[0]?.id;
       if (!campaignId) {
@@ -395,6 +402,52 @@ export class PgBriefStore implements BriefStorePort {
       }
       return { campaignId, slug };
     });
+  }
+
+  /**
+   * See `BriefStorePort.campaignMeta` (PT-5b3). Mirrors `resolveCampaign`'s
+   * own uuid-then-slug shape (a canonical uuid tried first, falling back to
+   * slug), since `ref` is the same D178 reference every route resolves —
+   * duplicated rather than composed with `resolveCampaign`, the same
+   * trade-off this file already makes for `currentRow` vs `listBriefs`.
+   * `has_version` is a single `exists` subquery rather than a join, so an
+   * unversioned row (no `brief_version` at all) still answers one row, not
+   * zero.
+   */
+  async campaignMeta(ref: string): Promise<CampaignMeta | undefined> {
+    interface Row {
+      readonly id: string;
+      readonly slug: string;
+      readonly name: string | null;
+      readonly type: string | null;
+      readonly team_id: string | null;
+      readonly has_version: boolean;
+    }
+    const selectHasVersion = `exists(select 1 from brief_version bv where bv.campaign_id = c.id) as has_version`;
+    const toMeta = (row: Row): CampaignMeta => ({
+      campaignId: row.id,
+      slug: row.slug,
+      name: row.name,
+      type: row.type,
+      hasVersion: row.has_version,
+    });
+    if (CANONICAL_UUID_PATTERN.test(ref)) {
+      const { rows } = await this.db.query<Row>(
+        `select c.id, c.slug, c.name, c.type, c.team_id, ${selectHasVersion}
+           from campaign c where c.org_id = $1 and c.id = $2`,
+        [this.orgId, ref.toLowerCase()],
+      );
+      const byId = rows[0];
+      if (byId && this.visible(byId.team_id)) return toMeta(byId);
+    }
+    const { rows } = await this.db.query<Row>(
+      `select c.id, c.slug, c.name, c.type, c.team_id, ${selectHasVersion}
+         from campaign c where c.org_id = $1 and c.slug = $2`,
+      [this.orgId, ref],
+    );
+    const bySlug = rows[0];
+    if (!bySlug || !this.visible(bySlug.team_id)) return undefined;
+    return toMeta(bySlug);
   }
 
   /**

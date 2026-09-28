@@ -226,6 +226,18 @@ describe("FsBriefStore", () => {
       expect(await store.findBriefById("fresh-slug")).toBeUndefined();
     });
 
+    test("writes the display name and type into campaign.json (PT-5b3, D168, D177)", async () => {
+      await store.createCampaign("named-slug", { name: "My Campaign", type: "paid-social" });
+      const raw = readFileSync(join(dir, "named-slug", "campaign.json"), "utf8");
+      expect(JSON.parse(raw)).toEqual({ name: "My Campaign", type: "paid-social" });
+    });
+
+    test("records null name and type when options omit them (PT-5b3)", async () => {
+      await store.createCampaign("blank-meta");
+      const raw = readFileSync(join(dir, "blank-meta", "campaign.json"), "utf8");
+      expect(JSON.parse(raw)).toEqual({ name: null, type: null });
+    });
+
     test("a taken slug (an existing directory) is EEXIST", async () => {
       await store.createCampaign("taken-dir");
       await expect(store.createCampaign("taken-dir")).rejects.toMatchObject({ code: "EEXIST" });
@@ -307,10 +319,21 @@ describe("FsBriefStore", () => {
   });
 
   describe("releaseCampaign (PT-5b2 fix-round item 2)", () => {
-    test("removes an empty reserved directory and answers true", async () => {
-      await store.createCampaign("mint-only");
+    test("removes a reserved directory (with its campaign.json) and answers true", async () => {
+      await store.createCampaign("mint-only", { name: "Mint Only", type: "social-post" });
+      expect(existsSync(join(dir, "mint-only", "campaign.json"))).toBe(true);
       expect(await store.releaseCampaign("mint-only")).toBe(true);
       expect(existsSync(join(dir, "mint-only"))).toBe(false);
+    });
+
+    // Backward compatibility (PT-5b3): a directory reserved before this lane
+    // shipped never got a campaign.json — `entries` is `[]`, not
+    // `["campaign.json"]`, so the "nothing else is there" check must still
+    // pass and the unlink must be skipped rather than attempted.
+    test("removes a pre-lane reservation with no campaign.json", async () => {
+      mkdirSync(join(dir, "old-reservation"));
+      expect(await store.releaseCampaign("old-reservation")).toBe(true);
+      expect(existsSync(join(dir, "old-reservation"))).toBe(false);
     });
 
     test("leaves a real brief untouched and answers false", async () => {
@@ -349,6 +372,60 @@ describe("FsBriefStore", () => {
         }
       },
     );
+  });
+
+  describe("campaignMeta (PT-5b3, D168, D177)", () => {
+    test("answers undefined for an unknown ref", async () => {
+      expect(await store.campaignMeta("nope")).toBeUndefined();
+    });
+
+    test("a versionless create answers its recorded name/type and hasVersion: false", async () => {
+      await store.createCampaign("versionless", { name: "Versionless", type: "short-video" });
+      expect(await store.campaignMeta("versionless")).toEqual({
+        campaignId: "versionless",
+        slug: "versionless",
+        name: "Versionless",
+        type: "short-video",
+        hasVersion: false,
+      });
+    });
+
+    test("a pre-lane campaign (a brief file, no reserved directory) answers null name/type and hasVersion: true", async () => {
+      await store.createBrief(minimalBrief);
+      expect(await store.campaignMeta("test-camp")).toEqual({
+        campaignId: "test-camp",
+        slug: "test-camp",
+        name: null,
+        type: null,
+        hasVersion: true,
+      });
+    });
+
+    test("saving a version never clears the name/type recorded at create (item 4)", async () => {
+      await store.createCampaign("first-save-meta", { name: "First Save", type: "display-ad" });
+      await store.createBrief({ ...minimalBrief, id: "first-save-meta" });
+      expect(await store.campaignMeta("first-save-meta")).toEqual({
+        campaignId: "first-save-meta",
+        slug: "first-save-meta",
+        name: "First Save",
+        type: "display-ad",
+        hasVersion: true,
+      });
+    });
+
+    test("rethrows a non-ENOENT campaign.json read failure unchanged", async () => {
+      await store.createCampaign("unreadable-meta");
+      // A directory in place of a file makes readFile fail with EISDIR, not
+      // ENOENT — this exercises the fail-closed rethrow, not the "no meta"
+      // branch. Overwriting campaign.json itself lets the store's own
+      // resolveConfined + readFile run unmolested up to that point.
+      const metaPath = join(dir, "unreadable-meta", "campaign.json");
+      rmSync(metaPath);
+      mkdirSync(metaPath);
+      await expect(store.campaignMeta("unreadable-meta")).rejects.toMatchObject({
+        code: "EISDIR",
+      });
+    });
   });
 
   test("rewriteBrief updates existing brief and checks revision when provided", async () => {
