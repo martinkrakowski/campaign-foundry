@@ -12,10 +12,10 @@ import {
 import { API, useRun } from "@/lib/run-context";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
-import { CREATE_SEED_KEY, createCampaign, takeSeed } from "@/lib/create-campaign";
 import { CreateCampaignDialog } from "@/components/shell/CreateCampaignDialog";
 import { BrowseBriefsButton } from "@/components/shell/Sidebar";
 import type { BriefEntry } from "@/lib/briefs-api";
+import { campaignRoute } from "@/lib/campaign-route";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
@@ -131,6 +131,24 @@ const entry = (id: string, revision?: string) => ({
   revision,
 });
 
+/**
+ * `GET /campaigns/:id`'s answer for a fresh, versionless campaign (PT-5c1,
+ * PT-5b3) — the shape `<Editor id={id} />` needs, with no listing entry, to
+ * resolve into a working blank draft whose `briefId` is `id` from the first
+ * render, the same way a real `POST /campaigns` mint (never a typed name,
+ * which derives nothing client-side any more, D178) would seed it.
+ */
+const blankCampaignMeta = (
+  id: string,
+  overrides: { name?: string | null; type?: string | null } = {},
+) => ({
+  campaignId: id,
+  slug: id,
+  name: overrides.name ?? null,
+  type: overrides.type ?? null,
+  hasVersion: false,
+});
+
 /** Route each call by URL+method; unmatched calls fail loudly rather than hanging.
  *  The write handlers receive the parsed request body, so a test can echo it back —
  *  what the real routes do (`parseBrief(await readBody(...))`), key order included. */
@@ -139,6 +157,8 @@ const routes = (handlers: {
   post?: (url: string, body?: Record<string, unknown>) => Response | Promise<Response>;
   put?: (url: string, body?: Record<string, unknown>) => Response | Promise<Response>;
   capabilities?: () => Response | Promise<Response>;
+  /** `GET /campaigns/:id` — PT-5c1's campaign-meta lookup, keyed by the uuid/slug in the URL. */
+  meta?: (id: string) => Response | Promise<Response>;
 }) => {
   const calls: { url: string; method: string; body?: Record<string, unknown> }[] = [];
   vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
@@ -157,6 +177,34 @@ const routes = (handlers: {
     }
     if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
       return Promise.resolve(handlers.list?.() ?? json({ briefs: [] }));
+    }
+    // PT-5c1 (D178) — `GET /campaigns/:id`: the load effect's fallback for an id the
+    // listing does not carry (a versionless campaign never is). Opt-in only, via
+    // `handlers.meta` — an id this suite did not ask about answers 404 by falling
+    // through to the catch-all below, the same as any other unconfigured route,
+    // rather than a blanket "every id is a fresh blank campaign" default that would
+    // turn every "unknown id" test into a false pass. Use `blankCampaignMeta(id)`
+    // for the common "a working blank-at-route draft" case.
+    if (
+      handlers.meta &&
+      method === "GET" &&
+      u.startsWith(`${API}/campaigns/`) &&
+      !u.startsWith(`${API}/campaigns/briefs`) &&
+      !u.startsWith(`${API}/campaigns/capabilities`) &&
+      !u.slice(`${API}/campaigns/`.length).includes("/")
+    ) {
+      const id = u.slice(u.lastIndexOf("/") + 1);
+      return Promise.resolve(handlers.meta(id));
+    }
+    // PT-5c1 (D177, D178) — `POST /campaigns`: the mint. Answered separately from the
+    // brief-write default below, whose shape (`{ file, brief, revision }`) is wrong for
+    // it. The default names the campaign after `name` itself (test fixtures pass
+    // already slug-shaped names — "fresh", "copy", "elsewhere" — so this needs no
+    // per-test handler for the common case); a test asserting a REAL dedupe or a
+    // refusal still supplies its own `post`.
+    if (method === "POST" && u === `${API}/campaigns`) {
+      const name = typeof parsed?.name === "string" ? parsed.name : "x";
+      return Promise.resolve(handlers.post?.(u, parsed) ?? json({ campaignId: name, slug: name }, 201));
     }
     // The defaults match what the real routes answer — `{ file, brief, revision }`:
     // a write mock less truthful than the route sends the next lane home green on
@@ -324,13 +372,17 @@ describe("BriefPage — data flow", () => {
 
   test("a new draft is saved with a POST carrying what was typed", async () => {
     const user = userEvent.setup();
-    const calls = routes({});
-    // A blank draft is a route now, so ask for it directly instead of clicking the
-    // editor back to empty.
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
+    // PT-5c1 (D178): a blank draft's id is server-minted now — <Editor id="fresh" />
+    // with no listing entry resolves through GET /campaigns/:id into a blank,
+    // "new"-source draft whose briefId is already "fresh", the same as a real
+    // POST /campaigns mint would seed it.
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
+    renderWithRun(<Editor id="fresh" />);
+    // Not a wait on campaignName === "" — that is also the pristine DEFAULT, true
+    // before the GET /campaigns/:id fetch this route depends on has even resolved
+    // (a waitFor on an already-true condition proves nothing). The id readout only
+    // ever shows "fresh" once the server-derived slug has actually landed.
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
 
     await fillValidDraft(user);
 
@@ -342,7 +394,7 @@ describe("BriefPage — data flow", () => {
     await saveVia(user, "Save");
 
     const post = await waitFor(() => {
-      const call = calls.find((c) => c.method === "POST");
+      const call = calls.find((c) => c.method === "POST" && c.url.includes("/campaigns/briefs"));
       expect(call).toBeTruthy();
       return call!;
     });
@@ -546,7 +598,7 @@ describe("BriefPage — data flow", () => {
   test("the blank route stays blank, however loud the shell is about its active brief", async () => {
     localStorage.setItem("cf:brief", JSON.stringify(brief("camp")));
     const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
 
     // wait for the listing, which is what used to trigger the adoption: a blank draft is
     // pristine, so the dirty guard let it through and `camp` landed in the form. The
@@ -561,7 +613,7 @@ describe("BriefPage — data flow", () => {
   test("New brief... on a dirty blank route asks once, then opens the dialog (W1)", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -591,7 +643,7 @@ describe("BriefPage — data flow", () => {
   test("a clean editor's New brief opens the dialog without asking (W1)", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -607,7 +659,7 @@ describe("BriefPage — data flow", () => {
   test("declining the prompt keeps what was typed and opens no dialog (W1)", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -628,7 +680,7 @@ describe("BriefPage — data flow", () => {
   test("Save as... on the blank route also stops the URL calling it new", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -998,12 +1050,11 @@ describe("BriefPage — data flow", () => {
   test("a 409 on a first-time save has no baseline to adopt the fresh revision against", async () => {
     const user = userEvent.setup();
     routes({
+      meta: () => json(blankCampaignMeta("fresh")),
       post: () => json({ error: 'Brief "fresh" already exists.', revision: "rev-fresh" }, 409),
     });
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
     await fillValidDraft(user, "fresh");
 
     await saveVia(user, "Save");
@@ -1097,7 +1148,7 @@ describe("BriefPage — data flow", () => {
     localStorage.setItem("cf:brief", JSON.stringify(brief("camp")));
     saveDraftToStorage(fromBrief(brief("camp"), { file: "camp.yaml" }));
 
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
 
     // D37/H5: the last-opened record survives — visiting /brief/new opens no brief,
     // so it must not destroy the pointer to the one the user opened last. (The bare
@@ -1115,9 +1166,15 @@ describe("BriefPage — data flow", () => {
   test("saving on the blank route stops the URL calling it new", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    // PT-5c1 (D177): the ONLY blank editor left at routeId === undefined is W3's
+    // resume of an abandoned draft (a fresh, routeless mount can never gain a
+    // briefId any more, since typing no longer derives one, D178) — so this is
+    // exercised as a resumed draft that already carries an id, the same shape a
+    // pre-lane build's autosave would have left.
+    saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "fresh" });
+    renderWithRun(<Editor />);
     await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh"),
     );
 
     await fillValidDraft(user, "fresh");
@@ -1136,8 +1193,12 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     // the PUT/POST echoes what was sent, so the stored snapshot matches the draft
     // and the chip can actually read clean
-    routes({ post: (_url, body) => json({ file: "fresh.yaml", brief: body, revision: "r1" }) });
-    renderWithRun(<NewEditor />);
+    routes({
+      meta: () => json(blankCampaignMeta("fresh")),
+      post: (_url, body) => json({ file: "fresh.yaml", brief: body, revision: "r1" }),
+    });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
 
     // Corrected with the pristine-chip fix: an untouched editor holds a blank form,
     // so the chip has nothing to report yet — it appears once the draft has content.
@@ -1306,7 +1367,7 @@ describe("BriefPage — data flow", () => {
   test("a Revert of a never-saved draft purges its recovery copy (L1, new source)", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -1598,7 +1659,7 @@ describe("BriefPage — data flow", () => {
     // rejects the brief. The structural validation now carries the destination.
     const user = userEvent.setup();
     const calls = routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -1620,7 +1681,7 @@ describe("BriefPage — data flow", () => {
     const user = userEvent.setup();
     globalThis.confirm = vi.fn(() => false);
     const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -1648,7 +1709,7 @@ describe("BriefPage — data flow", () => {
   test("accepting the overwrite retries with ?replace=1", async () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -1671,7 +1732,7 @@ describe("BriefPage — data flow", () => {
   test("a double activation of the overwrite confirm posts once", async () => {
     const user = userEvent.setup();
     const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -1707,7 +1768,7 @@ describe("BriefPage — data flow", () => {
           : json({ file: "copy.yaml", brief: brief("copy") }, 201);
       },
     });
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -1740,7 +1801,7 @@ describe("BriefPage — data flow", () => {
         return json({ error: "already exists" }, 409);
       },
     });
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -1769,7 +1830,7 @@ describe("BriefPage — data flow", () => {
       list: () => json({ briefs: [entry("taken", "r1")] }),
       post: () => new Promise<Response>(() => {}),
     });
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -1795,7 +1856,7 @@ describe("BriefPage — data flow", () => {
   test("a non-409 Save as… failure is reported", async () => {
     const user = userEvent.setup();
     routes({ post: () => json({ error: "disk full" }, 500) });
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -2097,11 +2158,9 @@ describe("BriefPage — capabilities and motion", () => {
 
   test("a motion brief authored from scratch saves with its motion policy (host with motion)", async () => {
     const user = userEvent.setup();
-    const calls = routes({});
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
     await fillValidDraft(user);
     await user.click(screen.getByText("Randomized"));
 
@@ -2133,7 +2192,7 @@ describe("BriefPage — capabilities and motion", () => {
   test("motion without a kind or a duration blocks Save, and the error reaches its input", async () => {
     const user = userEvent.setup();
     const calls = routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -2211,7 +2270,7 @@ describe("BriefPage — capabilities and motion", () => {
           commits += 1;
         }}
       >
-        <NewEditor />
+        <Editor />
       </Profiler>,
     );
     await waitFor(() =>
@@ -2299,7 +2358,7 @@ describe("BriefPage — capabilities and motion", () => {
           commits += 1;
         }}
       >
-        <NewEditor />
+        <Editor />
       </Profiler>,
     );
     await waitFor(() =>
@@ -2389,7 +2448,7 @@ describe("BriefPage — capabilities and motion", () => {
           commits += 1;
         }}
       >
-        <NewEditor />
+        <Editor />
       </Profiler>,
     );
     await waitFor(() =>
@@ -2423,16 +2482,14 @@ describe("BriefPage — capabilities and motion", () => {
       return <span data-testid="dirty-probe">{isDirty ? "dirty" : "clean"}</span>;
     };
     const user = userEvent.setup();
-    const calls = routes({});
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
     const view = renderWithRun(
       <>
         <DirtyProbe />
-        <NewEditor />
+        <Editor id="fresh" />
       </>,
     );
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
     expect(screen.getByTestId("dirty-probe").textContent).toBe("clean");
 
     // A first real edit sets it.
@@ -2569,7 +2626,7 @@ describe("BriefPage — capabilities and motion", () => {
       localStorage.setItem("cf:brief-picked", "1");
       const user = userEvent.setup();
       const calls = routes({});
-      const view = renderWithRun(<NewEditor />);
+      const view = renderWithRun(<Editor />);
       // `finally`, not a plain trailing `unmount()`: a throw anywhere below
       // (a `waitFor` that never resolves, a label that moved) must still
       // unmount this render rather than leave it mounted for whatever runs
@@ -3052,7 +3109,7 @@ describe("BriefPage — the refusal, in the one column (D3 / D38 / M1 / H2)", ()
   test("Save's refusal marks every failing section at once", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -3102,7 +3159,7 @@ describe("BriefPage — the refusal, in the one column (D3 / D38 / M1 / H2)", ()
   test("a refused Save speaks its refusal, and exactly once (D38)", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -4160,7 +4217,7 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
   test("a never-saved brief is still runnable, and running it writes nothing", async () => {
     const user = userEvent.setup();
     const calls = routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -4202,7 +4259,7 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
     renderWithRun(
       <>
         <Header />
-        <NewEditor />
+        <Editor />
       </>,
     );
     await waitFor(() => expect(screen.getByLabelText("Campaign Name")).toBeTruthy());
@@ -4354,7 +4411,7 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
     const user = userEvent.setup();
     let listed: readonly ReturnType<typeof entry>[] = [];
     routes({ list: () => json({ briefs: listed }) });
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -4392,7 +4449,7 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
         return json({ briefs: listed.map((e) => ({ ...e })) });
       },
     });
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -4589,7 +4646,7 @@ describe("BriefPage — the validation view (SG10 / SG-D13, SG-D14)", () => {
   test("a never-attempted draft reports its errors here, with no field showing one yet", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
@@ -4938,419 +4995,26 @@ describe("the route is the source of truth (D37)", () => {
   test("the /brief/new draft survives a reload, under one stable key (H6)", async () => {
     const user = userEvent.setup();
     routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    // PT-5c1 (D177): /brief/new no longer starts a blank editor on a fresh
+    // visit (create always mints through POST /campaigns first) — the one way
+    // it still shows a typeable blank editor is W3's resume, so this H6 claim
+    // is exercised through that path: seed a recoverable draft first.
+    saveDraftToStorage({ ...initialEditorState(), campaignName: "Abandoned" });
 
     const first = renderWithRun(<NewEditor />);
     await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("Abandoned"),
     );
     await fillValidDraft(user, "typed");
     await waitFor(() => expect(localStorage.getItem("cf:draft:new")).not.toBeNull());
     first.unmount();
 
-    // The reload lands on the same route and finds the draft it left.
+    // The reload finds the SAME draft, under the same stable key — resumed
+    // again, not started fresh.
     renderWithRun(<NewEditor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("typed"),
     );
-  });
-});
-
-describe("the create seed (W1)", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    localStorage.setItem("cf:brief-picked", "1");
-  });
-
-  const fillDialog = async (
-    user: ReturnType<typeof userEvent.setup>,
-    root: { getByLabelText: typeof screen.getByLabelText; getByRole: typeof screen.getByRole },
-  ) => {
-    await user.type(root.getByLabelText(messages.campaignNameLabel), "Summer Spark");
-    await user.click(root.getByRole("button", { name: messages.createCampaignConfirm }));
-  };
-
-  test("the guard asks exactly once for a dirty editor, before the dialog opens, and Create applies the seed in place", async () => {
-    nextMock().nav.pathname = "/brief/new";
-    // Everything presentation: every section stays mounted, so the applied values
-    // are assertable directly — the landing claim has its own tests below.
-    const user = userEvent.setup();
-    routes({});
-    renderWithRun(
-      <>
-        <BrowseBriefsButton />
-        <NewEditor />
-      </>,
-    );
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "",
-      ),
-    );
-    await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
-
-    // The sidebar's gesture: the guard asks first (D67)…
-    await user.click(screen.getByRole("button", { name: /Create new/ }));
-    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
-    // …and the create dialog is not open yet.
-    expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull();
-    await user.click(within(prompt).getByRole("button", { name: "Leave" }));
-
-    await fillDialog(
-      user,
-      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
-    );
-
-    // F8: the same-URL push resets nothing, so the seed was applied in place —
-    // and never through requestReplace (D67): one question for the whole gesture.
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    // D97 — the seed answers name and mode only: region and audience stay blank,
-    // waiting for the Identity step this landing is now on (D98).
-    expect((screen.getByLabelText("Target Region") as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe(
-      "",
-    );
-    expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull();
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    expect(screen.queryAllByRole("dialog", { name: "Unsaved edits" })).toHaveLength(0);
-  });
-
-  test("an in-place seed lands on Identity with the name applied (D98)", async () => {
-    nextMock().nav.pathname = "/brief/new";
-    const user = userEvent.setup();
-    routes({});
-    renderWithRun(
-      <>
-        <BrowseBriefsButton />
-        <NewEditor />
-      </>,
-    );
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "",
-      ),
-    );
-    await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
-
-    await user.click(screen.getByRole("button", { name: /Create new/ }));
-    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
-    await user.click(within(prompt).getByRole("button", { name: "Leave" }));
-    await fillDialog(
-      user,
-      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
-    );
-
-    // D98 — "lands on Identity" is true by construction since SG1: Identity is
-    // the first section of the one column, so there is no cursor to place and no
-    // way to arrive one step past two empty required fields. What is left to
-    // assert is that the seed APPLIED and spent its key.
-    await waitFor(() => expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull());
-    expect(document.getElementById("identity")).toBeTruthy();
-    // The seed rode a patch action, so the slug was derived in the reducer (F18) —
-    // the Identity readout shows it; the dialog never did.
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-      "Summer Spark",
-    );
-    expect(screen.getByText("summer-spark")).toBeTruthy();
-  });
-
-  test("after an in-place seed, no step baton remains (the leftover-baton pin)", async () => {
-    nextMock().nav.pathname = "/brief/new";
-    const user = userEvent.setup();
-    routes({});
-    renderWithRun(
-      <>
-        <BrowseBriefsButton />
-        <NewEditor />
-      </>,
-    );
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "",
-      ),
-    );
-    await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
-
-    await user.click(screen.getByRole("button", { name: /Create new/ }));
-    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
-    await user.click(within(prompt).getByRole("button", { name: "Leave" }));
-    await fillDialog(
-      user,
-      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
-    );
-
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    // `takeSeed` spends the companion baton as well as the seed. SG1 removed the
-    // baton's only APPLIER (the step cursor), so a leftover can no longer move
-    // anything — but it is still written on the cross-route create path, and a key
-    // that is written and never cleared is a leak this pin catches.
-    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
-  });
-
-  test("after a refused Save, an in-place seed arrives with nothing red — attempted is reset", async () => {
-    nextMock().nav.pathname = "/brief/new";
-    const user = userEvent.setup();
-    routes({});
-    renderWithRun(
-      <>
-        <BrowseBriefsButton />
-        <NewEditor />
-      </>,
-    );
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "",
-      ),
-    );
-    await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
-    // A refused Save sets attempted: every error shows and the status refuses.
-    // (It was a refused Next before SG1 — the wizard's own gesture; Save is the
-    // verb that carries the refusal now, and it is the same `attempted` flag.)
-    await saveVia(user, "Save");
-    expect(await screen.findByText(/Not saved yet/)).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: /Create new/ }));
-    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
-    await user.click(within(prompt).getByRole("button", { name: "Leave" }));
-    await fillDialog(
-      user,
-      within(await screen.findByRole("dialog", { name: messages.createCampaignTitle })),
-    );
-
-    // The arrival is not red: the seed reset attempted/touched (L1.1).
-    await waitFor(() => expect(screen.queryByText(/Not saved yet/)).toBeNull());
-    expect(screen.getByText(/New brief — fill/)).toBeTruthy();
-  });
-
-  test("a seed created elsewhere is applied on mount, and both batons are spent", async () => {
-    routes({});
-    // What the dialog's Create does from another route (verified in its own suite):
-    // publish the seed, stash the landing step, then push.
-    await act(async () => {
-      await createCampaign({ name: "Summer Spark", type: "social-post" });
-    });
-    localStorage.setItem("cf:step-handoff", "identity");
-
-    nextMock().nav.pathname = "/brief/new";
-    renderWithRun(<NewEditor />);
-    // The APPLIED field, never only the spent key: the landing itself stopped
-    // being a claim when SG1 deleted the cursor, so the seed's effect on the
-    // draft is the whole assertion.
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    // NOT the step baton. `takeSeed` spends that only for a REFUSED seed (its own
-    // suite pins both directions); an accepted one leaves it, because it used to
-    // be H5's to apply. SG1 deleted the applier, so a cross-route create now
-    // leaves `cf:step-handoff` behind — a dead key nothing reads. Asserting it
-    // were null here would be asserting a fix this lane has not made.
-    expect(localStorage.getItem("cf:step-handoff")).toBe("identity");
-  });
-
-  test("a paid-social seed sets the editor's mode and the Randomized section list", async () => {
-    routes({});
-    // The T2 dialog bridge maps the mode panel's Randomized choice to the
-    // paid-social type (D108); T3 replaces the panel with the type field.
-    await act(async () => {
-      await createCampaign({ name: "Summer Spark", type: "paid-social" });
-    });
-
-    nextMock().nav.pathname = "/brief/new";
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-    // Two controls carry this name now: the Sections outline's row and the
-    // sidebar accordion, which the mode publishes on its own since SG1 dropped
-    // the `presentation` term from its gate. The claim is about the mode's
-    // section LIST, so the count is what it is and Treatments is the discriminator.
-    expect(screen.getAllByRole("button", { name: "Variation Policy" }).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "Treatments" })).toBeNull();
-  });
-
-  test("an old-shape seed from the previous build is discarded, not half-applied (F5)", async () => {
-    routes({});
-    // What the currently deployed build writes: the four-field seed. Accepting it
-    // would seed a brief with a name and nothing else, silently — the guard
-    // discards it wholesale and the user starts clean.
-    localStorage.setItem(
-      CREATE_SEED_KEY,
-      JSON.stringify({
-        name: "Summer Spark",
-        targetRegion: "EU",
-        targetAudience: "trail runners",
-        mode: "brief",
-      }),
-    );
-    nextMock().nav.pathname = "/brief/new";
-    renderWithRun(<NewEditor />);
-    await waitFor(() => expect(screen.getByLabelText(messages.campaignNameLabel)).toBeTruthy());
-    // No partial patch: even the name is not seeded — the seed was discarded whole.
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText(messages.targetRegionLabel) as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe(
-      "",
-    );
-    // Spent, not retried: a refused baton cannot poison the next mount either.
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-  });
-
-  test("a rejected legacy seed also spends its landing baton, so the editor lands on Identity (D98)", async () => {
-    routes({});
-    // Both keys the previously deployed build left after an interrupted create —
-    // the old four-field seed and the Copy baton that skipped Identity. takeSeed
-    // in isolation and the navigation hook in isolation each look fine; the bug
-    // is the interaction: a refused seed that does not spend the companion baton
-    // lets the mount effect apply "copy" and land a blank brief one step past
-    // two empty required fields.
-    localStorage.setItem(
-      "cf:create-seed",
-      JSON.stringify({
-        name: "Summer Spark",
-        targetRegion: "EU",
-        targetAudience: "trail runners",
-        mode: "brief",
-      }),
-    );
-    localStorage.setItem("cf:step-handoff", "copy");
-    nextMock().nav.pathname = "/brief/new";
-    renderWithRun(<NewEditor />);
-
-    // SG1 — the "lands on Identity" half of this test is retired with the cursor:
-    // a leftover baton has nothing to move. What remains, and is the defect the
-    // test was written for, is that the refused seed SPENDS the companion baton
-    // rather than leaving it behind.
-    await waitFor(() => expect(localStorage.getItem("cf:step-handoff")).toBeNull());
-
-    // Discard: no name, region or audience seeded.
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText(messages.targetRegionLabel) as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText(messages.targetAudienceLabel) as HTMLInputElement).value).toBe(
-      "",
-    );
-  });
-
-  test("the #217 {name, mode} seed is discarded, not half-applied, and spends its baton (D108)", async () => {
-    routes({});
-    // What the previously deployed build wrote: the two-field seed. It is
-    // refused whole — no name seeded, the mode stays Classic — and the
-    // companion baton is spent rather than left behind.
-    localStorage.setItem(
-      CREATE_SEED_KEY,
-      JSON.stringify({ name: "Summer Spark", mode: "variation" }),
-    );
-    localStorage.setItem("cf:step-handoff", "copy");
-    nextMock().nav.pathname = "/brief/new";
-    renderWithRun(<NewEditor />);
-    await waitFor(() => expect(screen.getByLabelText(messages.campaignNameLabel)).toBeTruthy());
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "variation" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-    // Both keys cleared: a refused baton cannot poison the next mount either.
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    expect(localStorage.getItem("cf:step-handoff")).toBeNull();
-  });
-
-  test("a paid-social seed is applied once — a platform toggled off stays off (D109)", async () => {
-    routes({});
-    localStorage.setItem(
-      CREATE_SEED_KEY,
-      JSON.stringify({ name: "Summer Spark", type: "paid-social" }),
-    );
-    nextMock().nav.pathname = "/brief/new";
-    const user = userEvent.setup();
-    const view = renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    // The preset arrived: the paid platforms are on, mode is Randomized.
-    expect(
-      screen.getByRole("button", { name: "instagram-story" }).getAttribute("aria-pressed"),
-    ).toBe("true");
-    expect(screen.getByRole("button", { name: "brief" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-    // The user's change: one platform off.
-    await user.click(screen.getByRole("button", { name: "tiktok" }));
-    expect(screen.getByRole("button", { name: "tiktok" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-    // The remount this used to force with a presentation switch is gone with the
-    // toggle — and the full remount below is the stronger form of the same
-    // question anyway (the reload case), so nothing it proved is lost.
-    // A full remount does not re-apply the preset: the seed was spent by
-    // its one read, so the user's toggled-off platform survives the return.
-    view.unmount();
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "Summer Spark",
-      ),
-    );
-    expect(screen.getByRole("button", { name: "tiktok" }).getAttribute("aria-pressed")).toBe(
-      "false",
-    );
-    // Nothing is left to re-apply.
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    expect(takeSeed()).toBeNull();
-  });
-
-  test("a malformed seed leaves a working blank editor rather than throwing", async () => {
-    routes({});
-    // Syntactically valid, structurally not a seed — takeSeed must spend it as null.
-    localStorage.setItem(CREATE_SEED_KEY, JSON.stringify({ name: 42 }));
-    nextMock().nav.pathname = "/brief/new";
-    renderWithRun(<NewEditor />);
-    await waitFor(() => expect(screen.getByLabelText(messages.campaignNameLabel)).toBeTruthy());
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe("");
-    expect(localStorage.getItem(CREATE_SEED_KEY)).toBeNull();
-    const user = userEvent.setup();
-    await user.type(screen.getByLabelText(messages.campaignNameLabel), "spark");
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-      "spark",
-    );
-  });
-
-  test("a seed published while a named brief is open is not applied in place", async () => {
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    renderWithRun(<Editor id="camp" />);
-    await waitFor(() =>
-      expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-        "camp",
-      ),
-    );
-
-    await act(async () => {
-      await createCampaign({ name: "Other", type: "paid-social" });
-    });
-    // The gate is the route: the named brief stays on screen, and the seed waits in
-    // the store for a blank-route mount to spend it.
-    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
-      "camp",
-    );
-    expect(localStorage.getItem(CREATE_SEED_KEY)).not.toBeNull();
   });
 });
 
@@ -5412,7 +5076,7 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     renderWithRun(
       <>
         <BrowseBriefsButton />
-        <NewEditor />
+        <Editor />
       </>,
     );
     await waitFor(() =>
@@ -5450,7 +5114,7 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     renderWithRun(
       <>
         <BrowseBriefsButton />
-        <NewEditor />
+        <Editor />
       </>,
     );
     await waitFor(() =>
@@ -5520,7 +5184,7 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
   test("/brief/new with a rejected listing still renders the blank editor", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     routes({ list: () => json({ error: "boom" }, 500) });
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
 
     // Wait for the listing to have actually FAILED before asserting anything about the
     // editor. Campaign Name is "" on first paint and /brief/new never awaits the listing,
@@ -5779,7 +5443,7 @@ describe("the pre-type draft (T2 / D112)", () => {
     localStorage.setItem("cf:draft:new", JSON.stringify(stored));
 
     nextMock().nav.pathname = "/brief/new";
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
         "Restored",
@@ -5809,7 +5473,7 @@ describe("VE1 — undo and redo in the editor", () => {
   test("⌘Z steps back over a typed word; ⇧⌘Z replays it", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(nameField().value).toBe(""));
     await user.type(nameField(), "Spring");
     await waitFor(() => expect(nameField().value).toBe("Spring"));
@@ -5824,7 +5488,7 @@ describe("VE1 — undo and redo in the editor", () => {
   test("Ctrl+Z undoes where ⌘Z does", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(nameField().value).toBe(""));
     await user.type(nameField(), "Spring");
     fireEvent.keyDown(document.body, { key: "z", ctrlKey: true });
@@ -5834,7 +5498,7 @@ describe("VE1 — undo and redo in the editor", () => {
   test("⌘Z inside a text field is left to the field's own undo", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(nameField().value).toBe(""));
     await user.type(nameField(), "Spring");
     // The caret is in the field: the chord belongs to the field's native undo.
@@ -5856,7 +5520,7 @@ describe("VE1 — undo and redo in the editor", () => {
   test("the autosaved draft stays exactly EditorState's keys through an undo and a retype", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(nameField().value).toBe(""));
     await user.type(nameField(), "Spring");
     await user.type(audienceField(), "Family");
@@ -5877,7 +5541,7 @@ describe("VE1 — undo and redo in the editor", () => {
   test("undoing back to pristine purges the autosaved draft", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(nameField().value).toBe(""));
     await user.type(nameField(), "Spring");
     await waitFor(() => expect(localStorage.getItem("cf:draft:new")).not.toBeNull());
@@ -5899,7 +5563,7 @@ describe("VE1 — undo and redo in the editor", () => {
     // eats the very draft the mount came for. The return-to-pristine purge must
     // know this render is the START, not a RETURN.
     saveDraftToStorage({ ...initialEditorState(), capabilities: { motion: true } });
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(nameField().value).toBe(""));
     // Let the capabilities answer land and its (still-pristine) render flush.
     await new Promise((r) => setTimeout(r, 50));
@@ -5914,7 +5578,7 @@ describe("VE1 — undo and redo in the editor", () => {
   test("⌘Z inside an open dialog does not edit the draft behind it", async () => {
     const user = userEvent.setup();
     routes({});
-    renderWithRun(<NewEditor />);
+    renderWithRun(<Editor />);
     await waitFor(() => expect(nameField().value).toBe(""));
     await user.type(nameField(), "Spring");
     await saveVia(user, "Save as");
