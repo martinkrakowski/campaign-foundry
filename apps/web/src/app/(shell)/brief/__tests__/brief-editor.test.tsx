@@ -1000,7 +1000,9 @@ describe("BriefPage — data flow", () => {
     let listed: BriefEntry[] = [entry("camp", "r1")];
     routes({
       list: () => json({ briefs: listed }),
-      post: () => {
+      meta: () => json(blankCampaignMeta("copy")),
+      post: (url) => {
+        if (url.endsWith("/campaigns")) return json({ campaignId: "copy", slug: "copy" }, 201);
         listed = [...listed, { file: "copy.yaml", brief: stored, revision: "rev-copy" }];
         return json({ file: "copy.yaml", brief: stored, revision: "rev-copy" }, 201);
       },
@@ -1009,11 +1011,11 @@ describe("BriefPage — data flow", () => {
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.type(screen.getByLabelText("New campaign name"), "Copy");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
-    await waitFor(() => expect(screen.queryByLabelText("New brief id")).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText("New campaign name")).toBeNull());
     // W1: the rerender keeps the wrapper's tree shape (provider + dialog), so the
     // editor instance survives and the route prop change is what drives the load.
     view.rerender(
@@ -1511,7 +1513,7 @@ describe("BriefPage — data flow", () => {
     // Save is the verb itself now (one press); Save as… sits in the overflow.
     await saveVia(user, "Save");
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "elsewhere");
+    await user.type(screen.getByLabelText("New campaign name"), "Elsewhere");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
@@ -1575,200 +1577,29 @@ describe("BriefPage — data flow", () => {
     ).toBeTruthy();
   });
 
-  test("Save as… onto an existing id asks before overwriting, and honours a refusal", async () => {
-    const user = userEvent.setup();
-    globalThis.confirm = vi.fn(() => false);
-    const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
-    renderWithRun(<Editor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
-
-    await fillValidDraft(user);
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "taken");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    // The pre-flight check knows the id is taken: the attempt writes nothing and
-    // the overwrite dialog asks (D9 — the visible decision, never an auto-resend).
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    await user.click(within(prompt).getByRole("button", { name: messages.confirmCancel }));
-
-    // The refusal held: no write left the page, and the Save-as dialog stands
-    // ready to answer differently.
-    expect(calls.some((c) => c.method === "POST")).toBe(false);
-    expect(screen.getByLabelText("New brief id")).toBeTruthy();
-    expect(screen.queryByRole("dialog", { name: messages.saveAsOverwriteTitle })).toBeNull();
-  });
-
-  test("accepting the overwrite retries with ?replace=1", async () => {
-    const user = userEvent.setup();
-    const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
-    renderWithRun(<Editor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
-
-    await fillValidDraft(user);
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "taken");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    // the dialog is the decision point; the confirm is what sends the overwrite
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
-
-    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.url).toContain("replace=1"));
-  });
-
-  test("a double activation of the overwrite confirm posts once", async () => {
-    const user = userEvent.setup();
-    const calls = routes({ list: () => json({ briefs: [entry("taken", "r1")] }) });
-    renderWithRun(<Editor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
-
-    await fillValidDraft(user);
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "taken");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    const confirm = within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm });
-    // Two activations in the same frame: `saving` has not flushed, so a state
-    // check would still let both through. The synchronous ref is what collapses
-    // them to one write.
-    fireEvent.click(confirm);
-    fireEvent.click(confirm);
-
-    await waitFor(() => expect(writes(calls).length).toBe(1));
-    expect(writes(calls)[0].url).toContain("replace=1");
-  });
-
-  test("a 409 from a brief that appeared since the list was fetched offers the same overwrite", async () => {
-    const user = userEvent.setup();
-    let posts = 0;
-    const calls = routes({
-      post: () => {
-        posts += 1;
-        return posts === 1
-          ? json({ error: "already exists" }, 409)
-          : json({ file: "copy.yaml", brief: brief("copy") }, 201);
-      },
-    });
-    renderWithRun(<Editor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
-
-    await fillValidDraft(user);
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    // the first attempt posted WITHOUT replace; its 409 opens the same dialog the
-    // pre-flight check uses — one decision point, whichever way the collision was found
-    await waitFor(() => expect(posts).toBe(1));
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    expect(calls.filter((c) => c.method === "POST")[0].url).not.toContain("replace=1");
-
-    await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
-    await waitFor(() => expect(posts).toBe(2));
-    expect(calls.filter((c) => c.method === "POST")[1].url).toContain("replace=1");
-  });
-
-  test("refusing the 409 overwrite leaves the copy unwritten", async () => {
-    const user = userEvent.setup();
-    let posts = 0;
-    const calls = routes({
-      post: () => {
-        posts += 1;
-        return json({ error: "already exists" }, 409);
-      },
-    });
-    renderWithRun(<Editor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
-
-    await fillValidDraft(user);
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    await user.click(within(prompt).getByRole("button", { name: messages.confirmCancel }));
-
-    await waitFor(() => expect(posts).toBe(1));
-    expect(calls.some((c) => c.method === "POST" && c.url.includes("replace=1"))).toBe(false);
-    expect(screen.getByLabelText("New brief id")).toBeTruthy();
-  });
-
-  test("neither Escape nor Cancel dismisses the overwrite dialog while the retry write is in flight", async () => {
-    const user = userEvent.setup();
-    // The listing knows the id is taken, so the dialog opens without a write; the
-    // confirm's retry POST never answers.
-    routes({
-      list: () => json({ briefs: [entry("taken", "r1")] }),
-      post: () => new Promise<Response>(() => {}),
-    });
-    renderWithRun(<Editor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-    );
-
-    await fillValidDraft(user);
-
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "taken");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    const prompt = await screen.findByRole("dialog", { name: messages.saveAsOverwriteTitle });
-    await user.click(within(prompt).getByRole("button", { name: messages.saveAsOverwriteConfirm }));
-    expect(screen.getByRole("dialog", { name: messages.saveAsOverwriteTitle })).toBeTruthy();
-
-    // #163's saving guard: a dismissal mid-write would hand the user an editable
-    // page whose pending adoption is about to discard their edits.
-    await user.keyboard("{Escape}");
-    expect(screen.getByRole("dialog", { name: messages.saveAsOverwriteTitle })).toBeTruthy();
-  });
-
   test("a non-409 Save as… failure is reported", async () => {
     const user = userEvent.setup();
-    routes({ post: () => json({ error: "disk full" }, 500) });
+    // PT-5c1 (D177): a fresh, routeless editor can never gain a briefId any more
+    // (typing derives nothing, D178) — seed one the way W3's resume would find it.
+    saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "fresh" });
+    routes({
+      post: (url) => (url.endsWith("/campaigns") ? json({ error: "disk full" }, 500) : json({}, 201)),
+    });
     renderWithRun(<Editor />);
     await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh"),
     );
-
-    await fillValidDraft(user);
+    await fillValidDraft(user, "fresh");
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy");
+    await user.type(screen.getByLabelText("New campaign name"), "Copy");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
 
     expect(await screen.findByText(/disk full/)).toBeTruthy();
   });
+
 
   test("a route brief is re-attached to its file when the listing knows it", async () => {
     const calls = routes({
@@ -5280,8 +5111,10 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     const calls = routes({
       list: () =>
         listFails ? json({ error: "boom" }, 500) : json({ briefs: [entry("camp", "r1")] }),
-      // The copy is created; the refresh adoptSavedCopy awaits on the way out fails.
-      post: () => {
+      // The mint succeeds; the first-save write that completes it succeeds too —
+      // it is the LISTING REFRESH `handleSaveAs` awaits on the way out that fails.
+      post: (url) => {
+        if (url.endsWith("/campaigns")) return json({ campaignId: "copy-1", slug: "copy-1" }, 201);
         listFails = true;
         return json({ file: "copy-1.yaml", brief: brief("copy-1"), revision: "mock-rev" }, 201);
       },
@@ -5290,11 +5123,11 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     await waitForEditorReady();
 
     await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New brief id"), "copy-1");
+    await user.type(screen.getByLabelText("New campaign name"), "Copy 1");
     await user.click(
       within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
     );
-    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    await waitFor(() => expect(calls.filter((c) => c.method === "POST").length).toBe(2));
     await waitFor(() =>
       expect(error).toHaveBeenCalledWith("Failed to load briefs:", expect.anything()),
     );
