@@ -254,6 +254,35 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
     });
   });
 
+  // D177 (PT-5b2, coordinator follow-up): `rewriteBrief`'s own "versions[0]!"
+  // assumed createBrief always wrote version 1 first — no longer true once a
+  // blank `POST /campaigns` create can leave a row with none. Answering
+  // ENOENT here (exactly like a genuinely missing row) is what lets
+  // `replaceBrief`'s existing ENOENT-falls-to-create branch complete the
+  // row's first Save, and what lets `PUT /campaigns/briefs/:id` 404 instead
+  // of crashing.
+  describe("rewriteBrief and replaceBrief on a versionless campaign row (D177, PT-5b2)", () => {
+    test("rewriteBrief answers ENOENT, not a crash", async () => {
+      await db.query("insert into campaign (org_id, slug) values ($1, $2)", ["local", "test-camp"]);
+
+      await expect(store.rewriteBrief(minimalBrief)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    test("replaceBrief falls through to createBrief, adding version 1", async () => {
+      await db.query("insert into campaign (org_id, slug) values ($1, $2)", ["local", "test-camp"]);
+
+      const replaced = await store.replaceBrief(minimalBrief);
+      expect(replaced.brief.id).toBe("test-camp");
+
+      const { rows } = await db.query<{ version: number }>(
+        `select bv.version from brief_version bv
+           join campaign c on c.id = bv.campaign_id
+          where c.org_id = 'local' and c.slug = 'test-camp'`,
+      );
+      expect(rows).toEqual([{ version: 1 }]);
+    });
+  });
+
   describe("createCampaign (D177, PT-5b2)", () => {
     test("mints a campaign row with no version yet", async () => {
       const created = await store.createCampaign("fresh-slug");

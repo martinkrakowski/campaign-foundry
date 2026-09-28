@@ -421,7 +421,16 @@ export class PgBriefStore implements BriefStorePort {
         `select version, revision from brief_version where campaign_id = $1 order by version desc limit 1`,
         [campaignId],
       );
-      const current = versions[0]!; // createBrief always writes version 1
+      // D177 (PT-5b2): a `POST /campaigns` blank create leaves a campaign row
+      // with no version yet — rewriteBrief has nothing to rewrite. Answering
+      // `notFound` (ENOENT) here, exactly like a genuinely missing row, lets
+      // both callers already keyed on that code do the right thing: PUT
+      // /campaigns/briefs/:id 404s (its own contract — it never creates), and
+      // `replaceBrief`'s ENOENT catch falls through to `createBrief`, which
+      // completes the row's first Save. Without this, `versions[0]!` below
+      // would throw an uncaught TypeError (500) instead.
+      const current = versions[0];
+      if (!current) throw notFound(brief.id);
       if (expectedRevision && expectedRevision !== current.revision) {
         const err = new Error("Brief was modified by another user.");
         (err as { code?: string; revision?: string }).code = "ECONFLICT";
