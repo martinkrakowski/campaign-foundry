@@ -269,7 +269,11 @@ export class FsBriefStore implements BriefStorePort {
    * file) is part of the reservation and is removed with the directory, but
    * any other entry (a leftover `pools.json`) still refuses the whole
    * release, unchanged — reading first means a stray file is discovered
-   * before `campaign.json` is gone, never after.
+   * before `campaign.json` is gone, never after. The ENOENT/ENOTEMPTY
+   * fallback the old unconditional `rmdir` needed lives in this `readdir`
+   * check now (a slug never reserved, or one with something else in it), so
+   * `rmdir` itself runs only once both are already ruled out — its own
+   * failure (e.g. EACCES on the parent) propagates unchanged.
    */
   async releaseCampaign(slug: string): Promise<boolean> {
     if (await this.findBriefFileById(slug)) return false;
@@ -285,13 +289,8 @@ export class FsBriefStore implements BriefStorePort {
     if (entries.includes(CAMPAIGN_META_FILE)) {
       await unlink(resolveConfined(dirPath, CAMPAIGN_META_FILE));
     }
-    try {
-      await rmdir(dirPath);
-      return true;
-    } catch (error) {
-      if (isErrno(error, "ENOENT") || isErrno(error, "ENOTEMPTY")) return false;
-      throw error;
-    }
+    await rmdir(dirPath);
+    return true;
   }
 
   /**

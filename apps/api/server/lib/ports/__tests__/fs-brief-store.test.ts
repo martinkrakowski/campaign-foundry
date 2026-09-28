@@ -353,15 +353,26 @@ describe("FsBriefStore", () => {
       expect(await store.releaseCampaign("nope")).toBe(false);
     });
 
+    // A plain file where the reservation directory should be: findBriefFileById
+    // skips it (no recognized brief extension), so this reaches the readdir
+    // check, which fails ENOTDIR — the rethrow branch, not the ENOENT one.
+    test("rethrows a non-ENOENT readdir failure (e.g. ENOTDIR) unchanged", async () => {
+      writeFileSync(join(dir, "not-a-dir"), "x");
+      await expect(store.releaseCampaign("not-a-dir")).rejects.toMatchObject({
+        code: "ENOTDIR",
+      });
+    });
+
     const canDenyWriteRelease = process.platform !== "win32" && process.getuid?.() !== 0;
     test.skipIf(!canDenyWriteRelease)(
-      "rethrows a non-ENOENT/ENOTEMPTY rmdir failure (e.g. EACCES) unchanged",
+      "rethrows a rmdir failure (e.g. EACCES) unchanged",
       async () => {
         await store.createCampaign("mint-only");
-        // 0o555 (read+execute, no write): findBriefFileById's own readdir
-        // still succeeds — only rmdir's need to unlink the entry from its
-        // parent fails, so this exercises releaseCampaign's own catch
-        // rather than an earlier read failing first.
+        // 0o555 (read+execute, no write): findBriefFileById's own readdir and
+        // this method's own readdir/unlink (mint-only's own permissions are
+        // untouched) still succeed — only rmdir's need to remove the "mint-only"
+        // entry from its parent fails, so this exercises rmdir's own rejection,
+        // propagated with no catch around it.
         chmodSync(dir, 0o555);
         try {
           await expect(store.releaseCampaign("mint-only")).rejects.toMatchObject({
@@ -386,6 +397,17 @@ describe("FsBriefStore", () => {
         slug: "versionless",
         name: "Versionless",
         type: "short-video",
+        hasVersion: false,
+      });
+    });
+
+    test("a versionless create with no name/type given answers null for both", async () => {
+      await store.createCampaign("no-meta-given");
+      expect(await store.campaignMeta("no-meta-given")).toEqual({
+        campaignId: "no-meta-given",
+        slug: "no-meta-given",
+        name: null,
+        type: null,
         hasVersion: false,
       });
     });
