@@ -1,4 +1,5 @@
 export type Stage =
+  | "plan-review"
   | "dispatch"
   | "implement"
   | "gate"

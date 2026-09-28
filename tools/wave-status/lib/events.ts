@@ -1,6 +1,7 @@
 import type { EventKind, Stage, WaveEvent } from "./types.js";
 
 const STAGES: readonly Stage[] = [
+  "plan-review",
   "dispatch",
   "implement",
   "gate",
