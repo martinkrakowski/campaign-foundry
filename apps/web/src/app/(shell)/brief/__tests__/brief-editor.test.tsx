@@ -2218,18 +2218,27 @@ describe("BriefPage — capabilities and motion", () => {
         <Editor id="fresh" />
       </>,
     );
+    // PT-5c1 (D178): a blank-at-route campaign is never pristine from the first
+    // render — `isDirtySinceSave` is unconditionally true for a `"new"` source
+    // (nothing has been saved yet, which is honest: no version exists), and
+    // `isPristine` itself compares the WHOLE brief including `id`, which already
+    // differs from the truly-blank baseline the instant the server's minted slug
+    // lands. This is not new to this lane: a seeded `/brief/new` draft under the
+    // OLD scheme was equally dirty the moment its seed applied, for the same
+    // reason (a non-empty id and a never-saved source). What this test still
+    // proves is everything AFTER that: a real edit keeps it dirty, a no-op edit
+    // does not toggle it, Save clears it, and unmount clears it too.
     await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
-    expect(screen.getByTestId("dirty-probe").textContent).toBe("clean");
-
-    // A first real edit sets it.
-    await fillValidDraft(user);
     expect(screen.getByTestId("dirty-probe").textContent).toBe("dirty");
 
-    // An edit that changes nothing does not toggle it: replaying the value a field
-    // already holds still dispatches a `patch` (a new `state` object), but
-    // `isPristine`/`isDirtySinceSave` recompute to the same booleans as before, so
-    // the flag must not flip off and back on.
-    fireEvent.change(screen.getByLabelText("Campaign Name"), { target: { value: "fresh" } });
+    // A no-op edit — replaying the value a field already holds — still dispatches
+    // a `patch` (a new `state` object), but `isPristine`/`isDirtySinceSave`
+    // recompute to the same booleans as before, so the flag must not flip.
+    fireEvent.change(screen.getByLabelText("Campaign Name"), { target: { value: "" } });
+    expect(screen.getByTestId("dirty-probe").textContent).toBe("dirty");
+
+    // A first real edit — still dirty, unsurprisingly, but now for content too.
+    await fillValidDraft(user);
     expect(screen.getByTestId("dirty-probe").textContent).toBe("dirty");
 
     // A save clears it: the saved snapshot now matches the draft.
@@ -2354,17 +2363,21 @@ describe("BriefPage — capabilities and motion", () => {
       localStorage.clear();
       localStorage.setItem("cf:brief-picked", "1");
       const user = userEvent.setup();
-      const calls = routes({});
-      const view = renderWithRun(<Editor />);
+      // PT-5c1 (D178): both callers below fill the draft under the id "fresh" —
+      // a blank, routeless `<Editor />` can never gain a briefId any more
+      // (typing derives nothing), so this observes the same blank-at-route
+      // shape `GET /campaigns/:id` would seed a real create with.
+      const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
+      const view = renderWithRun(<Editor id="fresh" />);
       // `finally`, not a plain trailing `unmount()`: a throw anywhere below
       // (a `waitFor` that never resolves, a label that moved) must still
       // unmount this render rather than leave it mounted for whatever runs
       // next — the one thing this function's caller cannot do on its behalf,
       // since `view` lives only in this closure.
       try {
-        await waitFor(() =>
-          expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
-        );
+        // Not a wait on campaignName === "" — that is also the pristine DEFAULT,
+        // true before GET /campaigns/:id has even resolved.
+        await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
         await fill(user);
 
         // (c) — captured before anything else moves focus (Save's own click included).
