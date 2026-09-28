@@ -277,7 +277,7 @@ export function CreateCampaignDialog() {
       router.push(campaignRoute(result.campaignId));
     } catch (error) {
       setResumePrompt(false);
-      setRefusal(unknownErrorMessage(error, "Could not create the campaign."));
+      setRefusal(unknownErrorMessage(error, messages.createCampaignFailed));
     } finally {
       setCreating(false);
     }
