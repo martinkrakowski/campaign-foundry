@@ -23,6 +23,7 @@ import {
   type PrFact,
   type TailHandle,
 } from "../lib/collect.js";
+import type { WaveStatus } from "../lib/types.js";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1999,5 +2000,213 @@ describe("realDeps — the process-level wiring", () => {
 
   test("realDeps does not fix planVerifyArtifactPath at module load", () => {
     expect(realDeps.planVerifyArtifactPath).toBeUndefined();
+  });
+});
+
+describe("collect — the plan-review gate (FU-plan-review-gate)", () => {
+  const PLAN = [
+    "# The plan",
+    "",
+    "| Lane | Delivers |",
+    "|---|---|",
+    "| **PT-5a** | The campaign id, exposed and resolvable. |",
+  ].join("\n");
+
+  const reviewLine = (rows: Record<string, string>, verdict = "clear"): string =>
+    `${JSON.stringify({
+      ts: "2026-09-28T10:00:00Z",
+      wave: "R",
+      lane: "_plan",
+      stage: "plan-review",
+      event: "settled",
+      detail: { plan: "docs/planning/plan.md", reviewer: "plan-review-seat", rows, verdict },
+    })}\n`;
+
+  const dispatchLine = (lane: string): string =>
+    `${JSON.stringify({
+      ts: "2026-09-28T11:00:00Z",
+      wave: "R",
+      lane,
+      stage: "dispatch",
+      event: "started",
+    })}\n`;
+
+  const tree = (events: string, plan = PLAN): FakeTree => ({
+    dirs: { [ROOT]: ["waveR"], [`${ROOT}/waveR`]: ["events.jsonl"] },
+    files: { [`${ROOT}/waveR/events.jsonl`]: events, "docs/planning/plan.md": plan },
+  });
+
+  const laneAt = async (events: string, plan?: string): Promise<WaveStatus> =>
+    collect(fakeDeps(tree(events, plan)), ROOT, "2026-09-28T12:00:00Z");
+
+  const planHash = (): Promise<string> =>
+    import("node:crypto").then(({ createHash }) =>
+      createHash("sha256")
+        .update("| **PT-5a** | The campaign id, exposed and resolvable. |", "utf8")
+        .digest("hex"),
+    );
+
+  const laneRow = (status: WaveStatus, lane: string) =>
+    status.waves[0]?.lanes.find((l) => l.lane === lane);
+
+  test("a lane dispatched on a reviewed, unchanged row gathers no flag", async () => {
+    const status = await laneAt(reviewLine({ "PT-5a": await planHash() }) + dispatchLine("PT-5a"));
+    expect(laneRow(status, "PT-5a")?.derived.planReview).toBeUndefined();
+  });
+
+  test("a plan edited after the review flags the lane", async () => {
+    const edited = PLAN.replace("exposed and resolvable", "hidden and unresolvable");
+    const status = await laneAt(
+      reviewLine({ "PT-5a": await planHash() }) + dispatchLine("PT-5a"),
+      edited,
+    );
+    expect(laneRow(status, "PT-5a")?.derived.planReview).toBe("dispatched on an unreviewed row");
+  });
+
+  test("a lane dispatched with no review for the wave is flagged", async () => {
+    const status = await laneAt(dispatchLine("PT-5a"));
+    expect(laneRow(status, "PT-5a")?.derived.planReview).toBe("dispatched on an unreviewed row");
+  });
+
+  test("a plan file that cannot be read says why instead of guessing a hash", async () => {
+    const deps = fakeDeps({
+      dirs: { [ROOT]: ["waveR"], [`${ROOT}/waveR`]: ["events.jsonl"] },
+      files: {
+        [`${ROOT}/waveR/events.jsonl`]: reviewLine({ "PT-5a": "aa" }) + dispatchLine("PT-5a"),
+      },
+    });
+    const status = await collect(deps, ROOT, "2026-09-28T12:00:00Z");
+    expect(laneRow(status, "PT-5a")?.derived.planReview).toBeUndefined();
+  });
+
+  test("a plan without an unambiguous row for the lane is silence, not a verdict", async () => {
+    const status = await laneAt(reviewLine({ "PT-9": "aa" }) + dispatchLine("PT-9"));
+    expect(laneRow(status, "PT-9")?.derived.planReview).toBeUndefined();
+  });
+
+  test("a wave whose only event is a review shows no _plan row and probes nothing for it", async () => {
+    // The reserved token reviews the wave; it is not a lane. Once a review
+    // event exists, _plan used to reach the process probe, the gate-log
+    // lookup, the PR join and the state rollups — where a settled event with
+    // no process behind it classified as vanished.
+    const seen: string[] = [];
+    const status = await collect(
+      {
+        ...fakeDeps(tree(reviewLine({ "PT-5a": "aa" }))),
+        pgrep: async (pattern) => {
+          seen.push(pattern);
+          return 0;
+        },
+      },
+      ROOT,
+      "2026-09-28T12:00:00Z",
+    );
+    expect(status.waves[0]?.lanes).toEqual([]);
+    expect(seen).toEqual([]);
+  });
+
+  test("a review beside a real lane leaves that lane as the wave's only row", async () => {
+    const reviewAndLane =
+      reviewLine({ "PT-5a": "aa" }) +
+      `${JSON.stringify({
+        ts: "2026-09-28T10:30:00Z",
+        wave: "R",
+        lane: "PT-5a",
+        stage: "implement",
+        event: "started",
+      })}\n`;
+    const status = await laneAt(reviewAndLane);
+    expect(status.waves[0]?.lanes.map((lane) => lane.lane)).toEqual(["PT-5a"]);
+  });
+
+  test("a directory whose name differs from the events' wave id still gathers the gate's facts", async () => {
+    // wave-event.sh writes a wave id like `wave5` to $root/wave5 — the
+    // directory stripped of its prefix is "5", which matches no event. The
+    // gate's facts match the wave the events themselves claim, the same
+    // identity the merge groups by: here the dispatch is found, and the
+    // plan edited after its review is flagged.
+    const { rowHash } = await import("../../plan-review/lib/rows.js");
+    const edited = PLAN.replace("exposed and resolvable", "hidden and unresolvable");
+    const reviewAndDispatch =
+      `${JSON.stringify({
+        ts: "2026-09-28T10:00:00Z",
+        wave: "wave5",
+        lane: "_plan",
+        stage: "plan-review",
+        event: "settled",
+        detail: {
+          plan: "docs/planning/plan.md",
+          reviewer: "plan-review-seat",
+          rows: { "PT-5a": rowHash(PLAN, "PT-5a") },
+          verdict: "clear",
+        },
+      })}\n` + dispatchLine("PT-5a");
+    const status = await collect(
+      fakeDeps({
+        dirs: { [ROOT]: ["wave5"], [`${ROOT}/wave5`]: ["events.jsonl"] },
+        files: {
+          [`${ROOT}/wave5/events.jsonl`]: reviewAndDispatch,
+          "docs/planning/plan.md": edited,
+        },
+      }),
+      ROOT,
+      "2026-09-28T12:00:00Z",
+    );
+    const row = status.waves.find((wave) => wave.id === "5")?.lanes[0];
+    expect(row?.derived.planReview).toBe("dispatched on an unreviewed row");
+  });
+
+  test("a lane that never dispatched carries no plan-review facts", async () => {
+    const reviewAndLane =
+      reviewLine({ "PT-5a": "aa" }) +
+      `${JSON.stringify({
+        ts: "2026-09-28T10:30:00Z",
+        wave: "R",
+        lane: "PT-5a",
+        stage: "implement",
+        event: "started",
+      })}\n`;
+    const status = await laneAt(reviewAndLane);
+    expect(laneRow(status, "PT-5a")?.derived.planReview).toBeUndefined();
+  });
+
+  test("the row hash comes from the plan the governing review named, not the directory's latest review", async () => {
+    // Review 1 (wave R, plan A, clear) precedes the dispatch; reviews 2 and 3
+    // follow it — one for another wave naming plan C, one for this wave
+    // naming plan B. The lane's reviewed hash and the plan hashed are review
+    // 1's: a later review of a different plan, in this wave or another,
+    // hijacks neither.
+    const { rowHash } = await import("../../plan-review/lib/rows.js");
+    const planB = PLAN.replace("exposed and resolvable", "rewritten in plan B");
+    const planC = PLAN.replace("exposed and resolvable", "rewritten in plan C");
+    const line = (wave: string, plan: string, hash: string, ts: string): string =>
+      `${JSON.stringify({
+        ts,
+        wave,
+        lane: "_plan",
+        stage: "plan-review",
+        event: "settled",
+        detail: { plan, reviewer: "plan-review-seat", rows: { "PT-5a": hash }, verdict: "clear" },
+      })}\n`;
+    const tree = {
+      dirs: { [ROOT]: ["waveR"], [`${ROOT}/waveR`]: ["events.jsonl"] },
+      files: {
+        [`${ROOT}/waveR/events.jsonl`]:
+          line("R", "docs/planning/plan.md", rowHash(PLAN, "PT-5a"), "2026-09-28T10:00:00Z") +
+          dispatchLine("PT-5a") +
+          line(
+            "OTHER",
+            "docs/planning/plan-c.md",
+            rowHash(planC, "PT-5a"),
+            "2026-09-28T12:00:00Z",
+          ) +
+          line("R", "docs/planning/plan-b.md", rowHash(planB, "PT-5a"), "2026-09-28T13:00:00Z"),
+        "docs/planning/plan.md": PLAN,
+        "docs/planning/plan-b.md": planB,
+        "docs/planning/plan-c.md": planC,
+      },
+    };
+    const status = await collect(fakeDeps(tree), ROOT, "2026-09-28T14:00:00Z");
+    expect(laneRow(status, "PT-5a")?.derived.planReview).toBeUndefined();
   });
 });

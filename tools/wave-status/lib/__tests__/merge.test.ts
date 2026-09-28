@@ -17,6 +17,11 @@ const observation = (overrides: Partial<LaneObservation> = {}): LaneObservation 
 });
 
 describe("mergeStatus — shape and ordering", () => {
+  test("a _plan event is never a lane: it reviews the wave and buys no row", () => {
+    const status = mergeStatus([event({ lane: "_plan", stage: "plan-review" })], {}, "now");
+    expect(status.waves).toEqual([]);
+  });
+
   test("the latest event for a lane is the reported one; earlier events are history", () => {
     const status = mergeStatus(
       [

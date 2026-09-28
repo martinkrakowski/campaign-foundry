@@ -75,7 +75,7 @@ describe("formatEvent (plan §2.1, D103)", () => {
   test("an unknown stage throws with the vocabulary in the message", () => {
     const input = { wave: "S", lane: "s4", stage: "deploy", event: "started" };
     expect(() => formatEvent(input as never, clock)).toThrow(
-      /stage is one of: dispatch\|implement\|gate\|review\|remediate\|sweep\|merge\|record/,
+      /stage is one of: plan-review\|dispatch\|implement\|gate\|review\|remediate\|sweep\|merge\|record/,
     );
   });
 
@@ -112,6 +112,60 @@ describe("appendEvent (the thin impure edge)", () => {
       }),
     ).rejects.toThrow(/invalid wave event/);
     expect(calls).toBe(0);
+  });
+});
+
+describe("the plan-review stage (FU-plan-review-gate)", () => {
+  // The review is emitted once per review, under the reserved lane token `_plan`,
+  // and its detail is the reviewer's report: the plan it reviewed, who reviewed,
+  // the row fingerprints the reviewer took, the findings counts, and the verdict.
+  const detail =
+    '{"plan":"docs/planning/p.md","reviewer":"plan-review-seat","rows":{"PT-5a":"aa"},"decisions":{"D177":"bb"},"findings":{"bug":1,"suggestion":2,"nit":3},"applied":1,"refuted":2,"verdict":"clear"}';
+
+  test("formatEvent accepts a plan-review settled event and readEvents round-trips it", () => {
+    const input = {
+      wave: "platform-and-tenancy-w05",
+      lane: "_plan",
+      stage: "plan-review" as const,
+      event: "settled" as const,
+      detail: JSON.parse(detail) as Record<string, unknown>,
+    };
+    const line = formatEvent(input, clock);
+    expect(readEvents(line)).toEqual({
+      events: [{ ...input, ts: "2026-09-07T16:55:43Z" }],
+      truncated: false,
+      rejected: [],
+    });
+  });
+
+  test("wave-event.sh accepts the _plan lane, the plan-review stage and the gate's detail", () => {
+    const dir = tempDir();
+    execFileSync("sh", [
+      waveEventSh,
+      "--logdir",
+      dir,
+      "platform-and-tenancy-w05",
+      "_plan",
+      "plan-review",
+      "settled",
+      "--detail",
+      detail,
+    ]);
+    const written = readFileSync(join(dir, "events.jsonl"), "utf8");
+    const ts = JSON.parse(written).ts as string;
+    expect(written).toBe(
+      formatEvent(
+        {
+          ts,
+          wave: "platform-and-tenancy-w05",
+          lane: "_plan",
+          stage: "plan-review",
+          event: "settled",
+          detail: JSON.parse(detail) as Record<string, unknown>,
+        },
+        clock,
+      ),
+    );
   });
 });
 
@@ -177,7 +231,9 @@ describe("scripts/wave-event.sh agrees with formatEvent byte-for-byte", () => {
       stderr = err.stderr.toString();
     }
     expect(status).toBe(2);
-    expect(stderr).toContain("dispatch implement gate review remediate sweep merge record");
+    expect(stderr).toContain(
+      "plan-review dispatch implement gate review remediate sweep merge record",
+    );
     expect(readFileSync(log, "utf8")).toBe("sentinel\n");
   });
 

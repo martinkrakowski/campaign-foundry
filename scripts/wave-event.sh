@@ -21,7 +21,7 @@
 # reader would have to reject later.
 set -u
 
-stages="dispatch implement gate review remediate sweep merge record"
+stages="plan-review dispatch implement gate review remediate sweep merge record"
 kinds="started settled failed"
 
 is_stage() {
@@ -84,7 +84,7 @@ if [ -z "$LOGDIR" ]; then
 fi
 
 stage_ok=0
-for s in dispatch implement gate review remediate sweep merge record; do
+for s in plan-review dispatch implement gate review remediate sweep merge record; do
   if [ "$s" = "$STAGE" ]; then
     stage_ok=1
     break
