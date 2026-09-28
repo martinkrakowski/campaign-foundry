@@ -16,6 +16,16 @@ import {
 export const MAX_JOBS = 50;
 /** How long a settled job stays pollable after it completes or fails. */
 export const JOB_TTL_MS = 10 * 60_000;
+/**
+ * Grace period after the run deadline before a running job is considered stale.
+ * The in-process deadline (RUN_DEADLINE_MS, which equals JOB_TTL_MS) settles the
+ * run at JOB_TTL_MS; this grace keeps a legitimately finishing run from being
+ * reaped if the process dies just as the run is completing its final writes.
+ */
+export const STALE_GRACE_MS = 60_000;
+
+/** Message written when a stale running job is reaped after a process crash. */
+export const STALE_RUNNING_MESSAGE = "Run interrupted: the server stopped before it finished.";
 
 const QUEUED_EXPIRED_MESSAGE = "Queued run expired before a worker started it.";
 
@@ -148,6 +158,36 @@ export class FsJobStore implements JobStorePort {
     this.queuedTimers.set(id, timer);
   }
 
+  /**
+   * If the entry is a running job whose createdAt is older than the run
+   * deadline plus the grace period, rewrite it as failed with the stale
+   * running message, set settledAt to now, and schedule expireLater.
+   * Returns the (possibly rewritten) entry, or undefined if the entry was
+   * deleted (e.g., a settled job past its TTL).
+   * Must be called under withJobLock for the job id.
+   */
+  private async maybeReapStaleRunning(entry: StoredJob): Promise<StoredJob | undefined> {
+    if (entry.job.status !== "running") return entry;
+    const now = Date.now();
+    const threshold = JOB_TTL_MS + STALE_GRACE_MS;
+    if (now - entry.createdAt < threshold) return entry;
+    // Stale running job: rewrite as failed
+    const updated: StoredJob = {
+      ...entry,
+      job: {
+        status: "failed",
+        done: 0,
+        total: 0,
+        log: null,
+        error: STALE_RUNNING_MESSAGE,
+      },
+      settledAt: now,
+    };
+    await this.writeJobEntry(updated);
+    this.expireLater(entry.id);
+    return updated;
+  }
+
   async getStoredJob(id: string): Promise<StoredJob | undefined> {
     let st;
     try {
@@ -188,6 +228,9 @@ export class FsJobStore implements JobStorePort {
         this.expireLater(id);
         return updated;
       }
+      // Check for stale running job (cached)
+      const reaped = await this.maybeReapStaleRunning(cached.entry);
+      if (reaped !== cached.entry) return reaped;
       return cached.entry;
     }
 
@@ -228,6 +271,9 @@ export class FsJobStore implements JobStorePort {
       this.expireLater(id);
       return updated;
     }
+    // Check for stale running job (disk read)
+    const reaped = await this.maybeReapStaleRunning(entry);
+    if (reaped !== entry) return reaped;
     this.memoryCache.set(id, { entry, mtimeMs: st.mtimeMs });
     return entry;
   }

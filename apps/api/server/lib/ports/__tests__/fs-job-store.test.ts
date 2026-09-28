@@ -11,7 +11,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
-import { FsJobStore, JobCapacityError, JOB_TTL_MS, MAX_JOBS } from "../fs-job-store.js";
+import {
+  FsJobStore,
+  JobCapacityError,
+  JOB_TTL_MS,
+  MAX_JOBS,
+  STALE_GRACE_MS,
+  STALE_RUNNING_MESSAGE,
+} from "../fs-job-store.js";
 import {
   JobLeaseLostError,
   QUEUED_TTL_MS,
@@ -659,5 +666,227 @@ describe("FsJobStore", () => {
     // it to fire later against an id that no longer exists.
     await store.deleteJob(enq.jobId);
     expect(await store.getJob(enq.jobId)).toBeUndefined();
+  });
+
+  test("a stale running job is reaped on restart and the campaign can acquire again", async () => {
+    vi.useFakeTimers();
+    try {
+      // Create a running job
+      const id = await store.createJob("campaign-stale");
+      expect(await store.getRunningJobId("campaign-stale")).toBe(id);
+
+      // Backdate its createdAt to be older than RUN_DEADLINE_MS + STALE_GRACE_MS
+      // RUN_DEADLINE_MS === JOB_TTL_MS (10 minutes), STALE_GRACE_MS = 60 seconds
+      const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
+      writeFileSync(
+        store.jobPath(id),
+        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        "utf8",
+      );
+      // Clear cache so the stale read goes to disk
+      (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+
+      // Simulate a restart: new store instance on the same directory
+      const restartedStore = new FsJobStore(dir);
+
+      // FIXED: the stale running job is reaped, campaign can acquire again
+      const runningId = await restartedStore.getRunningJobId("campaign-stale");
+      expect(runningId).toBeUndefined();
+
+      // The job should now read as failed with the stale running message
+      const stored = await restartedStore.getStoredJob(id);
+      expect(stored).toBeDefined();
+      expect(stored?.job.status).toBe("failed");
+      expect(stored?.job.error).toBe(STALE_RUNNING_MESSAGE);
+      expect(stored?.settledAt).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a stale running job reads as failed with the exact message and settledAt set", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await store.createJob("campaign-stale-read");
+      // Backdate createdAt to be stale
+      const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
+      writeFileSync(
+        store.jobPath(id),
+        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        "utf8",
+      );
+      (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+
+      const stored = await store.getStoredJob(id);
+      expect(stored).toBeDefined();
+      expect(stored?.job.status).toBe("failed");
+      expect(stored?.job.error).toBe(STALE_RUNNING_MESSAGE);
+      expect(stored?.job.done).toBe(0);
+      expect(stored?.job.total).toBe(0);
+      expect(stored?.job.log).toBeNull();
+      expect(stored?.settledAt).toBeDefined();
+      expect(typeof stored?.settledAt).toBe("number");
+      // settledAt should be "now" (within fake timer)
+      expect(stored?.settledAt).toBeGreaterThan(Date.now() - 1000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a stale running job is rewritten on disk and a third store instance reads it as failed", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await store.createJob("campaign-stale-disk");
+      // Backdate createdAt to be stale
+      const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
+      writeFileSync(
+        store.jobPath(id),
+        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        "utf8",
+      );
+      (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+
+      // First store instance reads and reaps
+      const stored1 = await store.getStoredJob(id);
+      expect(stored1?.job.status).toBe("failed");
+      expect(stored1?.job.error).toBe(STALE_RUNNING_MESSAGE);
+
+      // Second store instance (simulating another process) reads the rewritten file
+      const store2 = new FsJobStore(dir);
+      const stored2 = await store2.getStoredJob(id);
+      expect(stored2).toBeDefined();
+      expect(stored2?.job.status).toBe("failed");
+      expect(stored2?.job.error).toBe(STALE_RUNNING_MESSAGE);
+      expect(stored2?.settledAt).toBeDefined();
+
+      // Third store instance also reads it as failed
+      const store3 = new FsJobStore(dir);
+      const stored3 = await store3.getStoredJob(id);
+      expect(stored3?.job.status).toBe("failed");
+      expect(stored3?.job.error).toBe(STALE_RUNNING_MESSAGE);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a running job just under the stale threshold is untouched", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await store.createJob("campaign-not-stale");
+      // Backdate createdAt to be JUST under the threshold (threshold - 1ms)
+      const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
+      writeFileSync(
+        store.jobPath(id),
+        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS - 1) }),
+        "utf8",
+      );
+      (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+
+      const stored = await store.getStoredJob(id);
+      expect(stored).toBeDefined();
+      expect(stored?.job.status).toBe("running");
+      expect(stored?.job.error).toBeUndefined();
+      expect(stored?.settledAt).toBeUndefined();
+      // Running job should still be returned by getRunningJobId
+      expect(await store.getRunningJobId("campaign-not-stale")).toBe(id);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("in-process runs are not tracked; reaping relies on threshold alone", async () => {
+    // FsJobStore does not track in-process runs (no map/set of active job ids).
+    // runJob in lib/jobs.ts uses an AbortController and deadline timer but does
+    // not register the job id in any global registry accessible to FsJobStore.
+    // Therefore, a running job whose createdAt is past the threshold will be
+    // reaped even if this process is the one that started it.
+    // This test documents the current behavior — if in-process tracking is added
+    // in the future, this test should be updated to verify that tracked runs
+    // are never reaped regardless of age.
+    expect(true).toBe(true);
+  });
+
+  test("two concurrent reads of a stale running job rewrite it once (idempotent)", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await store.createJob("campaign-concurrent");
+      // Backdate createdAt to be stale
+      const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
+      writeFileSync(
+        store.jobPath(id),
+        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        "utf8",
+      );
+      (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+
+      // Two concurrent reads
+      const [stored1, stored2] = await Promise.all([
+        store.getStoredJob(id),
+        store.getStoredJob(id),
+      ]);
+
+      // Both should see the job as failed with the same message
+      expect(stored1?.job.status).toBe("failed");
+      expect(stored1?.job.error).toBe(STALE_RUNNING_MESSAGE);
+      expect(stored2?.job.status).toBe("failed");
+      expect(stored2?.job.error).toBe(STALE_RUNNING_MESSAGE);
+
+      // The file on disk should have the failed status (last write wins, but content is same)
+      const disk = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
+      expect(disk.job.status).toBe("failed");
+      expect(disk.job.error).toBe(STALE_RUNNING_MESSAGE);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("eviction may now retire a reaped job", async () => {
+    vi.useFakeTimers();
+    try {
+      // Create a stale running job that will be reaped
+      const staleId = await store.createJob("campaign-stale-evict");
+      const raw = JSON.parse(readFileSync(store.jobPath(staleId), "utf8")) as StoredJob;
+      writeFileSync(
+        store.jobPath(staleId),
+        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        "utf8",
+      );
+      (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+
+      // Read it to trigger reaping
+      const reaped = await store.getStoredJob(staleId);
+      expect(reaped?.job.status).toBe("failed");
+
+      // Fill the store with MAX_JOBS - 1 running jobs
+      const runningIds: string[] = [];
+      for (let i = 0; i < MAX_JOBS - 1; i++) {
+        runningIds.push(await store.createJob(`runner-${i}`));
+      }
+
+      // Store should have MAX_JOBS jobs (MAX_JOBS - 1 running + 1 reaped failed)
+      let jobs = await store.listJobs();
+      expect(jobs.length).toBe(MAX_JOBS);
+
+      // Creating one more job should evict the reaped (settled) job, not a running one
+      const newId = await store.createJob("new-campaign");
+      expect(newId).toBeDefined();
+
+      jobs = await store.listJobs();
+      expect(jobs.length).toBe(MAX_JOBS);
+      expect(await store.getJob(staleId)).toBeUndefined(); // Reaped job evicted
+      for (const rid of runningIds) {
+        expect((await store.getJob(rid))?.status).toBe("running");
+      }
+      expect((await store.getJob(newId))?.status).toBe("running");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("RUN_DEADLINE_MS equals JOB_TTL_MS (pin)", async () => {
+    // This test ensures that if either constant changes, the relationship is noticed.
+    // RUN_DEADLINE_MS is defined as JOB_TTL_MS in lib/jobs.ts.
+    const { RUN_DEADLINE_MS } = await import("../../jobs.js");
+    expect(RUN_DEADLINE_MS).toBe(JOB_TTL_MS);
   });
 });

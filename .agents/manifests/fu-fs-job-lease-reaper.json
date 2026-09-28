@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "FU-fs-job-lease-reaper",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/fs-job-store.ts",
+      "before": "    if (now - entry.createdAt < threshold) return entry;",
+      "after": "    if (true) return entry; // mutant: never reap stale running jobs",
+      "because": "stale running job reaping is disabled, so a crashed process's job stays running forever and blocks the campaign",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-job-store.test.ts",
+        "-t",
+        "a stale running job is reaped on restart"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
