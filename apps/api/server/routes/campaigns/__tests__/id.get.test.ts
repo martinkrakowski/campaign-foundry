@@ -183,7 +183,7 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
       }
     });
 
-    test("a campaign minted with no name/type answers null for both, and still 200", async () => {
+    test("a campaign minted with no type answers null type, keeps its name, and still 200", async () => {
       const harness = await setup();
       try {
         const { get, create } = mount();
@@ -193,6 +193,7 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
         const res = await get(`/campaigns/${slug}`);
         expect(res.status).toBe(200);
         const body = (await res.json()) as { name: string | null; type: string | null };
+        expect(body.name).toBe("No Type Given");
         expect(body.type).toBeNull();
       } finally {
         await harness.cleanup();
