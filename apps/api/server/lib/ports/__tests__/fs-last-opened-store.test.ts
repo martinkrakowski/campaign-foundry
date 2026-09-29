@@ -303,26 +303,32 @@ describe("FsLastOpenedStore (PT-5e, D173, D180)", () => {
 
   test("read's own file-level lstat rethrows a non-ENOENT failure unchanged", async () => {
     await store.write("camp", "u1");
+    // Fail only the lstat of the POINTER FILE, leaving both directory levels
+    // alone: `dirUnsafe` now checks the level above the pointer directory too,
+    // so a hook that threw on "anything but the pointer directory" would be
+    // caught there and this line's own rethrow would never run.
     fsHook.lstat = async (path: string) => {
-      if (path !== dir) {
+      if (path === join(dir, "u1.json")) {
         const err = new Error("EIO") as NodeJS.ErrnoException;
         err.code = "EIO";
         throw err;
       }
-      return fsHook.realLstat!(path);
+      return fsHook.realLstat!(path, undefined);
     };
     await expect(store.read("u1")).rejects.toThrow("EIO");
   });
 
   test("write's own file-level lstat rethrows a non-ENOENT failure unchanged", async () => {
     await store.write("camp", "u1");
+    // As above: only the pointer file's own lstat, so the rethrow under test
+    // is this one and not `dirUnsafe`'s.
     fsHook.lstat = async (path: string) => {
-      if (path !== dir) {
+      if (path === join(dir, "u1.json")) {
         const err = new Error("EIO") as NodeJS.ErrnoException;
         err.code = "EIO";
         throw err;
       }
-      return fsHook.realLstat!(path);
+      return fsHook.realLstat!(path, undefined);
     };
     await expect(store.write("camp", "u1")).rejects.toThrow("EIO");
   });
