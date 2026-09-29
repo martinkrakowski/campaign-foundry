@@ -69,7 +69,7 @@ describe("renderStatus", () => {
     const withPr = rows.find((line) => line.includes("T/t1"));
     const withoutPr = rows.find((line) => line.includes("T/t2"));
     expect(withPr).toContain("#12 open pass");
-    expect(withoutPr).toMatch(/T\/t2\s+unknown\s+—\s+not alive\s+—\s+—$/);
+    expect(withoutPr).toMatch(/T\/t2\s+unknown\s+—\s+not alive\s+—\s+—\s+—$/);
   });
 
   test("the seat column sits between lane and stage, and renders the seat or the honest unknown", () => {
@@ -217,9 +217,9 @@ describe("renderStatus", () => {
       ]),
     );
     expect(out).toContain("exit 0 · 98/95/97/98%");
-    expect(out).toContain("exit 3\n");
+    expect(out).toContain("exit 3");
     expect(out).toContain("· 50/60/70/80%");
-    expect(out).toMatch(/T\/t3\s+unknown\s+—\s+not alive\s+—\s+—$/m);
+    expect(out).toMatch(/T\/t3\s+unknown\s+—\s+not alive\s+—\s+—\s+—$/m);
   });
 
   test("colour is opt-in and paints the page's tones", () => {
@@ -392,6 +392,26 @@ describe("renderStatus", () => {
       alive: false,
     });
     expect(isLaneStalled(lane)).toBe(false);
+  });
+
+  test("the plan-review column shows the gate's flag, or — for a lane it says nothing about", () => {
+    const status = makeStatus([
+      makeLane("t1", { alive: false }),
+      {
+        ...makeLane("t2", { alive: false }),
+        derived: { alive: false, planReview: "dispatched on an unreviewed row" },
+      },
+    ]);
+    const out = renderStatus(status, { color: false });
+    expect(out).toContain("plan review");
+    expect(out).toContain("dispatched on an unreviewed row");
+    const rows = out.split("\n");
+    expect(rows.find((line) => line.includes("T/t1"))).toMatch(/—\s*$/);
+    const flagged = rows.find((line) => line.includes("T/t2"));
+    expect(flagged).not.toMatch(/—\s*$/);
+    // The flag is a disagreement in its own words, painted red — never folded into a state.
+    const colored = renderStatus(status, { color: true });
+    expect(colored).toContain("\x1b[31mdispatched on an unreviewed row\x1b[0m");
   });
 });
 

@@ -106,6 +106,32 @@ plan committed
       └─▶ next wave (repeat) → docs/session-log PR at the end
 ```
 
+### Plan review gate
+
+A lane is briefed from its row in a plan's lane table (`docs/planning/*.md`, rows like
+`| **PT-5c2-close-the-legacy-create-paths** | … |`). Rows get rewritten mid-wave, and a rewritten
+row that no independent reviewer has read gets dispatched anyway. The gate makes the review
+structural, not a habit: **before any `dispatch started`, `yarn plan:review check` must exit 0.**
+
+```bash
+# The reviewer's report carries the row fingerprints it took (pasted into the emit):
+yarn plan:review hashes docs/planning/<plan>.md <laneId>… <Dnnn>…
+#   → {"rows":{"<laneId>":"<hash>",…},"decisions":{"<Dnnn>":"<hash>",…}}
+
+# The orchestrator records the review once, under the reserved lane token _plan:
+scripts/wave-event.sh --logdir <dir> <wave> _plan plan-review settled --detail '{"plan":"<path>","reviewer":"<seat>","rows":{…},"decisions":{…},"findings":{"bug":0,"suggestion":0,"nit":0},"applied":0,"refuted":0,"verdict":"clear"}'
+
+# Before each dispatch — exit 0 or the lane does not go out:
+yarn plan:review check docs/planning/<plan>.md --logdir <dir> --wave <wave> <laneId>
+```
+
+`check` exits 0 when the wave's latest review settled `clear` over row fingerprints that still
+match the plan on disk; 1 on any mismatch (naming the ids that changed); 2 when there is no
+review for the wave or the lane is absent from it; 3 when the review ended `changes-required`.
+The status page shows the same gate from the other side: a lane whose row was never reviewed —
+or whose row changed after its review — is flagged **"dispatched on an unreviewed row"**, and the
+flag is never resolved into a lane state; it is a disagreement, left showing.
+
 ### Stage 1 — Delegate
 
 Split the wave into **file-disjoint lanes**. Two lanes may not own the same file; where a

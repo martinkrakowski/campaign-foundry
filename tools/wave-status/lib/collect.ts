@@ -3,10 +3,18 @@ import { open as fsOpen, readdir as fsReaddir, readFile as fsReadFile } from "no
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { readEvents } from "./events.js";
+import { planReviewFacts } from "./derive.js";
 import { mergeStatus } from "./merge.js";
 import { readBacklog } from "./backlog.js";
 import { artifactPathFor } from "../../plan-verify/lib/artifact.js";
-import type { LaneObservation, PrChecks, WaveEvent, WaveStatus } from "./types.js";
+import { PLAN_REVIEW_LANE, rowHash } from "../../plan-review/lib/rows.js";
+import type {
+  LaneObservation,
+  PlanReviewObservation,
+  PrChecks,
+  WaveEvent,
+  WaveStatus,
+} from "./types.js";
 
 /**
  * A readable file opened for a ranged tail. `FileHandle` satisfies this;
@@ -223,18 +231,30 @@ export async function collect(
       // PR, whatever the events' own wave field says.
       const reportedPrByLane = new Map<string, number>();
       const eventLanes = new Set<string>();
+      let dirEvents: readonly WaveEvent[] = [];
       if (entries.includes("events.jsonl")) {
         try {
           const text = await deps.readFile(join(dir, "events.jsonl"));
-          for (const event of readEvents(text).events) {
+          dirEvents = readEvents(text).events;
+          for (const event of dirEvents) {
             events.push(event);
-            eventLanes.add(event.lane);
-            if (event.pr !== undefined) reportedPrByLane.set(event.lane, event.pr);
+            // The reserved token reviews the wave; it is never a lane — no
+            // row, no probe, no gate-log lookup, no PR join. The events stay
+            // in dirEvents, where the plan-review derivation reads them.
+            if (event.lane !== PLAN_REVIEW_LANE) {
+              eventLanes.add(event.lane);
+              if (event.pr !== undefined) reportedPrByLane.set(event.lane, event.pr);
+            }
           }
         } catch {
           // W3 writes events.jsonl; absent or unreadable is "nobody reported", not an error.
         }
       }
+
+      // The plan-review gate's input is per lane: the plan file the review
+      // that governed THAT lane's dispatch named, read by planReviewFor.
+      // Everything else about the gate is derived from the events — the
+      // collector only reads, it does not conclude.
 
       for (const lane of [...eventLanes].sort()) {
         const logName = `${lane}.log`;
@@ -262,7 +282,15 @@ export async function collect(
         const reportedPr = reportedPrByLane.get(lane);
         lanes.add(lane);
         if (reportedPr !== undefined) reportedPrs.add(reportedPr);
-        const obs = await buildObservation(deps, dir, entries, lane, worktrees, log);
+        const obs = await buildObservation(
+          deps,
+          dir,
+          entries,
+          lane,
+          worktrees,
+          log,
+          await planReviewFor(deps, dirEvents, lane),
+        );
         rows.push({ wave, lane, reportedPr, obs });
       }
     }
@@ -302,6 +330,38 @@ export async function collect(
 }
 
 /**
+ * The plan-review facts one lane carries on its observation: the dispatch and
+ * review facts from the wave's events, plus the lane row's hash taken from
+ * the plan THE GOVERNING REVIEW named — the review `planReviewFacts` chose,
+ * not whichever plan any other review in the directory mentioned. A lane that
+ * never dispatched carries nothing — the gate is about dispatches. An
+ * unreadable plan, a review that named no plan, or a plan without an
+ * unambiguous row for the lane says why, instead of guessing a hash.
+ */
+async function planReviewFor(
+  deps: CollectDeps,
+  dirEvents: readonly WaveEvent[],
+  lane: string,
+): Promise<PlanReviewObservation | undefined> {
+  const facts = planReviewFacts(dirEvents, lane);
+  if (facts.dispatchedAt === undefined) return undefined;
+  if (facts.reviewedPlan === undefined) {
+    return { ...facts, rowHashMissing: "the governing review named no plan file" };
+  }
+  let planText: string | undefined;
+  try {
+    planText = await deps.readFile(facts.reviewedPlan);
+  } catch {
+    return { ...facts, rowHashMissing: "the plan file could not be read" };
+  }
+  try {
+    return { ...facts, rowHash: rowHash(planText, lane) };
+  } catch {
+    return { ...facts, rowHashMissing: "the plan holds no unambiguous row for this lane" };
+  }
+}
+
+/**
  * The observation every row is built with, log attached or not: one probe,
  * one gate lookup, one assembly — so a field one lane carries cannot be
  * missing from another. Two copies of this block are how an event-only lane
@@ -315,6 +375,7 @@ async function buildObservation(
   lane: string,
   worktrees: readonly string[],
   log?: LaneObservation["log"],
+  planReview?: PlanReviewObservation,
 ): Promise<Omit<LaneObservation, "pr">> {
   let alive = false;
   try {
@@ -336,6 +397,7 @@ async function buildObservation(
   return {
     ...(log !== undefined ? { log } : {}),
     ...(gateLog !== undefined ? { gateLog } : {}),
+    ...(planReview !== undefined ? { planReview } : {}),
     alive,
   };
 }
