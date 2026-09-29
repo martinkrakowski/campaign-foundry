@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-5c3-pages-carry-the-campaign-id",
+  "mutations": [
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "    (d?.log?.campaignId === campaignId || (slug !== undefined && d?.log?.campaignId === slug)) &&",
+      "after": "    (d?.log?.campaignId === campaignId || (slug !== undefined && d?.log?.campaignId === campaignId)) && // mutant: the page id instead of the slug",
+      "because": "matching the report against the page id instead of the slug makes a uuid-addressed page (D178) refuse the slug-keyed report Postgres stores, so the page renders empty",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "a report keyed by the campaign's slug"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

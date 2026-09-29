@@ -21,6 +21,13 @@ interface MobileMenuProps {
   onClose: () => void;
   tabs: readonly NavTab[];
   /**
+   * PT-5c3 (D180) — the campaign query the tabs carry (`?campaign=<id>`, already
+   * encoded by Header, empty when the shell holds no campaign). It rides the
+   * HREF only: the active-tab match below stays on `pathname.startsWith(tab.href)`,
+   * on the path, or the query would take the active tab's light away from it.
+   */
+  campaignQuery?: string;
+  /**
    * The auth block (email, sign out, org switcher) Header hands in under better-auth
    * mode (PT-1b2 item 5) — a slot rather than a portal keyed on this dialog's own
    * `[role="dialog"][aria-label="Menu"]`, so it renders as an ordinary child of this
@@ -35,7 +42,13 @@ interface MobileMenuProps {
  * sits above the whole shell. Closes on a link tap, the × button, or Escape; traps
  * focus and locks body scroll while open.
  */
-export function MobileMenu({ open, onClose, tabs, authControls }: MobileMenuProps) {
+export function MobileMenu({
+  open,
+  onClose,
+  tabs,
+  campaignQuery = "",
+  authControls,
+}: MobileMenuProps) {
   const pathname = usePathname();
   const { guardedPush } = useGuardedNavigation();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -157,11 +170,15 @@ export function MobileMenu({ open, onClose, tabs, authControls }: MobileMenuProp
         <nav className="flex flex-col border-b border-border p-2">
           {tabs.map((tab) => {
             const active = pathname.startsWith(tab.href);
+            // The query rides the HREF only; `active` above stays on the path,
+            // and the click handler must name the same destination the anchor
+            // shows, so a guarded (dirty) push lands where a clean one would.
+            const linkHref = `${tab.href}${campaignQuery}`;
             return (
               <a
                 key={tab.href}
-                href={tab.href}
-                onClick={(e) => handleTabClick(e, tab.href)}
+                href={linkHref}
+                onClick={(e) => handleTabClick(e, linkHref)}
                 className={cn(
                   "rounded-lg px-3 py-3 text-[15px] font-medium transition-colors",
                   active

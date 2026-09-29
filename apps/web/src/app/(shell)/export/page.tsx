@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { API, assetCanvas, assetKey, assetLabel, useRun } from "@/lib/run-context";
+import {
+  API,
+  assetCanvas,
+  assetKey,
+  assetLabel,
+  usePageCampaignParam,
+  useRun,
+} from "@/lib/run-context";
 import * as messages from "@/components/campaign/messages";
 import {
   platformProfile,
@@ -14,6 +21,8 @@ const formatDuration = (seconds: number): string => `${seconds}s`;
 
 /** Print export queue — the HITL-approved creatives + their proofs, ready to ship. */
 export default function ExportPage() {
+  // D180 — this page addresses a campaign by `?campaign=<id>`.
+  usePageCampaignParam();
   const {
     assets,
     hasRun,

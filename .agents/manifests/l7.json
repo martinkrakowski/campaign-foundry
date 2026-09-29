@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/ports/fs-job-store.ts",
-      "before": "          job: { status: \"running\", done: 0, total: 0, log: null },\n          createdAt: Date.now(),\n          seq: ++globalJobSeq,\n        };\n        await this.writeJobEntry(entry);",
-      "after": "          job: { status: \"running\", done: 0, total: 0, log: null },\n          createdAt: Date.now(),\n          seq: ++globalJobSeq,\n        };\n        /* do not persist to storage */",
-      "because": "The defect this lane fixes, restored: if createJob does not persist the minted handle to storage, the handle only exists in the local process and any other process fails to resolve it (404 / lost). Re-anchored 2026-09-26 by PT-6b1: enqueueJob also writes an entry; anchor narrowed to acquireJob's running entry.",
+      "before": "          job: { status: \"running\", done: 0, total: 0, log: null },\n          createdAt: now,\n          startedAt: now,\n          seq: ++globalJobSeq,\n        };\n        await this.writeJobEntry(entry);",
+      "after": "          job: { status: \"running\", done: 0, total: 0, log: null },\n          createdAt: now,\n          startedAt: now,\n          seq: ++globalJobSeq,\n        };\n        /* do not persist to storage */",
+      "because": "The defect this lane fixes, restored: if createJob does not persist the minted handle to storage, the handle only exists in the local process and any other process fails to resolve it (404 / lost). Re-anchored 2026-09-26 by PT-6b1: enqueueJob also writes an entry; anchor narrowed to acquireJob's running entry. Re-anchored 2026-09-28 (FU-fs-job-lease-reaper fix round): acquireJob now also sets startedAt and calls cancelPendingRetention before the entry; anchor extended to include startedAt, mutation unchanged (still \"never persist the acquired entry\").",
       "command": [
         "yarn",
         "vitest",
