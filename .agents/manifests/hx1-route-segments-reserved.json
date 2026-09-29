@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "HX1-route-segments-reserved",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/domain/value-objects/Treatment.vo.ts",
+      "before": "  \"templates\",\n] as const;",
+      "after": "] as const;",
+      "because": "dropping templates from RESERVED_ROUTE_SEGMENTS lets a campaign slugged templates collide with the templates/ route (a saved creative template's own directory) and, on fs, cost that campaign its GET /campaigns/:id entirely (D179). The route-tree test derives the static segment list from the real route directory and fails listing any segment the caller's array omits.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/route-tree.test.ts",
+        "-t",
+        "every static segment on disk is in RESERVED_ROUTE_SEGMENTS"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -69,21 +69,55 @@ import {
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /**
- * Campaign identifiers the orchestrator reserves for itself, and which cannot
- * name a campaign: the top-level directory names under an org's output root
- * (`cache`, `jobs`, `orgs`, `packages`), and `last-opened` — the static
- * `/campaigns/last-opened` route (PT-5e, D180).
- *
- * Mirrored from CampaignOrchestration/Treatment.vo.ts. Value-importing from the
- * package root barrel fails the Next.js webpack build (node:fs UnhandledSchemeError
- * via project-root.ts), and Treatment.vo has no subpath export in package.json
- * (the same reason SAFE_ID_PATTERN is mirrored above). Pinned by validate.test.ts.
+ * Mirrored from CampaignOrchestration/Treatment.vo.ts's `RESERVED_STORE_AREAS`.
+ * Value-importing from the package root barrel fails the Next.js webpack build
+ * (node:fs UnhandledSchemeError via project-root.ts), and Treatment.vo has no
+ * subpath export in package.json (the same reason SAFE_ID_PATTERN is mirrored
+ * above). Pinned by validate.test.ts.
  */
-export const RESERVED_CAMPAIGN_IDS = ["cache", "jobs", "last-opened", "orgs", "packages"] as const;
-export type ReservedCampaignId = (typeof RESERVED_CAMPAIGN_IDS)[number];
+export const RESERVED_STORE_AREAS = ["cache", "jobs", "last-opened", "orgs"] as const;
+
+/**
+ * Mirrored from CampaignOrchestration/Treatment.vo.ts's `RESERVED_ROUTE_SEGMENTS`
+ * (HX1/D181) — every static first segment under
+ * `apps/api/server/routes/campaigns/`. Pinned by validate.test.ts.
+ */
+export const RESERVED_ROUTE_SEGMENTS = [
+  "assets",
+  "briefs",
+  "capabilities",
+  "decisions",
+  "generate",
+  "jobs",
+  "last-opened",
+  "package",
+  "packages",
+  "plan",
+  "pools",
+  "preview-frame",
+  "provider-keys",
+  "result",
+  "templates",
+] as const;
+
+/**
+ * Campaign identifiers the orchestrator reserves for itself, and which cannot
+ * name a campaign: the union of `RESERVED_STORE_AREAS` and
+ * `RESERVED_ROUTE_SEGMENTS` above, mirroring the package's own union so every
+ * existing caller of `isReservedCampaignId` is unchanged by the split.
+ */
+export const RESERVED_CAMPAIGN_IDS: readonly string[] = Array.from(
+  new Set<string>([...RESERVED_STORE_AREAS, ...RESERVED_ROUTE_SEGMENTS]),
+);
+// The literal union, kept precise independent of RESERVED_CAMPAIGN_IDS's own
+// runtime (deduped, `readonly string[]`) type — a nit from the D181 fix
+// round's second review.
+export type ReservedCampaignId =
+  | (typeof RESERVED_STORE_AREAS)[number]
+  | (typeof RESERVED_ROUTE_SEGMENTS)[number];
 
 export function isReservedCampaignId(id: string): id is ReservedCampaignId {
-  return (RESERVED_CAMPAIGN_IDS as readonly string[]).includes(id);
+  return RESERVED_CAMPAIGN_IDS.includes(id);
 }
 
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
@@ -144,7 +178,15 @@ export function validateIdentity(state: EditorState, existingIds?: string[]): Fi
   } else if (
     isReservedCampaignId(state.briefId) &&
     // An existing campaign keeps its id: only a NEW id may not be reserved, as on the API.
-    !(state.source.kind === "file" && state.source.loadedId === state.briefId)
+    !(state.source.kind === "file" && state.source.loadedId === state.briefId) &&
+    // D181 fix round: a versionless campaign the editor SEEDED from the server
+    // (`BriefEditor`'s `markSeeded`, mirroring the API's own grandfather rule)
+    // is likewise an existing campaign, not a fresh mint — its own slug must
+    // not be refused as reserved on its first Save. Compared against the
+    // SEEDED slug, not `briefId` generally: a user who renames this draft
+    // AWAY from that slug and onto a different reserved word still gets the
+    // error — only the campaign's own id is grandfathered, never a rename.
+    !(state.source.kind === "new" && state.source.seeded?.slug === state.briefId)
   ) {
     errors.briefId = messages.briefIdReserved(state.briefId);
   }
