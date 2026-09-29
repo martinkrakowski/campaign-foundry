@@ -899,6 +899,26 @@ describe("FsBriefStore", () => {
     expect(await store.hasGenuineReservation("templates")).toBe(true);
   });
 
+  // D181 fix round 2 (qodo, "legacy campaigns can gain duplicate briefs"):
+  // a version existing only under a DIFFERENT (legacy, non-canonical)
+  // filename is not evidence — findBriefFileById alone would have said
+  // otherwise, and createBrief's own unconditional `${id}.yaml` write that
+  // follows a true answer would then create a SECOND file carrying the same
+  // domain id. findBriefFile (matched against createBrief's own write
+  // target) correctly says false here, so the reserved refusal still fires.
+  test("hasGenuineReservation is false when the id's only version lives under a different (legacy) filename", async () => {
+    writeFileSync(
+      join(dir, "legacy.yaml"),
+      dumpBrief({ ...minimalBrief, id: "templates" }),
+      "utf8",
+    );
+    expect(await store.findBriefFileById("templates")).toBe("legacy.yaml");
+    expect(await store.hasGenuineReservation("templates")).toBe(false);
+    await expect(store.createBrief({ ...minimalBrief, id: "templates" })).rejects.toThrow(
+      `"templates" is reserved; choose another campaign id.`,
+    );
+  });
+
   test("hasGenuineReservation is false for an id with neither a version nor a campaign.json", async () => {
     expect(await store.hasGenuineReservation("templates")).toBe(false);
   });

@@ -356,17 +356,28 @@ export class FsBriefStore implements BriefStorePort {
 
   /**
    * See `BriefStorePort.hasGenuineReservation` (D181 fix round 2). Real
-   * evidence is a saved version (`findBriefFileById`) or a readable
-   * `campaign.json` (`readCampaignMeta`) — deliberately NOT `campaignMeta`'s
-   * own bare-directory fallback (`campaignDirExists`), which exists to
-   * recognise a pre-PT-5b3 reservation with no meta file, but which
+   * evidence is a saved version AT ITS OWN CANONICAL FILENAME
+   * (`findBriefFile`, not `findBriefFileById`) or a readable `campaign.json`
+   * (`readCampaignMeta`) — deliberately NOT `campaignMeta`'s own
+   * bare-directory fallback (`campaignDirExists`), which exists to recognise
+   * a pre-PT-5b3 reservation with no meta file, but which
    * `FsPoolStore.writePool`'s inline-brief `mkdir` can produce for ANY id.
-   * A `readCampaignMeta` failure (a corrupt or unreadable `campaign.json`)
-   * propagates unchanged, same fail-closed stance the rest of this store
-   * takes — it is not treated as "no evidence".
+   *
+   * `findBriefFile`, never the id-parsed `findBriefFileById` (qodo, D181 fix
+   * round 2): `createBrief` below writes unconditionally to `${ref}.yaml`
+   * once past this gate, with no check of its own for the id living under a
+   * DIFFERENT filename (a legacy, non-canonical one — `createCampaign`'s own
+   * dedupe already covers that case for a fresh mint, but `createBrief` never
+   * has). Grandfathering on `findBriefFileById` alone would let a reserved id
+   * whose only version lives in such a file through this gate, and the write
+   * that follows would create a second, canonically-named file carrying the
+   * same domain id — an ambiguous lookup. `findBriefFile` matches exactly
+   * what `createBrief` is about to write to: true here means that path is
+   * either already taken (the write EEXISTs, same as any other collision) or
+   * genuinely free.
    */
   async hasGenuineReservation(ref: string): Promise<boolean> {
-    if (await this.findBriefFileById(ref)) return true;
+    if (await this.findBriefFile(ref)) return true;
     return (await this.readCampaignMeta(ref)) !== undefined;
   }
 
