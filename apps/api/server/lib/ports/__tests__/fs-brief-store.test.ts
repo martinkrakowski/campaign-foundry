@@ -944,10 +944,12 @@ describe("FsBriefStore", () => {
    * The id -> file index behind L1 (`scripts/bench-fs-id-lookup.ts` measured a
    * 199-202 ms median over 1,000 campaigns, against a 5 ms threshold). The
    * contract these pin is not "it is fast" — it is which answers the cache is
-   * allowed to give on its own, and which it must re-derive: a HIT is served
-   * from the map, a MISS is never cached, and the two methods whose FIRST act
-   * is a decision about the root (`createCampaign`'s taken-check and
-   * `releaseCampaign`'s "holds no brief file" guard) re-derive it first.
+   * allowed to give on its own, and which it must re-derive: a HIT is validated
+   * with one `lstat` and served from the map, a MISS is never cached, a hit
+   * whose file is gone or is no longer a regular file is re-derived rather than
+   * served, and the two methods whose FIRST act is a decision about the root
+   * (`createCampaign`'s taken-check and `releaseCampaign`'s "holds no brief
+   * file" guard) re-derive it first.
    */
   describe("the id index (L1)", () => {
     test("a create is found by the very next lookup, with the index already warm", async () => {
@@ -1021,10 +1023,109 @@ describe("FsBriefStore", () => {
       });
     });
 
+    // The half of a stale entry the hit's own `lstat` CANNOT disprove: the
+    // file is still there, still a regular file, and no longer declares the id
+    // it was indexed under. These are the two methods whose FIRST act is a
+    // decision about the root, and both re-derive the index for exactly this —
+    // neither the stat nor any other writer's cleanup will ever drop the entry.
+    test("a release re-derives the root when the file no longer declares the slug", async () => {
+      await store.createCampaign("moved");
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      writeFileSync(join(dir, "moved.yaml"), campYaml.replace("id: camp", "id: elsewhere"));
+
+      // The hit validates, so a cache that trusted it would refuse this
+      // release FOREVER and leak the reservation directory with it.
+      expect(await store.releaseCampaign("moved")).toBe(true);
+      expect(existsSync(join(dir, "moved"))).toBe(false);
+    });
+
+    test("createCampaign re-derives the root when the file no longer declares the slug", async () => {
+      // Deliberately NOT the canonical `<slug>.yaml`: a brief file NAMED after
+      // the slug is "taken" by `findBriefFile`'s own rule (D177), which reads
+      // the name and is right to. The index is the other half of the check —
+      // "a brief whose `id` IS the slug but lives in a differently named file".
+      writeFileSync(join(dir, "a-reusable.yaml"), campYaml.replace("id: camp", "id: reusable"));
+      expect(await store.findBriefFileById("reusable")).toBe("a-reusable.yaml");
+
+      writeFileSync(join(dir, "a-reusable.yaml"), campYaml.replace("id: camp", "id: elsewhere"));
+
+      // The slug is free: no file in this root declares it any more. EEXIST
+      // here would be permanent, and the slug unusable for good.
+      await expect(store.createCampaign("reusable")).resolves.toEqual({
+        campaignId: "reusable",
+        slug: "reusable",
+      });
+    });
+
     test("two files declaring one id resolve to the first by name, warm or cold alike", async () => {
       writeFileSync(join(dir, "a-dup.yaml"), campYaml.replace("id: camp", "id: dup"));
       writeFileSync(join(dir, "b-dup.yaml"), campYaml.replace("id: camp", "id: dup"));
       expect(await store.findBriefFileById("dup")).toBe("a-dup.yaml");
+    });
+
+    // A cached hit is a CLAIM about a file, and this store never outlives a
+    // request, so another writer can make the claim false at any time: an
+    // operator's `rm`, a second API process, an editor's own delete. Nothing
+    // here ever unlinks a brief file, so the tests below do it by hand — which
+    // is the point, since no in-band path can produce the state.
+    test("a hit whose file was removed out of band is re-derived, not served from the map", async () => {
+      await store.createBrief({ ...minimalBrief, id: "gone" });
+      expect(await store.findBriefFileById("gone")).toBe("gone.yaml");
+      expect(await store.campaignMeta("gone")).toMatchObject({ hasVersion: true });
+
+      unlinkSync(join(dir, "gone.yaml"));
+
+      // The port's existence answers are the ones a route 404s on. Served from
+      // the map, all three keep reporting a campaign that no longer exists.
+      expect(await store.findBriefFileById("gone")).toBeUndefined();
+      expect(await store.findBriefById("gone")).toBeUndefined();
+      expect(await store.campaignVisibility("gone")).toBe("absent");
+      expect(await store.resolveCampaign("gone")).toBeUndefined();
+      expect(await store.campaignMeta("gone")).toBeUndefined();
+      expect(await store.campaignTeam("gone")).toBeUndefined();
+
+      // `readBrief` rejects on a missing campaign, and rejects the same way
+      // here: identical to the id this root never held, which is the whole
+      // contract — the deleted campaign is indistinguishable from one that was
+      // never created, rather than a lookup that found something.
+      await expect(store.readBrief("gone")).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(store.readBrief("never-existed")).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    test("a hit that is no longer a regular file is not read through", async () => {
+      await store.createBrief({ ...minimalBrief, id: "swapped" });
+      expect(await store.findBriefById("swapped")).toMatchObject({ file: "swapped.yaml" });
+
+      // A parseable brief OUTSIDE the root, which is what makes this a hole
+      // rather than a miss: `listBriefs` would never have listed this name
+      // (`readdir`'s `isFile()` is false for a link), so reading it through
+      // the index would be a way around the listing's own check.
+      const outside = join(dir, "..", `${basename(dir)}-outside.yaml`);
+      writeFileSync(outside, campYaml.replace("id: camp", "id: swapped"));
+      unlinkSync(join(dir, "swapped.yaml"));
+      symlinkSync(outside, join(dir, "swapped.yaml"));
+      try {
+        expect(await store.findBriefFileById("swapped")).toBeUndefined();
+        expect(await store.findBriefById("swapped")).toBeUndefined();
+      } finally {
+        rmSync(outside, { force: true });
+      }
+    });
+
+    // A root this store cannot stat is a storage failure, not an absent
+    // campaign: answering EIO as "no such campaign" would turn an outage into
+    // a 404 on every route that resolves a campaign first.
+    test("rethrows a non-ENOENT lstat failure from the hit's own stat unchanged", async () => {
+      await store.createBrief(minimalBrief);
+      fsHook.lstat = async (path: string) => {
+        if (path.endsWith("test-camp.yaml")) {
+          throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" });
+        }
+        throw new Error(`unexpected lstat(${path}) in this test`);
+      };
+      await expect(store.findBriefFileById("test-camp")).rejects.toMatchObject({ code: "EIO" });
     });
   });
 });

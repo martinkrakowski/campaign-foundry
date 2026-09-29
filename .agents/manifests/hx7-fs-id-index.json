@@ -6,7 +6,7 @@
       "file": "apps/api/server/lib/ports/fs-brief-store.ts",
       "before": "    this.idIndex.clear();\n    if (await this.findBriefFileById(slug)) return false;",
       "after": "    if (await this.findBriefFileById(slug)) return false;",
-      "because": "dropping the index clear makes releaseCampaign's 'holds no brief file' guard read the cache instead of the disk, so a brief file removed outside this store leaves a stale entry that refuses the release FOREVER — nothing else in the class invalidates it, and the campaign's reservation directory leaks with it. The test removes the brief file with unlinkSync (nothing in this store ever unlinks one) and then expects the release to succeed and the lookup to miss",
+      "because": "dropping the index clear makes releaseCampaign's 'holds no brief file' guard read the cache instead of the disk, and the hit's own stat cannot disprove this case: the file is still there, still a regular file, and no longer declares this slug. The guard would then refuse the release FOREVER, leaking the campaign's reservation directory with it, and nothing else in the class invalidates the entry. The test rewrites the brief file's id in place and expects the release to succeed",
       "command": [
         "yarn",
         "vitest",
@@ -15,7 +15,7 @@
         "api",
         "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
         "-t",
-        "a release re-derives the root"
+        "a release re-derives the root when the file no longer declares the slug"
       ],
       "verdict": "caught"
     },
@@ -23,7 +23,7 @@
       "file": "apps/api/server/lib/ports/fs-brief-store.ts",
       "before": "    this.idIndex.clear();\n    // \"Taken\" is a file NAMED after the slug (`findBriefFile`) OR an existing",
       "after": "    // \"Taken\" is a file NAMED after the slug (`findBriefFile`) OR an existing",
-      "because": "the same stale entry, met by createCampaign's taken-check: with the cache answering, a slug whose brief file was removed outside this store is refused with EEXIST over a reservation that is genuinely free, and the slug is unusable for good. This is the other of the two methods whose first act is a decision about the root",
+      "because": "the same stale entry, met by createCampaign's taken-check: a slug no file declares any more, in a differently named file whose id was rewritten in place, is refused with EEXIST over a reservation that is genuinely free, and the slug is unusable for good. This is the other of the two methods whose first act is a decision about the root",
       "command": [
         "yarn",
         "vitest",
@@ -32,14 +32,14 @@
         "api",
         "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
         "-t",
-        "createCampaign re-derives the root too"
+        "createCampaign re-derives the root when the file no longer declares the slug"
       ],
       "verdict": "caught"
     },
     {
       "file": "apps/api/server/lib/ports/fs-brief-store.ts",
-      "before": "    if (cached !== undefined) return cached;\n    await this.rebuildIdIndex();\n    return this.idIndex.get(id);",
-      "after": "    if (cached !== undefined) return cached;\n    return this.idIndex.get(id);",
+      "before": "    if (cached !== undefined && (await this.isIndexedFileLive(cached))) return cached;\n    await this.rebuildIdIndex();",
+      "after": "    if (cached !== undefined && (await this.isIndexedFileLive(cached))) return cached;",
       "because": "dropping the scan-on-miss turns a positive-only cache into an authoritative one: a miss is answered from the map instead of the disk, so a brief another FsBriefStore — or another process, or an operator — put in this root is invisible to this instance for the life of the process. The test warms one instance's index and then asks a SECOND FsBriefStore over the same root, which is exactly that case",
       "command": [
         "yarn",
@@ -50,6 +50,40 @@
         "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
         "-t",
         "a second store over the same root sees a campaign the first one created"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    if (cached !== undefined && (await this.isIndexedFileLive(cached))) return cached;",
+      "after": "    if (cached !== undefined) return cached;",
+      "because": "dropping the hit's own stat is the lane's original bug (fix round: the index is cached for the life of the process, and nothing in this file ever unlinks a brief file, so a cached name outlives the file behind it). Answered from the map alone, a campaign deleted out of band stays 'visible' to resolveCampaign / campaignVisibility / campaignMeta, and a name that has become a symlink is read THROUGH — a way around the regular-file check listBriefs applies. The test warms a hit, unlinks the file, and expects the existence answers to flip to absent; the symlink test covers the second half",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a hit whose file was removed out of band is re-derived"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "      const st = await lstat(resolveConfined(this.dir, file));\n      return st.isFile();\n    } catch (error) {\n      if (isErrno(error, \"ENOENT\")) return false;\n      throw error;",
+      "after": "      const st = await lstat(resolveConfined(this.dir, file));\n      return st.isFile();\n    } catch (error) {\n      if (isErrno(error, \"ENOENT\")) return false;\n      return false;",
+      "because": "the fail-closed half of that stat: a non-ENOENT lstat failure (EACCES, EIO) is a storage failure, and answering it as 'no such campaign' turns an outage into a 404 on every route that resolves a campaign first. The test makes the hit's own lstat fail with EIO and expects that errno to reach the caller unchanged",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "rethrows a non-ENOENT lstat failure from the hit's own stat"
       ],
       "verdict": "caught"
     }

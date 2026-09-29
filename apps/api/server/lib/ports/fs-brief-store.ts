@@ -81,13 +81,24 @@ export class FsBriefStore implements BriefStorePort {
    * routes.
    *
    * A POSITIVE cache, and deliberately only that:
-   * - a hit is answered from here with no filesystem work at all;
+   * - a hit is validated and then answered from here: one `lstat` on the
+   *   cached NAME (`isIndexedFileLive`), never a re-read of the brief;
    * - a miss ALWAYS falls back to a full `listBriefs()` scan
    *   (`rebuildIdIndex`), which republishes the whole map. A miss is never
    *   cached, so this cannot hide a brief that another `FsBriefStore`, another
    *   process or an operator put in this root since the last scan — the first
    *   lookup from a second instance over the same root is exactly that case,
    *   and it finds the campaign.
+   *
+   * The `lstat` is what makes a long-lived instance honest. `FsBriefStore`
+   * outlives any request (the ports `Registry` caches one per scope), and
+   * nothing in this file ever unlinks a brief file, so a cached name can
+   * outlive the file behind it: an operator's `rm`, a second API process, an
+   * editor's own "delete campaign". Answered from the map alone, a stale hit
+   * made `resolveCampaign` / `campaignVisibility` / `campaignMeta` report a
+   * campaign that is gone, and a stale hit that is now a SYMLINK would be read
+   * through it — a fresh scan excludes that name, and the index must not be a
+   * way around the listing's regular-file check.
    *
    * It holds FILE NAMES and nothing else. A `StoredBrief`'s revision must
    * always be hashed from the bytes on disk (`getRevision`, and
@@ -181,13 +192,48 @@ export class FsBriefStore implements BriefStorePort {
   }
 
   /**
-   * See `BriefStorePort.findBriefFileById`. One map read on a hit; a full
-   * directory scan on a miss, never a cached miss — see `idIndex` for why a
-   * miss has to keep paying for the answer.
+   * True when an indexed file name still names a REGULAR file in this root —
+   * the one check `findBriefFileById`'s hit is worth paying for.
+   *
+   * `lstat`, never `stat`: it does not follow the final component, so a name
+   * that has become a symlink reports as `!isFile()` (and is never opened)
+   * rather than being read through to a brief outside the briefs root. That is
+   * the same rule `listBriefs` applies through `readdir`'s `isFile()`, so a
+   * name this accepts is a name a fresh scan would list.
+   *
+   * `resolveConfined`, for the same reason every other reader in this file uses
+   * it: the name is checked for escape before it is stat'd, not after.
+   *
+   * ENOENT (a brief file removed out of band) and "not a regular file" are the
+   * same answer here — the entry is not what it was — so both return false and
+   * the caller re-derives. Any OTHER errno (EACCES, EIO, ENOTDIR on the parent)
+   * propagates unchanged: a root this store cannot stat is a storage failure,
+   * and answering it as "no such campaign" would turn an outage into a 404.
+   */
+  private async isIndexedFileLive(file: string): Promise<boolean> {
+    try {
+      const st = await lstat(resolveConfined(this.dir, file));
+      return st.isFile();
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) return false;
+      throw error;
+    }
+  }
+
+  /**
+   * See `BriefStorePort.findBriefFileById`. One map read and one `lstat` on a
+   * hit; a full directory scan on a miss, never a cached miss — see `idIndex`
+   * for why a miss has to keep paying for the answer.
+   *
+   * A hit whose file is gone (or is no longer a regular file) is NOT a hit: it
+   * falls through to the same scan a miss pays for, which drops the entry by
+   * replacing the whole map. `createCampaign` and `releaseCampaign` still clear
+   * the index before they DECIDE anything, but for what a stat cannot see — a
+   * file that no longer declares the id it was indexed under.
    */
   async findBriefFileById(id: string): Promise<string | undefined> {
     const cached = this.idIndex.get(id);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined && (await this.isIndexedFileLive(cached))) return cached;
     await this.rebuildIdIndex();
     return this.idIndex.get(id);
   }
@@ -265,11 +311,12 @@ export class FsBriefStore implements BriefStorePort {
       throw new Error(`"${slug}" is reserved; choose another campaign id.`);
     }
     // The EEXIST decision below is made from `findBriefFileById`, so this
-    // method re-derives what the root holds before it decides. A stale entry —
-    // a brief file removed outside this store, since nothing here ever unlinks
-    // one — would otherwise refuse a slug that is genuinely free, and the
-    // refusal would be permanent. Cheap here: one reservation per campaign, on
-    // a path that is not a read.
+    // method re-derives what the root holds before it decides. A hit proves
+    // the indexed NAME is a live regular file (see `isIndexedFileLive`), not
+    // that the file still DECLARES this slug — a brief whose id was rewritten
+    // in place out of band would keep its name and lose its claim to the slug,
+    // and the refusal it caused would be permanent. Cheap here: one
+    // reservation per campaign, on a path that is not a read.
     this.idIndex.clear();
     // "Taken" is a file NAMED after the slug (`findBriefFile`) OR an existing
     // brief whose `id` IS the slug but lives in a differently named file
@@ -464,10 +511,12 @@ export class FsBriefStore implements BriefStorePort {
     // so it re-derives that rather than deciding from a claim the index has not
     // re-checked. The failure this prevents is a leak rather than a wrong
     // answer: a brief file removed outside this store (another process, an
-    // operator's `rm` — nothing in this file ever unlinks one) leaves a stale
-    // entry, that entry makes the guard below report "holds a brief file", and
-    // the reservation is refused FOREVER, because no other method invalidates
-    // it. Once per failed create, never on a read.
+    // operator's `rm` — nothing in this file ever unlinks one) or one whose id
+    // was rewritten in place leaves an entry the hit's own `lstat` either
+    // cannot see past or cannot disprove, that entry makes the guard below
+    // report "holds a brief file", and the reservation is refused FOREVER,
+    // because no other method invalidates it. Once per failed create, never on
+    // a read.
     this.idIndex.clear();
     if (await this.findBriefFileById(slug)) return false;
     if (await this.isCampaignDirUnsafe(slug)) return false;

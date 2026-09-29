@@ -11,19 +11,32 @@ import { FsBriefStore } from "../apps/api/server/lib/ports/fs-brief-store.js";
 
 /**
  * Finding L1 (plan `2026-09-29_wave-hardening-and-w05-follow-ups.md:48`):
- * `FsBriefStore.findBriefFileById` resolves one id by reading and YAML-parsing
- * EVERY brief file in the briefs root — it is `listBriefs()` plus a `find` over
- * the result — and it backs `resolveCampaign`, `campaignVisibility`,
+ * `FsBriefStore.findBriefFileById` resolved one id by reading and YAML-parsing
+ * EVERY brief file in the briefs root — it was `listBriefs()` plus a `find`
+ * over the result — and it backs `resolveCampaign`, `campaignVisibility`,
  * `campaignMeta`, `campaignTeam`, `readBrief`, `getRevision`, `exists`,
  * `rewriteBrief` and `replaceBrief`, i.e. the assets, decisions, pools and
  * preview-frame routes.
  *
- * This script measures that, and exists because the row that chartered it is a
+ * This script measures it, and exists because the row that chartered it is a
  * MEASUREMENT rather than a change: over 1,000 campaigns, a hit median over
  * 5 ms means the lane builds an in-memory id -> slug index, and a median under
- * it means the finding closes with these numbers and no index. Re-run it after
- * any change to `FsBriefStore`; the number it prints is the only evidence
- * either branch of that decision rests on.
+ * it means the finding closes with these numbers and no index. It measured
+ * 199-202 ms, the index was built, and this script is re-run after it — so the
+ * two lines it prints now describe two DIFFERENT lookups, which is the point
+ * of keeping it:
+ *
+ * - the HIT is an indexed lookup: an in-memory `Map` read plus the one `lstat`
+ *   that validates the cached file name, NOT a full scan. Its number is the
+ *   cost the index bought back, and it must stay far under the threshold —
+ *   that is the whole regression guard the lane leaves behind.
+ * - the MISS still pays the full `listBriefs()` scan by design (a miss is
+ *   never cached, or another writer's brief would be invisible for the life of
+ *   the process), so its number is the 199-202 ms this finding was filed
+ *   against, still live, still re-derived on every miss.
+ *
+ * Run it after any change to `FsBriefStore`; the numbers it prints are the only
+ * evidence either branch of that decision rests on.
  *
  * Not a test, and deliberately not one: it seeds a thousand campaigns and runs
  * a hundred timed lookups, which no assertion wants in CI. It lives in
@@ -139,9 +152,11 @@ async function main(): Promise<void> {
       await store.createBrief(briefFor(slugFor(i)));
     }
 
-    // The last slug by sort order. Its position does not change the cost — the
-    // scan reads all 1,000 files before `find` looks at the first entry — which
-    // is the finding itself, and this case measures the worst end of it.
+    // The last slug by sort order — the worst end of the scan this finding was
+    // filed against, where the scan read all 1,000 files before `find` looked
+    // at the first entry. An indexed hit no longer depends on the position at
+    // all, so keeping the LAST slug is what stops the number from flattering
+    // itself: it is the one id whose full-scan cost was highest.
     const hitId = slugFor(CAMPAIGNS - 1);
     const missId = "no-such-campaign";
 
