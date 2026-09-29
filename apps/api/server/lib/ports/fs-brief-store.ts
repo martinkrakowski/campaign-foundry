@@ -42,6 +42,15 @@ import {
 const CAMPAIGN_META_FILE = "campaign.json";
 
 /**
+ * A campaign's autosave drafts (PT-5d), one JSON file per user, inside the
+ * same reserved directory `campaign.json` lives in — `FsDraftStore`'s own
+ * `DRAFTS_DIR`, duplicated here rather than imported: this file must not
+ * depend on the draft store (the reverse dependency, one write path per
+ * concern), and the two agreeing is what `releaseCampaign`'s own test proves.
+ */
+const DRAFTS_DIR = "drafts";
+
+/**
  * D166 item 5: this backend has no team column at all — a non-undefined
  * `teamId` (a team id to assign, or `null` to clear one) is refused outright
  * rather than silently ignored, since silently dropping it would tell the
@@ -358,6 +367,14 @@ export class FsBriefStore implements BriefStorePort {
    * file outside the briefs root — so `isCampaignDirUnsafe` runs first, and
    * a caller sees the same `false` a leftover-pool-file refusal gives, never
    * a distinguishing error.
+   *
+   * PT-5d: `drafts/` (every user's autosave for this campaign) is now part of
+   * the reservation too, same as `campaign.json` — a failed blank create
+   * (item 3's own test) must release its draft along with everything else, or
+   * the caller's own autosave orphans a directory this method reports as
+   * fully released. A symlinked `drafts/` is refused exactly like a
+   * symlinked `<slug>` itself: checked before any entry inside it is
+   * touched, so a release can never be tricked into deleting through it.
    */
   async releaseCampaign(slug: string): Promise<boolean> {
     if (await this.findBriefFileById(slug)) return false;
@@ -370,7 +387,22 @@ export class FsBriefStore implements BriefStorePort {
       if (isErrno(error, "ENOENT")) return false;
       throw error;
     }
-    if (entries.some((entry) => entry !== CAMPAIGN_META_FILE)) return false;
+    if (entries.some((entry) => entry !== CAMPAIGN_META_FILE && entry !== DRAFTS_DIR)) {
+      return false;
+    }
+    let draftsPath: string | undefined;
+    if (entries.includes(DRAFTS_DIR)) {
+      draftsPath = resolveConfined(dirPath, DRAFTS_DIR);
+      const draftsStat = await lstat(draftsPath);
+      if (!draftsStat.isDirectory()) return false;
+    }
+    if (draftsPath) {
+      const draftFiles = await readdir(draftsPath);
+      for (const file of draftFiles) {
+        await unlink(resolveConfined(draftsPath, file));
+      }
+      await rmdir(draftsPath);
+    }
     if (entries.includes(CAMPAIGN_META_FILE)) {
       await unlink(resolveConfined(dirPath, CAMPAIGN_META_FILE));
     }

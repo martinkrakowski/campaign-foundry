@@ -26,7 +26,7 @@ import { createCampaign } from "@/lib/create-campaign";
 import { campaignRoute } from "@/lib/campaign-route";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
-import { hasRecoverableDraft } from "@/components/campaign/editor-state";
+import { fetchLatestServerDraft, type LatestServerDraft } from "@/components/campaign/editor-state";
 import { unknownErrorMessage } from "@/lib/briefs-api";
 import {
   formatDisplayName,
@@ -157,10 +157,8 @@ function typeTileDescription(type: CampaignType): string {
 export function CreateCampaignDialog() {
   const { createDialogOpen, closeCreateDialog } = useCreateCampaign();
   const router = useRouter();
+  const { guardedPush } = useGuardedNavigation();
   const pathname = usePathname();
-  // W3 — read only. The dialog never guards: the create gesture was already guarded
-  // by the entry point that opened it (D67); `isDirty` scopes the F19 two-way below.
-  const { isDirty } = useGuardedNavigation();
   const [name, setName] = useState("");
   const [type, setType] = useState<CampaignType>(DEFAULT_CAMPAIGN_TYPE);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -177,6 +175,13 @@ export function CreateCampaignDialog() {
   // provided the node is still connected; the name input is the stable fallback.
   const guardReturnFocusRef = useRef<HTMLElement | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  // Fix round (bots) — bumped by every close gesture; `handleCreate` captures
+  // it before its own `await fetchLatestServerDraft()` and refuses to act on
+  // a stale answer (setting the resume prompt, or minting) once it no longer
+  // matches. A close gesture during that await — Cancel, Escape, the guard's
+  // Discard and close — must not let the pending check go on to mint a
+  // campaign, or raise a prompt, for a dialog the operator already closed.
+  const createSessionRef = useRef(0);
 
   /** Where a cleared answer takes its notice down. */
   const clearRefusal = () => {
@@ -189,6 +194,7 @@ export function CreateCampaignDialog() {
 
   /** A cancelled or completed create leaves nothing behind — the typed fields included. */
   const closeAndReset = () => {
+    createSessionRef.current += 1;
     closeCreateDialog();
     setName("");
     setType(DEFAULT_CAMPAIGN_TYPE);
@@ -293,6 +299,15 @@ export function CreateCampaignDialog() {
     }
   };
 
+  // PT-5d item 5 — which campaign `handleCreate`'s own draft check found, so
+  // `handleResume` (pressed after the prompt renders) knows where to go
+  // without asking the server again.
+  const latestDraftRef = useRef<LatestServerDraft | null>(null);
+  // Guards the same double-activation window `createInFlightRef` guards for
+  // `runCreate` — `handleCreate` now awaits a fetch before it ever reaches
+  // that ref, so a second press inside that window needs its own latch.
+  const checkingDraftRef = useRef(false);
+
   const handleCreate = async () => {
     // The refusal ladder collapsed with the Identity fields: only the name can
     // be missing. Type has a default (D108).
@@ -302,34 +317,64 @@ export function CreateCampaignDialog() {
       return;
     }
     setNameInvalid(false);
-    // W3 (F19) — before minting a brand-new campaign, ask about the abandoned
-    // draft it would leave stranded. The scope term is the lane's heart, and
-    // both halves are mandatory:
-    //
-    // `isDirty && pathname === "/brief/new"` — only there do the guard's question and
-    // this one concern the *same* draft. `setDirty` is driven by any mounted editor,
-    // not just the blank one, so without the route term a stale `cf:draft:new` from an
-    // earlier session plus a dirty editor on a named route would stay silent and the
-    // user would mint a second campaign with the first abandoned draft unmentioned —
-    // F19 unfixed. On the blank route, asking again after the guard's "Leave" would
-    // be the D67 double prompt.
-    //
-    // No capture-before-the-guard is needed: `guardedAction` never clears the flag and
-    // no navigation has happened, so the value at press time is the value at gesture
-    // start — and the gesture starts at four call sites this dialog does not own.
-    if (hasRecoverableDraft() && !(isDirty && pathname === "/brief/new")) {
-      setResumePrompt(true);
-      return;
+    if (checkingDraftRef.current) return;
+    checkingDraftRef.current = true;
+    // Fix round (bots) — captured before the await: a close gesture (Cancel,
+    // Escape, the guard's Discard and close) during the lookup below bumps
+    // `createSessionRef` via `closeAndReset`, and this check refuses to set
+    // the resume prompt or mint a campaign for a session that already ended.
+    // Real, reviewer-confirmed: without it, Discard-and-close during this
+    // await did not stop a subsequent no-draft answer from minting a
+    // campaign with the name and type captured when Create was pressed.
+    const session = createSessionRef.current;
+    try {
+      // W3 (F19) — before minting a brand-new campaign, ask about the
+      // abandoned draft it would leave stranded (PT-5d item 5: the caller's
+      // own latest server draft, across every campaign). The scope term:
+      // skip the prompt when that draft's OWN campaign is the one already
+      // open — asking about the draft the operator is already looking at
+      // would be the D67 double prompt this dialog does not own (the
+      // navigation guard's own question, for the same draft). Compared
+      // against both `campaignId` and `slug` (fix round, bots): on Postgres
+      // they differ, and the currently open route may have been reached by
+      // either (#613), so a uuid-only compare misses a slug-reached route
+      // naming the very campaign the draft belongs to.
+      const result = await fetchLatestServerDraft();
+      if (createSessionRef.current !== session) return;
+      if (!result.ok) {
+        setRefusal(messages.createDraftCheckFailed);
+        return;
+      }
+      const latest = result.latest;
+      latestDraftRef.current = latest;
+      if (
+        latest !== null &&
+        pathname !== campaignRoute(latest.campaignId) &&
+        pathname !== campaignRoute(latest.slug)
+      ) {
+        setResumePrompt(true);
+        return;
+      }
+      await runCreate();
+    } finally {
+      checkingDraftRef.current = false;
     }
-    await runCreate();
   };
 
-  /** Resume: the draft stays on disk, nothing is minted — `/brief/new` finds
-   *  a recoverable draft (`hasRecoverableDraft`) and resumes the editor from
-   *  it, rather than opening the dialog again (PT-5c1). */
+  /** Resume: nothing is minted — the caller's latest server draft already
+   *  names a real campaign (PT-5d item 5), so this navigates straight to it
+   *  rather than opening `/brief/new` again to re-ask the same question.
+   *  Only ever pressed from the resume prompt this ref's own non-null value
+   *  raised (`handleCreate`), and nothing in between resets it — the
+   *  non-null assertion documents that, rather than a dead `if` branch.
+   *  `guardedPush`, not a raw `router.push` (fix round, bots): the dialog can
+   *  be opened over a dirty OTHER campaign's editor (a global "New campaign"
+   *  entry point), and every other navigation in the shell already asks
+   *  before leaving unsaved work — this was the one exception. */
   const handleResume = () => {
+    const latest = latestDraftRef.current!;
     closeAndReset();
-    router.push("/brief/new");
+    guardedPush(campaignRoute(latest.campaignId));
   };
 
   const cancelResumePrompt = () => setResumePrompt(false);

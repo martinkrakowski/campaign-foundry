@@ -106,9 +106,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "    if (!isPristine(state)) {\n      draftDivergedRef.current = true;\n      saveDraftToStorage(state);\n      return;\n    }\n    if (draftDivergedRef.current) purgeDraftFromStorage(state);",
-      "after": "    if (isPristine(state)) {\n      purgeDraftFromStorage(state);\n      return;\n    }\n    saveDraftToStorage(state);",
-      "because": "Purge on EVERY pristine render, not only on a return to pristine: mount starts pristine and the capabilities answer re-renders pristine again, so a stored draft whose visible content matches the blank editor is eaten before and after the restore flow reads it — with no diverging state to trigger the write-back that would hide this for a draft with visible edits. The reload finds nothing because the purge that was meant to clean up after undo ran on the very render that came to recover.",
+      "before": "    } else if (draftDivergedRef.current) {",
+      "after": "    } else {",
+      "because": "Purge on EVERY pristine render, not only on a return to pristine: mount starts pristine, and this session never diverged from it, so a stored draft whose visible content matches the blank editor is DELETEd on that very render — before the restore effect (a separate, async effect) ever gets to read it. The gate this mutation drops is what makes the delete a same-session-divergence-only action; without it, the mount's own pristine render is indistinguishable from a genuine return to pristine. Re-anchored for PT-5d: the storage calls became putServerDraft/deleteServerDraft and the branch order flipped (still-diverging first, pristine second), but the divergedRef gate this mutation strips is unchanged.",
       "command": [
         "yarn",
         "vitest",
@@ -123,9 +123,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "    if (!isPristine(state)) {\n      draftDivergedRef.current = true;\n      saveDraftToStorage(state);\n      return;\n    }\n    if (draftDivergedRef.current) purgeDraftFromStorage(state);",
-      "after": "    if (isPristine(state)) return;\n    saveDraftToStorage(state);",
-      "because": "Drop the return-to-pristine purge (the finding as reported): the autosave effect still never removes a stored draft, so an undone brief comes back after reload — with undo one keystroke away made returning to exactly pristine easy, the stale draft arrives with no history left to undo it.",
+      "before": "    } else if (draftDivergedRef.current) {\n      draftDivergedRef.current = false;\n      pendingDraftRef.current = null;\n      enqueueDraftWrite(() => deleteServerDraft(routeId));\n    }",
+      "after": "    }",
+      "because": "Drop the return-to-pristine purge (the finding as reported): the autosave effect still never removes a stored draft, so an undone brief comes back after reload — with undo one keystroke away, returning to exactly pristine is easy, and the stale draft arrives with no history left to undo it. Re-anchored for PT-5d, then again for the bot fix round: `deleteServerDraft` replaces `purgeDraftFromStorage`, and the write now goes through `enqueueDraftWrite` (the client-side write chain) instead of a bare call, but the branch this mutation deletes — the return-to-pristine cleanup itself — is the same one.",
       "command": [
         "yarn",
         "vitest",

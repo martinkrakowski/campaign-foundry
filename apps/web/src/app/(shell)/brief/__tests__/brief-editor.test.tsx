@@ -19,14 +19,9 @@ import { campaignRoute } from "@/lib/campaign-route";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
-import {
-  fromBrief,
-  initialEditorState,
-  saveDraftToStorage,
-} from "@/components/campaign/editor-state";
+import { fromBrief, initialEditorState } from "@/components/campaign/editor-state";
 import { sectionOrder } from "@/components/campaign/sections";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
-import NewBriefPage from "../new/page";
 import { Header } from "@/components/shell/Header";
 
 /**
@@ -64,9 +59,6 @@ const renderWithRun = (ui: React.ReactElement) =>
  * way Next does when the user arrives (or reloads) there.
  */
 const Editor = ({ id }: { id?: string }) => <BriefEditor briefId={id} />;
-
-/** `/brief/new` — the same editor, started empty. */
-const NewEditor = () => <NewBriefPage />;
 
 /** Corrected for D35's verb model: Save is the bar's primary, one press; Save as…
  *  lives in the overflow — the old disclosure that hid Save behind Save is gone. */
@@ -149,6 +141,44 @@ const blankCampaignMeta = (
   hasVersion: false,
 });
 
+/**
+ * PT-5d's in-memory draft store: the `draft.*` route defaults below share
+ * this, so a PUT followed by a reload's GET round-trips the way the real
+ * server does without every test needing its own handler — only a test that
+ * asserts something about the draft's own `baseRevision`/failure behaviour
+ * needs `handlers.draft`. Exposed on `routes()`'s own return value (a
+ * `CallsList`, below) rather than changing that return shape, so every
+ * existing `const calls = routes({...})` call site keeps working unchanged.
+ */
+function makeDraftStore() {
+  const store = new Map<string, { state: unknown; baseRevision: string | null }>();
+  return {
+    get(id: string): Response {
+      const rec = store.get(id);
+      return json({ draft: rec ? { ...rec, updatedAt: "t" } : null });
+    },
+    put(id: string, body?: Record<string, unknown>): Response {
+      const state = body?.state;
+      const baseRevision = typeof body?.baseRevision === "string" ? body.baseRevision : null;
+      store.set(id, { state, baseRevision });
+      return json({ draft: { state, baseRevision, updatedAt: "t" } });
+    },
+    del(id: string): Response {
+      store.delete(id);
+      return json({ deleted: true });
+    },
+    has: (id: string) => store.has(id),
+    stored: (id: string) => store.get(id),
+    seed(id: string, state: unknown, baseRevision: string | null) {
+      store.set(id, { state, baseRevision });
+    },
+  };
+}
+
+interface CallsList extends Array<{ url: string; method: string; body?: Record<string, unknown> }> {
+  drafts: ReturnType<typeof makeDraftStore>;
+}
+
 /** Route each call by URL+method; unmatched calls fail loudly rather than hanging.
  *  The write handlers receive the parsed request body, so a test can echo it back —
  *  what the real routes do (`parseBrief(await readBody(...))`), key order included. */
@@ -159,8 +189,16 @@ const routes = (handlers: {
   capabilities?: () => Response | Promise<Response>;
   /** `GET /campaigns/:id` — PT-5c1's campaign-meta lookup, keyed by the uuid/slug in the URL. */
   meta?: (id: string) => Response | Promise<Response>;
+  /** PT-5d — `/campaigns/:id/draft` and the W3 latest-draft lookup. Defaults
+   *  round-trip through `calls.drafts` (an in-memory store) when omitted. */
+  draft?: {
+    get?: (id: string) => Response | Promise<Response>;
+    put?: (id: string, body?: Record<string, unknown>) => Response | Promise<Response>;
+    delete?: (id: string) => Response | Promise<Response>;
+    latest?: () => Response | Promise<Response>;
+  };
 }) => {
-  const calls: { url: string; method: string; body?: Record<string, unknown> }[] = [];
+  const calls = Object.assign([], { drafts: makeDraftStore() }) as CallsList;
   vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
     const u = String(url);
     const method = (init?.method ?? "GET").toUpperCase();
@@ -175,8 +213,30 @@ const routes = (handlers: {
     if (method === "GET" && u === `${API}/campaigns/capabilities`) {
       return Promise.resolve(handlers.capabilities?.() ?? json({ motion: true }));
     }
+    // PT-5d — checked before the "briefs" list prefix below, which `/campaigns/briefs/draft`
+    // would otherwise also match (it starts with the same `${API}/campaigns/briefs` prefix).
+    if (method === "GET" && u === `${API}/campaigns/briefs/draft`) {
+      return Promise.resolve(handlers.draft?.latest?.() ?? json({ latest: null }));
+    }
     if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
       return Promise.resolve(handlers.list?.() ?? json({ briefs: [] }));
+    }
+    // PT-5d — `/campaigns/:id/draft`, checked before the generic POST/PUT
+    // catch-alls below (whose shapes are wrong for a draft) and before `meta`
+    // (whose own check already excludes a URL with a second "/", so this
+    // never reaches it anyway).
+    const draftMatch = /^\/campaigns\/([^/]+)\/draft$/.exec(u.slice(API.length));
+    if (draftMatch) {
+      const id = draftMatch[1]!;
+      if (method === "GET") {
+        return Promise.resolve(handlers.draft?.get?.(id) ?? calls.drafts.get(id));
+      }
+      if (method === "PUT") {
+        return Promise.resolve(handlers.draft?.put?.(id, parsed) ?? calls.drafts.put(id, parsed));
+      }
+      if (method === "DELETE") {
+        return Promise.resolve(handlers.draft?.delete?.(id) ?? calls.drafts.del(id));
+      }
     }
     // PT-5c1 (D178) — `GET /campaigns/:id`: the load effect's fallback for an id the
     // listing does not carry (a versionless campaign never is). Opt-in only, via
@@ -250,13 +310,20 @@ const routes = (handlers: {
  * So these tests assert what they mean — nothing was written — rather than the stricter
  * statement that no request of any kind was issued. Any other non-GET, including a stray
  * /campaigns/generate, still fails.
+ *
+ * PT-5d — a draft PUT/DELETE is excluded the same way: the autosave effect fires
+ * on ANY non-pristine state (debounced 1 s), which these refusal tests do not
+ * control for and do not mean by "nothing was written" — the campaign brief
+ * itself is what they assert about, and a draft is explicitly not one (item 3:
+ * "PUT never calls parseBrief").
  */
 const writes = (calls: readonly { url: string; method: string }[]) =>
   calls.filter(
     (c) =>
       c.method !== "GET" &&
       !c.url.includes("/campaigns/plan") &&
-      !c.url.includes("/campaigns/preview-frame"),
+      !c.url.includes("/campaigns/preview-frame") &&
+      !/\/campaigns\/[^/]+\/draft$/.test(c.url),
   );
 
 const waitForEditorReady = async () =>
@@ -700,50 +767,44 @@ describe("BriefPage — data flow", () => {
     expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull();
   });
 
-  test("Save as... on the blank route also stops the URL calling it new", async () => {
-    const user = userEvent.setup();
-    // PT-5c1 (D178): the ONLY blank editor at routeId === undefined is W3's resume
-    // of an abandoned draft now (a fresh, routeless mount can never gain a briefId,
-    // D178) — seed one with an id already, the shape a pre-lane build would have
-    // left, and Save as... still mints a BRAND NEW campaign from the typed name.
-    saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "fresh" });
-    const calls = routes({});
-    renderWithRun(<Editor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh"),
+  // PT-5d — `state.briefId` becomes non-empty only through `markSeeded`,
+  // which needs a resolved route (D168 retired typing-derives-the-slug, so
+  // typing into Campaign Name can never do it for an unseeded source, and
+  // `validateIdentity` fails `SAFE_ID_PATTERN.test("")` unconditionally).
+  // `routeId === undefined` is therefore unreachable through normal
+  // navigation now (`/brief/new` never mounts a bare editor), and Save/Save
+  // as… would refuse before the network anyway if it somehow were — but the
+  // mint branches below are PT-5c2's, not this lane's, so they stay and keep
+  // their coverage: seed the identity at a real route, then drop the route
+  // out from under the SAME mounted instance. `state` is a reducer (it does
+  // not reset on a prop change) and the load effect's own
+  // `if (routeId === undefined) return;` leaves a seeded "new" source's
+  // `state.source` exactly as it was — the one way left to reach this branch
+  // without a raw state injection.
+  const dropRoute = (view: ReturnType<typeof renderWithRun>) =>
+    view.rerender(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <Editor />
+          <CreateCampaignDialog />
+        </CreateCampaignProvider>
+      </ShellProviders>,
     );
-    await fillValidDraft(user, "fresh");
 
-    await saveVia(user, "Save as");
-    await user.type(screen.getByLabelText("New campaign name"), "elsewhere");
-    await user.click(
-      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
-    );
-
-    // D37: the copy's identity lives in the URL — the mint's own campaignId names it.
-    await waitFor(() =>
-      expect(nextMock().router.replace).toHaveBeenCalledWith(campaignRoute("elsewhere")),
-    );
-
-    // PT-5c2: no campaign was open (routeId undefined) — the mint carries no
-    // `teamOf` at all.
-    const mint = calls.find((c) => c.method === "POST" && c.url === `${API}/campaigns`);
-    expect(mint?.body).not.toHaveProperty("teamOf");
-  });
-
-  // PT-5c2 fix round (qodo PRRT_kwDOSzP1zc6m7irB): plain Save on the SAME W3
-  // resume shape — briefs.post.ts now refuses to create a campaign nothing
-  // ever minted, so the first Save of an abandoned pre-PT-5c1 draft must mint
-  // one first (POST /campaigns), the same way Save as… already does.
   test("Save on the blank route mints the campaign first, then saves the draft into it", async () => {
     const user = userEvent.setup();
-    saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "fresh" });
-    const calls = routes({});
-    renderWithRun(<Editor />);
+    // Seeded under a DIFFERENT slug ("fresh-camp") than the typed name
+    // ("fresh"): a controlled input's `fireEvent.change` to the value it
+    // already displays (here, the `briefId` fallback `campaignNameValue`
+    // falls back to) never fires onChange at all — React's own value
+    // tracker sees no change — so the seed and the typed name must differ.
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh-camp")) });
+    const view = renderWithRun(<Editor id="fresh-camp" />);
     await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh"),
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh-camp"),
     );
     await fillValidDraft(user, "fresh");
+    dropRoute(view);
 
     await saveVia(user, "Save");
 
@@ -760,6 +821,38 @@ describe("BriefPage — data flow", () => {
     expect(posts[mintIndex]?.body).toMatchObject({ name: "fresh" });
     // The draft is saved under the MINTED slug, not the abandoned draft's own id.
     expect(posts[saveIndex]?.body).toMatchObject({ id: "fresh" });
+  });
+
+  // Also covers `handleSaveAs`'s own `sourceRouteId === undefined` branch
+  // (no `teamOf`) and this lane's `if (sourceRouteId !== undefined)` guard on
+  // the post-Save-as draft DELETE.
+  test("Save as... on the blank route also stops the URL calling it new", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
+    const view = renderWithRun(<Editor id="fresh" />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh"),
+    );
+    dropRoute(view);
+    await fillValidDraft(user, "fresh");
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New campaign name"), "elsewhere");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+
+    // D37: the copy's identity lives in the URL — the mint's own campaignId names it.
+    await waitFor(() =>
+      expect(nextMock().router.replace).toHaveBeenCalledWith(campaignRoute("elsewhere")),
+    );
+
+    // PT-5c2: no campaign was open (routeId undefined at Save-as time) — the
+    // mint carries no `teamOf` at all, and this lane's own post-Save-as
+    // DELETE has nothing to target either.
+    const mint = calls.find((c) => c.method === "POST" && c.url === `${API}/campaigns`);
+    expect(mint?.body).not.toHaveProperty("teamOf");
+    expect(calls.some((c) => c.method === "DELETE" && c.url.includes("/draft"))).toBe(false);
   });
 
   test("Save as... keeps the copy's revision, so the next save still guards the write", async () => {
@@ -1022,22 +1115,28 @@ describe("BriefPage — data flow", () => {
     // a file identity without a baseline — the shape a legacy or hand-edited draft
     // can carry. Nothing to keep dirty against, so nothing to protect on a conflict.
     const orphan = fromBrief(brief("camp") as never, { file: "camp.yaml", revision: "r1" });
-    saveDraftToStorage({
-      ...orphan,
-      source: {
-        kind: "file",
-        file: "camp.yaml",
-        loadedId: "camp",
-        savedSnapshot: null,
-        revision: "r1",
-      },
-    });
-    routes({
+    const calls = routes({
       list: () => json({ briefs: [entry("camp", "r1")] }),
       put: () => json({ error: "Brief was modified by another user.", revision: "rev-fresh" }, 409),
     });
+    // PT-5d: seeded on the server draft store, at the SAME revision ("r1") the
+    // listing answers for camp — the restore effect's own base_revision gate.
+    calls.drafts.seed(
+      "camp",
+      {
+        ...orphan,
+        source: {
+          kind: "file",
+          file: "camp.yaml",
+          loadedId: "camp",
+          savedSnapshot: null,
+          revision: "r1",
+        },
+      },
+      "r1",
+    );
     renderWithRun(<Editor id="camp" />);
-    // the route loads camp, then draft recovery restores the orphan over it
+    // the route loads camp, then the PT-5d restore effect restores the orphan over it
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
     );
@@ -1098,10 +1197,10 @@ describe("BriefPage — data flow", () => {
   // POST of the on-screen draft, zero brief writes.
 
   test("arriving on the blank route lets go of the campaign being left", async () => {
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     // the shell is on `camp`, with unsaved edits to it in storage
     localStorage.setItem("cf:brief", JSON.stringify(brief("camp")));
-    saveDraftToStorage(fromBrief(brief("camp"), { file: "camp.yaml" }));
+    calls.drafts.seed("camp", fromBrief(brief("camp"), { file: "camp.yaml" }), "r1");
 
     renderWithRun(<Editor />);
 
@@ -1111,34 +1210,15 @@ describe("BriefPage — data flow", () => {
     await waitFor(() =>
       expect(JSON.parse(localStorage.getItem("cf:brief") ?? "null")?.id).toBe("camp"),
     );
-    // …and camp's unsaved work is untouched. Getting here does not always follow the
-    // unsaved-changes prompt — from any other view there is no mounted editor to call
-    // itself dirty — so deleting the draft would be destroying work nobody was asked
-    // about, and D11 recovery exists to keep exactly this.
-    expect(localStorage.getItem("cf:draft:camp")).not.toBeNull();
+    // …and camp's own server draft is untouched: a routeless mount (PT-5d) never
+    // fetches, writes or deletes any campaign's draft — all three effects gate on
+    // a defined routeId, and this one has none.
+    expect(calls.some((c) => c.url.includes("/campaigns/camp/draft"))).toBe(false);
   });
 
-  test("saving on the blank route stops the URL calling it new", async () => {
-    const user = userEvent.setup();
-    routes({});
-    // PT-5c1 (D177): the ONLY blank editor left at routeId === undefined is W3's
-    // resume of an abandoned draft (a fresh, routeless mount can never gain a
-    // briefId any more, since typing no longer derives one, D178) — so this is
-    // exercised as a resumed draft that already carries an id, the same shape a
-    // pre-lane build's autosave would have left.
-    saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "fresh" });
-    renderWithRun(<Editor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh"),
-    );
-
-    await fillValidDraft(user, "fresh");
-    await saveVia(user, "Save");
-
-    // D37: the URL is the source of truth for which brief is open — otherwise a
-    // reload would blank the brief that was just saved
-    await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief/fresh"));
-  });
+  // PT-5d — a duplicate of "Save on the blank route mints the campaign
+  // first..." above (same seed-then-drop-the-route setup); retired rather
+  // than kept as a second copy of the same assertion.
 
   // Corrected for D35/D41: "Apply to run" is retired and the chip has two states.
   // What the old test pinned — that committing the draft retires the unapplied badge —
@@ -1290,17 +1370,17 @@ describe("BriefPage — data flow", () => {
 
   test("the recovery draft is not resurrected by autosave after a Revert (L1)", async () => {
     const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(<Editor id="camp" />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
     );
 
-    // Type an edit (autosaved under the brief's draft key), then revert it.
+    // Type an edit (autosaved, debounced, under the campaign's own server draft), then revert it.
     await user.type(screen.getByLabelText("Headline"), " edited");
-    await waitFor(() => expect(localStorage.getItem("cf:draft:camp")).not.toBeNull());
-    const autosaved = JSON.parse(localStorage.getItem("cf:draft:camp") ?? "null");
-    expect(autosaved.state.campaignMessage).toBe("Hi edited");
+    await waitFor(() => expect(calls.drafts.has("camp")).toBe(true));
+    const autosaved = calls.drafts.stored("camp");
+    expect((autosaved?.state as { campaignMessage?: string })?.campaignMessage).toBe("Hi edited");
 
     await user.click(screen.getByText("⋯"));
     await user.click(screen.getByText(messages.editorRevert));
@@ -1310,44 +1390,39 @@ describe("BriefPage — data flow", () => {
       expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi"),
     );
 
-    // L1: the reverted state is not pristine, so autosave refills the key — with the
-    // REVERTED content, never the discarded edit. (The old code purged here and
-    // autosave immediately rewrote it: a no-op fight that this assertion pins.)
-    await waitFor(() => {
-      const draft = JSON.parse(localStorage.getItem("cf:draft:camp") ?? "null");
-      expect(draft?.state?.campaignMessage).toBe("Hi");
-    });
+    // L1, fix round (bots) — a Revert on a "file" source lands back on its OWN
+    // saved/loaded baseline, which is genuinely nothing-unsaved (`hasUnsavedWork`,
+    // `editor-state.ts`): autosave DELETEs the draft rather than refilling it, the
+    // same "return to pristine purges it" shape an undo back to a clean editor
+    // already takes. This was NOT always true here: `isPristine` alone (the bug a
+    // real Qodo review finding named) read a loaded, file-backed campaign as
+    // never pristine regardless of edits, so this assertion used to pin the OLD,
+    // wrong behaviour — a draft "refilled" with the reverted content, discarded
+    // edit gone but a phantom recovery draft left behind anyway. Never the
+    // discarded edit either way.
+    await waitFor(() => expect(calls.drafts.has("camp")).toBe(false));
   });
 
-  test("a Revert of a never-saved draft purges its recovery copy (L1, new source)", async () => {
+  test("a Revert of a never-saved draft on a routeless mount touches no server draft (L1, new source)", async () => {
     const user = userEvent.setup();
-    routes({});
+    const calls = routes({});
     renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
     await fillValidDraft(user, "typed");
 
-    // autosaved under the new draft's temp-id key. (The suite's localStorage is the
-    // in-memory stand-in from vitest.setup, whose keys are read via key(i), not
-    // Object.keys.)
-    await waitFor(() => {
-      const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) ?? "");
-      expect(keys.filter((k) => k.startsWith("cf:draft:"))).toHaveLength(1);
-    });
-
     await user.click(screen.getByText("⋯"));
     await user.click(screen.getByText(messages.editorRevert));
     const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
     await user.click(within(prompt).getByRole("button", { name: messages.confirmDialogDiscard }));
 
-    // Reverting a new source mints a fresh temp id and leaves the editor pristine, so
-    // autosave will not rewrite anything: the purge is what keeps the discarded edits
-    // from lingering in storage forever.
-    await waitFor(() => {
-      const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) ?? "");
-      expect(keys.filter((k) => k.startsWith("cf:draft:"))).toEqual([]);
-    });
+    // PT-5d: a routeless mount (`routeId === undefined`) has no campaign id to
+    // autosave against at all, so nothing here ever reaches a server draft — the
+    // purge the old localStorage mechanism needed (a fresh temp id orphaning the
+    // old key) has no equivalent hazard: server drafts are keyed by campaign id,
+    // never a rotating temp id.
+    expect(calls.some((c) => c.url.includes("/draft"))).toBe(false);
     expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("");
   });
 
@@ -1466,11 +1541,13 @@ describe("BriefPage — data flow", () => {
   });
 
   test("unsaved edits come back when the brief they belong to is reopened", async () => {
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
 
-    // what the auto-save would have written while editing "camp"
+    // what the auto-save would have written while editing "camp" — seeded at
+    // the SAME revision ("r1") the listing answers, the restore effect's own
+    // base_revision gate (PT-5d item 4).
     const edited = fromBrief(brief("camp") as never, { file: "camp.yaml", revision: "r1" });
-    saveDraftToStorage({ ...edited, campaignMessage: "unsaved work" });
+    calls.drafts.seed("camp", { ...edited, campaignMessage: "unsaved work" }, "r1");
 
     // D37/H6: the draft is keyed to the route's id, so arriving at /brief/camp —
     // the way a reload does — finds the recovery copy once the brief has loaded.
@@ -1483,14 +1560,14 @@ describe("BriefPage — data flow", () => {
 
   test("a draft survives a reload at the same route (H6)", async () => {
     const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
 
     const first = renderWithRun(<Editor id="camp" />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
     );
     await user.type(screen.getByLabelText("Headline"), " edited");
-    await waitFor(() => expect(localStorage.getItem("cf:draft:camp")).not.toBeNull());
+    await waitFor(() => expect(calls.drafts.has("camp")).toBe(true));
     first.unmount();
 
     // The reload: a fresh provider, a fresh editor, the same route.
@@ -1634,18 +1711,16 @@ describe("BriefPage — data flow", () => {
 
   test("a non-409 Save as… failure is reported", async () => {
     const user = userEvent.setup();
-    // PT-5c1 (D177): a fresh, routeless editor can never gain a briefId any more
-    // (typing derives nothing, D178) — seed one the way W3's resume would find it.
-    saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "fresh" });
     routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
       post: (url) =>
         url.endsWith("/campaigns") ? json({ error: "disk full" }, 500) : json({}, 201),
     });
-    renderWithRun(<Editor />);
+    renderWithRun(<Editor id="camp" />);
     await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh"),
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
     );
-    await fillValidDraft(user, "fresh");
+    await fillValidDraft(user, "camp");
 
     await saveVia(user, "Save as");
     await user.type(screen.getByLabelText("New campaign name"), "Copy");
@@ -1713,9 +1788,14 @@ describe("BriefPage — data flow", () => {
     // A NEVER-saved source (D9: Save as… does not require the source to be
     // saved first) — the case where the Identity field reads `campaignName`
     // rather than a loaded file's slug, so a rename of the source is visible.
-    saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "Original" });
-    const calls = routes({});
-    renderWithRun(<Editor />);
+    // A seeded, versionless campaign (`markSeeded`, PT-5c1/PT-5b3) is the
+    // current mechanism that gets a "new" source a real identity — the
+    // pre-lane `saveDraftToStorage` injection this replaces relied on a raw
+    // `restore` dispatch that could set `briefId` independently of any real
+    // campaign, which PT-5d's retirement of that whole mechanism makes
+    // impossible to reach any other way.
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh", { name: "Original" })) });
+    renderWithRun(<Editor id="fresh" />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("Original"),
     );
@@ -4907,7 +4987,7 @@ describe("the route is the source of truth (D37)", () => {
 
   test("an unknown id is answered with the empty state, names it, and creates no draft", async () => {
     const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
     renderWithRun(
       <>
         <RunBriefProbe />
@@ -4924,10 +5004,10 @@ describe("the route is the source of truth (D37)", () => {
     expect(screen.getByRole("link", { name: messages.briefNotFoundNew }).getAttribute("href")).toBe(
       "/brief/new",
     );
-    // No draft was created for the unknown id.
-    await new Promise((r) => setTimeout(r, 50));
-    const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) ?? "");
-    expect(keys.filter((k) => k.startsWith("cf:draft:"))).toEqual([]);
+    // No draft was created for the unknown id (PT-5d): the restore and
+    // autosave effects both gate on a resolved route, which an unknown id
+    // never reaches.
+    expect(calls.some((c) => c.url.includes("/draft"))).toBe(false);
 
     // W1 (D66/D67): the way out is the create dialog — the link keeps its href, but
     // the gesture opens the door; the editor is not mounted, so the guard is silent.
@@ -5167,45 +5247,29 @@ describe("the route is the source of truth (D37)", () => {
     expect(screen.queryByText("a")).toBeNull();
   });
 
-  test("the /brief/new draft survives a reload, under one stable key (H6)", async () => {
-    const user = userEvent.setup();
-    routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    // PT-5c1 (D177): /brief/new no longer starts a blank editor on a fresh
-    // visit (create always mints through POST /campaigns first) — the one way
-    // it still shows a typeable blank editor is W3's resume, so this H6 claim
-    // is exercised through that path: seed a recoverable draft first.
-    saveDraftToStorage({ ...initialEditorState(), campaignName: "Abandoned" });
-
-    const first = renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("Abandoned"),
-    );
-    await fillValidDraft(user, "typed");
-    await waitFor(() => expect(localStorage.getItem("cf:draft:new")).not.toBeNull());
-    first.unmount();
-
-    // The reload finds the SAME draft, under the same stable key — resumed
-    // again, not started fresh.
-    renderWithRun(<NewEditor />);
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("typed"),
-    );
-  });
+  // PT-5d — retired. `/brief/new` no longer mounts a bare editor at all (W3's
+  // resume now navigates to the draft's own campaign route,
+  // `app/(shell)/brief/new/page.tsx`), so H6's "one stable key" reload claim
+  // has nothing left to exercise here; the SAME claim, at a real campaign's
+  // own route, is "a draft survives a reload at the same route (H6)" above.
 
   // PT-5c1 fix round — root cause (mscyy/mscdk): a versionless campaign used to
   // open with `source.kind: "new"` and NO seed, so its autosave used
-  // `generateTempId`'s literal `"new"` — the exact key `/brief/new` itself uses.
-  // Two different campaigns (and `/brief/new`) all wrote to ONE recovery slot.
-  test("a seeded versionless campaign autosaves under its own campaign id, never the shared cf:draft:new key", async () => {
+  // `generateTempId`'s literal `"new"` — the exact key `/brief/new` itself used
+  // to share. PT-5d: server drafts are keyed per campaign id by construction
+  // (`0014_draft.sql`'s primary key), so this collision class cannot occur at
+  // all any more — kept as a direct pin that the seeded campaign's own id is
+  // what a PUT actually carries.
+  test("a seeded versionless campaign autosaves under its own campaign id", async () => {
     const user = userEvent.setup();
-    routes({ meta: () => json(blankCampaignMeta("fresh")) });
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
     renderWithRun(<Editor id="fresh" />);
     await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
     await user.type(screen.getByLabelText("Target Audience"), "x");
-    await waitFor(() => expect(localStorage.getItem("cf:draft:fresh")).not.toBeNull());
-    // Never under the shared key `/brief/new` (and every OTHER versionless
-    // campaign) would otherwise collide on.
-    expect(localStorage.getItem("cf:draft:new")).toBeNull();
+    await waitFor(() => expect(calls.drafts.has("fresh")).toBe(true));
+    expect(calls.some((c) => c.method === "PUT" && c.url === `${API}/campaigns/fresh/draft`)).toBe(
+      true,
+    );
   });
 
   // mscdq — `routeMatchesLoaded` is always false for a blank-at-route campaign
@@ -5272,18 +5336,15 @@ describe("the route is the source of truth (D37)", () => {
   });
 
   // The msczF keep-edits path used to autosave those keystrokes under the
-  // shared `cf:draft:new` key while `GET /campaigns/:id` was still in flight,
-  // then leave that copy behind once `markSeeded` moved the key. The abandoned
-  // `/brief/new` draft W3 resume reads must survive the whole window, and the
-  // kept edits must land under the campaign's own key once the lookup resolves.
-  test("edits typed before a named route resolves autosave under that campaign, never cf:draft:new", async () => {
+  // shared `cf:draft:new` key while `GET /campaigns/:id` was still in flight
+  // (PT-5d retires that key entirely). What survives: the in-flight window
+  // writes no draft at all (the autosave effect gates on `routeAlreadyResolved`,
+  // which a pending lookup never satisfies), and the kept edits land under the
+  // campaign's own id once the lookup resolves.
+  test("edits typed while a named route's lookup is still in flight autosave under that campaign once it resolves", async () => {
     const user = userEvent.setup();
-    saveDraftToStorage({ ...initialEditorState(), campaignName: "Abandoned" });
-    const abandoned = localStorage.getItem("cf:draft:new");
-    expect(abandoned).not.toBeNull();
-
     let resolveMeta: ((r: Response) => void) | null = null;
-    routes({
+    const calls = routes({
       list: () => json({ briefs: [] }),
       meta: () => new Promise<Response>((resolve) => (resolveMeta = resolve)),
     });
@@ -5294,18 +5355,15 @@ describe("the route is the source of truth (D37)", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    // The in-flight window writes nothing: the abandoned draft is byte-identical,
-    // and the campaign key does not exist yet (the server has not named it).
-    expect(localStorage.getItem("cf:draft:new")).toBe(abandoned);
-    expect(localStorage.getItem("cf:draft:fresh")).toBeNull();
+    // The in-flight window writes nothing at all.
+    expect(calls.some((c) => c.url.includes("/draft"))).toBe(false);
 
     resolveMeta!(json(blankCampaignMeta("fresh", { name: "Server Name" })));
-    await waitFor(() => expect(localStorage.getItem("cf:draft:fresh")).not.toBeNull());
-    expect(localStorage.getItem("cf:draft:new")).toBe(abandoned);
-    const stored = JSON.parse(localStorage.getItem("cf:draft:fresh") as string) as {
-      state: { targetAudience: string };
-    };
-    expect(stored.state.targetAudience).toBe("typed early");
+    await waitFor(() => expect(calls.drafts.has("fresh")).toBe(true));
+    const stored = calls.drafts.stored("fresh");
+    expect((stored?.state as { targetAudience?: string } | undefined)?.targetAudience).toBe(
+      "typed early",
+    );
     expect((screen.getByLabelText("Target Audience") as HTMLInputElement).value).toBe(
       "typed early",
     );
@@ -5326,12 +5384,17 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     await user.click(root.getByRole("button", { name: messages.createCampaignConfirm }));
   };
 
-  test("a dirty editor on a named route still asks about the abandoned blank draft (F19)", async () => {
-    // The stale blank draft from an earlier session, invisible from this route —
-    // the exact state a bare `isDirty` check would silently overwrite.
-    saveDraftToStorage({ ...initialEditorState(), campaignName: "Abandoned" });
+  test("a dirty editor on a named route still asks about an abandoned draft elsewhere (F19)", async () => {
     nextMock().nav.pathname = "/brief/camp-1";
-    routes({ list: () => json({ briefs: [entry("camp-1", "r1")] }) });
+    routes({
+      list: () => json({ briefs: [entry("camp-1", "r1")] }),
+      // An UNRELATED campaign's abandoned draft (PT-5d) — "the exact state a
+      // bare `isDirty` check would silently overwrite" is now "some OTHER
+      // campaign's draft the operator is not looking at right now", the one
+      // shape the dialog's own scope term (skip only when the LATEST draft's
+      // own campaign is already open) does not suppress.
+      draft: { latest: () => json({ latest: { campaignId: "elsewhere-1", slug: "elsewhere-1" } }) },
+    });
     const user = userEvent.setup();
     renderWithRun(
       <>
@@ -5383,8 +5446,11 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
       ),
     );
     await user.type(screen.getByLabelText(messages.campaignNameLabel), "typed");
-    // The autosave effect wrote the very draft the seed would overwrite.
-    await waitFor(() => expect(localStorage.getItem("cf:draft:new")).not.toBeNull());
+    // PT-5d: this editor is routeless (`routeId === undefined`), so the
+    // autosave effect never reaches a server draft at all — there is nothing
+    // here for the create dialog's own resume check to find, which is why the
+    // two-way below never opens (not the D67 scope term specifically; see
+    // CreateCampaignDialog.test.tsx for that).
 
     await user.click(screen.getByRole("button", { name: /Create new/ }));
     const prompt = await screen.findByRole("dialog", { name: messages.confirmDialogTitle });
@@ -5440,7 +5506,7 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
 
   test("a rejected listBriefs on a named route renders the failure state, not the not-found state", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    routes({ list: () => json({ error: "boom" }, 500) });
+    const calls = routes({ list: () => json({ error: "boom" }, 500) });
     renderWithRun(
       <>
         <RunBriefProbe />
@@ -5458,10 +5524,11 @@ describe("a failed listing is its own state (D83 / F-A)", () => {
     // …and the remedy that invites a duplicate is exactly what it must not offer.
     expect(screen.queryByText(messages.briefNotFoundNew)).toBeNull();
     expect(screen.getByRole("button", { name: messages.briefListFailedRetry })).toBeTruthy();
-    // No draft was created for the id the listing could not answer about.
+    // No draft was created for the id the listing could not answer about
+    // (PT-5d): the route never resolves (`routeAlreadyResolved`), so neither
+    // the restore nor the autosave effect ever reaches the server.
     await new Promise((r) => setTimeout(r, 50));
-    const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i) ?? "");
-    expect(keys.filter((k) => k.startsWith("cf:draft:"))).toEqual([]);
+    expect(calls.some((c) => c.url.includes("/draft"))).toBe(false);
     error.mockRestore();
   });
 
@@ -5726,31 +5793,27 @@ describe("the pre-type draft (T2 / D112)", () => {
   });
 
   test("a draft saved before the type existed restores with the default (D112)", async () => {
-    routes({});
-    // What the previous build wrote: a state with no type keys at all — the
-    // saved draft must normalise, not crash the mount or lose the name.
-    saveDraftToStorage({ ...initialEditorState(), campaignName: "Restored" });
-    const stored = JSON.parse(localStorage.getItem("cf:draft:new") as string) as {
-      state: Record<string, unknown>;
-    };
-    delete stored.state.type;
-    delete stored.state.typeExplicit;
-    localStorage.setItem("cf:draft:new", JSON.stringify(stored));
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    // What a previous build wrote: a state with no type keys at all — the
+    // stored draft must normalise, not crash the mount or lose the name.
+    // Seeded at the SAME revision ("r1") the listing answers for camp — the
+    // restore effect's own base_revision gate (PT-5d item 4).
+    const state = { ...initialEditorState(), campaignName: "Restored" } as Record<string, unknown>;
+    delete state.type;
+    delete state.typeExplicit;
+    calls.drafts.seed("camp", state, "r1");
 
-    nextMock().nav.pathname = "/brief/new";
-    renderWithRun(<Editor />);
+    renderWithRun(<Editor id="camp" />);
     await waitFor(() =>
       expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
         "Restored",
       ),
     );
     // The editor path, not only the unit: a restored pre-type draft must carry
-    // the default on the state the autosave writes, not merely keep the name.
+    // the default on the state the autosave writes back, not merely keep the name.
     await waitFor(() => {
-      const restored = JSON.parse(localStorage.getItem("cf:draft:new") as string) as {
-        state: { type?: string };
-      };
-      expect(restored.state.type).toBe("social-post");
+      const stored = calls.drafts.stored("camp");
+      expect((stored?.state as { type?: string } | undefined)?.type).toBe("social-post");
     });
   });
 });
@@ -5814,60 +5877,78 @@ describe("VE1 — undo and redo in the editor", () => {
 
   test("the autosaved draft stays exactly EditorState's keys through an undo and a retype", async () => {
     const user = userEvent.setup();
-    routes({});
-    renderWithRun(<Editor />);
-    await waitFor(() => expect(nameField().value).toBe(""));
-    await user.type(nameField(), "Spring");
+    // PT-5d: a routeless mount can no longer autosave at all, so this is
+    // exercised at a seeded, versionless campaign's own route instead — a
+    // "new" source with a real campaign id, the same as a truly blank editor
+    // in every way that matters here (an editable Campaign Name field).
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(nameField().value).toBe("fresh"));
+    // `campaignNameValue` falls back to `briefId` ("fresh") whenever
+    // `campaignName` is empty, so a clear-then-type would show "fresh" again
+    // mid-edit and the retype would land after it — set the value directly instead.
+    setField(nameField(), "Spring");
     await user.type(audienceField(), "Family");
     // One step back undoes the audience run only — the name stands, so the
     // editor is still dirty and autosave writes the post-undo state.
     fireEvent.keyDown(document.body, { key: "z", metaKey: true });
     await waitFor(() => expect(audienceField().value).toBe(""));
-    await waitFor(() => expect(localStorage.getItem("cf:draft:new")).not.toBeNull());
-    const stored = JSON.parse(localStorage.getItem("cf:draft:new") as string) as {
-      state: Record<string, unknown>;
-    };
+    await waitFor(() => expect(calls.drafts.has("fresh")).toBe(true));
+    const stored = calls.drafts.stored("fresh");
     // History leaking into the persisted shape would come back through `restore`
     // as a phantom draft (R6): the object on disk is exactly what it was before VE1.
-    expect(Object.keys(stored.state).sort()).toEqual(Object.keys(initialEditorState()).sort());
-    expect(stored.state.campaignName).toBe("Spring");
+    expect(Object.keys(stored?.state as Record<string, unknown>).sort()).toEqual(
+      Object.keys(initialEditorState()).sort(),
+    );
+    expect((stored?.state as { campaignName?: string }).campaignName).toBe("Spring");
   });
 
   test("undoing back to pristine purges the autosaved draft", async () => {
     const user = userEvent.setup();
-    routes({});
-    renderWithRun(<Editor />);
-    await waitFor(() => expect(nameField().value).toBe(""));
-    await user.type(nameField(), "Spring");
-    await waitFor(() => expect(localStorage.getItem("cf:draft:new")).not.toBeNull());
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(nameField().value).toBe("fresh"));
+    await user.type(audienceField(), "Family");
+    await waitFor(() => expect(calls.drafts.has("fresh")).toBe(true));
     // Undo steps every edit back: the draft is pristine again, so the recovery copy
     // holds nothing to recover — and a stale one would come back on reload with no
     // history left to undo it.
     fireEvent.keyDown(document.body, { key: "z", metaKey: true });
-    await waitFor(() => expect(nameField().value).toBe(""));
-    await waitFor(() => expect(localStorage.getItem("cf:draft:new")).toBeNull());
+    await waitFor(() => expect(audienceField().value).toBe(""));
+    await waitFor(() => expect(calls.drafts.has("fresh")).toBe(false));
   });
 
   test("a draft stored before mount is still offered for restore on mount", async () => {
-    routes({});
-    // A legacy-shaped draft: its visible content matches the pristine editor and it
-    // carries the host verdict it saved with, so the restore it is offered lands
-    // back on a pristine state — and the capabilities answer arriving a moment later
-    // re-renders pristine again. A purge keyed on pristine ALONE fires on both, with
-    // no diverging edit to undo and no re-save to bring the draft back: the mount
-    // eats the very draft the mount came for. The return-to-pristine purge must
-    // know this render is the START, not a RETURN.
-    saveDraftToStorage({ ...initialEditorState(), capabilities: { motion: true } });
-    renderWithRun(<Editor />);
-    await waitFor(() => expect(nameField().value).toBe(""));
-    // Let the capabilities answer land and its (still-pristine) render flush.
+    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    // A draft whose visible content matches the pristine loaded brief exactly
+    // (at the SAME revision the listing answers) — the mount's own
+    // restore-then-still-pristine render must not purge it: the
+    // return-to-pristine purge only fires for a divergence THIS session
+    // witnessed (`draftDivergedRef`), never for the mount's own restore.
+    // `capabilities` matches the default `routes()` capabilities probe
+    // answers (`{ motion: true }`) — `fromBrief` itself defaults it to
+    // `null`, and the probe's own dispatch is what moves it, so a draft this
+    // exactly-equal to what's on screen after that probe lands must carry
+    // the SAME value, or `valuesEqual` would (correctly) call it different.
+    // `appliedSnapshot` needs the same treatment: `fromBrief` defaults it to
+    // `null`, but the route's own auto-`apply` (BriefEditor's load effect)
+    // sets it to the loaded brief's saved snapshot the moment the mount
+    // resolves — confirmed by diffing the mounted state against a seed that
+    // left it `null`, which desynced the two and forced a spurious restore.
+    const loaded = fromBrief(brief("camp") as never, { file: "camp.yaml", revision: "r1" });
+    const pristine = {
+      ...loaded,
+      capabilities: { motion: true },
+      appliedSnapshot: loaded.source.kind === "file" ? loaded.source.savedSnapshot : null,
+    };
+    calls.drafts.seed("camp", pristine, "r1");
+    renderWithRun(<Editor id="camp" />);
+    await waitFor(() => expect(nameField().value).toBe("camp"));
+    // Let any further settling render flush.
     await new Promise((r) => setTimeout(r, 50));
     // Still there — and still the draft that was stored, not a rewrite of it: the
     // mount read it and left it alone until something diverges.
-    const stored = JSON.parse(localStorage.getItem("cf:draft:new") ?? "null") as {
-      state: { capabilities: unknown };
-    } | null;
-    expect(stored?.state.capabilities).toEqual({ motion: true });
+    expect(calls.drafts.has("camp")).toBe(true);
   });
 
   test("⌘Z inside an open dialog does not edit the draft behind it", async () => {

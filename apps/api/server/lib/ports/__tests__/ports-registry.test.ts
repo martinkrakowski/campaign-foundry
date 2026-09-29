@@ -18,17 +18,22 @@ import {
   getJobRegistry,
   setJobRegistry,
   resetJobRegistry,
+  getDraftStore,
+  setDraftStore,
+  resetDraftStore,
   FsBriefStore,
   FsAssetStore,
   FsPoolStore,
   FsTemplateStore,
   FsJobStore,
+  FsDraftStore,
 } from "../index.js";
 import type { BriefStorePort } from "../brief-store.port.js";
 import type { AssetStorePort } from "../asset-store.port.js";
 import type { PoolStorePort } from "../pool-store.port.js";
 import type { TemplateStorePort } from "../template-store.port.js";
 import type { JobStorePort } from "../job-store.port.js";
+import type { DraftStorePort } from "../draft-store.port.js";
 
 import { LOCAL_TENANT } from "../../tenant.js";
 describe("ports registry", () => {
@@ -38,6 +43,7 @@ describe("ports registry", () => {
     resetPoolStore();
     resetTemplateStore();
     resetJobStore();
+    resetDraftStore();
   });
 
   test("getBriefStore returns default FsBriefStore and allows override", () => {
@@ -104,5 +110,17 @@ describe("ports registry", () => {
     expect(getJobRegistry).toBe(getJobStore);
     expect(setJobRegistry).toBe(setJobStore);
     expect(resetJobRegistry).toBe(resetJobStore);
+  });
+
+  test("getDraftStore returns default FsDraftStore and allows override", () => {
+    const initial = getDraftStore(LOCAL_TENANT);
+    expect(initial).toBeInstanceOf(FsDraftStore);
+
+    const mockStore = {} as DraftStorePort;
+    setDraftStore(mockStore);
+    expect(getDraftStore(LOCAL_TENANT)).toBe(mockStore);
+
+    resetDraftStore();
+    expect(getDraftStore(LOCAL_TENANT)).toBeInstanceOf(FsDraftStore);
   });
 });

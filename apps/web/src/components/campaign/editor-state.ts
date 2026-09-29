@@ -3045,6 +3045,25 @@ export function isDirtySinceSave(state: EditorState): boolean {
   return !valuesEqual(toBrief(state), state.source.savedSnapshot);
 }
 
+/**
+ * Fix round (bots) — the navigation guard's own predicate (`!isPristine(state)
+ * && isDirtySinceSave(state)`), promoted here so the draft-autosave effect
+ * shares it instead of testing `isPristine` alone. `isPristine`'s baseline
+ * for a `"file"` source is a BLANK editor (see its own doc comment — only a
+ * `"new"` source carries a seeded baseline), so an untouched, freshly loaded,
+ * named campaign is never pristine by that measure alone: a real qodo-review
+ * finding confirmed opening any nonblank campaign and never touching it
+ * still armed the autosave PUT after one debounce window. `isDirtySinceSave`
+ * is what actually answers "has this changed since it was loaded or last
+ * saved" for a `"file"` source (its baseline IS the loaded/saved snapshot);
+ * for a `"new"` source it is unconditionally `true` (there is no save to be
+ * dirty since), so `!isPristine` alone still gates that case correctly —
+ * this only widens the check for the case `isPristine` gets wrong.
+ */
+export function hasUnsavedWork(state: EditorState): boolean {
+  return !isPristine(state) && isDirtySinceSave(state);
+}
+
 export function isDirtySinceApply(state: EditorState): boolean {
   if (!state.appliedSnapshot) return true;
   return !valuesEqual(toBrief(state), state.appliedSnapshot);
@@ -3127,23 +3146,6 @@ function sameIdSet(a: readonly string[], b: readonly string[]): boolean {
   return left.every((id, index) => id === right[index]);
 }
 
-export function draftKeyFor(id: string): string {
-  return `cf:draft:${id}`;
-}
-
-export function getDraftKey(state: EditorState): string {
-  // PT-5c1 fix round (mscyy/mscdk) — a seeded "new" source has its own campaign
-  // identity; keying its autosave on that (never on the literal `"new"`
-  // `generateTempId` always returns) keeps it out of the shared `cf:draft:new`
-  // key `/brief/new` — and every OTHER versionless campaign — would otherwise
-  // collide on.
-  const id =
-    state.source.kind === "file"
-      ? state.source.loadedId
-      : (state.source.seeded?.campaignId ?? state.source.tempId);
-  return draftKeyFor(id);
-}
-
 /**
  * The empty brief — what "no campaign" is, for both the editor and the shell. A blank
  * `id` is the marker: nothing can be saved, listed or run under it.
@@ -3160,42 +3162,154 @@ export function blankBrief(): CampaignBrief {
   };
 }
 
-export function saveDraftToStorage(state: EditorState): void {
-  if (typeof localStorage === "undefined") return;
-  const key = getDraftKey(state);
-  const draft = { state, timestamp: Date.now() };
-  localStorage.setItem(key, JSON.stringify(draft));
+/**
+ * Same path as `briefs-api.ts`'s own `API` (`briefs-api.ts:19`) — local here
+ * too, so this module reaches the draft routes without importing
+ * `briefs-api.ts` (which would risk the cycle that constant's own comment
+ * warns about: `run-context.tsx` already imports from here).
+ */
+const API = "/api/pipeline";
+
+/**
+ * A caller's own autosave draft, as `GET /campaigns/:id/draft` answers it
+ * (PT-5d, D173, D177): `state` is read back through `normalizeDraftState`
+ * exactly as a localStorage draft used to be (a draft written by an older
+ * build must still restore), and `baseRevision` is the campaign's published
+ * revision the draft was taken against — `null` for one with no version yet.
+ */
+export interface ServerDraft {
+  readonly state: EditorState;
+  readonly baseRevision: string | null;
 }
 
-export function loadDraftFromStorage(state: EditorState): EditorState | null {
-  if (typeof localStorage === "undefined") return null;
-  const key = getDraftKey(state);
-  const raw = localStorage.getItem(key);
-  if (!raw) return null;
+/**
+ * The caller's own draft for campaign `id` (a uuid or a slug, D178, D179),
+ * or `null` when there is none, the campaign is unknown, or the request
+ * fails outright — restore is best-effort, never a reason to block the
+ * editor from loading. Malformed shapes (an unexpected body, a `state` that
+ * is not an object) answer `null` the same way a corrupt localStorage entry
+ * used to.
+ */
+export async function fetchServerDraft(id: string): Promise<ServerDraft | null> {
+  let res: Response;
   try {
-    const draft = JSON.parse(raw) as { state?: unknown };
-    if (typeof draft.state !== "object" || draft.state === null) return null;
-    return normalizeDraftState(draft.state as Record<string, unknown>);
+    res = await fetch(`${API}/campaigns/${encodeURIComponent(id)}/draft`);
   } catch {
     return null;
+  }
+  if (!res.ok) return null;
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return null;
+  }
+  const draft = (body as { draft?: unknown } | null)?.draft;
+  if (typeof draft !== "object" || draft === null) return null;
+  const raw = draft as { state?: unknown; baseRevision?: unknown };
+  if (typeof raw.state !== "object" || raw.state === null) return null;
+  return {
+    state: normalizeDraftState(raw.state as Record<string, unknown>),
+    baseRevision: typeof raw.baseRevision === "string" ? raw.baseRevision : null,
+  };
+}
+
+/**
+ * Autosave, debounced by the caller (`BriefEditor`, one PUT per 1 s window,
+ * item 4): stores the editor-state blob and the campaign revision it was
+ * taken against, for campaign `id`. Best-effort and fire-and-forget — a
+ * dropped PUT is superseded by the next debounce window's write, so nothing
+ * here surfaces a failure to the editor.
+ */
+export async function putServerDraft(
+  id: string,
+  state: EditorState,
+  baseRevision: string | null,
+): Promise<void> {
+  try {
+    await fetch(`${API}/campaigns/${encodeURIComponent(id)}/draft`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ state, baseRevision }),
+    });
+  } catch {
+    /* best-effort autosave; see the doc comment above */
   }
 }
 
 /**
- * W3 (F19): whether the blank route's stored draft holds real work. H6 gives every
- * unnamed editor the one stable key, so `cf:draft:new` survives the unmount — and
- * the autosave effect writes only non-pristine states there, so a draft still on
- * disk while no editor is mounted is exactly the abandoned work the D11 recovery
- * exists to keep. The create dialog reads this before publishing a seed, which
- * would otherwise overwrite the draft silently.
- *
- * Read-only by contract: nothing is written, cleared or purged, and the
- * normalisation happens on the in-memory read only, exactly as in
- * `loadDraftFromStorage` — a malformed entry answers false, never throws.
+ * Removes the caller's own draft for campaign `id` — after a successful
+ * Save (D177: the published version is now the source of truth) or a
+ * Revert back to a clean, never-saved editor. Best-effort: a failed DELETE
+ * leaves the draft on the server, and the next reload's restore compares its
+ * `baseRevision` against the campaign's now-current one, so a stale draft
+ * from a completed Save never resurfaces (item: "a reload after a Save whose
+ * DELETE failed shows the published brief").
  */
-export function hasRecoverableDraft(): boolean {
-  const draft = loadDraftFromStorage(initialEditorState());
-  return draft !== null && !isPristine(draft);
+export async function deleteServerDraft(id: string): Promise<void> {
+  try {
+    await fetch(`${API}/campaigns/${encodeURIComponent(id)}/draft`, { method: "DELETE" });
+  } catch {
+    /* best-effort; see the doc comment above */
+  }
+}
+
+/** Which campaign a caller's own latest draft belongs to — `campaignId` is
+ *  whatever `campaignMeta` answered server-side (a Postgres uuid or the fs
+ *  slug, D178/D179), `slug` is always the human slug: on Postgres they
+ *  differ, on fs they are the same string twice. Fix round (bots) — a
+ *  caller comparing only against `campaignId` misses a currently-open
+ *  campaign reached by its slug route, since Postgres editor routes are
+ *  reached both ways (`/brief/<uuid>` and `/brief/<slug>`, #613). */
+export interface LatestServerDraft {
+  readonly campaignId: string;
+  readonly slug: string;
+}
+
+/**
+ * W3's resume (item 5): the caller's own latest draft across every campaign
+ * in scope. Read-only — nothing is written, cleared or purged.
+ *
+ * Fix round (bots) — distinguishes "no draft" from "could not ask": a
+ * caller that read `null` for both could silently mint a campaign, or open
+ * the blank create flow, on a network hiccup that had nothing to do with
+ * whether a draft exists. `{ ok: true, latest: null }` means the lookup
+ * genuinely answered "none"; `{ ok: false }` means it never got an answer
+ * at all — a caller like `CreateCampaignDialog` that would otherwise MINT
+ * on `ok:false` must refuse instead (see its own `handleCreate`).
+ */
+export async function fetchLatestServerDraft(): Promise<
+  { readonly ok: true; readonly latest: LatestServerDraft | null } | { readonly ok: false }
+> {
+  let res: Response;
+  try {
+    res = await fetch(`${API}/campaigns/briefs/draft`);
+  } catch {
+    return { ok: false };
+  }
+  if (!res.ok) return { ok: false };
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return { ok: false };
+  }
+  // `ok: false` is reserved for a genuine communication failure (network
+  // error, a non-2xx status, a body that is not valid JSON at all) — the
+  // ONLY thing a caller like `CreateCampaignDialog` needs to treat
+  // differently from "no draft" (it refuses to mint rather than silently
+  // treating "could not ask" as "asked, and there is none"). A 200 whose
+  // body does not carry a recognizable `latest` shape is not that: this
+  // server never produces one, so reading it as "no draft" rather than a
+  // hard failure is the same lenient, best-effort stance every other parse
+  // in this file already takes (see `fetchServerDraft`'s own doc comment).
+  const latest = (body as { latest?: unknown } | null)?.latest;
+  if (typeof latest !== "object" || latest === null) return { ok: true, latest: null };
+  const { campaignId, slug } = latest as { campaignId?: unknown; slug?: unknown };
+  if (typeof campaignId !== "string" || typeof slug !== "string") {
+    return { ok: true, latest: null };
+  }
+  return { ok: true, latest: { campaignId, slug } };
 }
 
 /**
@@ -3596,11 +3710,6 @@ export function normalizeDraftState(raw: Record<string, unknown>): EditorState {
     // The occlusion notice is derived UI from reposition, not persisted state.
     occlusionNotice: null,
   } as EditorState;
-}
-
-export function purgeDraftFromStorage(state: EditorState): void {
-  if (typeof localStorage === "undefined") return;
-  localStorage.removeItem(getDraftKey(state));
 }
 
 /** The platform the exclusion remedy adds when the brief has no still-image outlet. */

@@ -18,6 +18,7 @@ import {
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
 import { FsBriefStore } from "../fs-brief-store.js";
+import { FsDraftStore } from "../fs-draft-store.js";
 import { dumpBrief, hashBytes } from "../../brief-files.js";
 
 // Hookable `writeFile`/`lstat`, each used by exactly one test below (the
@@ -393,6 +394,45 @@ describe("FsBriefStore", () => {
       expect(existsSync(join(dir, "mint-only", "campaign.json"))).toBe(true);
       expect(await store.releaseCampaign("mint-only")).toBe(true);
       expect(existsSync(join(dir, "mint-only"))).toBe(false);
+    });
+
+    // PT-5d item 3: a caller that abandons a blank create (the create itself
+    // fails, or the user backs out before the first Save) must not orphan a
+    // draft that was autosaved against it in the meantime.
+    test("PT-5d: a failed blank create with a draft is released along with it", async () => {
+      const { campaignId } = await store.createCampaign("mint-only", { name: "Mint Only" });
+      await new FsDraftStore(dir).writeDraft(campaignId, "u1", { name: "Draft" }, null);
+      expect(existsSync(join(dir, "mint-only", "drafts", "u1.json"))).toBe(true);
+      expect(await store.releaseCampaign("mint-only")).toBe(true);
+      expect(existsSync(join(dir, "mint-only"))).toBe(false);
+    });
+
+    test("PT-5d: removes every user's draft, not just one", async () => {
+      const { campaignId } = await store.createCampaign("mint-only");
+      const drafts = new FsDraftStore(dir);
+      await drafts.writeDraft(campaignId, "u1", { name: "Mine" }, null);
+      await drafts.writeDraft(campaignId, "u2", { name: "Theirs" }, null);
+      expect(await store.releaseCampaign("mint-only")).toBe(true);
+      expect(existsSync(join(dir, "mint-only"))).toBe(false);
+    });
+
+    // A symlinked drafts/ must refuse the whole release, the same stance a
+    // symlinked <slug> itself already takes — never enumerate or delete
+    // through it.
+    test("PT-5d: refuses release through a symlinked drafts/ directory", async () => {
+      const outside = mkdtempSync(join(tmpdir(), "cf-outside-"));
+      try {
+        const outsideFile = join(outside, "u1.json");
+        writeFileSync(outsideFile, "not yours");
+        await store.createCampaign("mint-only");
+        symlinkSync(outside, join(dir, "mint-only", "drafts"));
+
+        expect(await store.releaseCampaign("mint-only")).toBe(false);
+        expect(existsSync(outsideFile)).toBe(true);
+        expect(existsSync(join(dir, "mint-only"))).toBe(true);
+      } finally {
+        rmSync(outside, { recursive: true, force: true });
+      }
     });
 
     // Backward compatibility (PT-5b3): a directory reserved before this lane
