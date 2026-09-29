@@ -165,6 +165,44 @@ describe("FsLastOpenedStore (PT-5e, D173, D180)", () => {
     });
   });
 
+  // Fix round (qodo PRRT_kwDOSzP1zc6nELaB). `dirUnsafe` checked only the FINAL
+  // level, `<root>/state/last-opened`. `lstat` never follows the last component
+  // but it DOES resolve every one before it, so a symlink at `<root>/state`
+  // aimed the whole check at the link's target: absent there is ENOENT, which
+  // `dirUnsafe` reads as "nothing reserved yet, safe", and the `mkdir` and
+  // `writeFile` that follow both resolve through the link and land outside the
+  // project root. The store must check every level beneath the trusted root, the
+  // way `FsDraftStore.draftsDirUnsafe` already does from the outside in.
+  describe("a symlinked parent of the pointer directory", () => {
+    let outside: string;
+    beforeEach(() => {
+      outside = mkdtempSync(join(tmpdir(), "cf-fs-last-opened-parent-"));
+      // `<root>/state` is the link; `last-opened` beneath it does not exist yet,
+      // which is the state that used to read as safe.
+      symlinkSync(outside, join(root, "state"));
+    });
+    afterEach(() => {
+      rmSync(outside, { recursive: true, force: true });
+    });
+
+    test("a write refuses and writes nothing outside the project root", async () => {
+      await expect(store.write("camp", "u1")).rejects.toThrow(SYMLINK_WRITE_ERROR);
+      expect(existsSync(join(outside, "last-opened", "u1.json"))).toBe(false);
+      expect(existsSync(join(outside, "u1.json"))).toBe(false);
+    });
+
+    test("a read answers no pointer rather than following it", async () => {
+      // A pointer that really is on the far side of the link must still read
+      // as "no pointer": the store does not own that path.
+      mkdirSync(join(outside, "last-opened"), { recursive: true });
+      writeFileSync(
+        join(outside, "last-opened", "u1.json"),
+        JSON.stringify({ campaignId: "elsewhere", updatedAt: "t" }),
+      );
+      await expect(store.read("u1")).resolves.toBeUndefined();
+    });
+  });
+
   test("a userId that is not path-safe is refused, not followed", async () => {
     await expect(store.read("../campaign")).rejects.toThrow('Invalid user id: "../campaign"');
     await expect(store.write("camp", "../campaign")).rejects.toThrow(

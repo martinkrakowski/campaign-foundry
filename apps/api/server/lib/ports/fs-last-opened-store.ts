@@ -1,6 +1,6 @@
 import { lstat, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
 import { errorMessage } from "@campaignfoundry/shared";
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { isErrno, SYMLINK_WRITE_ERROR } from "../brief-files.js";
@@ -54,19 +54,38 @@ export class FsLastOpenedStore implements LastOpenedStorePort {
   }
 
   /**
-   * True when the pointer directory exists but is not a genuine directory (a
-   * symlink at that level). Absent (ENOENT) is "no pointer recorded yet", not
-   * unsafe — `write` creates it.
+   * True when the pointer directory — or the level directly above it, which the
+   * `mkdir(…, { recursive: true })` below can also create — exists but is not a
+   * genuine directory. Checked one level at a time from the outside in, exactly
+   * as `FsDraftStore.draftsDirUnsafe` does and for the same reason: `lstat`
+   * never follows the FINAL component of the path it is given, but it does
+   * resolve every component before it. A check on the pointer directory alone
+   * therefore reads a symlink at its parent at face value — it gets the
+   * target's own answer — and a target that has no pointer directory in it yet
+   * answers ENOENT, which a final-level-only check must otherwise read as
+   * "nothing reserved yet". The `mkdir` and `writeFile` that follow resolve
+   * through the same link and put the pointer outside the project root (fix
+   * round, qodo PRRT_kwDOSzP1zc6nELaB).
+   *
+   * The project root above these is the trusted anchor the registry resolved
+   * the path from, and is not re-checked: it is given, not created, exactly as
+   * `briefs/` is for `FsBriefStore`.
+   *
+   * Absent (ENOENT) at either level is "nothing created here yet", not unsafe —
+   * `write` creates it.
    */
   private async dirUnsafe(): Promise<boolean> {
-    let st;
-    try {
-      st = await lstat(this.dir);
-    } catch (error) {
-      if (isErrno(error, "ENOENT")) return false;
-      throw error;
+    for (const path of [dirname(this.dir), this.dir]) {
+      let st;
+      try {
+        st = await lstat(path);
+      } catch (error) {
+        if (isErrno(error, "ENOENT")) return false;
+        throw error;
+      }
+      if (!st.isDirectory()) return true;
     }
-    return !st.isDirectory();
+    return false;
   }
 
   /** Throws for a userId that is not path-safe, before any path is built from
