@@ -4,8 +4,8 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/ports/fs-job-store.ts",
-      "before": "    if (now - entry.createdAt < threshold) return entry;",
-      "after": "    if (true) return entry; // mutant: never reap stale running jobs",
+      "before": "    return Date.now() - startTime >= JOB_TTL_MS + STALE_GRACE_MS;",
+      "after": "    return false; // mutant: never reap stale running jobs",
       "because": "stale running job reaping is disabled, so a crashed process's job stays running forever and blocks the campaign",
       "command": [
         "yarn",
