@@ -1,5 +1,13 @@
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -85,6 +93,38 @@ function isAlive(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+/** Run the lock script without waiting for it — for tests that race it. */
+function runLockAsyncIn(
+  dir: string,
+  args: string[],
+  env: Record<string, string> = {},
+): Promise<RunResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("sh", [gateLockSh, ...args], {
+      env: { ...process.env, TMPDIR: dir, ...env },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ status: code ?? -1, stdout, stderr }));
+  });
+}
+
+/** Poll until the path exists — the handshake for the script's test pauses. */
+async function waitForFile(path: string, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!existsSync(path)) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${path}`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+function leftoverCands(dir: string): string[] {
+  return readdirSync(dir).filter((entry) => entry.startsWith("cf-gate.lock.cand."));
 }
 
 describe("gate-lock.sh", () => {
@@ -180,6 +220,54 @@ describe("gate-lock.sh", () => {
     expect(result.stdout).toContain("reclaiming");
     expect(lockFile(dir, "owner").trim()).toBe("lane-b");
   });
+
+  test("a creator paused before the rename leaves no lock at the name, then completes atomically", async () => {
+    // Creation writes the candidate aside and renames it onto the name, so a
+    // contender can never observe a half-written lock — only an abandoned one.
+    const dir = scratch();
+    const marker = join(dir, "paused-before-mv");
+    const pending = runLockAsyncIn(dir, ["acquire", "lane-a"], {
+      CF_GATE_CALLER_PID: "424242",
+      CF_GATE_TEST_PAUSE_BEFORE_MV: marker,
+    });
+    await waitForFile(marker);
+    expect(existsSync(lockDir(dir))).toBe(false);
+    const candDir = leftoverCands(dir).at(0);
+    if (!candDir) throw new Error("no candidate directory while the creator is paused");
+    expect(readFileSync(join(dir, candDir, "owner"), "utf8").trim()).toBe("lane-a");
+    expect(readFileSync(join(dir, candDir, "pid"), "utf8").trim()).toBe("424242");
+    expect(Number(readFileSync(join(dir, candDir, "beat"), "utf8"))).toBeGreaterThan(0);
+    rmSync(marker);
+    const result = await pending;
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("acquired by lane-a");
+    expect(lockFile(dir, "owner").trim()).toBe("lane-a");
+    expect(lockFile(dir, "pid").trim()).toBe("424242");
+    expect(leftoverCands(dir)).toEqual([]);
+  }, 15_000);
+
+  test("a creator paused before the rename loses the name to a contender and reports busy", async () => {
+    const dir = scratch();
+    const marker = join(dir, "paused-before-mv");
+    const pending = runLockAsyncIn(dir, ["acquire", "lane-a"], {
+      CF_GATE_CALLER_PID: "424242",
+      CF_GATE_TEST_PAUSE_BEFORE_MV: marker,
+    });
+    await waitForFile(marker);
+    // The contender takes the name while the first is paused before its rename.
+    const contender = runLockIn(dir, ["acquire", "lane-b"], {
+      CF_GATE_CALLER_PID: String(process.pid),
+    });
+    expect(contender.status).toBe(0);
+    rmSync(marker);
+    const result = await pending;
+    expect(result.status).toBe(75);
+    expect(result.stderr).toContain("busy");
+    expect(result.stderr).toContain("lane-b");
+    // The winner's lock is intact, and no candidate directories leak.
+    expect(lockFile(dir, "owner").trim()).toBe("lane-b");
+    expect(leftoverCands(dir)).toEqual([]);
+  }, 15_000);
 
   test("heartbeat refreshes the beat, and fails loudly without a lock", () => {
     const dir = scratch();

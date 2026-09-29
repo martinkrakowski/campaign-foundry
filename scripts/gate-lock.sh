@@ -40,12 +40,14 @@
 # set it) and no fractional sleep assumption beyond what BSD and GNU sleep both
 # accept — the waits below use whole seconds.
 #
-# Residual race, named honestly: two acquirers that both judge the lock
+# Residual races, named honestly: two acquirers that both judge the lock
 # reclaimable are arbitrated by `mv` (only one wins the rename; the loser
-# re-inspects and eventually exits 75). A fresh acquirer whose half-written
-# lock is read in the microseconds between its file writes is protected by
-# ordered writes (pid before beat) plus bounded re-reads, not eliminated; a
-# lock is dev-host machinery, and the cost of a full retry loop is minutes.
+# re-inspects and eventually exits 75), and creation is atomic (a fully
+# written temp directory renamed onto the name), so no half-written lock can
+# appear at the name for a contender to misjudge. A reclaimer that renamed a
+# lock it did not inspect restores or leaves it rather than deleting it (see
+# take_stale). A lock is dev-host machinery; nothing here assumes a filesystem
+# more clever than rename.
 set -u
 
 LOCK="${TMPDIR:-/tmp}/cf-gate.lock"
@@ -94,20 +96,41 @@ beat_is_stale() {
   [ $((now - $1)) -ge "$STALE_SECONDS" ]
 }
 
-# mkdir the lock and write it. The pid file is written BEFORE the beat on
-# purpose: every half-written state then either waits (both files missing, or
-# the beat trailing the pid — both handled in acquire) or reads as dead, and
-# the read-back below catches the name having been taken over between mkdir
-# and the pid write. Returns 0 only if the lock is verifiably ours.
+# mkdir the lock and write it. Creation is atomic: the metadata is written
+# into a temp directory first, and `mv` moves the FINISHED directory onto the
+# lock name — the rename is the only moment the name exists. A lock without
+# metadata can therefore only be one that was abandoned, never one still
+# being written: the old mkdir-then-write ordering had exactly that window,
+# and a contender that reclaimed the half-written name left its creator
+# writing into a directory it no longer owned. A failed `mv` means the name
+# is held (a directory rename onto a non-empty directory fails), i.e. busy.
+# Returns 0 only if the lock is verifiably ours.
 try_create() {
-  mkdir "$LOCK" 2>/dev/null || return 1
+  cand="$LOCK.cand.$$"
+  # Our own pid is unique among live processes, so a leftover cand dir with
+  # this name can only be a dead attempt's (pids recycle); clear it first.
+  rm -rf "$cand" 2>/dev/null
+  mkdir "$cand" 2>/dev/null || return 1
   now=$(date +%s)
-  printf '%s\n' "$1" > "$LOCK/owner" 2>/dev/null || return 1
-  printf '%s\n' "$now" > "$LOCK/started" 2>/dev/null || return 1
-  printf '%s\n' "$recorded_pid" > "$LOCK/pid" 2>/dev/null || return 1
-  printf '%s\n' "$now" > "$LOCK/beat" 2>/dev/null || return 1
-  [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$recorded_pid" ] || return 1
-  return 0
+  printf '%s\n' "$1" > "$cand/owner" 2>/dev/null || { rm -rf "$cand"; return 1; }
+  printf '%s\n' "$now" > "$cand/started" 2>/dev/null || { rm -rf "$cand"; return 1; }
+  printf '%s\n' "$recorded_pid" > "$cand/pid" 2>/dev/null || { rm -rf "$cand"; return 1; }
+  printf '%s\n' "$now" > "$cand/beat" 2>/dev/null || { rm -rf "$cand"; return 1; }
+  # Test hook (CF_GATE_TEST_PAUSE_BEFORE_MV): a pause point between the fully
+  # written temp directory and the rename, so a test can prove no partial
+  # lock ever appears at the name and can race a contender in.
+  if [ -n "${CF_GATE_TEST_PAUSE_BEFORE_MV:-}" ]; then
+    touch "$CF_GATE_TEST_PAUSE_BEFORE_MV" 2>/dev/null
+    while [ -f "$CF_GATE_TEST_PAUSE_BEFORE_MV" ]; do sleep 1; done
+  fi
+  if mv "$cand" "$LOCK" 2>/dev/null; then
+    # Read-back: the name holds OUR metadata — a rename cannot have replaced
+    # a non-empty directory, so nothing could have taken the name in between.
+    [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$recorded_pid" ] || return 1
+    return 0
+  fi
+  rm -rf "$cand"
+  return 1
 }
 
 # Move a judged-stale lock aside and delete it. `mv` is the arbitration: two
@@ -136,9 +159,11 @@ acquire() {
     pid=$(cat "$LOCK/pid" 2>/dev/null)
     beat=$(cat "$LOCK/beat" 2>/dev/null)
     owner=$(cat "$LOCK/owner" 2>/dev/null)
-    # A writer may sit between mkdir and its first writes; re-read instead of
-    # judging a half-written lock (bounded — an abandoned one is reclaimed at
-    # pass 3). The second wait covers the pid-before-beat write order.
+    # Creation is atomic, so a lock without pid or beat cannot be mid-write —
+    # it is abandoned (or the filesystem is failing). Re-read instead of
+    # judging on the first pass anyway, bounded: an abandoned one is reclaimed
+    # at pass 3. The second wait covers a pid present but beat missing — a
+    # live holder always has a beat, so that too reads as abandoned.
     if [ -z "$pid" ] && [ -z "$beat" ] && [ "$pass" -lt 3 ]; then
       sleep 1
       continue
