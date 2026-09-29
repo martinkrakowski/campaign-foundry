@@ -6,6 +6,7 @@ import {
   DEFAULT_CAMPAIGN_TYPE,
   templateFromCanonical,
   type CampaignBrief,
+  type CopyGeneratorPort,
 } from "@campaignfoundry/CampaignOrchestration";
 import type { TenantContext } from "../../../lib/tenant.js";
 import * as loadBrief from "../../../lib/load-brief.js";
@@ -19,6 +20,7 @@ import resultGetHandler from "../result.get.js";
 import decisionsGetHandler from "../decisions.get.js";
 import assetsGetHandler from "../assets.get.js";
 import poolGetHandler from "../pools/[briefId].get.js";
+import copyPoolHandler from "../pools/copy.post.js";
 import jobsGetHandler from "../jobs/index.get.js";
 import packageGetHandler from "../packages/[campaignId].get.js";
 import briefsPostHandler from "../briefs.post.js";
@@ -28,6 +30,20 @@ import {
   setupFsHarness,
   setupPgHarness,
 } from "../../__tests__/tenant-harness.js";
+
+// D181 fix round 3 (Fable): only `pools/copy.post.js`'s inline-brief path
+// needs a real headline generator — mocked exactly like
+// `pools/__tests__/pools.test.ts` mocks it, narrowly (only `copyGenerator`),
+// so every other export of `lib/pipeline.js` this file's other handlers
+// might reach stays real.
+const { copyGeneratorMock } = vi.hoisted(() => ({ copyGeneratorMock: vi.fn() }));
+vi.mock("../../../lib/pipeline.js", () => ({
+  copyGenerator: (env?: unknown) => copyGeneratorMock(env) as CopyGeneratorPort | undefined,
+}));
+const fakeCopyGenerator = (headlines: readonly string[]): CopyGeneratorPort => ({
+  model: "openai/gpt-4o-mini",
+  suggestHeadlines: vi.fn(async () => headlines),
+});
 
 const t1Member: TenantContext = { orgId: "local", userId: "u1", roles: [], teamIds: ["t1"] };
 const t2Member: TenantContext = { orgId: "local", userId: "u2", roles: [], teamIds: ["t2"] };
@@ -226,6 +242,20 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
       try {
         const res = await mount().create(createReq({ name: "Cache" }));
         expect(((await res.json()) as { slug: string }).slug).toBe("cache-2");
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    // HX1/D181: `templates` is a directory under `routes/campaigns/` (a saved
+    // creative template's own route), so a campaign slugged `templates` would
+    // shadow it — the same collision `cache` above is reserved to prevent, just
+    // via RESERVED_ROUTE_SEGMENTS rather than RESERVED_STORE_AREAS.
+    test("a campaign named `Templates` gets a slug other than `templates`", async () => {
+      const harness = await setup();
+      try {
+        const res = await mount().create(createReq({ name: "Templates" }));
+        expect(((await res.json()) as { slug: string }).slug).toBe("templates-2");
       } finally {
         await harness.cleanup();
       }
@@ -1320,6 +1350,284 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
     });
   },
 );
+
+/**
+ * D181 fix round (grok-4.7 pre-PR review): a reserved id must be refused at
+ * Save only when NOTHING exists for it yet — an already-minted campaign
+ * (grandfathered, D181's own scope note: existing campaigns keep their id)
+ * must still complete its first Save. These tests call the raw
+ * `briefs.post.ts` handler directly (never `mount().createBrief`'s own
+ * best-effort auto-mint wrapper, which tries `createCampaign` first and
+ * would either interfere with a deliberately-missing fixture or mask the
+ * exact refusal/success this suite is pinning).
+ */
+const briefsReq = (body: unknown) =>
+  new Request("http://x/campaigns/briefs", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+describe("POST /campaigns/briefs onto a grandfathered reserved slug (D181 fix round)", () => {
+  describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
+    "$backend",
+    ({ backend }) => {
+      const setup = () => (backend === "fs" ? setupFsHarness() : setupPgHarness());
+
+      test("a pre-minted versionless `templates` campaign accepts its first Save as version 1", async () => {
+        const harness = await setup();
+        try {
+          // Mint directly through the store, bypassing `createCampaign`'s own
+          // (correct, unchanged) reserved-id refusal — simulating a campaign
+          // minted BEFORE this lane, when `templates` was not yet reserved.
+          // On fs this must be GENUINE evidence — a real campaign.json, the
+          // same shape `createCampaign` itself writes — not a bare directory
+          // (D181 fix round 2, Fable: a bare directory is exactly what
+          // `FsPoolStore.writePool`'s inline-brief path can create for ANY
+          // id, so `hasGenuineReservation` no longer trusts it alone).
+          if (backend === "fs") {
+            const fsHarness = harness as Awaited<ReturnType<typeof setupFsHarness>>;
+            mkdirSync(join(fsHarness.projectRoot, "briefs", "templates"), { recursive: true });
+            writeFileSync(
+              join(fsHarness.projectRoot, "briefs", "templates", "campaign.json"),
+              JSON.stringify({ name: "Templates", type: null }),
+            );
+          } else {
+            const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+            await pgHarness.db.query(
+              `insert into campaign (org_id, slug, team_id, name, type) values ($1, $2, $3, $4, $5)`,
+              ["local", "templates", null, null, null],
+            );
+          }
+
+          const createBrief = mountTenantRoute(briefsPostHandler, {
+            method: "POST",
+            path: "/campaigns/briefs",
+            tenant: LOCAL_TENANT,
+          });
+          const res = await createBrief(briefsReq(sampleBrief("templates")));
+          expect(res.status).toBe(201);
+          const body = (await res.json()) as { brief: { id: string } };
+          expect(body.brief.id).toBe("templates");
+
+          const meta = await getBriefStore(LOCAL_TENANT).campaignMeta("templates");
+          expect(meta?.hasVersion).toBe(true);
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
+      test("a reserved id with no campaign at all is still refused with today's status and body", async () => {
+        const harness = await setup();
+        try {
+          const createBrief = mountTenantRoute(briefsPostHandler, {
+            method: "POST",
+            path: "/campaigns/briefs",
+            tenant: LOCAL_TENANT,
+          });
+          const res = await createBrief(briefsReq(sampleBrief("templates")));
+          expect(res.status).toBe(400);
+          expect(await res.json()).toEqual({
+            error: `"templates" is reserved; choose another campaign id.`,
+          });
+
+          // S1 (D181 fix round 2): the refused mint leaves nothing behind —
+          // a genuinely rolled-back attempt, not a row/directory some later
+          // caller could stumble into and read as a real reservation.
+          if (backend === "postgres") {
+            const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+            const { rows } = await pgHarness.db.query(
+              `select 1 from campaign where org_id = 'local' and slug = 'templates'`,
+            );
+            expect(rows).toEqual([]);
+          } else {
+            // D181 fix round 3 (Fable nit): there is no fs equivalent of the
+            // Postgres assertion above that can actually fail. Nothing in
+            // this scenario ever attempts a filesystem write before the
+            // early gate refuses — `briefs/templates` was never going to
+            // exist regardless of whether the refusal fired correctly, so
+            // asserting its absence here would pass even if the entire
+            // reserved-id guard were deleted. The bare-directory scenario
+            // where a real fs write DOES happen first (via the pools/copy
+            // route) is covered by the end-to-end test below instead, which
+            // asserts the write happened AND that `templates.yaml` still
+            // never gets created.
+          }
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
+      if (backend === "fs") {
+        // Bug 2 (Fable, D181 fix round 2): `FsPoolStore.writePool`'s
+        // inline-brief path (`POST /campaigns/pools/copy` with `{ brief }`)
+        // `mkdir`s `briefs/<id>/` as a side effect, for ANY id — reserved or
+        // not — with no campaign behind it. Before that fix that bare
+        // directory alone made `campaignMeta` (and so the old grandfather
+        // check) answer "known", letting a fresh reserved mint through a
+        // side door `createCampaign` itself would have refused.
+        //
+        // D181 fix round 3 (Fable): driven through the REAL
+        // `POST /campaigns/pools/copy` route rather than a hand-written
+        // `pools.json` fixture — a hand-written fixture cannot reproduce
+        // round 3's own bug (`?replace=1` skips the early gate at
+        // `briefs.post.ts`'s `!replace &&` guard entirely, so
+        // `campaignMeta`'s bare-directory trust and `replaceBrief`'s
+        // ENOENT-falls-to-`createBrief` path are what actually answer —
+        // and, before that bug's own fix, `createBrief`'s reserved `Error`
+        // carried no `code`, so this route's catch rethrew it as an
+        // uncaught 500). Both WITH and WITHOUT `?replace=1` must answer the
+        // identical 400, and neither ever creates `templates.yaml`.
+        test("a bare briefs/templates/ directory, created via the real pools/copy route, does not grandfather a reserved mint — with or without ?replace=1", async () => {
+          const harness = await setup();
+          const fsHarness = harness as Awaited<ReturnType<typeof setupFsHarness>>;
+          try {
+            copyGeneratorMock.mockReturnValue(fakeCopyGenerator(["Stay wild"]));
+            const copyPool = mountTenantRoute(copyPoolHandler, {
+              method: "POST",
+              path: "/campaigns/pools/copy",
+              tenant: LOCAL_TENANT,
+            });
+            const copyRes = await copyPool(
+              new Request("http://x/campaigns/pools/copy", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ brief: sampleBrief("templates"), count: 1 }),
+              }),
+            );
+            expect(copyRes.status).toBe(201);
+            // The real side effect this bug depends on: a bare directory
+            // with a pool file, no campaign.json, no version.
+            const templatesDir = join(fsHarness.projectRoot, "briefs", "templates");
+            expect(existsSync(join(templatesDir, "pools.json"))).toBe(true);
+            expect(existsSync(join(templatesDir, "campaign.json"))).toBe(false);
+            expect(existsSync(join(fsHarness.projectRoot, "briefs", "templates.yaml"))).toBe(false);
+
+            const createBrief = mountTenantRoute(briefsPostHandler, {
+              method: "POST",
+              path: "/campaigns/briefs",
+              tenant: LOCAL_TENANT,
+            });
+
+            const withoutReplace = await createBrief(briefsReq(sampleBrief("templates")));
+            const withoutReplaceText = await withoutReplace.text();
+            expect(withoutReplace.status).toBe(400);
+            expect(JSON.parse(withoutReplaceText)).toEqual({
+              error: `"templates" is reserved; choose another campaign id.`,
+            });
+
+            const withReplace = await createBrief(
+              new Request("http://x/campaigns/briefs?replace=1", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(sampleBrief("templates")),
+              }),
+            );
+            const withReplaceText = await withReplace.text();
+            expect(withReplace.status).toBe(400);
+            // Byte-for-byte identical to the no-replace response, not merely
+            // deep-equal parsed JSON — the two requests must be genuinely
+            // indistinguishable to a caller.
+            expect(withReplaceText).toBe(withoutReplaceText);
+
+            expect(existsSync(join(fsHarness.projectRoot, "briefs", "templates.yaml"))).toBe(false);
+          } finally {
+            await harness.cleanup();
+          }
+        });
+      }
+    },
+  );
+
+  test("a hidden (other team) pre-minted `templates` campaign answers the identical 400 a genuinely missing reserved id does (PT-2d)", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await harness.db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+        ["t1", "Team One", "local"],
+      );
+      // Mint directly through the store (raw SQL), bypassing BOTH
+      // `createCampaign`'s and `createBrief`'s own reserved-id refusals —
+      // simulating a pre-lane blank `POST /campaigns` whose team is t1.
+      await harness.db.query(
+        `insert into campaign (org_id, slug, team_id, name, type) values ($1, $2, $3, $4, $5)`,
+        ["local", "templates", "t1", null, null],
+      );
+
+      const createBrief = mountTenantRoute(briefsPostHandler, {
+        method: "POST",
+        path: "/campaigns/briefs",
+        tenant: t2Member,
+      });
+
+      // D181 fix round 2 (Fable, PT-2d): a hidden reserved campaign must NOT
+      // be distinguishable from a genuinely missing reserved id — either
+      // status alone would leak that a hidden campaign exists under that
+      // slug to a caller who cannot see it.
+      const hidden = await createBrief(briefsReq(sampleBrief("templates")));
+      const hiddenText = await hidden.text();
+      expect(hidden.status).toBe(400);
+      expect(JSON.parse(hiddenText)).toEqual({
+        error: `"templates" is reserved; choose another campaign id.`,
+      });
+
+      // Now the SAME slug, SAME harness, SAME caller — genuinely missing
+      // (the row deleted, not merely hidden) — for a same-id, same-db
+      // apples-to-apples comparison rather than two different reserved ids.
+      await harness.db.query(`delete from campaign where org_id = 'local' and slug = 'templates'`);
+      const missing = await createBrief(briefsReq(sampleBrief("templates")));
+      const missingText = await missing.text();
+      expect(missing.status).toBe(hidden.status);
+      // D181 fix round 3 (Fable nit): byte-for-byte against the hidden
+      // response's raw text, not a `toEqual` on separately parsed JSON —
+      // proves the two response BODIES are indistinguishable, not merely
+      // that they parse to the same object.
+      expect(missingText).toBe(hiddenText);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  // D181 fix round 2 (qodo, HIGH/Security): the route-level companion to
+  // pg-brief-store.test.ts's "replaceBrief preserves an existing versionless
+  // row's team" — a team-scoped, RESERVED, versionless campaign's first Save
+  // via ?replace=1 with no teamId in the body must keep its team, not reset
+  // it to org-wide.
+  test("a grandfathered reserved campaign's first Save via ?replace=1 with no teamId keeps its team", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await harness.db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+        ["t1", "Team One", "local"],
+      );
+      await harness.db.query(
+        `insert into campaign (org_id, slug, team_id, name, type) values ($1, $2, $3, $4, $5)`,
+        ["local", "templates", "t1", null, null],
+      );
+
+      const createBrief = mountTenantRoute(briefsPostHandler, {
+        method: "POST",
+        path: "/campaigns/briefs",
+        tenant: LOCAL_TENANT,
+      });
+      const res = await createBrief(
+        new Request("http://x/campaigns/briefs?replace=1", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(sampleBrief("templates")),
+        }),
+      );
+      expect(res.status).toBe(201);
+
+      const { rows } = await harness.db.query<{ team_id: string | null }>(
+        `select team_id from campaign where org_id = 'local' and slug = 'templates'`,
+      );
+      expect(rows[0]!.team_id).toBe("t1");
+    } finally {
+      await harness.cleanup();
+    }
+  });
+});
 
 function sampleBrief(id: string): CampaignBrief {
   return {

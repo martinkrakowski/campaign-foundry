@@ -871,6 +871,59 @@ describe("FsBriefStore", () => {
     },
   );
 
+  // D181 fix round 2 (Fable, Bug 2): a bare `briefs/<id>/` directory with no
+  // campaign.json and no saved version — exactly what `FsPoolStore.writePool`
+  // creates for ANY id, including a reserved one, via the inline-brief path
+  // of POST /campaigns/pools/copy — must NOT grandfather a reserved mint.
+  // `hasGenuineReservation` (unlike the plain `campaignMeta` this replaced)
+  // requires real evidence: a saved version or a readable campaign.json.
+  test("createBrief still refuses a reserved id behind only a bare directory (no campaign.json, no version)", async () => {
+    const bareDir = join(dir, "templates");
+    mkdirSync(bareDir, { recursive: true });
+    writeFileSync(join(bareDir, "pools.json"), "{}");
+    await expect(store.createBrief({ ...minimalBrief, id: "templates" })).rejects.toThrow(
+      `"templates" is reserved; choose another campaign id.`,
+    );
+  });
+
+  // The other branch of hasGenuineReservation's own evidence check: a real
+  // saved version is evidence on its own, checked before readCampaignMeta —
+  // written directly (mirroring "stored brief with reserved id lists, reads,
+  // rewrites and replaces" below), since createBrief itself refuses to mint
+  // a reserved id with no evidence yet.
+  test("hasGenuineReservation is true for a reserved id with a real saved version", async () => {
+    writeFileSync(
+      join(dir, "templates.yaml"),
+      dumpBrief({ ...minimalBrief, id: "templates" }),
+      "utf8",
+    );
+    expect(await store.hasGenuineReservation("templates")).toBe(true);
+  });
+
+  // D181 fix round 2 (qodo, "legacy campaigns can gain duplicate briefs"):
+  // a version existing only under a DIFFERENT (legacy, non-canonical)
+  // filename is not evidence — findBriefFileById alone would have said
+  // otherwise, and createBrief's own unconditional `${id}.yaml` write that
+  // follows a true answer would then create a SECOND file carrying the same
+  // domain id. findBriefFile (matched against createBrief's own write
+  // target) correctly says false here, so the reserved refusal still fires.
+  test("hasGenuineReservation is false when the id's only version lives under a different (legacy) filename", async () => {
+    writeFileSync(
+      join(dir, "legacy.yaml"),
+      dumpBrief({ ...minimalBrief, id: "templates" }),
+      "utf8",
+    );
+    expect(await store.findBriefFileById("templates")).toBe("legacy.yaml");
+    expect(await store.hasGenuineReservation("templates")).toBe(false);
+    await expect(store.createBrief({ ...minimalBrief, id: "templates" })).rejects.toThrow(
+      `"templates" is reserved; choose another campaign id.`,
+    );
+  });
+
+  test("hasGenuineReservation is false for an id with neither a version nor a campaign.json", async () => {
+    expect(await store.hasGenuineReservation("templates")).toBe(false);
+  });
+
   test.each(["cache", "jobs", "orgs", "packages"] as const)(
     "replaceBrief on a non-existent brief refuses reserved campaign id %s",
     async (id) => {

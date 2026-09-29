@@ -68,6 +68,19 @@ export interface PlanReviewObservation {
   readonly rowHashMissing?: string;
 }
 
+/**
+ * D184's pre-PR-review gate facts about one lane, gathered by the collector:
+ * its risk tier (discovered by grepping `docs/planning/`, exactly as
+ * `pre-pr-check` does), and, for a `high` tier only, why the gate would
+ * refuse a merge right now — `undefined` there means the gate would pass.
+ * The flag itself ("high-risk PR open without pre-PR review") is derived
+ * (derive.ts) from this plus the lane's PR state, never gathered here.
+ */
+export interface RiskObservation {
+  readonly tier: "high" | "normal";
+  readonly refusal?: string;
+}
+
 export interface LaneObservation {
   readonly log?: {
     readonly bytes: number;
@@ -76,6 +89,7 @@ export interface LaneObservation {
   };
   readonly gateLog?: string;
   readonly planReview?: PlanReviewObservation;
+  readonly risk?: RiskObservation;
   readonly alive: boolean;
   readonly pr?: {
     readonly number: number;
@@ -119,6 +133,15 @@ export interface DerivedLane {
    * flag rides beside the state, never inside it.
    */
   readonly planReview?: string;
+  /**
+   * D184's pre-PR-review gate flag, verbatim: "high-risk PR open without
+   * pre-PR review" — set only for a `high`-risk lane whose PR is open and
+   * whose wave log does not yet hold a settled pre-PR review (or holds a
+   * `changes-required` one with no later remediation). Derived, exactly like
+   * `planReview` above, and for the same reason: it rides beside the state,
+   * never inside it.
+   */
+  readonly risk?: string;
 }
 
 export interface LaneStatus {

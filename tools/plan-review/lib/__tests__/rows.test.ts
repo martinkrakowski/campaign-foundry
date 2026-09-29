@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { asHashRecord, rowHash } from "../rows.js";
+import { asHashRecord, rowHash, rowRisk } from "../rows.js";
 
 const plan = [
   "# The plan",
@@ -65,6 +65,43 @@ describe("rowHash", () => {
     expect(rowHash(plan, "D177")).toMatch(/^[0-9a-f]{64}$/);
     const edited = plan.replace("Create is a server call.", "Create is a client call.");
     expect(rowHash(edited, "D177")).not.toBe(rowHash(plan, "D177"));
+  });
+});
+
+describe("rowRisk", () => {
+  const risked = [
+    "| Lane | Risk | Delivers |",
+    "|---|---|---|",
+    "| **HX1** | **high** | Split the reserved list. |",
+    "| **HX4** | normal | Plan rows carry a risk tier. |",
+  ].join("\n");
+
+  test("a bolded **high** second cell is high", () => {
+    expect(rowRisk(risked, "HX1")).toBe("high");
+  });
+
+  test("the literal word normal is normal", () => {
+    expect(rowRisk(risked, "HX4")).toBe("normal");
+  });
+
+  test("a table with no Risk column defaults to normal, as in the platform plan", () => {
+    expect(rowRisk(plan, "PT-5a")).toBe("normal");
+  });
+
+  test("an unbolded high is not the marker — it defaults to normal", () => {
+    const unbolded = "| **HX1** | high | Split the reserved list. |";
+    expect(rowRisk(unbolded, "HX1")).toBe("normal");
+  });
+
+  test("a pipe inside backticks in the second cell still defaults to normal, not high", () => {
+    const row = "| **PT-5b1** | The route reads `getPoolStore(scope) | withPools` first. |";
+    expect(rowRisk(row, "PT-5b1")).toBe("normal");
+  });
+
+  test("zero or ambiguous matches throws, same as rowHash", () => {
+    expect(() => rowRisk(plan, "PT-9")).toThrow(/found 0/);
+    const duplicated = `${risked}\n| **HX1** | **high** | A second row with the same id. |`;
+    expect(() => rowRisk(duplicated, "HX1")).toThrow(/found 2/);
   });
 });
 

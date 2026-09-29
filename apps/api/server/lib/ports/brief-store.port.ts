@@ -240,4 +240,20 @@ export interface BriefStorePort {
    * a ref absent or hidden by team; never throws for an unknown ref.
    */
   campaignMeta(ref: string): Promise<CampaignMeta | undefined>;
+
+  /**
+   * Whether `id` names a campaign with REAL evidence behind it — a saved
+   * version, or a genuine record `createCampaign` itself wrote — visible to
+   * this caller (D181 fix round 2). Used only to grandfather a RESERVED
+   * slug's first Save: `campaignMeta`'s own fs fallback trusts a bare
+   * `briefs/<id>/` directory as proof of a pre-lane reservation, but a
+   * directory alone is not exclusive to `createCampaign` — `FsPoolStore
+   * .writePool`'s own `mkdir` (the inline-brief path of
+   * `POST /campaigns/pools/copy`) creates the identical shape for ANY id,
+   * reserved or not, with no campaign behind it at all. On Postgres this is
+   * exactly `campaignMeta(id) !== undefined`: a `pool` row has no foreign key
+   * to `campaign` (`0005_pool.sql`), but `campaignMeta` never reads the pool
+   * table, so it was never exposed to the same hole.
+   */
+  hasGenuineReservation(id: string): Promise<boolean>;
 }

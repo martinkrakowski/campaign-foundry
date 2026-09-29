@@ -8,10 +8,13 @@ import { mergeStatus } from "./merge.js";
 import { readBacklog } from "./backlog.js";
 import { artifactPathFor } from "../../plan-verify/lib/artifact.js";
 import { PLAN_REVIEW_LANE, rowHash } from "../../plan-review/lib/rows.js";
+import { discoverRisk } from "../../plan-review/lib/risk.js";
+import { prePrReviewRefusal } from "../../plan-review/lib/pre-pr.js";
 import type {
   LaneObservation,
   PlanReviewObservation,
   PrChecks,
+  RiskObservation,
   WaveEvent,
   WaveStatus,
 } from "./types.js";
@@ -44,7 +47,12 @@ export interface CollectDeps {
   readonly gh: (args: readonly string[]) => Promise<string>;
   readonly git?: (args: readonly string[]) => Promise<string>;
   readonly planVerifyArtifactPath?: string;
+  /** Where D184's risk gate greps for a lane's row — defaults to `docs/planning`. */
+  readonly planningDir?: string;
 }
+
+/** Where `pre-pr-check` (and this collector) grep for a lane's row, unless overridden. */
+export const DEFAULT_PLANNING_DIR = "docs/planning";
 
 /** Wave log directories live directly under here: `~/.waves/wave*`. */
 export const WAVE_LOG_ROOT = join(homedir(), ".waves");
@@ -192,6 +200,12 @@ export async function collect(
 
   const worktrees = await worktreeFacts(deps);
 
+  // Every lane's riskFor call reads the same docs/planning tree; without a
+  // cache, a wave of N lanes re-lists the directory and re-reads every plan
+  // N times over. Cheap and self-contained (NIT 3): cache readdir/readFile
+  // for the lifetime of this one collect() call only, never across calls.
+  const riskDeps: CollectDeps = { ...deps, ...cachedRiskIo(deps) };
+
   const scanRoots = resolveScanRoots(root, legacyRoots);
 
   for (const scanRoot of scanRoots) {
@@ -288,6 +302,7 @@ export async function collect(
           entries,
           lane,
           worktrees,
+          await riskFor(riskDeps, dirEvents, lane),
           log,
           await planReviewFor(deps, dirEvents, lane),
         );
@@ -362,6 +377,91 @@ async function planReviewFor(
 }
 
 /**
+ * The `wave` field carried by this lane's LATEST own event in `dirEvents`,
+ * in log order, or undefined. LATEST — never the first — for the same
+ * reason `planReviewFacts` reads a dispatch event's wave off the newest
+ * `dispatch started` line: every other "governing" lookup in this module
+ * walks from the end. A directory can genuinely hold the same lane under
+ * two different wave ids (a reused log directory, or a custom `--logdir`);
+ * the first-seen wave was found to pick the wrong one and pass a lane whose
+ * newer wave's review never settled (Qodo thread 4, #630).
+ */
+export function laneWaveIn(events: readonly WaveEvent[], lane: string): string | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].lane === lane) return events[i].wave;
+  }
+  return undefined;
+}
+
+/**
+ * A `readdir`/`readFile` pair that caches every result for the lifetime of
+ * ONE `collect()` call (NIT 3): every lane's `riskFor` reads the same
+ * `docs/planning` tree, and re-listing the directory and re-reading every
+ * plan once per lane is pure waste on a wave with more than a couple. A
+ * caller in flight is cached too (the Map holds the promise, not its
+ * resolution), so two lanes racing the same read still cost one call.
+ * Scoped to a single `collect()` invocation only — never a module-level
+ * cache, which would answer a later poll with a plan that has since changed
+ * on disk.
+ */
+function cachedRiskIo(deps: CollectDeps): Pick<CollectDeps, "readdir" | "readFile"> {
+  const dirs = new Map<string, Promise<readonly string[]>>();
+  const files = new Map<string, Promise<string>>();
+  return {
+    readdir: (dir) => {
+      let cached = dirs.get(dir);
+      if (cached === undefined) {
+        cached = deps.readdir(dir);
+        dirs.set(dir, cached);
+      }
+      return cached;
+    },
+    readFile: (path) => {
+      let cached = files.get(path);
+      if (cached === undefined) {
+        cached = deps.readFile(path);
+        files.set(path, cached);
+      }
+      return cached;
+    },
+  };
+}
+
+/**
+ * D184's pre-PR-review gate facts for one lane: its risk tier (discovered by
+ * grepping `docs/planning/`, exactly as `pre-pr-check` does — the collector
+ * runs the same discovery, never a second opinion), and, for a `high` tier,
+ * whether the gate would refuse it right now.
+ *
+ * The review/remediate scan is matched on the WAVE THE LANE'S OWN EVENTS
+ * NAME — never `waveIdFromDirName(dirName)` — for the same reason
+ * `planReviewFacts` reads `dispatchWave` off the dispatch event itself: a
+ * directory's name and its events' own `wave` field can differ, and matching
+ * on the wrong one would silently never find the review this lane's events
+ * actually carry.
+ */
+export async function riskFor(
+  deps: CollectDeps,
+  dirEvents: readonly WaveEvent[],
+  lane: string,
+): Promise<RiskObservation | undefined> {
+  const tier = await discoverRisk(lane, deps.planningDir ?? DEFAULT_PLANNING_DIR, deps);
+  // discoverRisk's `undefined` (BUG3: no plan names this lane, or the
+  // directory could not be read) is silence here — never a claim — the same
+  // way an event-only lane's missing observation is silence. The status
+  // page has no opinion to render for a lane this gate has never heard of;
+  // `pre-pr-check` is the one place that must refuse on it, not the page.
+  if (tier === undefined) return undefined;
+  if (tier === "normal") return { tier };
+
+  const wave = laneWaveIn(dirEvents, lane);
+  if (wave === undefined) return { tier };
+
+  const refusal = prePrReviewRefusal(dirEvents, wave, lane);
+  return refusal === undefined ? { tier } : { tier, refusal };
+}
+
+/**
  * The observation every row is built with, log attached or not: one probe,
  * one gate lookup, one assembly — so a field one lane carries cannot be
  * missing from another. Two copies of this block are how an event-only lane
@@ -374,6 +474,10 @@ async function buildObservation(
   entries: readonly string[],
   lane: string,
   worktrees: readonly string[],
+  // Optional again (BUG3 fix round): riskFor can now genuinely return
+  // undefined — a lane no plan names, or an unreadable planning directory —
+  // and the status page stays silent about it rather than guessing.
+  risk?: RiskObservation,
   log?: LaneObservation["log"],
   planReview?: PlanReviewObservation,
 ): Promise<Omit<LaneObservation, "pr">> {
@@ -398,6 +502,7 @@ async function buildObservation(
     ...(log !== undefined ? { log } : {}),
     ...(gateLog !== undefined ? { gateLog } : {}),
     ...(planReview !== undefined ? { planReview } : {}),
+    ...(risk !== undefined ? { risk } : {}),
     alive,
   };
 }

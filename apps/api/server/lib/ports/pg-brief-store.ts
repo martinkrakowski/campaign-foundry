@@ -73,7 +73,14 @@ function assertSafeSlug(id: string): void {
 
 function assertNotReserved(id: string): void {
   if (isReservedCampaignId(id)) {
-    throw new Error(`"${id}" is reserved; choose another campaign id.`);
+    // D181 fix round 3 (Fable, client-reachable 500): `code: "ERESERVED"`
+    // lets the route map this to 400 regardless of which path reaches it —
+    // see the matching fs-brief-store.ts comment for the exact mechanism
+    // (`?replace=1` skips the route's own early gate, so this throw's own
+    // code is what the route's catch must key on).
+    const err = new Error(`"${id}" is reserved; choose another campaign id.`);
+    (err as { code?: string }).code = "ERESERVED";
+    throw err;
   }
 }
 
@@ -308,7 +315,6 @@ export class PgBriefStore implements BriefStorePort {
     teamId: string | null | undefined,
   ): Promise<StoredBrief> {
     assertSafeSlug(brief.id);
-    assertNotReserved(brief.id);
     return this.db.transaction(async (tx) => {
       if (teamId !== null && teamId !== undefined) await this.assertTeamInOrg(tx, teamId);
       const { rows: inserted } = await tx.query<{ id: string }>(
@@ -326,6 +332,11 @@ export class PgBriefStore implements BriefStorePort {
         // `rewriteBriefInternal` uses, so a concurrent write to this exact
         // row serialises on it rather than reading a version count this
         // transaction is about to invalidate.
+        //
+        // D181 fix round: a row already existing here is exactly what
+        // grandfathers a reserved slug (D181's scope note) — `assertNotReserved`
+        // never runs in this branch, reserved or not, because this write is
+        // onto a campaign that already exists, not a fresh mint of one.
         const { rows: existing } = await tx.query<{ id: string; team_id: string | null }>(
           `select id, team_id from campaign where org_id = $1 and slug = $2 for update`,
           [this.orgId, brief.id],
@@ -354,6 +365,13 @@ export class PgBriefStore implements BriefStorePort {
         if (teamId !== undefined) {
           await tx.query(`update campaign set team_id = $1 where id = $2`, [teamId, campaignId]);
         }
+      } else {
+        // A brand-new row: nothing existed for this slug a moment ago, so a
+        // reserved id may never mint fresh here (D181) — checked AFTER the
+        // insert, not before, precisely so an already-existing row (the
+        // branch above) is never refused as reserved. Throwing rolls this
+        // insert back with the rest of the transaction.
+        assertNotReserved(brief.id);
       }
       const yaml = dumpBrief(brief);
       const revision = hashBytes(Buffer.from(yaml, "utf8"));
@@ -448,6 +466,18 @@ export class PgBriefStore implements BriefStorePort {
     const metaBySlug = rows[0];
     if (!metaBySlug || !this.visible(metaBySlug.team_id)) return undefined;
     return toMeta(metaBySlug);
+  }
+
+  /**
+   * See `BriefStorePort.hasGenuineReservation` (D181 fix round 2). On
+   * Postgres `campaignMeta` is already exact — a `campaign` row is real
+   * evidence on its own, unlike fs's bare-directory fallback, because
+   * `writePool`'s own insert (`pg-pool-store.ts`) writes only the `pool`
+   * table, which has no foreign key to `campaign` (`0005_pool.sql`) and
+   * `campaignMeta` never reads.
+   */
+  async hasGenuineReservation(ref: string): Promise<boolean> {
+    return (await this.campaignMeta(ref)) !== undefined;
   }
 
   /**
@@ -546,19 +576,29 @@ export class PgBriefStore implements BriefStorePort {
 
   /**
    * `replaceBrief`'s own ENOENT-falls-to-create shape carries the team the
-   * route already authorized (D166 item 3) down either path. `rewriteBrief`'s
-   * "`options.teamId` undefined leaves it as it is" keeps an already-assigned
-   * team in place for the common existing-campaign case — a replace-save with
-   * no `teamId` in the request must not reset it to org-wide. Only when there
-   * is no existing row to leave alone (ENOENT, a fresh slug) does `undefined`
-   * become `createBrief`'s `null` default.
+   * route already authorized (D166 item 3) down either path. `undefined`
+   * (the caller passed no `teamId`) is forwarded to `createBrief` UNCHANGED
+   * — never coerced to `null` here. `createBriefInternal` already makes the
+   * right call either way: `undefined` leaves an EXISTING (grandfathered)
+   * row's team exactly as it is, the same "leave it alone" rule
+   * `rewriteBrief` follows; only its own fresh-insert branch defaults a
+   * missing `teamId` to `null` (org-wide), because that row has no team yet
+   * to preserve.
+   *
+   * D181 fix round 2 (qodo, HIGH/Security): this used to coerce `undefined`
+   * to `null` itself, so a first Save via `?replace=1` with no `teamId` on
+   * an existing team-scoped row (a grandfathered reserved slug is what
+   * exposed it, but it was reachable for any slug whose first Save used
+   * `?replace=1`) reset that row's team to org-wide — `createBriefInternal`'s
+   * own `teamId !== undefined` guard on the existing-row branch was defeated
+   * before it ever saw the caller's real intent.
    */
   async replaceBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
     try {
       return await this.rewriteBrief(brief, options);
     } catch (error) {
       if (isErrno(error, "ENOENT")) {
-        return this.createBrief(brief, { teamId: options?.teamId ?? null });
+        return this.createBrief(brief, { teamId: options?.teamId });
       }
       throw error;
     }

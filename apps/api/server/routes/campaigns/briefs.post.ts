@@ -7,14 +7,18 @@ import { getAssetStore, getBriefStore, TeamsNotSupportedError } from "../../lib/
 import { assertSourceVisible, CampaignNotFoundError, canAssignTeam } from "../../lib/ownership.js";
 
 import { requestTenant } from "../../lib/tenant.js";
+
 /**
  * POST /campaigns/briefs — persist a campaign brief.
  *
  * Body is a brief (same validator as generate). Lookup is by `brief.id`, not
  * filename. The target campaign must already be KNOWN (PT-5c2: `POST /campaigns`
- * is the only path that mints one now) — a hidden and a missing target answer
- * the identical 404, and nothing is written for either. A known target already
- * carrying a version 409s unless `?replace=1` (repeated `replace` still counts;
+ * is the only path that mints one now) — for a NON-reserved id, a hidden and a
+ * missing target answer the identical 404, and nothing is written for either
+ * (D181 fix round 3: for a RESERVED id, both instead answer the identical 400
+ * "reserved" — see the `hasGenuineReservation`/PT-2d comment below; a 404
+ * here would leak that a hidden campaign exists under that slug). A known
+ * target already carrying a version 409s unless `?replace=1` (repeated `replace` still counts;
  * the first value wins); a KNOWN but versionless target (a blank `POST /campaigns`
  * create) accepts this write as its first Save either way. Replace rewrites that
  * same file in its own format. Creates use exclusive `wx` writes under
@@ -49,8 +53,10 @@ import { requestTenant } from "../../lib/tenant.js";
  */
 export default defineEventHandler(async (event) => {
   const scope = requestTenant(event);
+  const store = getBriefStore(scope);
   let brief: CampaignBrief;
   let teamId: string | undefined;
+  let replace: boolean;
   try {
     const rawBody: unknown = await readBody(event);
     if (typeof rawBody !== "object" || rawBody === null || Array.isArray(rawBody)) {
@@ -63,16 +69,31 @@ export default defineEventHandler(async (event) => {
     teamId = rawTeamId as string | undefined;
     brief = parseBrief(briefBody);
     const rawReplace = getQuery(event).replace;
-    const replace = (Array.isArray(rawReplace) ? rawReplace[0] : rawReplace) === "1";
-    if (!replace && isReservedCampaignId(brief.id)) {
-      throw new Error(`"${brief.id}" is reserved; choose another campaign id.`);
-    }
+    replace = (Array.isArray(rawReplace) ? rawReplace[0] : rawReplace) === "1";
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: errorMessage(error) };
   }
 
-  const store = getBriefStore(scope);
+  // D181 fix round 2 (S2): kept OUT of the body-parse try/catch above, which
+  // exists for validation errors only — a `hasGenuineReservation` storage
+  // failure must surface as a 500, never folded into this route's 400 with
+  // raw error text.
+  //
+  // D181 fix round 2 (Fable, PT-2d): `hasGenuineReservation` is visible-only
+  // (Postgres) and evidence-only (fs, never a bare directory another write
+  // path could have created — see its own doc comment) — a hidden campaign
+  // under a reserved slug therefore answers the SAME 400 "reserved" message a
+  // genuinely missing one does, never the 404 a hidden NON-reserved target
+  // gets. Distinguishing them would let a caller learn that another team
+  // holds a campaign under that slug, exactly the oracle PT-2d exists to
+  // close.
+  const reserved = isReservedCampaignId(brief.id);
+  if (!replace && reserved && !(await store.hasGenuineReservation(brief.id))) {
+    setResponseStatus(event, 400);
+    return { error: `"${brief.id}" is reserved; choose another campaign id.` };
+  }
+
   // Checked before canAssignTeam, and — the point of this order (D166, PT-2c,
   // coderabbit thread U_YF) — before ANY of the Save-as asset copying below:
   // on the fs backend (item 5), copying first and only then hitting
@@ -87,8 +108,6 @@ export default defineEventHandler(async (event) => {
     return { error: `Not authorized to assign team "${teamId}".` };
   }
 
-  const rawReplace = getQuery(event).replace;
-  const replace = (Array.isArray(rawReplace) ? rawReplace[0] : rawReplace) === "1";
   const rawRevision = getQuery(event).revision;
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
   try {
@@ -185,6 +204,15 @@ export default defineEventHandler(async (event) => {
     }
     if (isErrno(error, "EFORBIDDEN")) {
       setResponseStatus(event, 403);
+      return { error: errorMessage(error) };
+    }
+    // D181 fix round 3 (Fable, client-reachable 500): a reserved id can
+    // reach this catch via `replaceBrief`'s ENOENT-falls-to-`createBrief`
+    // path when `?replace=1` skipped the early gate above entirely (the
+    // gate only ever runs `!replace`) — same status and body either way,
+    // never a 500 for the same client state a plain POST answers 400.
+    if (isErrno(error, "ERESERVED")) {
+      setResponseStatus(event, 400);
       return { error: errorMessage(error) };
     }
     throw error;

@@ -3217,23 +3217,33 @@ export async function fetchServerDraft(id: string): Promise<ServerDraft | null> 
 /**
  * Autosave, debounced by the caller (`BriefEditor`, one PUT per 1 s window,
  * item 4): stores the editor-state blob and the campaign revision it was
- * taken against, for campaign `id`. Best-effort and fire-and-forget — a
- * dropped PUT is superseded by the next debounce window's write, so nothing
- * here surfaces a failure to the editor.
+ * taken against, for campaign `id`. Fire-and-forget as far as the editor is
+ * concerned — a dropped PUT is superseded by the next debounce window's
+ * write, so nothing here surfaces a failure to the editor itself.
+ *
+ * D185: it still ANSWERS whether the write landed — `true` only for an OK
+ * response, `false` for a non-OK one or a thrown request. A dropped write is
+ * the one failure with nothing to supersede it: the operator's edits are on
+ * screen and nowhere else, so the shell's leave guard (`EditorUnloadGuard`)
+ * has to be able to see one, and it cannot see a silent one. A 500 counts as
+ * a failure here even though `fetch` resolves for it happily — that is the
+ * case this used to swallow along with the throw.
  */
 export async function putServerDraft(
   id: string,
   state: EditorState,
   baseRevision: string | null,
-): Promise<void> {
+): Promise<boolean> {
   try {
-    await fetch(`${API}/campaigns/${encodeURIComponent(id)}/draft`, {
+    const res = await fetch(`${API}/campaigns/${encodeURIComponent(id)}/draft`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ state, baseRevision }),
     });
+    return res.ok;
   } catch {
-    /* best-effort autosave; see the doc comment above */
+    /* best-effort autosave; the answer above is how a failure is recorded */
+    return false;
   }
 }
 
