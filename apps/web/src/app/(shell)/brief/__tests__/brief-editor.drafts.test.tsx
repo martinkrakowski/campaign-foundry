@@ -10,6 +10,7 @@ import {
 import { renderWithRun, json } from "@/__tests__/helpers";
 import { API } from "@/lib/run-context";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
+import { EditorUnloadGuard } from "@/components/shell/EditorUnloadGuard";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
 import { fromBrief } from "@/components/campaign/editor-state";
 import * as messages from "@/components/campaign/messages";
@@ -44,6 +45,15 @@ const WriteFlags = () => {
 };
 
 const flag = (name: "pending-write" | "failed-write") => screen.getByTestId(name).textContent;
+
+/** `cancelable: true` is not optional here: happy-dom defaults it to false, and
+ *  on such an event `preventDefault()` does nothing, so a guard that had
+ *  registered nothing at all would satisfy the assertion. */
+const unload = (): Event => {
+  const event = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(event);
+  return event;
+};
 
 afterEach(() => {
   vi.useRealTimers();
@@ -774,5 +784,65 @@ describe("the write flags the shell's leave guard reads (D185)", () => {
     expect(
       (routed.stored("camp")?.state as { campaignMessage?: string } | undefined)?.campaignMessage,
     ).toBe("Edit two");
+  });
+});
+
+describe("the leave guard over a real draft write (D185)", () => {
+  test("a draft PUT answered 500 keeps the tab guarded, and the guard releases nothing until the editor does", async () => {
+    // The two halves met: the editor's write flags and the shell's one
+    // `beforeunload` listener, with the debounce, the chain and the PUT's own
+    // status in between. What is left un-proved here — that a later PUT that
+    // lands RELEASES the listener — cannot be, because an edited editor that
+    // was never saved stays dirty on its own account, so the guard would
+    // rightly stay armed whatever the write did.
+    const routed = draftRoutes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      failPutFor: "camp",
+    });
+    renderWithRun(
+      <>
+        <Editor id="camp" />
+        <EditorUnloadGuard />
+        <WriteFlags />
+      </>,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+    const headline = screen.getByLabelText("Headline") as HTMLInputElement;
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      act(() => {
+        fireEvent.change(headline, { target: { value: "Never stored" } });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+        await Promise.resolve();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await waitFor(() => expect(flag("failed-write")).toBe("true"));
+    // The edits are on the screen and nowhere else, so closing the tab now
+    // loses them: the browser's own prompt is the only warning there is.
+    expect(unload().defaultPrevented).toBe(true);
+
+    // A later PUT lands, and the failed-write flag comes back down with it.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      act(() => {
+        fireEvent.change(headline, { target: { value: "Stored at last" } });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+        await Promise.resolve();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    await waitFor(() => expect(flag("failed-write")).toBe("false"));
+    expect(routed.has("camp")).toBe(true);
   });
 });
