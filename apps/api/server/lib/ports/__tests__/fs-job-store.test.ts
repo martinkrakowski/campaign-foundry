@@ -668,6 +668,43 @@ describe("FsJobStore", () => {
     expect(await store.getJob(enq.jobId)).toBeUndefined();
   });
 
+  test("a job queued long ago but started just now is not reaped (startedAt, not createdAt, sets the deadline)", async () => {
+    vi.useFakeTimers();
+    try {
+      const enq = await store.enqueueJob("campaign-queued-long-ago");
+      expect(enq.acquired).toBe(true);
+      if (!enq.acquired) return;
+
+      // Backdate createdAt to look like it sat in the queue for 9 minutes —
+      // long, but still under QUEUED_TTL_MS (10 min), so the queued-expiry
+      // check does not fire first and mask what this test is proving.
+      const raw = JSON.parse(readFileSync(store.jobPath(enq.jobId), "utf8")) as StoredJob;
+      writeFileSync(
+        store.jobPath(enq.jobId),
+        JSON.stringify({ ...raw, createdAt: Date.now() - 9 * 60_000 }),
+        "utf8",
+      );
+      (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+
+      // The run starts now: startQueuedJob must set startedAt to the current
+      // time, independent of the ancient createdAt.
+      expect(await store.startQueuedJob(enq.jobId)).toBe(true);
+
+      // Advance to just under the stale-running threshold MEASURED FROM
+      // startedAt. Measured from createdAt instead, this point is
+      // 9min + (threshold - 1ms) — well past the threshold — so a
+      // createdAt-based check would already have reaped it here.
+      vi.advanceTimersByTime(JOB_TTL_MS + STALE_GRACE_MS - 1);
+
+      const stored = await store.getStoredJob(enq.jobId);
+      expect(stored?.job.status).toBe("running");
+      expect(stored?.job.error).toBeUndefined();
+      expect(stored?.settledAt).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("a stale running job is reaped on restart and the campaign can acquire again", async () => {
     vi.useFakeTimers();
     try {
