@@ -77,26 +77,25 @@ the status:
 ```bash
 gh pr list --head "<branch>" --json number,url --jq '.[] | "#\(.number) \(.url)"'   # empty ⇒ stuck
 git -C "<worktree>" rev-list --count origin/main..HEAD                             # 0 ⇒ it wrote nothing
-(cd "<worktree>" && yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn sync:check && yarn test:cov && yarn lint:bytes)
+(cd "<worktree>" && yarn gate)
 git -C "<worktree>" status --porcelain=v1 -b && git -C "<worktree>" diff --stat origin/main...HEAD
 ```
 
 **Run the commit count first, and do not skip it because the seat said `SUCCESS`.** (why: [rationale](references/rationale.md#run-the-commit-count-first-and-do-not-skip-it-because-the-seat-said-success))
 
-**The gate is a subset of CI, and the difference is named.** `ci.yml` runs **three** steps the seven
-commands above do not. The first is the one that bites most quietly:
+**The gate is a subset of CI, and the difference is named.** `yarn gate` (D183) runs CI's gate
+steps in one command — `check:env` as the same conditional no-op, `build`, `typecheck`, `lint`,
+`format:check`, `lint:arch`, `sync:check`, `lint:bytes`, `plan:verify`, `arch:inventory`, the
+Nitro route-scan guard, `test:cov` and `verify-manifests` — and stops at the first failure by
+name. `ci.yml` runs **one** step it does not:
 
-**`yarn install --immutable`** is not in the local gate. Say in the brief whether a lane may add
+**`yarn install --immutable`** is not in `yarn gate`. Say in the brief whether a lane may add
 a dependency, and if it may, that the regenerated `yarn.lock` travels with it. (why: [rationale](references/rationale.md#yarn-install---immutable))
 
-**`yarn lint:bytes`** is in the gate list above, deliberately — it is not inside `yarn typecheck`. (why: [rationale](references/rationale.md#yarn-lintbytes))
+**`yarn lint:bytes`** is in the gate, deliberately — it is not inside `yarn typecheck`. (why: [rationale](references/rationale.md#yarn-lintbytes))
 
-**A lane that adds or moves a test file under `apps/api/server/` must also run the Nitro route-scan guard** (why: [rationale](references/rationale.md#the-other-two-checkenv-and-the-nitro-route-scan-guard)):
-
-```bash
-yarn workspace @campaignfoundry/api exec nitro prepare && \
-  ! grep -q "\.test\." apps/api/.nitro/types/nitro-routes.d.ts
-```
+**The Nitro route-scan guard is a `yarn gate` step** (`nitro-route-scan`), so a lane that adds or
+moves a test file under `apps/api/server/` is covered by the gate itself. (why: [rationale](references/rationale.md#the-other-two-checkenv-and-the-nitro-route-scan-guard))
 
 **A green local gate is not a green CI: diff your gate against the CI workflow first.** (why: [rationale](references/rationale.md#a-green-local-gate-is-not-a-green-ci))
 

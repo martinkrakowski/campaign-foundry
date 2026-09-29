@@ -161,10 +161,10 @@ lane=feat/e1-web; wt=../wt-e1-web
 gh pr list --head "$lane" --json number,url,isDraft --jq '.[] | "#\(.number) \(.url)"'
 
 # 2. Is it green? The gate's exit code is the answer; the lane's summary is not.
-#    `lint:bytes` is the byte-level half of source hygiene: no other gate here
-#    looks at raw bytes, and a raw \x00 in a string literal once passed all of
-#    the rest. It is ~150ms, so it costs nothing to keep in this line.
-(cd "$wt" && yarn build && yarn typecheck && yarn lint && yarn lint:arch && yarn lint:bytes && yarn test:cov)
+#    `yarn gate` (D183) runs CI's gate steps and stops at the first failure,
+#    printing each step's real exit code. It holds the gate lock around
+#    `test:cov` and `verify-manifests` only.
+(cd "$wt" && yarn gate)
 echo "gate exit: $?"
 
 # 3. What actually changed, and is the tree clean?
@@ -173,16 +173,14 @@ git -C "$wt" log --oneline origin/main..HEAD
 git -C "$wt" diff --stat origin/main...HEAD
 ```
 
-**The gate is a subset of CI, and the difference is named.** `ci.yml` runs two steps the gate above
-does not: `check:env` (a conditional no-op here — no such script exists) and the **Nitro route-scan
-guard**, which runs `nitro prepare` and fails if a `*.test.ts` file has been registered as an API
-route. Its own comment in `ci.yml` says it catches "a runtime fault the build and coverage gate
-don't catch". **A lane that adds or moves a test file under `apps/api/server/` must also run:**
-
-```bash
-yarn workspace @campaignfoundry/api exec nitro prepare && \
-  ! grep -q "\.test\." apps/api/.nitro/types/nitro-routes.d.ts
-```
+**The gate is a subset of CI, and the difference is named.** `yarn gate` runs CI's gate steps in
+one command — `check:env` as the same conditional no-op (no such script exists), the Nitro
+route-scan guard (which runs `nitro prepare` and fails if a `*.test.ts` file has been registered
+as an API route — its own comment in `ci.yml` says it catches "a runtime fault the build and
+coverage gate don't catch"), and `test:cov` with the `ERROR: Coverage` scan that fails the gate
+when a threshold is missed even if vitest exits 0. `ci.yml` runs **one** step the gate does not:
+`yarn install --immutable`. Say in the brief whether a lane may add a dependency, and if it may,
+that the regenerated `yarn.lock` travels with it.
 
 A green local gate is not a green CI. Found 2026-09-08 by the hexagen-monaco orchestrator, which
 hit the same class in its own repo: it ran the stated gate, passed, and reddened `main` on
