@@ -403,6 +403,13 @@ describe("the bare shell urls follow the last-opened pointer (PT-5e)", () => {
       </>,
     );
     await waitFor(() => expect(screen.getByTestId("picker").textContent).toBe("true"));
+    // A macrotask, not the microtask the waitFor above ends on (fix round,
+    // coderabbit PRRT_kwDOSzP1zc6nENjV): the self-replace this test rules out
+    // is issued from a promise continuation, so without the flush the
+    // assertion runs before the code has had the chance to do it.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
     expect(nextMock().router.replace).not.toHaveBeenCalled();
   });
 
@@ -452,6 +459,13 @@ describe("the bare shell urls follow the last-opened pointer (PT-5e)", () => {
           .mock.calls.some(([url]) => String(url).includes("/campaigns/last-opened")),
       ).toBe(true),
     );
+    // A macrotask, not the microtask the waitFor above ends on (fix round,
+    // coderabbit PRRT_kwDOSzP1zc6nENjV): the redirect is issued from a promise
+    // continuation, so without the flush the assertion runs before the read
+    // has settled and passes whatever the code then does.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
     expect(nextMock().router.replace).not.toHaveBeenCalled();
   });
 

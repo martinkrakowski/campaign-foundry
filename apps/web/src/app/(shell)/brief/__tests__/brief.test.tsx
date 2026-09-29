@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import {
   ShellProviders,
   json,
@@ -65,7 +65,12 @@ describe("the bare /brief route (D37, PT-5e)", () => {
   // F6: could-not-ask is not "there is nothing". A failed pointer read must not
   // move the visitor off a page they can already see.
   test("a failed pointer read navigates nowhere", async () => {
-    mockPipelineApi({ result: () => Promise.reject(new Error("down")) });
+    // `lastOpened`, not `result`: the pointer URL is answered before any
+    // `result` handler runs, so `result` left this test's pointer read
+    // SUCCEEDING with `null` — which navigates to `/grid`, the opposite of
+    // what this test claims to pin (fix round, coderabbit
+    // PRRT_kwDOSzP1zc6nENjV).
+    mockPipelineApi({ lastOpened: () => Promise.reject(new Error("down")) });
     renderWithRun(<BriefIndexPage />);
     await vi.waitFor(() =>
       expect(
@@ -74,6 +79,12 @@ describe("the bare /brief route (D37, PT-5e)", () => {
           .mock.calls.some(([url]) => String(url).includes("/campaigns/last-opened")),
       ).toBe(true),
     );
+    // A macrotask, not the microtask the waitFor above ends on: the redirect
+    // is issued from a promise continuation, so the assertion has to land
+    // after one for the "navigates nowhere" claim to be about a settled read.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
     expect(nextMock().router.replace).not.toHaveBeenCalled();
   });
 

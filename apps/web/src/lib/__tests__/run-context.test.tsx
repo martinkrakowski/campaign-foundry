@@ -1152,12 +1152,38 @@ describe("RunProvider — brief picker & persistence", () => {
 
   // PT-5e: there is no stored JSON left to be malformed — the server names the
   // campaign or it does not. A pointer read that FAILS restores nothing at all
-  // (F6: could-not-ask is not absence), so the shell keeps the default brief.
-  test("a failed pointer read leaves the shell on the default brief", async () => {
-    mockPipelineApi({ result: () => Promise.reject(new Error("down")) });
+  // (F6: could-not-ask is not absence), so the shell keeps the default brief
+  // AND runs no default-brief discovery — the second half is what makes the
+  // first able to fail.
+  test("a failed pointer read leaves the shell on the default brief and starts no discovery", async () => {
+    // `lastOpened`, not `result` (fix round, coderabbit PRRT_kwDOSzP1zc6nENjV):
+    // the pointer URL is answered before any `result` handler runs, so `result`
+    // left this read SUCCEEDING with `null` — and a null pointer is exactly the
+    // path that starts `restoreDefaultBrief`, so the assertion below held for a
+    // read that had not failed at all.
+    mockPipelineApi({ lastOpened: () => Promise.reject(new Error("down")) });
     const { result } = setup();
-    await waitFor(() => expect(vi.mocked(globalThis.fetch).mock.calls.length).toBeGreaterThan(0));
-    expect(result.current.brief.id).toBe("summer-hydration-2026");
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([url]) => String(url).includes("/campaigns/last-opened")),
+      ).toBe(true),
+    );
+    // A macrotask, so the read's rejection and its `.catch` have both run.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
+    // No default-brief job lookup went out — the discovery a NULL pointer
+    // starts, and a failed one must not.
+    expect(
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.some(([url]) =>
+          String(url).includes(`/campaigns/jobs?campaignId=${DEFAULT_BRIEF.id}`),
+        ),
+    ).toBe(false);
   });
 
   // Fix round (qodo #4). `setBrief` fired every `putLastOpened` as an unordered

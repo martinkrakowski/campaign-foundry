@@ -243,6 +243,15 @@ export type MockPipelineApiOptions = {
   decisions?: Verdicts | ReturnType<typeof fakeDecisionsApi>;
   /** The campaign the last-opened pointer names (absent = no pointer at all). */
   opened?: OpenedCampaign;
+  /**
+   * `GET /campaigns/last-opened` itself (PT-5e). The pointer is answered from
+   * `opened` above, BEFORE any `result` handler runs — a per-test `result`
+   * therefore never sees this URL, so a test that means "the pointer read
+   * FAILED" (F6: could-not-ask is not absence) could not express it and its
+   * assertion passed against a pointer that had in fact answered `null`. This
+   * override is how such a test says so.
+   */
+  lastOpened?: GetFn;
 };
 
 /**
@@ -326,8 +335,11 @@ export const mockPipelineApi = (opts: MockPipelineApiOptions = {}) => {
     }
     // The last-opened pointer (PT-5e). Matched on the exact path, before the
     // per-test `result` handler, so a test that routes some other URL cannot
-    // accidentally answer the pointer with a body that parses as a campaign.
+    // accidentally answer the pointer with a body that parses as a campaign —
+    // and `lastOpened` is how a test drives THIS url when `opened` cannot say
+    // what it needs (a read that fails).
     if (u === `${API}/campaigns/last-opened`) {
+      if (opts.lastOpened) return Promise.resolve(opts.lastOpened(u));
       return Promise.resolve(json({ campaignId: opened?.id ?? null }));
     }
     if (opened) {
