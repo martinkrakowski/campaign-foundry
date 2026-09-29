@@ -21,12 +21,16 @@ import {
   getDraftStore,
   setDraftStore,
   resetDraftStore,
+  getLastOpenedStore,
+  setLastOpenedStore,
+  resetLastOpenedStore,
   FsBriefStore,
   FsAssetStore,
   FsPoolStore,
   FsTemplateStore,
   FsJobStore,
   FsDraftStore,
+  FsLastOpenedStore,
 } from "../index.js";
 import type { BriefStorePort } from "../brief-store.port.js";
 import type { AssetStorePort } from "../asset-store.port.js";
@@ -34,6 +38,7 @@ import type { PoolStorePort } from "../pool-store.port.js";
 import type { TemplateStorePort } from "../template-store.port.js";
 import type { JobStorePort } from "../job-store.port.js";
 import type { DraftStorePort } from "../draft-store.port.js";
+import type { LastOpenedStorePort } from "../last-opened-store.port.js";
 
 import { LOCAL_TENANT } from "../../tenant.js";
 describe("ports registry", () => {
@@ -44,6 +49,7 @@ describe("ports registry", () => {
     resetTemplateStore();
     resetJobStore();
     resetDraftStore();
+    resetLastOpenedStore();
   });
 
   test("getBriefStore returns default FsBriefStore and allows override", () => {
@@ -122,5 +128,17 @@ describe("ports registry", () => {
 
     resetDraftStore();
     expect(getDraftStore(LOCAL_TENANT)).toBeInstanceOf(FsDraftStore);
+  });
+
+  test("getLastOpenedStore returns default FsLastOpenedStore and allows override", () => {
+    const initial = getLastOpenedStore(LOCAL_TENANT);
+    expect(initial).toBeInstanceOf(FsLastOpenedStore);
+
+    const mockStore = {} as LastOpenedStorePort;
+    setLastOpenedStore(mockStore);
+    expect(getLastOpenedStore(LOCAL_TENANT)).toBe(mockStore);
+
+    resetLastOpenedStore();
+    expect(getLastOpenedStore(LOCAL_TENANT)).toBeInstanceOf(FsLastOpenedStore);
   });
 });
