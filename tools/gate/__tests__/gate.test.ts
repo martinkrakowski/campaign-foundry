@@ -129,11 +129,16 @@ describe("yarn gate", () => {
     expect(JSON.parse(readFileSync(packageJson, "utf8")).scripts.gate).toBe("sh scripts/gate.sh");
   });
 
-  test("names yarn install --immutable as the CI step the gate does not run", () => {
+  test("names yarn install --immutable as the CI step the gate does not run, and the TEST_DATABASE_URL-only suites", () => {
     const r = runGate(["--lane", "lane-b"], stepsEnv([["build", "true"]]));
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("yarn install --immutable");
     expect(r.stdout).toContain("does not run");
+    // The two real-Postgres concurrency suites skip themselves without
+    // TEST_DATABASE_URL (CI sets it on its Test step); the gate says so
+    // rather than letting a green run read as CI-equivalent.
+    expect(r.stdout).toContain("TEST_DATABASE_URL");
+    expect(r.stdout).toContain("skip themselves");
   });
 
   test("a busy lock makes the gate exit 75 and leaves the holder's lock alone", () => {

@@ -308,6 +308,10 @@ run_test_cov() {
 }
 
 printf '%s\n' "gate: lane $LANE, $total steps — 'yarn install --immutable' is the one CI step the gate does not run"
+# CI's Test step sets TEST_DATABASE_URL (postgres service); the two
+# real-Postgres concurrency suites skip themselves when it is absent, so a
+# local gate — and a local test:cov — has not exercised them. Say so.
+printf '%s\n' "gate: the two real-Postgres concurrency suites run only when TEST_DATABASE_URL is set — CI sets it; locally they skip themselves"
 
 step_no=0
 while IFS="$TAB" read -r name cmd; do
