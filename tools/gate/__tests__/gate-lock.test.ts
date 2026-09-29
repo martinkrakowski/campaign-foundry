@@ -186,6 +186,26 @@ async function waitForLock(dir: string): Promise<void> {
 }
 
 /**
+ * Poll until a condition holds, and say what it was waiting for when it does
+ * not. A bare `await done` cannot tell a run that reacted from one still
+ * waiting out the command it never signalled: the promise simply does not
+ * settle, and the failure a reader gets is the test's own timeout, naming the
+ * timeout rather than the claim.
+ */
+async function waitFor(
+  condition: () => boolean,
+  timeoutMs: number,
+  what: string,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return true;
+}
+
+/**
  * Poll until a pid is gone. A process told to die needs a moment, and a test
  * that asserted instantly would be reading scheduling luck; one that waited
  * out the whole process would be hiding the very failure it is looking for —
@@ -630,65 +650,86 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
   }, 20_000);
 
   test("a reader never catches the beat empty while the heartbeat refreshes it", async () => {
-    const dir = scratch();
-    // `acquire` and `status` read the beat, and an empty one reads as STALE:
-    // a reader that caught a heartbeat mid-write would judge a live,
-    // heartbeating holder's lock reclaimable, and take it. The beat is
-    // replaced by a rename, so a reader sees the previous beat or the next one
-    // and never nothing. Hammering the file for the life of a run that
-    // heartbeats every second is the only way to look at that window; the
-    // sample count is asserted too, so a reader that stalled cannot pass this
-    // by having read nothing.
-    const { done } = startLockIn(dir, ["run", "lane-a", "--", "sleep", "7"], {
-      CF_GATE_HEARTBEAT_SECONDS: "1",
-    });
-    await waitForLock(dir);
-    const beat = join(lockDir(dir), "beat");
-    let reads = 0;
-    let empty = 0;
-    let missing = 0;
-    const deadline = Date.now() + 5_000;
-    while (Date.now() < deadline) {
-      let value: string;
-      try {
-        value = readFileSync(beat, "utf8");
-      } catch {
-        // Counted, not skipped: the beat is replaced by a rename, so it is
-        // never absent, and a read that fails is a defect this test would
-        // otherwise step over — on the way to passing on the reads that worked.
-        missing += 1;
-        continue;
+    // Under both shells, like the signal tests: the beat is written by a
+    // subshell that sleeps and forks, and the two shells differ in what they
+    // defer and when, so a property of the beat that holds under one of them is
+    // a property of that shell until it has been run under the other.
+    for (const shell of SIGNAL_SHELLS) {
+      const dir = scratch();
+      // `acquire` and `status` read the beat, and an empty one reads as STALE:
+      // a reader that caught a heartbeat mid-write would judge a live,
+      // heartbeating holder's lock reclaimable, and take it. The beat is
+      // replaced by a rename, so a reader sees the previous beat or the next one
+      // and never nothing. Hammering the file for the life of a run that
+      // heartbeats every second is the only way to look at that window; the
+      // sample count is asserted too, so a reader that stalled cannot pass this
+      // by having read nothing.
+      const { child, done } = startLockIn(
+        dir,
+        ["run", "lane-a", "--", "sleep", "7"],
+        {
+          CF_GATE_HEARTBEAT_SECONDS: "1",
+        },
+        shell,
+      );
+      await waitForLock(dir);
+      const beat = join(lockDir(dir), "beat");
+      let reads = 0;
+      let empty = 0;
+      let missing = 0;
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        let value: string;
+        try {
+          value = readFileSync(beat, "utf8");
+        } catch {
+          // Counted, not skipped: the beat is replaced by a rename, so it is
+          // never absent, and a read that fails is a defect this test would
+          // otherwise step over — on the way to passing on the reads that worked.
+          missing += 1;
+          continue;
+        }
+        reads += 1;
+        if (value === "") empty += 1;
+        // Yield periodically, so the child's stdout and stderr keep being drained
+        // while this loop runs. Nothing here fills a pipe today — `run` prints two
+        // lines and the heartbeat's stdio is detached — but a reader that starves
+        // the writer it is measuring is a measurement that can stop measuring.
+        if (reads % 500 === 0) await new Promise((resolve) => setImmediate(resolve));
       }
-      reads += 1;
-      if (value === "") empty += 1;
-      // Yield periodically, so the child's stdout and stderr keep being drained
-      // while this loop runs. Nothing here fills a pipe today — `run` prints two
-      // lines and the heartbeat's stdio is detached — but a reader that starves
-      // the writer it is measuring is a measurement that can stop measuring.
-      if (reads % 500 === 0) await new Promise((resolve) => setImmediate(resolve));
+      // All three, and the sample count with them: a reader that stalled, or one
+      // whose reads were all failures, must not be able to pass.
+      expect({ shell, reads: reads > 1000, empty, missing }).toEqual({
+        shell,
+        reads: true,
+        empty: 0,
+        missing: 0,
+      });
+      process.kill(child.pid as number, "SIGTERM");
+      const result = await done;
+      expect({ shell, status: result.status }).toEqual({ shell, status: 143 });
     }
-    // All three, and the sample count with them: a reader that stalled, or one
-    // whose reads were all failures, must not be able to pass.
-    expect({ reads: reads > 1000, empty, missing }).toEqual({
-      reads: true,
-      empty: 0,
-      missing: 0,
-    });
-    process.kill(Number(lockFile(dir, "pid").trim()), "SIGTERM");
-    const result = await done;
-    expect(result.status).toBe(143);
-  }, 20_000);
+  }, 30_000);
 
   /**
    * One signal, from outside, at a `run` that is holding the lock around a
    * command which is not going to stop on its own. Everything asserted here is
    * about the command, not the wrapper: the wrapper's exit code says it reacted,
    * and only the command's own pid says it stopped.
+   *
+   * `times` is how many signals are sent, 500ms apart — a second one landing
+   * while the first is still being handled is what a CI timeout does, and the
+   * two shells answered it differently enough to cost a lock (see the notes on
+   * forward_signal). A `times: 2` signal may find `run` already gone, which is
+   * the exec-mode case below: `exec sleep 30` dies on the forwarded TERM at
+   * once, so there is no window for a second signal to fall into, and a signal
+   * to a dead pid is a fact about the test's timing, not a failure to report.
    */
   async function signalRun(
     shell: string,
     signal: "SIGINT" | "SIGTERM",
     expectedStatus: number,
+    times = 1,
   ): Promise<void> {
     const dir = scratch();
     // The command reports the pid it will be — it execs, so the pid it
@@ -720,7 +761,32 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     // Signal the holder the way a person or a CI timeout would: the process
     // the lock names, which the tests above pin to `run` itself.
     expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
-    process.kill(Number(lockFile(dir, "pid").trim()), signal);
+    const signalledAt = Date.now();
+    for (let i = 0; i < times; i++) {
+      try {
+        if (child.exitCode === null) {
+          process.kill(Number(lockFile(dir, "pid").trim()), signal);
+        }
+      } catch {
+        // Already gone, which is the exec-mode outcome described above.
+      }
+      if (i + 1 < times) await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    // Bounded, because `await done` on its own cannot tell a run that reacted
+    // from one that is still waiting out the command it never signalled: a
+    // dropped forwarding shows up as this promise not settling for the full
+    // 30s, and the test's own timeout fires and names the timeout instead of
+    // the wrapper. The manifest's mutation — no TERM forwarding — must fail
+    // here, on a claim about elapsed time, and not on the clock running out.
+    const settled = await waitFor(
+      () => child.exitCode !== null || child.signalCode !== null,
+      5_000,
+      `run did not exit within 5000ms of ${signal}`,
+    );
+    expect({ shell, times, settled }).toEqual({ shell, times, settled: true });
+    const elapsed = Date.now() - signalledAt;
+    expect({ shell, withinBudget: elapsed < 5_000 }).toEqual({ shell, withinBudget: true });
 
     const result = await done;
     // 130/143 are INT/TERM's own conventions, so a caller can tell a signalled
@@ -753,52 +819,104 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     }
   }, 30_000);
 
-  test("a signalled run holds the lock until the command has actually stopped", async () => {
+  test("TERM twice on run still releases the lock and reaps the heartbeat", async () => {
     for (const shell of SIGNAL_SHELLS) {
-      const dir = scratch();
-      // A command that is NOT dead the moment it is signalled: it catches TERM
-      // and takes two seconds to tear down, marking the fact. A `run` that
-      // killed and exited in the same breath would have handed the lock to the
-      // next lane while this was still running — and the commands `run` wraps
-      // (a test run, a mutate replay, verify-manifests) all write to the tree.
-      const stopped = join(dir, "stopped");
-      const { child, done } = startLockIn(
-        dir,
-        [
-          "run",
-          "lane-a",
-          "--",
-          "sh",
-          "-c",
-          // `exec >/dev/null 2>&1` first: the command must not hold this test's
-          // pipe open, or the result below would arrive when the COMMAND
-          // finished rather than when `run` did, and the ordering under test
-          // would be observed from the wrong end. `wait` (not a foreground
-          // sleep) so the trap runs the moment the signal arrives, and the
-          // orphan it leaves behind — the sleep, which has outlived its own
-          // shell — is the reason the redirect is here as well.
-          `exec >/dev/null 2>&1; trap 'sleep 2; echo stopped > "${stopped}"; exit 0' TERM; printf '%s\\n' "$$" > "${join(dir, "command.pid")}"; sleep 30 >/dev/null 2>&1 & wait`,
-        ],
-        { CF_GATE_HEARTBEAT_SECONDS: "1" },
-        shell,
-      );
-      await waitForContent(join(dir, "command.pid"));
-      const commandPid = Number(readFileSync(join(dir, "command.pid"), "utf8").trim());
-      expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
-      process.kill(child.pid as number, "SIGTERM");
-
-      const result = await done;
-      expect({ shell, status: result.status }).toEqual({ shell, status: 143 });
-      // The ordering, which is the whole claim: the command had finished
-      // tearing down by the time the lock went away.
-      expect({ shell, stoppedBeforeTheLockWent: existsSync(stopped) }).toEqual({
-        shell,
-        stoppedBeforeTheLockWent: true,
-      });
-      expect(existsSync(lockDir(dir))).toBe(false);
-      expect(isAlive(commandPid)).toBe(false);
+      await signalRun(shell, "SIGTERM", 143, 2);
     }
-  }, 40_000);
+  }, 30_000);
+
+  test("INT twice on run still releases the lock and reaps the heartbeat", async () => {
+    for (const shell of SIGNAL_SHELLS) {
+      await signalRun(shell, "SIGINT", 130, 2);
+    }
+  }, 30_000);
+
+  /**
+   * The same two signals again against a command that is still ALIVE when the
+   * second one lands, which is where the two shells parted company: bash
+   * deferred the second TERM and re-entered forward_signal at exit, after the
+   * command had been reaped, so the EXIT trap never ran and the lock stayed on
+   * disk with the heartbeat still looping under a dead pid. Measured 6 runs in
+   * 6 under /bin/sh before forward_signal ignored both signals; dash never had
+   * the fault, which is why this runs under both.
+   */
+  async function teardownRun(
+    shell: string,
+    signal: "SIGINT" | "SIGTERM",
+    expectedStatus: number,
+    times: number,
+  ): Promise<void> {
+    const dir = scratch();
+    // A command that is NOT dead the moment it is signalled: it catches TERM
+    // and takes two seconds to tear down, marking the fact. A `run` that
+    // killed and exited in the same breath would have handed the lock to the
+    // next lane while this was still running — and the commands `run` wraps
+    // (a test run, a mutate replay, verify-manifests) all write to the tree.
+    const stopped = join(dir, "stopped");
+    const { child, done } = startLockIn(
+      dir,
+      [
+        "run",
+        "lane-a",
+        "--",
+        "sh",
+        "-c",
+        // `exec >/dev/null 2>&1` first: the command must not hold this test's
+        // pipe open, or the result below would arrive when the COMMAND
+        // finished rather than when `run` did, and the ordering under test
+        // would be observed from the wrong end. `wait` (not a foreground
+        // sleep) so the trap runs the moment the signal arrives, and the
+        // orphan it leaves behind — the sleep, which has outlived its own
+        // shell — is the reason the redirect is here as well.
+        `exec >/dev/null 2>&1; trap 'sleep 2; echo stopped > "${stopped}"; exit 0' TERM; printf '%s\\n' "$$" > "${join(dir, "command.pid")}"; sleep 30 >/dev/null 2>&1 & wait`,
+      ],
+      { CF_GATE_HEARTBEAT_SECONDS: "1" },
+      shell,
+    );
+    await waitForContent(join(dir, "command.pid"));
+    const commandPid = Number(readFileSync(join(dir, "command.pid"), "utf8").trim());
+    expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
+    for (let i = 0; i < times; i++) {
+      try {
+        if (child.exitCode === null) process.kill(child.pid as number, signal);
+      } catch {
+        // Already gone: nothing left to signal.
+      }
+      if (i + 1 < times) await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    const result = await done;
+    expect({ shell, times, status: result.status }).toEqual({
+      shell,
+      times,
+      status: expectedStatus,
+    });
+    // The ordering, which is the whole claim: the command had finished
+    // tearing down by the time the lock went away.
+    expect({ shell, stoppedBeforeTheLockWent: existsSync(stopped) }).toEqual({
+      shell,
+      stoppedBeforeTheLockWent: true,
+    });
+    expect(existsSync(lockDir(dir))).toBe(false);
+    expect(isAlive(commandPid)).toBe(false);
+  }
+
+  test("a signalled run holds the lock until the command has actually stopped", async () => {
+    // INT and TERM share this path — both traps forward TERM — so both are
+    // named: a run that only ever saw TERM here was never tested for the half
+    // of its signal handling that a Ctrl-C takes.
+    for (const shell of SIGNAL_SHELLS) {
+      await teardownRun(shell, "SIGTERM", 143, 1);
+      await teardownRun(shell, "SIGINT", 130, 1);
+    }
+  }, 60_000);
+
+  test("a second signal during the teardown still releases the lock and reaps the heartbeat", async () => {
+    for (const shell of SIGNAL_SHELLS) {
+      await teardownRun(shell, "SIGTERM", 143, 2);
+      await teardownRun(shell, "SIGINT", 130, 2);
+    }
+  }, 60_000);
 
   test("exits with the command's own status, and still releases the lock", () => {
     const dir = scratch();
@@ -835,46 +953,51 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
   });
 
   test("a command that takes the lock away is stopped, not left running without one", async () => {
-    const dir = scratch();
-    // The heartbeat refreshes only a lock that still names this run, so a lock
-    // that names someone else makes the refresh fail — and a failed refresh is
-    // how the loop learns the lock is gone, since the foreground is blocked in
-    // `wait` and cannot see it. The command must be stopped there and then: it
-    // is running against a lock this run no longer holds, and letting it
-    // finish is the failure the heartbeat exists to prevent.
-    const completed = join(dir, "completed");
-    const commandPidFile = join(dir, "command.pid");
-    const replace = [
-      'rm -rf "$TMPDIR/cf-gate.lock"',
-      'mkdir "$TMPDIR/cf-gate.lock"',
-      'printf "lane-c\\n" > "$TMPDIR/cf-gate.lock/owner"',
-      `printf "${process.pid}\\n" > "$TMPDIR/cf-gate.lock/pid"`,
-      'printf "$(date +%s)\\n" > "$TMPDIR/cf-gate.lock/started"',
-      'printf "$(date +%s)\\n" > "$TMPDIR/cf-gate.lock/beat"',
-      `printf '%s\\n' "$$" > "${commandPidFile}"`,
-      // `wait`, not a foreground sleep, so the shell answers a TERM at once
-      // instead of deferring it for the length of the sleep; the sleep's own
-      // stdio is dropped so the orphan it leaves cannot hold this test's pipe.
-      "sleep 8 >/dev/null 2>&1 & wait",
-      `touch "${completed}"`,
-    ].join("; ");
-    const result = await runLockAsyncIn(dir, ["run", "lane-a", "--", "sh", "-c", replace], {
-      CF_GATE_HEARTBEAT_SECONDS: "1",
-    });
-    expect(result.status).not.toBe(0);
-    // It says so, and says why the command ended: a 143 on its own is
-    // indistinguishable from a caller that signalled the run.
-    expect(result.stderr).toContain("the lock was lost while the command ran");
-    const commandPid = Number(readFileSync(commandPidFile, "utf8").trim());
-    // Stopped, not merely reported on: a command that reaches its own end
-    // leaves the marker it wrote on the way out.
-    expect(isAlive(commandPid)).toBe(false);
-    expect(existsSync(completed)).toBe(false);
-    // The replacement is still the replacement's: this run never deletes a
-    // lock it does not hold, however it ends.
-    expect(lockFile(dir, "owner").trim()).toBe("lane-c");
-    expect(existsSync(lockDir(dir))).toBe(true);
-  }, 20_000);
+    // Both shells: the loop that does the stopping is the one whose deferral
+    // and re-entry behaviour differ, so the claim is only made once each shell
+    // has been asked to keep it.
+    for (const shell of SIGNAL_SHELLS) {
+      const dir = scratch();
+      // The heartbeat refreshes only a lock that still names this run, so a lock
+      // that names someone else makes the refresh fail — and a failed refresh is
+      // how the loop learns the lock is gone, since the foreground is blocked in
+      // `wait` and cannot see it. The command must be stopped there and then: it
+      // is running against a lock this run no longer holds, and letting it
+      // finish is the failure the heartbeat exists to prevent.
+      const completed = join(dir, "completed");
+      const commandPidFile = join(dir, "command.pid");
+      const replace = [
+        'rm -rf "$TMPDIR/cf-gate.lock"',
+        'mkdir "$TMPDIR/cf-gate.lock"',
+        'printf "lane-c\\n" > "$TMPDIR/cf-gate.lock/owner"',
+        `printf "${process.pid}\\n" > "$TMPDIR/cf-gate.lock/pid"`,
+        'printf "$(date +%s)\\n" > "$TMPDIR/cf-gate.lock/started"',
+        'printf "$(date +%s)\\n" > "$TMPDIR/cf-gate.lock/beat"',
+        `printf '%s\\n' "$$" > "${commandPidFile}"`,
+        // `wait`, not a foreground sleep, so the shell answers a TERM at once
+        // instead of deferring it for the length of the sleep; the sleep's own
+        // stdio is dropped so the orphan it leaves cannot hold this test's pipe.
+        "sleep 8 >/dev/null 2>&1 & wait",
+        `touch "${completed}"`,
+      ].join("; ");
+      const result = await runLockAsyncIn(dir, ["run", "lane-a", "--", "sh", "-c", replace], {
+        CF_GATE_HEARTBEAT_SECONDS: "1",
+      });
+      expect(result.status).not.toBe(0);
+      // It says so, and says why the command ended: a 143 on its own is
+      // indistinguishable from a caller that signalled the run.
+      expect(result.stderr).toContain("the lock was lost while the command ran");
+      const commandPid = Number(readFileSync(commandPidFile, "utf8").trim());
+      // Stopped, not merely reported on: a command that reaches its own end
+      // leaves the marker it wrote on the way out.
+      expect({ shell, stopped: isAlive(commandPid) }).toEqual({ shell, stopped: false });
+      expect({ shell, completed: existsSync(completed) }).toEqual({ shell, completed: false });
+      // The replacement is still the replacement's: this run never deletes a
+      // lock it does not hold, however it ends.
+      expect(lockFile(dir, "owner").trim()).toBe("lane-c");
+      expect(existsSync(lockDir(dir))).toBe(true);
+    }
+  }, 40_000);
 
   test("a lock deleted under it fails the run too, though the release has nothing to remove", () => {
     const dir = scratch();

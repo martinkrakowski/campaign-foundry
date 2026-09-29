@@ -64,6 +64,22 @@
 # lock it did not inspect restores or leaves it rather than deleting it (see
 # take_stale). A lock is dev-host machinery; nothing here assumes a filesystem
 # more clever than rename.
+#
+# One gap is left open on purpose, and it is not a race. NOTHING watches the
+# heartbeat's own death: kill the pid `run` prints and the loop is simply gone,
+# so the beat goes stale, the next acquire reclaims the lock as one whose holder
+# has stopped answering for it, and the command carries on running against a
+# lock nobody holds until it ends or `run` is signalled. Measured here with
+# CF_GATE_HEARTBEAT_SECONDS=1, CF_GATE_STALE_SECONDS=2 and a 20s command, after
+# killing the printed pid: the lock was reclaimed 0.7s later under /bin/sh and
+# 1.6s under /bin/dash, with `run` and the command both still alive and neither
+# aware of it. `run` does close the other direction — a refresh that FAILS stops
+# the command at once — because a failure the loop can see is a failure it can
+# act on. Closing this one needs a supervisor that outlives the loop, and the
+# only pid available to be that supervisor is the one acquire already judges by
+# liveness, so a pid-recycled holder would be reported as supervising a lock it
+# no longer holds. It is left named rather than half-closed, and gate.sh has the
+# same gap.
 set -u
 
 # This script's own directory, resolved once. `run` re-invokes it — heartbeat,
@@ -295,7 +311,38 @@ acquire() {
 # process group, so the Ctrl-C the tty driver sends to the foreground group
 # would no longer reach the command either, and the job-control output it
 # prints would interleave with the command's own.
+#
+# A SECOND signal, arriving while the wait below is still running, is the one
+# case that used to cost the lock, and the two shells answered it differently
+# enough that neither answer could be described as "the signal is handled".
+# Measured here — one command that catches TERM and takes 2s to tear down, two
+# TERMs 500ms apart, /bin/sh (bash 3.2) and /bin/dash:
+#   bash DEFERS the second TERM and re-enters this handler at exit, after the
+#   command has been reaped. `wait` then has no child left (`wait: pid N is not
+#   a child of this shell`) and the `exit 143` runs without ever entering the
+#   EXIT trap. Observed 6 times in 6: exit 143, no "released by", the lock left
+#   at the name with all four of its files, and the heartbeat still looping
+#   under a pid that had died — a lock the next acquire reclaims on pid-death
+#   and an orphan refreshing a dead holder's beat. A CI timeout that sends TERM
+#   twice is exactly that.
+#   dash re-enters at once, re-sends TERM, and leaves through the EXIT trap.
+# A second INT is a third answer: bash DROPS it and never re-enters, so INT was
+# already safe on its own — which is why the note that used to sit here, "bash
+# does not re-enter this trap while it is running, so a second INT/TERM is
+# dropped", was half right and read as though both signals were covered.
+#
+# So the second signal is ignored here, in BOTH shells, deliberately
+# (`trap '' INT TERM`, below). Answering it again is the only thing this
+# handler can do that is worse than doing nothing: under bash it re-enters with
+# the command already reaped, and the one job left — leaving through the EXIT
+# trap so the lock goes — is precisely the job it cannot do any more. Ignoring
+# is the answer that cannot skip the cleanup. The cost is that nothing outside
+# can break the wait any more, not even a second TERM, so `kill -9` on the
+# command or on this pid is the way out of a command that will not stop: the
+# former unwinds cleanly, the latter leaves a lock the next acquire reclaims as
+# a dead pid.
 forward_signal() {
+  trap '' INT TERM
   if [ -n "$cmd_pid" ]; then
     kill -TERM "$cmd_pid" 2>/dev/null
     # And WAIT for it, here, before the lock goes with it. A signalled command
@@ -306,13 +353,8 @@ forward_signal() {
     #
     # The wait is a real wait, with no timeout, and that is deliberate: a
     # command that will not stop keeps the lock, which is what a lock is for.
-    # The cost is that nothing here can break the wait from outside except a
-    # signal to the command itself — bash (a macOS /bin/sh) does not re-enter
-    # this trap while it is running, so a second INT/TERM is dropped rather
-    # than re-killing, and dash re-enters and re-sends TERM to a command that
-    # is ignoring it. `kill -9` on the command, or on this pid, ends it either
-    # way; the former unwinds cleanly, the latter leaves a lock the next
-    # acquire reclaims as a dead pid.
+    # INT and TERM are both ignored from here on (see above), so the wait ends
+    # when the command ends and on nothing else.
     wait "$cmd_pid" 2>/dev/null
   fi
   exit "$2"
@@ -593,15 +635,12 @@ heartbeat() {
   # readable right up to it. Measured on this host: a reader looping on the file
   # saw an empty value 10 times in 7 seconds.
   #
-  # The new value is staged BESIDE THE LOCK, not inside it. A `run` was observed
-  # failing with "release failed — could not remove … Directory not empty" while
-  # its own heartbeat was refreshing, and the entry that was in the directory at
-  # that moment was the one this function had just staged there. Whether the
-  # interleaving is a narrow one or not, the fix does not argue about it: the
-  # lock directory is written once, by try_create, and read-only from then on,
-  # so there is nothing in it for a removal to race. Same filesystem by
-  # construction — the lock is itself ${TMPDIR:-/tmp}/cf-gate.lock, so a file in
-  # ${TMPDIR:-/tmp} renames onto it.
+  # The new value is staged BESIDE THE LOCK, not inside it, so the lock
+  # directory holds nothing but the four files try_create wrote: a removal never
+  # has to unlink a file that is still being written, and the only entry that
+  # can appear after creation is the finished one this rename delivers. Same
+  # filesystem by construction — the lock is itself ${TMPDIR:-/tmp}/cf-gate.lock,
+  # so a file in ${TMPDIR:-/tmp} renames onto it.
   beat_new="${TMPDIR:-/tmp}/cf-gate.beatnew.$$"
   if ! printf '%s\n' "$(date +%s)" > "$beat_new" 2>/dev/null; then
     printf '%s\n' "gate-lock: heartbeat — cannot write $LOCK/beat" >&2
