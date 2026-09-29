@@ -989,13 +989,50 @@ describe("FsBriefStore", () => {
       await first.createBrief({ ...minimalBrief, id: "shared" });
       expect(await first.findBriefFileById("shared")).toBe("shared.yaml");
 
-      // The first instance's index is warm; this one's is empty, so this is the
-      // lookup that must fall back to a scan. A cache that answered a miss from
-      // its own map would report the campaign as absent — the index hiding
-      // another writer's brief is the failure the scan-on-miss exists to stop.
+      // What this pins is not that `first` exists but the shape `second` is in:
+      // an index with nothing in it, so the lookup can only be answered by the
+      // scan. A cache that answered a miss from its own map would report the
+      // campaign as absent — the index hiding another writer's brief is the
+      // failure the scan-on-miss exists to stop. `first`'s own lookups above
+      // only warm a map `second` cannot see.
       const second = new FsBriefStore(dir);
       expect(await second.findBriefFileById("shared")).toBe("shared.yaml");
       expect(await second.findBriefById("shared")).toMatchObject({ campaignId: "shared" });
+    });
+
+    // Two rebuilds in flight on one instance: publishing a map is an
+    // assignment, so a rebuild that started on an OLDER view of the root can
+    // land after one that started on a newer one. Reading `this.idIndex` back
+    // after the await is what turns that into a wrong answer — the caller gets
+    // whichever map won the assignment race, not the one it scanned for. The
+    // deferred scan is what forces that interleaving; nothing in the filesystem
+    // would produce it on demand.
+    test("a lookup answers from the scan it waited for, not from one that overtook it", async () => {
+      const gates: (() => void)[] = [];
+      const real = store.listBriefs.bind(store);
+      let call = 0;
+      vi.spyOn(store, "listBriefs").mockImplementation(async () => {
+        const mine = (call += 1);
+        if (mine > 2) return real();
+        await new Promise<void>((release) => gates.push(release));
+        // The OLD scan, taken before the newer one below: it has never heard
+        // of `fresh`, so publishing it last is exactly the regression.
+        return mine === 1
+          ? [{ campaignId: "stale", file: "stale.yaml", brief: minimalBrief, revision: "r" }]
+          : [{ campaignId: "fresh", file: "fresh.yaml", brief: minimalBrief, revision: "r" }];
+      });
+
+      const older = store.findBriefFileById("stale");
+      const newer = store.findBriefFileById("fresh");
+      await vi.waitFor(() => expect(gates).toHaveLength(2));
+
+      // Released together, in the order that puts the NEWER scan's publish
+      // first and the older one's second.
+      gates[1]!();
+      gates[0]!();
+
+      expect(await newer).toBe("fresh.yaml");
+      expect(await older).toBe("stale.yaml");
     });
 
     test("a release re-derives the root, so a brief file removed out of band cannot leak the reservation", async () => {

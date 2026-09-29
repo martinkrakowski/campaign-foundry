@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/ports/fs-brief-store.ts",
-      "before": "    this.idIndex.clear();\n    if (await this.findBriefFileById(slug)) return false;",
-      "after": "    if (await this.findBriefFileById(slug)) return false;",
-      "because": "dropping the index clear makes releaseCampaign's 'holds no brief file' guard read the cache instead of the disk, and the hit's own stat cannot disprove this case: the file is still there, still a regular file, and no longer declares this slug. The guard would then refuse the release FOREVER, leaking the campaign's reservation directory with it, and nothing else in the class invalidates the entry. The test rewrites the brief file's id in place and expects the release to succeed",
+      "before": "    if ((await this.rebuildIdIndex()).get(slug)) return false;",
+      "after": "    if (this.idIndex.get(slug)) return false;",
+      "because": "deciding from the cache instead of from the scan makes releaseCampaign's 'holds no brief file' guard read a claim the index has not re-checked, and the hit's own stat cannot disprove this case: the file is still there, still a regular file, and no longer declares this slug. The guard would then refuse the release FOREVER, leaking the campaign's reservation directory with it, and nothing else in the class invalidates the entry. The test rewrites the brief file's id in place and expects the release to succeed",
       "command": [
         "yarn",
         "vitest",
@@ -21,8 +21,8 @@
     },
     {
       "file": "apps/api/server/lib/ports/fs-brief-store.ts",
-      "before": "    this.idIndex.clear();\n    // \"Taken\" is a file NAMED after the slug (`findBriefFile`) OR an existing",
-      "after": "    // \"Taken\" is a file NAMED after the slug (`findBriefFile`) OR an existing",
+      "before": "      (await this.rebuildIdIndex()).get(slug) !== undefined;",
+      "after": "      this.idIndex.get(slug) !== undefined;",
       "because": "the same stale entry, met by createCampaign's taken-check: a slug no file declares any more, in a differently named file whose id was rewritten in place, is refused with EEXIST over a reservation that is genuinely free, and the slug is unusable for good. This is the other of the two methods whose first act is a decision about the root",
       "command": [
         "yarn",
@@ -38,9 +38,9 @@
     },
     {
       "file": "apps/api/server/lib/ports/fs-brief-store.ts",
-      "before": "    if (cached !== undefined && (await this.isIndexedFileLive(cached))) return cached;\n    await this.rebuildIdIndex();",
-      "after": "    if (cached !== undefined && (await this.isIndexedFileLive(cached))) return cached;",
-      "because": "dropping the scan-on-miss turns a positive-only cache into an authoritative one: a miss is answered from the map instead of the disk, so a brief another FsBriefStore — or another process, or an operator — put in this root is invisible to this instance for the life of the process. The test warms one instance's index and then asks a SECOND FsBriefStore over the same root, which is exactly that case",
+      "before": "    if (cached !== undefined && (await this.isIndexedFileLive(cached))) return cached;\n    return (await this.rebuildIdIndex()).get(id);",
+      "after": "    if (cached !== undefined && (await this.isIndexedFileLive(cached))) return cached;\n    return this.idIndex.get(id);",
+      "because": "dropping the scan-on-miss turns a positive-only cache into an authoritative one: a miss is answered from the map instead of the disk, so a brief another FsBriefStore — or another process, or an operator — put in this root is invisible to this instance for the life of the process. The same edit also drops the guarantee that a caller answers from the scan it waited for rather than from whichever rebuild won the assignment race, which the suite's two interleaved-rebuild lookups pin; the test replayed here covers the first half. The test warms one instance's index and then asks a SECOND FsBriefStore over the same root, which is exactly that case",
       "command": [
         "yarn",
         "vitest",
@@ -89,7 +89,7 @@
     },
     {
       "file": "apps/api/server/lib/ports/fs-brief-store.ts",
-      "before": "    if (entry === undefined || entry.campaignId === id) return entry;\n    await this.rebuildIdIndex();\n    const replacement = this.idIndex.get(id);\n    return replacement === undefined ? undefined : this.storedBrief(replacement);",
+      "before": "    if (entry === undefined || entry.campaignId === id) return entry;\n    const replacement = (await this.rebuildIdIndex()).get(id);\n    return replacement === undefined ? undefined : this.storedBrief(replacement);",
       "after": "    return entry;",
       "because": "a stat sees the NAME, not what the file declares: a brief whose id was rewritten in place keeps its name and its inode, so the hit still validates, and findBriefById would hand assertOwnedCampaign a different campaign's brief under the id the caller asked for. The parse that method already pays for is what makes the comparison free, so a disagreement re-derives the mapping from the directory. Two tests cover both outcomes: the id is simply gone, and the id resolves to the OTHER file that declares it. (Dropping only the COMPARISON is not a mutation this tool can see — the repair left behind then runs on every lookup and answers the same, which is why the claim is the whole block)",
       "command": [
@@ -106,7 +106,7 @@
     },
     {
       "file": "apps/api/server/lib/ports/fs-brief-store.ts",
-      "before": "    await this.rebuildIdIndex();\n    const replacement = this.idIndex.get(id);\n    return replacement === undefined ? undefined : this.storedBrief(replacement);",
+      "before": "    const replacement = (await this.rebuildIdIndex()).get(id);\n    return replacement === undefined ? undefined : this.storedBrief(replacement);",
       "after": "    return undefined;",
       "because": "the second half of that repair: a mismatch must be re-derived, not merely refused, or an id that DID move to another file would answer 'no such campaign' for a campaign that is right there. The test that pins it puts a second file declaring the id beside the one that stopped declaring it",
       "command": [

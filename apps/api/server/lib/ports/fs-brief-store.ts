@@ -122,8 +122,10 @@ export class FsBriefStore implements BriefStorePort {
    * Residual, and named: a stat sees the NAME, not what the file declares. A
    * file whose `brief.id` was changed in place out of band is still answered
    * by `findBriefFileById` (a parse per hit is the cost this lane exists to
-   * remove). `findBriefById` pays that parse already, so it verifies the id it
-   * parsed and repairs the mapping when they disagree.
+   * remove). The two lookups that read the file anyway fix that differently,
+   * and both have to: `findBriefById` verifies the id it parsed, and
+   * `rewriteBrief` verifies the id in the bytes it is about to patch, so a Save
+   * cannot rewrite one campaign's file as another.
    *
    * It holds FILE NAMES and nothing else. A `StoredBrief`'s revision must
    * always be hashed from the bytes on disk (`getRevision`, and
@@ -131,11 +133,13 @@ export class FsBriefStore implements BriefStorePort {
    * turn a conditional write into an unconditional one and quietly retire
    * `ECONFLICT`.
    *
-   * Replaced by reference rather than mutated in place, so publishing a
-   * rebuild is one assignment: two concurrent misses each publish a complete
-   * map built from a complete scan, and whichever loses that race is still
-   * correct. An entry a concurrent rebuild drops is picked up by the next
-   * miss.
+   * A rebuild REPLACES the map rather than mutating it, so publishing one is a
+   * single assignment and any map a reader is holding stays whole. Nothing else
+   * empties it: a rebuild is the only way entries are dropped, so `clear()`
+   * does not appear anywhere in this file. `createBrief` is the one in-place
+   * writer, and it only ever records the name a write just created. Each
+   * rebuild also RETURNS the map it built so its caller answers from that scan
+   * rather than from the field — see `rebuildIdIndex`.
    */
   private idIndex: Map<string, string> = new Map();
 
@@ -200,14 +204,24 @@ export class FsBriefStore implements BriefStorePort {
    * which is what `list.find` over the already-sorted listing answered before
    * the index existed: two files declaring one id is a corrupt root, and the
    * answer must not depend on whether the caller arrived warm or cold.
+   *
+   * It RETURNS the map it built, and callers answer from that rather than from
+   * `this.idIndex` after the await. Publishing is an assignment, so a rebuild
+   * that scanned an older view of the root can land after one that scanned a
+   * newer one; a caller that read the field back would get whichever map won
+   * that race instead of the one it waited for, and a decision made from it
+   * (`createCampaign`'s taken-check, `releaseCampaign`'s guard) would be made
+   * from a scan nobody asked for. Each caller answers from a complete scan it
+   * performed itself, and the field is left to be the cache.
    */
-  private async rebuildIdIndex(): Promise<void> {
+  private async rebuildIdIndex(): Promise<ReadonlyMap<string, string>> {
     const listed = await this.listBriefs();
     const next = new Map<string, string>();
     for (const entry of listed) {
       if (!next.has(entry.campaignId)) next.set(entry.campaignId, entry.file);
     }
     this.idIndex = next;
+    return next;
   }
 
   /**
@@ -229,8 +243,7 @@ export class FsBriefStore implements BriefStorePort {
     if (file === undefined) return undefined;
     const entry = await this.storedBrief(file);
     if (entry === undefined || entry.campaignId === id) return entry;
-    await this.rebuildIdIndex();
-    const replacement = this.idIndex.get(id);
+    const replacement = (await this.rebuildIdIndex()).get(id);
     return replacement === undefined ? undefined : this.storedBrief(replacement);
   }
 
@@ -270,15 +283,23 @@ export class FsBriefStore implements BriefStorePort {
    *
    * A hit whose file is gone (or is no longer a regular file) is NOT a hit: it
    * falls through to the same scan a miss pays for, which drops the entry by
-   * replacing the whole map. `createCampaign` and `releaseCampaign` still clear
-   * the index before they DECIDE anything, but for what a stat cannot see — a
-   * file that no longer declares the id it was indexed under.
+   * replacing the whole map. `createCampaign` and `releaseCampaign` do not
+   * consult the cache at all before they DECIDE anything — they scan, and
+   * answer from that scan — for what a stat cannot see: a file that no longer
+   * declares the id it was indexed under.
+   *
+   * The name, not the bytes: a cached file whose contents stopped PARSING is
+   * still a hit here, while `findBriefById` reports that id absent. Pre-index
+   * both said absent. The split is deliberate and is the write path's reason —
+   * `rewriteBrief` must keep handing those bytes to `patchBriefYaml`, which
+   * refuses them by name (R4.1). Deriving them here instead would answer a
+   * corrupt file's id as "no such campaign", and `replaceBrief` would turn
+   * that refusal into a create.
    */
   async findBriefFileById(id: string): Promise<string | undefined> {
     const cached = this.idIndex.get(id);
     if (cached !== undefined && (await this.isIndexedFileLive(cached))) return cached;
-    await this.rebuildIdIndex();
-    return this.idIndex.get(id);
+    return (await this.rebuildIdIndex()).get(id);
   }
 
   async findBriefFile(
@@ -363,14 +384,6 @@ export class FsBriefStore implements BriefStorePort {
     if (isReservedCampaignId(slug)) {
       throw new Error(`"${slug}" is reserved; choose another campaign id.`);
     }
-    // The EEXIST decision below is made from `findBriefFileById`, so this
-    // method re-derives what the root holds before it decides. A hit proves
-    // the indexed NAME is a live regular file (see `isIndexedFileLive`), not
-    // that the file still DECLARES this slug — a brief whose id was rewritten
-    // in place out of band would keep its name and lose its claim to the slug,
-    // and the refusal it caused would be permanent. Cheap here: one
-    // reservation per campaign, on a path that is not a read.
-    this.idIndex.clear();
     // "Taken" is a file NAMED after the slug (`findBriefFile`) OR an existing
     // brief whose `id` IS the slug but lives in a differently named file
     // (`findBriefFileById`, an id-parsed lookup over `listBriefs()` — the
@@ -378,7 +391,21 @@ export class FsBriefStore implements BriefStorePort {
     // alone missed that second case (coderabbit PRRT_kwDOSzP1zc6mgBu7 / qodo
     // PRRT_kwDOSzP1zc6mgEyH): the legacy `reserveVisible` check in
     // `duplicate.post.ts` was id-based and never had this gap.
-    if ((await this.findBriefFile(slug)) || (await this.findBriefFileById(slug))) {
+    //
+    // The EEXIST decision is made from a SCAN, not from the cache, so this
+    // method re-derives what the root holds before it decides. A hit proves
+    // the indexed NAME is a live regular file (see `isIndexedFileLive`), not
+    // that the file still DECLARES this slug — a brief whose id was rewritten
+    // in place out of band would keep its name and lose its claim to the slug,
+    // and the refusal it caused would be permanent. Cheap here: one
+    // reservation per campaign, on a path that is not a read. Asking for the
+    // scan directly rather than clearing the index and going through
+    // `findBriefFileById` is the same one scan either way, minus the window in
+    // which every other reader on this shared instance misses with it.
+    const taken =
+      (await this.findBriefFile(slug)) !== undefined ||
+      (await this.rebuildIdIndex()).get(slug) !== undefined;
+    if (taken) {
       const err = new Error(`Brief "${slug}" already exists.`);
       (err as { code?: string }).code = "EEXIST";
       throw err;
@@ -569,9 +596,9 @@ export class FsBriefStore implements BriefStorePort {
     // cannot see past or cannot disprove, that entry makes the guard below
     // report "holds a brief file", and the reservation is refused FOREVER,
     // because no other method invalidates it. Once per failed create, never on
-    // a read.
-    this.idIndex.clear();
-    if (await this.findBriefFileById(slug)) return false;
+    // a read. The scan is asked for directly, so the answer comes from the
+    // scan this call made rather than from the shared field it republishes.
+    if ((await this.rebuildIdIndex()).get(slug)) return false;
     if (await this.isCampaignDirUnsafe(slug)) return false;
     const dirPath = resolveConfined(this.dir, slug);
     let entries: string[];
