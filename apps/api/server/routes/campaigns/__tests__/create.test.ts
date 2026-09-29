@@ -450,9 +450,7 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
             const spy = vi
               .spyOn(getBriefStore(LOCAL_TENANT), "resolveCampaign")
               .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
-            const res = await mount().create(
-              createReq({ name: "Copy", teamOf: sourceSlug }),
-            );
+            const res = await mount().create(createReq({ name: "Copy", teamOf: sourceSlug }));
             expect(res.status).toBe(500);
             spy.mockRestore();
             const { rows } = await pgHarness.db.query(

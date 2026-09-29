@@ -392,6 +392,56 @@ describe("PT-2d: team gates on routes (D166)", () => {
     expect(resT1.status).toBe(200);
   });
 
+  // PT-5c2 item 2: campaignMeta answers a versionless (blank-created) row
+  // too (unlike campaignVisibility/resolveCampaign, which miss it on fs —
+  // this pins the SAME contract on Postgres), so plan and generate both
+  // succeed against one, not just an already-versioned campaign.
+  test("plan and generate both succeed against a versionless (blank-created) campaign on Postgres", async () => {
+    const ownerStore = new PgBriefStore(harness.db, "local", "owner", ["owner"], []);
+    await ownerStore.createCampaign("blank-t1", { teamId: "t1" });
+
+    const variationBrief: CampaignBrief = {
+      ...sampleBrief,
+      id: "blank-t1",
+      mode: "variation",
+      variation: {
+        count: 2,
+        seed: 1,
+        axes: { layout: ["headline-top"], tone: ["bold"] },
+      },
+    };
+
+    const callPlan = mountTenantRoute(planPostHandler, {
+      method: "POST",
+      path: "/campaigns/plan",
+      tenant: t1Member,
+    });
+    const resPlan = await callPlan(
+      new Request("http://x/campaigns/plan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(variationBrief),
+      }),
+    );
+    expect(resPlan.status).toBe(200);
+
+    const callGenerate = mountTenantRoute(generatePostHandler, {
+      method: "POST",
+      path: "/campaigns/generate",
+      tenant: t1Member,
+    });
+    const resGenerate = await callGenerate(
+      new Request("http://x/campaigns/generate?model=procedural", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(variationBrief),
+      }),
+    );
+    expect(resGenerate.status).toBe(202);
+    const { jobId } = (await resGenerate.json()) as { jobId: string };
+    await awaitSettled(jobId, t1Member);
+  });
+
   // PT-5c2 closes the gap this test used to document: generate now requires
   // a KNOWN campaign (`campaignMeta` defined — the campaign must already be
   // minted through `POST /campaigns`), so an unsaved, never-minted "draft"

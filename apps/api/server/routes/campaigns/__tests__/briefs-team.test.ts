@@ -209,6 +209,11 @@ describe("POST/PUT /campaigns/briefs — teamId (D166, PT-2c item 3)", () => {
 
         const res = await mount(t2Member).create(postReq(sampleBrief));
         expect(res.status).toBe(404);
+        // The SAME body a genuinely missing campaign answers (see
+        // "POST 404s on a pre-existing unparseable file never known to
+        // campaignMeta" and the teamOf/duplicate 404 tests) — CampaignNotFoundError's
+        // own message, verbatim, not a bespoke "hidden" wording.
+        expect(await res.json()).toEqual({ error: 'Campaign "camp" not found' });
 
         const { rows } = await harness.db.query<{ count: number }>(
           `select count(*)::int from brief_version bv

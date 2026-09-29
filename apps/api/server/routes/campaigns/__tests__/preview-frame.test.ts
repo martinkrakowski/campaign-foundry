@@ -131,9 +131,7 @@ describe("POST /campaigns/preview-frame", () => {
   // PT-5c2: the campaign must be known (`campaignMeta`) — an id never minted
   // through `POST /campaigns` answers 404, and nothing is rendered for it.
   test("answers 404 for a campaign never minted through POST /campaigns", async () => {
-    const res = await mount()(
-      jsonReq({ brief: { ...brief(), id: "never-minted" }, cell: cell() }),
-    );
+    const res = await mount()(jsonReq({ brief: { ...brief(), id: "never-minted" }, cell: cell() }));
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'Campaign "never-minted" not found.' });
   });
