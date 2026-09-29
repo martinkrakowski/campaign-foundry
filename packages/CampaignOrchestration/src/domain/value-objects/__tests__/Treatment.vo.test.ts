@@ -48,17 +48,25 @@ describe("Treatment value object", () => {
     }
   });
 
-  test("RESERVED_CAMPAIGN_IDS lists orchestrator-reserved directory names", () => {
-    expect(RESERVED_CAMPAIGN_IDS).toEqual(["cache", "jobs", "orgs", "packages"]);
+  test("RESERVED_CAMPAIGN_IDS lists orchestrator-reserved campaign ids", () => {
+    expect(RESERVED_CAMPAIGN_IDS).toEqual(["cache", "jobs", "last-opened", "orgs", "packages"]);
   });
 
   test("isReservedCampaignId identifies reserved campaign ids", () => {
-    for (const id of ["cache", "jobs", "orgs", "packages"]) {
+    for (const id of ["cache", "jobs", "last-opened", "orgs", "packages"]) {
       expect(isReservedCampaignId(id), id).toBe(true);
     }
-    for (const id of ["camp", "my-campaign", "product", "treatment", "default"]) {
+    for (const id of ["camp", "my-campaign", "product", "treatment", "default", "last-opened-2"]) {
       expect(isReservedCampaignId(id), id).toBe(false);
     }
+  });
+
+  test("`last-opened` is reserved because the static route of that name would shadow a campaign's own id (PT-5e, D180)", () => {
+    // The reserved list is what stops `slugify("Last Opened")` from minting the
+    // very path `/campaigns/last-opened` addresses (D179: on fs the slug IS the
+    // campaign's only id, so the shadowing would cost it its `GET /campaigns/:id`).
+    expect(slugify("Last Opened")).toBe("last-opened");
+    expect(isReservedCampaignId(slugify("Last Opened"))).toBe(true);
   });
 
   test("slugify equals the web's mirror (parity, pinned against drift)", () => {

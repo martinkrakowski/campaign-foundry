@@ -291,19 +291,19 @@ describe("validateIdentity", () => {
 
   test("RESERVED_CAMPAIGN_IDS equals the package's list (pinned against drift)", () => {
     expect(RESERVED_CAMPAIGN_IDS).toEqual(PKG_RESERVED_CAMPAIGN_IDS);
-    for (const id of ["cache", "jobs", "orgs", "packages", "other-id"]) {
+    for (const id of ["cache", "jobs", "last-opened", "orgs", "packages", "other-id"]) {
       expect(isReservedCampaignId(id)).toBe(pkgIsReservedCampaignId(id));
     }
   });
 
-  test.each(["cache", "jobs", "orgs", "packages"] as const)(
+  test.each(["cache", "jobs", "last-opened", "orgs", "packages"] as const)(
     "rejects reserved campaign id %s",
     (id) => {
       expect(validateIdentity(valid({ briefId: id })).briefId).toBe(messages.briefIdReserved(id));
     },
   );
 
-  test.each(["cache", "jobs", "orgs", "packages"] as const)(
+  test.each(["cache", "jobs", "last-opened", "orgs", "packages"] as const)(
     "accepts an existing campaign already named %s (only a new id is refused)",
     (id) => {
       const state = valid({

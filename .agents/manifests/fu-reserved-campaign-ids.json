@@ -4,8 +4,8 @@
   "mutations": [
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/Treatment.vo.ts",
-      "before": "export const RESERVED_CAMPAIGN_IDS = [\"cache\", \"jobs\", \"orgs\", \"packages\"] as const;",
-      "after": "export const RESERVED_CAMPAIGN_IDS = [\"cache\", \"jobs\", \"orgs\"] as const;",
+      "before": "export const RESERVED_CAMPAIGN_IDS = [\"cache\", \"jobs\", \"last-opened\", \"orgs\", \"packages\"] as const;",
+      "after": "export const RESERVED_CAMPAIGN_IDS = [\"cache\", \"jobs\", \"last-opened\", \"orgs\"] as const;",
       "because": "dropping packages from RESERVED_CAMPAIGN_IDS allows a campaign named packages to collide with the public packaging directory",
       "command": [
         "yarn",
