@@ -125,6 +125,36 @@ describe.skipIf(!hasZsh())("merge-prs.sh — D184's pre-PR-review gate", () => {
     }
   });
 
+  test("a genuinely 3-field spec (no lane/wave fields at all, not just empty ones) keeps today's behaviour", () => {
+    // S2: "42||fix/typo" already proves an EMPTY lane field is skipped. This
+    // proves the shorter, pre-D184 spec shape itself — a caller that never
+    // learned about the two new fields — parses the same way.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, ["42|wt|feat/x"]);
+      expect(result.stdout).toContain("=== PR #42");
+      expect(result.stderr).not.toContain("pre-PR-review gate");
+      expect(marker(harness)).toBe("");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("a gate exit other than 0/1 (usage error or a broken run) is distinguished from a refusal", () => {
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, ["42|wt|feat/x|HX1-route-segments-reserved|w06"], {
+        STUB_PREPR_EXIT: "2",
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("could not run (exit 2)");
+      expect(result.stderr).not.toContain("refused the merge");
+      expect(result.stdout).not.toContain("=== PR #42");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
   test("a lane with no wave dies immediately, naming both, without calling the gate", () => {
     const harness = makeHarness();
     try {

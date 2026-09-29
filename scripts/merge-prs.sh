@@ -7,7 +7,7 @@
 #
 # Example:
 #   scripts/merge-prs.sh "41|../cf-wt-seeded-random|feat/seeded-random" "42||fix/typo"
-#   scripts/merge-prs.sh "43|../cf-wt-hx1|feat/reserved-ids|HX1-route-segments-reserved|w06"
+#   scripts/merge-prs.sh "43|../cf-wt-hx1|feat/reserved-ids|HX1-route-segments-reserved|wave-hardening-w06"
 #
 # For each PR, in order:
 #   0. D184's pre-PR-review gate, ONLY when the spec names a lane: refuse the
@@ -144,8 +144,18 @@ for spec in "$@"; do
     typeset -a preprcheck_args
     preprcheck_args=(pre-pr-check "$lane" --wave "$wave")
     [[ -z "$LOGDIR_OVERRIDE" ]] || preprcheck_args+=(--logdir "$LOGDIR_OVERRIDE")
-    ( cd "$REPO" && yarn plan:review "${preprcheck_args[@]}" ) \
-      || die "PR #$pr ($lane): D184's pre-PR-review gate refused the merge — see above"
+    ( cd "$REPO" && yarn plan:review "${preprcheck_args[@]}" )
+    preprcheck_status=$?
+    # Distinguish a REFUSAL (exit 1, the gate ran and said no) from every
+    # other non-zero exit (2 is pre-pr-check's own usage error; anything
+    # else is `yarn` or the process itself failing to run at all) — a
+    # refusal and a broken gate are different problems, and the message
+    # must say which one this is.
+    if [[ "$preprcheck_status" -eq 1 ]]; then
+      die "PR #$pr ($lane): D184's pre-PR-review gate refused the merge — see above"
+    elif [[ "$preprcheck_status" -ne 0 ]]; then
+      die "PR #$pr ($lane): D184's pre-PR-review gate could not run (exit $preprcheck_status) — see above"
+    fi
   fi
 
   echo "=== PR #$pr ($branch)"
