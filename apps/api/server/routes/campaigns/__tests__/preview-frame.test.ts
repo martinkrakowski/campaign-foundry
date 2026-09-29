@@ -128,6 +128,16 @@ describe("POST /campaigns/preview-frame", () => {
     expect(bytes.readUInt32BE(20)).toBe(1920);
   });
 
+  // PT-5c2: the campaign must be known (`campaignMeta`) — an id never minted
+  // through `POST /campaigns` answers 404, and nothing is rendered for it.
+  test("answers 404 for a campaign never minted through POST /campaigns", async () => {
+    const res = await mount()(
+      jsonReq({ brief: { ...brief(), id: "never-minted" }, cell: cell() }),
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'Campaign "never-minted" not found.' });
+  });
+
   test("a display-size cell renders the exact pixel canvas, not a scaled ratio", async () => {
     const res = await mount()(
       jsonReq({ brief: brief(), cell: cell({ canvas: { size: "728x90" } }) }),

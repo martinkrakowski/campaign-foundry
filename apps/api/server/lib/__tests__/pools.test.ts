@@ -376,6 +376,22 @@ describe("planInputFor / pooledPlanner", () => {
     });
   });
 
+  // No route passes `hidePool` any more (PT-5c2: plan.post.ts now gates the
+  // whole route on a known campaign instead) — kept as a direct unit test so
+  // the option itself, still part of this function's public contract, stays
+  // covered.
+  test("hidePool answers an empty headline list without ever reading the pool", async () => {
+    const { planInputFor, writePool } = await filesFor(dir);
+    await writePool(
+      LOCAL_TENANT,
+      pool({ entries: [{ id: "h1", text: "Stay wild", status: "approved" }] }),
+    );
+    expect(await planInputFor(LOCAL_TENANT, brief(), { hidePool: true })).toEqual({
+      success: true,
+      value: { headlines: [] },
+    });
+  });
+
   test("returns an err carrying the invalid-pool message for a hand-edited pool, and rethrows other errors", async () => {
     const { planInputFor, InvalidCopyPoolError } = await filesFor(dir);
     mkdirSync(join(dir, "briefs", "camp"), { recursive: true });

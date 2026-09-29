@@ -187,10 +187,6 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 403);
       return { error: errorMessage(error) };
     }
-    if (errorMessage(error).includes("is reserved")) {
-      setResponseStatus(event, 400);
-      return { error: errorMessage(error) };
-    }
     throw error;
   }
 });

@@ -186,6 +186,26 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
       }
     });
 
+    test("a non-string teamOf answers 400", async () => {
+      const harness = await setup();
+      try {
+        const res = await mount().create(createReq({ name: "Bad TeamOf", teamOf: 42 }));
+        expect(res.status).toBe(400);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    test("an empty-string teamOf answers 400", async () => {
+      const harness = await setup();
+      try {
+        const res = await mount().create(createReq({ name: "Bad TeamOf", teamOf: "" }));
+        expect(res.status).toBe(400);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
     test("dedupes against an existing campaign: -2, then -3", async () => {
       const harness = await setup();
       try {
@@ -414,6 +434,29 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
 
             const { rows } = await pgHarness.db.query(
               `select 1 from campaign where org_id = 'local' and slug = 'copy-of-hidden'`,
+            );
+            expect(rows).toHaveLength(0);
+          } finally {
+            await harness.cleanup();
+          }
+        });
+
+        test("an unexpected resolveCampaign failure for teamOf (not CampaignNotFoundError) surfaces as 500", async () => {
+          const harness = await setup();
+          const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+          try {
+            const source = await mount().create(createReq({ name: "Failing Source" }));
+            const { slug: sourceSlug } = (await source.json()) as { slug: string };
+            const spy = vi
+              .spyOn(getBriefStore(LOCAL_TENANT), "resolveCampaign")
+              .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+            const res = await mount().create(
+              createReq({ name: "Copy", teamOf: sourceSlug }),
+            );
+            expect(res.status).toBe(500);
+            spy.mockRestore();
+            const { rows } = await pgHarness.db.query(
+              `select 1 from campaign where org_id = 'local' and slug = 'copy'`,
             );
             expect(rows).toHaveLength(0);
           } finally {
