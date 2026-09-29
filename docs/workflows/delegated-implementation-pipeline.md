@@ -305,7 +305,7 @@ Rules:
   `sh scripts/gate-lock.sh run <LANE> -- <cmd>`, which holds it around that one command and passes
   the command's exit code back. `run` records its own pid, so the lock cannot be reclaimed while
   the command runs — a bare `sh scripts/gate-lock.sh acquire <LANE>` records the pid of a shell
-  that exits immediately, leaves a lock anyone may take, and is refused.   `run` and `yarn gate`
+  that exits immediately, leaves a lock anyone may take, and is refused. `run` and `yarn gate`
   take the SAME host lock, so never wrap one in the other: a nested `run` exits 75 (busy) and
   `yarn gate` inside a `run` exits 75 the same way.
 - Tests live <WHERE>, one behaviour per test, no real clock/network/filesystem in unit tests.
