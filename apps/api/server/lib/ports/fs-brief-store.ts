@@ -700,7 +700,8 @@ export class FsBriefStore implements BriefStorePort {
     // refuses it by name (R4.1). Declaring a DIFFERENT id is another campaign's
     // file, and `undefined` is not an answer that covers both. One predicate for
     // the two, so the second comparison below cannot drift from the first.
-    const misdeclares = (t: WritableTarget) => t.declaredId !== undefined && t.declaredId !== brief.id;
+    const misdeclares = (t: WritableTarget) =>
+      t.declaredId !== undefined && t.declaredId !== brief.id;
     if (target !== undefined && misdeclares(target)) {
       // A hit the hit's own `lstat` cannot disprove, and the one place it can
       // still do damage rather than merely answer wrongly: the file is still

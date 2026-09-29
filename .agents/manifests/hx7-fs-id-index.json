@@ -174,8 +174,8 @@
     },
     {
       "file": "apps/api/server/lib/ports/fs-brief-store.ts",
-      "before": "    const misdeclares = (t: WritableTarget) => t.declaredId !== undefined && t.declaredId !== brief.id;",
-      "after": "    const misdeclares = (t: WritableTarget) => t.declaredId === undefined;",
+      "before": "    const misdeclares = (t: WritableTarget) =>\n      t.declaredId !== undefined && t.declaredId !== brief.id;",
+      "after": "    const misdeclares = (t: WritableTarget) =>\n      t.declaredId === undefined;",
       "because": "the write path's half of the residual a stat cannot see. patchBriefYaml patches the WHOLE target, id included, so a cached hit for `moved` against a file that now declares `stolen` rewrites another campaign's file as `moved` — a cross-campaign clobber the read path already refuses, and one the rename-based replace makes permanent. Dropping the comparison against the id the caller asked for leaves only the unparseable arm, so a disagreement is never re-derived. The test rewrites a brief whose id another writer moved, and expects ENOENT with the other campaign's bytes byte for byte intact",
       "command": [
         "yarn",

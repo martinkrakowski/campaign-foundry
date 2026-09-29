@@ -1354,7 +1354,10 @@ describe("FsBriefStore", () => {
     // id is the only thing standing between a Save and another campaign's
     // bytes. Same two shapes, same two answers.
     test("a rewrite re-derives off a schema-broken JSON brief that declares another id, and leaves its bytes alone", async () => {
-      writeFileSync(join(dir, "moved.json"), JSON.stringify({ ...minimalBrief, id: "moved" }, null, 2));
+      writeFileSync(
+        join(dir, "moved.json"),
+        JSON.stringify({ ...minimalBrief, id: "moved" }, null, 2),
+      );
       // A HIT, so the index holds the name the write must NOT target.
       expect(await store.findBriefFileById("moved")).toBe("moved.json");
 
@@ -1368,7 +1371,10 @@ describe("FsBriefStore", () => {
     });
 
     test("a replace leaves a schema-broken JSON brief that declares another id alone", async () => {
-      writeFileSync(join(dir, "moved.json"), JSON.stringify({ ...minimalBrief, id: "moved" }, null, 2));
+      writeFileSync(
+        join(dir, "moved.json"),
+        JSON.stringify({ ...minimalBrief, id: "moved" }, null, 2),
+      );
       expect(await store.findBriefFileById("moved")).toBe("moved.json");
 
       const stolen = JSON.stringify({ id: "stolen", products: "not-an-array" }, null, 2);
