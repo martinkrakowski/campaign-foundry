@@ -958,7 +958,12 @@ describe("FsBriefStore", () => {
       // recorded anything.
       expect(await store.findBriefFileById("test-camp")).toBeUndefined();
       await store.createBrief(minimalBrief);
+      // Spied AFTER the create, so it can only catch a scan this lookup causes:
+      // with `createBrief` no longer recording the write, the scan underneath
+      // would still find the file and pass the assertion below it.
+      const listBriefs = vi.spyOn(store, "listBriefs");
       expect(await store.findBriefFileById("test-camp")).toBe("test-camp.yaml");
+      expect(listBriefs).not.toHaveBeenCalled();
       expect(await store.findBriefById("test-camp")).toMatchObject({ file: "test-camp.yaml" });
     });
 
@@ -1063,6 +1068,17 @@ describe("FsBriefStore", () => {
       writeFileSync(join(dir, "a-dup.yaml"), campYaml.replace("id: camp", "id: dup"));
       writeFileSync(join(dir, "b-dup.yaml"), campYaml.replace("id: camp", "id: dup"));
       expect(await store.findBriefFileById("dup")).toBe("a-dup.yaml");
+
+      // `createBrief` writes the CANONICAL name for an id, which is not
+      // necessarily the first by name — `a-dup.yaml` still declares `dup`.
+      // Recording that write over the entry made this warm store answer
+      // `dup.yaml` where a store built a second later answers `a-dup.yaml`, so
+      // which file a read or a rewrite targeted depended on cache state alone.
+      // The write still happens; only the mapping is left alone.
+      await store.createBrief({ ...minimalBrief, id: "dup" });
+      expect(existsSync(join(dir, "dup.yaml"))).toBe(true);
+      expect(await store.findBriefFileById("dup")).toBe("a-dup.yaml");
+      expect(await new FsBriefStore(dir).findBriefFileById("dup")).toBe("a-dup.yaml");
     });
 
     // A cached hit is a CLAIM about a file, and this store never outlives a

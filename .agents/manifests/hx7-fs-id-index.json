@@ -120,6 +120,40 @@
         "an id whose file was renamed onto another campaign resolves to the file that declares it"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    const indexed = this.idIndex.get(brief.id);\n    if (indexed === undefined || fileName < indexed) this.idIndex.set(brief.id, fileName);",
+      "after": "    this.idIndex.set(brief.id, fileName);",
+      "because": "an unconditional set made the answer depend on cache state: createBrief writes the CANONICAL name for an id, which is not necessarily the first by name, so a warm store picked dup.yaml where a store built a second later picked a-dup.yaml — and reads and rewrites then target different files for one id. The test creates the canonical file over a warm index holding the earlier-sorting one, and asks both this store and a new one",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "two files declaring one id resolve to the first by name"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    const fileName = `${brief.id}.yaml`;\n    const indexed = this.idIndex.get(brief.id);\n    if (indexed === undefined || fileName < indexed) this.idIndex.set(brief.id, fileName);",
+      "after": "    const fileName = `${brief.id}.yaml`;",
+      "because": "recording the write is what makes the read that FOLLOWS a Save a hit rather than a full re-read of the root — the whole point of recording it in createBrief. With the record gone the lookup still succeeds, through the scan-on-miss, which is why the test spies on listBriefs after the create: it can only catch the scan, not the missing entry",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a create is found by the very next lookup"
+      ],
+      "verdict": "caught"
     }
   ]
 }

@@ -308,8 +308,18 @@ export class FsBriefStore implements BriefStorePort {
     // cache with a scan on every miss, so an id it has never seen would be
     // found by the next scan anyway; recording it here is what makes the read
     // that FOLLOWS a Save a hit instead of a full re-read of the root.
-    this.idIndex.set(brief.id, `${brief.id}.yaml`);
-    return { campaignId: brief.id, file: `${brief.id}.yaml`, brief, revision };
+    //
+    // Never over an entry that still sorts first (qodo PRRT_kwDOSzP1zc6nOTpw
+    // / coderabbit PRRT_kwDOSzP1zc6nOY4b): `a-dup.yaml` and `dup.yaml` may both
+    // declare `dup`, and `rebuildIdIndex` answers with the first by name. An
+    // unconditional set made a warm store pick `dup.yaml` where a store built
+    // one second later picks `a-dup.yaml` — so which file a read or a rewrite
+    // targeted would depend on cache state alone. This write is still made:
+    // the mapping is only ever taken when it agrees with a rebuild.
+    const fileName = `${brief.id}.yaml`;
+    const indexed = this.idIndex.get(brief.id);
+    if (indexed === undefined || fileName < indexed) this.idIndex.set(brief.id, fileName);
+    return { campaignId: brief.id, file: fileName, brief, revision };
   }
 
   /**
