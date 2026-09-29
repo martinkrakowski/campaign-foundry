@@ -48,9 +48,11 @@ describe("discoverRisk", () => {
     expect(await discoverRisk("HX4-pre-pr-review-gate", "docs/planning", io)).toBe("normal");
   });
 
-  test("a lane found in no plan counts as normal", async () => {
+  test("a lane found in no plan is undefined — never normal", async () => {
+    // Undefined and normal are different answers: "this gate has never heard
+    // of this lane" must not read the same as "this gate cleared it".
     const io = ioOver({ "docs/planning/a.md": highPlan });
-    expect(await discoverRisk("HX9-nonexistent", "docs/planning", io)).toBe("normal");
+    expect(await discoverRisk("HX9-nonexistent", "docs/planning", io)).toBeUndefined();
   });
 
   test("a plan without a Risk column parses as normal, as in the platform plan", async () => {
@@ -58,7 +60,7 @@ describe("discoverRisk", () => {
     expect(await discoverRisk("PT-5a", "docs/planning", io)).toBe("normal");
   });
 
-  test("files are tried in sorted order, and the first unambiguous match wins", async () => {
+  test("a fail-closed union: ANY plan saying high wins, whatever order files sort in", async () => {
     const io = ioOver({
       "docs/planning/b-later.md": highPlan,
       "docs/planning/a-earlier.md": normalPlan.replace(
@@ -66,8 +68,18 @@ describe("discoverRisk", () => {
         "HX1-route-segments-reserved",
       ),
     });
-    // a-earlier.md sorts first and names HX1 as normal; b-later.md (high) must lose.
-    expect(await discoverRisk("HX1-route-segments-reserved", "docs/planning", io)).toBe("normal");
+    // a-earlier.md sorts first and names HX1 as normal; b-later.md (high)
+    // must still win — an old plan's normal row must never shadow a new
+    // plan's high one.
+    expect(await discoverRisk("HX1-route-segments-reserved", "docs/planning", io)).toBe("high");
+  });
+
+  test("sorted order only decides which NORMAL match is reported, when none say high", async () => {
+    const io = ioOver({
+      "docs/planning/a-earlier.md": normalPlan,
+      "docs/planning/b-later.md": normalPlan,
+    });
+    expect(await discoverRisk("HX4-pre-pr-review-gate", "docs/planning", io)).toBe("normal");
   });
 
   test("a plan whose row is ambiguous (0 or 2+ matches) is skipped, not thrown", async () => {
@@ -90,7 +102,7 @@ describe("discoverRisk", () => {
     expect(await discoverRisk("HX1-route-segments-reserved", "docs/planning", io)).toBe("high");
   });
 
-  test("an unreadable planning directory counts as normal", async () => {
+  test("an unreadable planning directory is undefined — never normal", async () => {
     const io = {
       readdir: async (): Promise<readonly string[]> => {
         throw new Error("ENOENT: no such directory");
@@ -99,7 +111,7 @@ describe("discoverRisk", () => {
         throw new Error("unreachable");
       },
     };
-    expect(await discoverRisk("HX1-route-segments-reserved", "docs/planning", io)).toBe("normal");
+    expect(await discoverRisk("HX1-route-segments-reserved", "docs/planning", io)).toBeUndefined();
   });
 
   test("a file that cannot be read is skipped in favour of the next", async () => {
