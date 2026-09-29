@@ -257,6 +257,25 @@ describe("the shell pages carry ?campaign= (PT-5c3, D180)", () => {
             hasVersion: true,
           });
         }
+        if (url.includes("/campaigns/briefs")) {
+          return json({
+            briefs: [
+              {
+                file: `${SLUG}.yaml`,
+                campaignId: UUID,
+                brief: {
+                  id: SLUG,
+                  targetRegion: "DE",
+                  targetAudience: "a",
+                  campaignMessage: "m",
+                  products: [
+                    { id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" },
+                  ],
+                },
+              },
+            ],
+          });
+        }
         return json({ error: "Not found" }, 404);
       },
     });

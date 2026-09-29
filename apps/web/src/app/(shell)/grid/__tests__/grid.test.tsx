@@ -973,6 +973,24 @@ describe("GridPage — the page's ?campaign= (PT-5c3, D180)", () => {
             hasVersion: true,
           });
         }
+        if (url.includes("/campaigns/briefs")) {
+          return json({
+            briefs: [
+              {
+                file: `${PAGE_SLUG}.yaml`,
+                campaignId: PAGE_UUID,
+                brief: {
+                  id: PAGE_SLUG,
+                  template: storedTemplate,
+                  targetRegion: "DE",
+                  targetAudience: "a",
+                  campaignMessage: "m",
+                  products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+                },
+              },
+            ],
+          });
+        }
         return json({ error: "Not found" }, 404);
       },
     });
