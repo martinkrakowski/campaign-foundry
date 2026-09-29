@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "HX6-jobs-subprocess-test",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/__tests__/jobs.test.ts",
+      "before": "    const id = await createJob(LOCAL_TENANT, \"survives\");\n    vi.resetModules();\n    const fresh = await import(\"../jobs.js\");\n    expect(fresh).not.toBe(jobsModule);",
+      "after": "    const id = await createJob(LOCAL_TENANT, \"survives\");\n    const fresh = await import(\"../jobs.js\");\n    expect(fresh).not.toBe(jobsModule);",
+      "because": "dropping vi.resetModules() leaves the dynamic import returning the SAME module namespace, so the test compares one module instance against itself and the job is read back out of the FsJobStore memory cache the writer just filled — the handle would no longer be proven to live in the job JSON file, which is the whole claim",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/jobs.test.ts",
+        "-t",
+        "NEW MODULE INSTANCE"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
