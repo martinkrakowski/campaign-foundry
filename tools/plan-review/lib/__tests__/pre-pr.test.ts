@@ -35,9 +35,42 @@ describe("prePrReviewRefusal", () => {
     expect(prePrReviewRefusal(events, "w06", "HX1")).toBeUndefined();
   });
 
-  test("a review settled with no verdict recorded at all: not refused", () => {
+  test("a review settled with no verdict recorded at all: REFUSED — fail closed", () => {
+    // The ordinary post-PR review bots emit stage=review event=settled with
+    // only finding counts ({"bug":1,"suggestion":2,"nit":0}) and no verdict
+    // at all. That must never satisfy D184's gate.
     const events = [event({ wave: "w06", lane: "HX1", stage: "review", event: "settled" })];
-    expect(prePrReviewRefusal(events, "w06", "HX1")).toBeUndefined();
+    const refusal = prePrReviewRefusal(events, "w06", "HX1");
+    expect(refusal).toContain("no verdict recorded");
+  });
+
+  test("a review settled with an unrecognised verdict: refused, naming it", () => {
+    const events = [
+      event({
+        wave: "w06",
+        lane: "HX1",
+        stage: "review",
+        event: "settled",
+        detail: { verdict: "approved" },
+      }),
+    ];
+    const refusal = prePrReviewRefusal(events, "w06", "HX1");
+    expect(refusal).toContain("unrecognised verdict");
+    expect(refusal).toContain("approved");
+  });
+
+  test("a review settled with the finding-count shape a review bot actually emits: refused", () => {
+    const events = [
+      event({
+        wave: "w06",
+        lane: "HX1",
+        stage: "review",
+        event: "settled",
+        detail: { bug: 1, suggestion: 2, nit: 0 },
+      }),
+    ];
+    const refusal = prePrReviewRefusal(events, "w06", "HX1");
+    expect(refusal).toContain("no verdict recorded");
   });
 
   test("changes-required with no later remediate settled: refused", () => {

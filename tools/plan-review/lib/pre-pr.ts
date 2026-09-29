@@ -1,7 +1,7 @@
 import type { WaveEvent } from "../../wave-status/lib/types.js";
 
 /** The latest `<stage> settled` event for (wave, lane), in log order, or undefined. */
-function latestStageSettled(
+export function latestStageSettled(
   events: readonly WaveEvent[],
   wave: string,
   lane: string,
@@ -43,11 +43,15 @@ function hasLaterRemediateSettled(
  * may proceed, or the reason it may not — naming the missing event — when it
  * may not.
  *
- * The wave log must hold `stage=review event=settled` for this lane. When
- * that event's `detail.verdict` is `changes-required`, a LATER
- * `stage=remediate event=settled` for the same lane must follow it in log
- * order too. Any other verdict on the review — `clear`, or none recorded at
- * all — needs nothing further: the review itself is enough.
+ * The wave log must hold `stage=review event=settled` for this lane, AND its
+ * verdict must be `clear` — or `changes-required` with a LATER
+ * `stage=remediate event=settled` for the same lane, in log order. Every
+ * other verdict refuses, BY NAME: a missing `detail.verdict` (the ordinary
+ * post-PR review bots emit `stage=review event=settled` with only finding
+ * counts — `{"bug":1,"suggestion":2,"nit":0}` — and no verdict at all) or any
+ * string this gate does not recognise. The gate fails CLOSED: only a verdict
+ * it can read as clearance ever passes it, never "anything but the one
+ * verdict this function happens to check for."
  *
  * "Latest" and "later" are both LOG ORDER, never a timestamp comparison —
  * the same reason `governingPlanReview` gives: wave-event.sh records whole
@@ -62,14 +66,24 @@ export function prePrReviewRefusal(
   if (review === undefined) {
     return `no stage=review event=settled for lane ${lane} in wave ${wave}`;
   }
-  if (
-    review.event.detail?.verdict === "changes-required" &&
-    !hasLaterRemediateSettled(events, wave, lane, review.index)
-  ) {
+  const verdict = review.event.detail?.verdict;
+  if (verdict === "clear") {
+    return undefined;
+  }
+  if (verdict === "changes-required") {
+    if (hasLaterRemediateSettled(events, wave, lane, review.index)) {
+      return undefined;
+    }
     return (
       `stage=review event=settled for lane ${lane} in wave ${wave} ended changes-required ` +
       `with no later stage=remediate event=settled`
     );
   }
-  return undefined;
+  if (verdict === undefined) {
+    return `stage=review event=settled for lane ${lane} in wave ${wave} carries no verdict recorded`;
+  }
+  return (
+    `stage=review event=settled for lane ${lane} in wave ${wave} carries an unrecognised verdict ` +
+    `${JSON.stringify(verdict)}`
+  );
 }
