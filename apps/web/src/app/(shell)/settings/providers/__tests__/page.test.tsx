@@ -750,9 +750,10 @@ describe("ProviderKeysSettingsPage — unsaved key material marks the page dirty
       setDirty: activeSetDirty,
       // D185 — the draft write states, which this page neither reads nor writes.
       hasPendingWrite: false,
-      setPendingWrite: vi.fn(),
       hasFailedWrite: false,
-      setFailedWrite: vi.fn(),
+      registerDraftWriter: vi.fn(() => {
+        throw new Error("this page registers no draft-write writer");
+      }),
       guardedAction: vi.fn(() => true),
       guardedPush: vi.fn(() => true),
     }));

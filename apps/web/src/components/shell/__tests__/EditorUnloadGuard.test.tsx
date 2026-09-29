@@ -1,7 +1,11 @@
 import { describe, test, expect, vi, type MockInstance } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { EditorDirtyProvider, useEditorDirty } from "@/lib/editor-dirty-context";
+import {
+  EditorDirtyProvider,
+  useDraftWriteWriter,
+  useEditorDirty,
+} from "@/lib/editor-dirty-context";
 import { EditorUnloadGuard } from "../EditorUnloadGuard";
 
 /**
@@ -9,9 +13,15 @@ import { EditorUnloadGuard } from "../EditorUnloadGuard";
  * it does to the event. What the editor PUBLISHES into this context is
  * `brief-editor.drafts.test.tsx`'s half, and the two meet end to end in the
  * "a 500 keeps the tab guarded" test in that file.
+ *
+ * The probe arms the write states through the SAME per-writer registration a
+ * real editor uses, rather than through a setter the context no longer has: a
+ * fixture that could raise a flag the guard reads by a private path would keep
+ * passing if that path stopped being what the editor actually does.
  */
 const Probe = () => {
-  const { setDirty, setPendingWrite, setFailedWrite } = useEditorDirty();
+  const { setDirty } = useEditorDirty();
+  const writer = useDraftWriteWriter();
   return (
     <>
       <button type="button" onClick={() => setDirty(true)}>
@@ -20,13 +30,13 @@ const Probe = () => {
       <button type="button" onClick={() => setDirty(false)}>
         make-clean
       </button>
-      <button type="button" onClick={() => setPendingWrite(true)}>
+      <button type="button" onClick={() => writer.beginWrite()}>
         make-pending
       </button>
-      <button type="button" onClick={() => setFailedWrite(false)}>
+      <button type="button" onClick={() => writer.setFailed(false)}>
         clear-failure
       </button>
-      <button type="button" onClick={() => setFailedWrite(true)}>
+      <button type="button" onClick={() => writer.setFailed(true)}>
         make-failed
       </button>
     </>
