@@ -43,10 +43,17 @@ describe("static route segments under routes/campaigns/ (HX1/D181)", () => {
       mkdirSync(join(fixtureDir, "[id]"), { recursive: true });
       mkdirSync(join(fixtureDir, "__tests__"), { recursive: true });
       writeFileSync(join(fixtureDir, "__tests__", "helper.ts"), "export {};\n");
+      // D181 fix round 2 (qodo): a *.test.ts file dropped DIRECTLY under the
+      // routes directory (not __tests__/) is still not a route — Nitro's own
+      // `ignore` skips it, and so must this derivation. A distinct segment
+      // name ("sprockets", not "widgets") proves the exclusion: if it were
+      // NOT excluded, "sprockets" would show up in `onDisk` below.
+      writeFileSync(join(fixtureDir, "sprockets.test.ts"), "export {};\n");
 
       const onDisk = staticRouteSegments(fixtureDir);
       // "index" and "__tests__" are excluded by the derivation itself; "[id]"
-      // is excluded too — none of the three should ever reach the caller.
+      // and the direct-child "sprockets.test.ts" are excluded too — none of
+      // the four should ever reach the caller.
       expect(onDisk).toEqual(["gadgets", "widgets"]);
 
       const deliberatelyIncompleteList = new Set(["widgets"]);
