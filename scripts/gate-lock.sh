@@ -367,12 +367,14 @@ run_locked() {
   lane=$1
   shift
   [ $# -ge 1 ] || usage
-  # Everything from the FIRST `--` on is the command. A run with no `--` at
-  # all, or with nothing after it, is a usage error rather than a guess.
-  while [ $# -gt 0 ] && [ "$1" != "--" ]; do
-    shift
-  done
-  [ $# -ge 1 ] || usage
+  # The separator is the ONLY thing the lane may be followed by. It used to be
+  # searched for, which meant everything before it was shifted away in
+  # silence: `run lane-a extra -- cmd one two` started `cmd` with `two` and
+  # reported success. A run that does not look like the usage is a usage error
+  # rather than a guess, because a silently dropped argument is a command that
+  # runs with less than the caller asked for — and the caller is a lane that
+  # cannot see it.
+  [ "$1" = "--" ] || usage
   shift
   [ $# -ge 1 ] || usage
   HB_SECONDS="${CF_GATE_HEARTBEAT_SECONDS:-60}"

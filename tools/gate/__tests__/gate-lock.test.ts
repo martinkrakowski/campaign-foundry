@@ -871,6 +871,15 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     const noLane = runLockIn(dir, ["run"]);
     expect(noLane.status).toBe(2);
     expect(noLane.stderr).toContain("usage");
+
+    // A word where the separator belongs is a usage error, not a guess. The
+    // separator used to be searched for, so everything before it was shifted
+    // away in silence: `run lane-a extra -- sh -c … one two` started the
+    // command with `two` and said nothing at all.
+    const stray = runLockIn(dir, ["run", "lane-a", "extra", "--", "true"]);
+    expect(stray.status).toBe(2);
+    expect(stray.stderr).toContain("usage");
+
     // Nothing was locked on the way to the usage error.
     expect(existsSync(lockDir(dir))).toBe(false);
   });
