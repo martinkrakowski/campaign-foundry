@@ -8,6 +8,7 @@ import {
   symlinkSync,
   rmSync,
   readFileSync,
+  unlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -989,6 +990,555 @@ describe("FsBriefStore", () => {
 
       const missing = await store.resolveCampaign("non-existent");
       expect(missing).toBeUndefined();
+    });
+  });
+
+  /**
+   * The id -> file index behind L1 (`scripts/bench-fs-id-lookup.ts` measured a
+   * 199-202 ms median over 1,000 campaigns, against a 5 ms threshold). The
+   * contract these pin is not "it is fast" — it is which answers the cache is
+   * allowed to give on its own, and which it must re-derive: a HIT is validated
+   * with one `lstat` and served from the map, a MISS is never cached, a hit
+   * whose file is gone or is no longer a regular file is re-derived rather than
+   * served, and the two methods whose FIRST act is a decision about the root
+   * (`createCampaign`'s taken-check and `releaseCampaign`'s "holds no brief
+   * file" guard) re-derive it first.
+   */
+  describe("the id index (L1)", () => {
+    test("a create is found by the very next lookup, with the index already warm", async () => {
+      // Warmed on a MISS first, which is the state a stale cache is in: without
+      // this the lookup would be answered by a scan whether or not the create
+      // recorded anything.
+      expect(await store.findBriefFileById("test-camp")).toBeUndefined();
+      await store.createBrief(minimalBrief);
+      // Spied AFTER the create, so it can only catch a scan this lookup causes:
+      // with `createBrief` no longer recording the write, the scan underneath
+      // would still find the file and pass the assertion below it.
+      const listBriefs = vi.spyOn(store, "listBriefs");
+      expect(await store.findBriefFileById("test-camp")).toBe("test-camp.yaml");
+      expect(listBriefs).not.toHaveBeenCalled();
+      expect(await store.findBriefById("test-camp")).toMatchObject({ file: "test-camp.yaml" });
+    });
+
+    test("a rewrite that changes nothing about the id keeps resolving to the same file", async () => {
+      await store.createBrief(minimalBrief);
+      expect(await store.findBriefFileById("test-camp")).toBe("test-camp.yaml");
+
+      const rewritten = await store.rewriteBrief({
+        ...minimalBrief,
+        campaignMessage: "Second pass",
+      });
+      expect(rewritten.file).toBe("test-camp.yaml");
+      expect(await store.findBriefFileById("test-camp")).toBe("test-camp.yaml");
+      // The hit is real data, not a cached name: the rewrite is visible through
+      // it, and the revision is hashed from the bytes rather than the index.
+      expect((await store.readBrief("test-camp")).campaignMessage).toBe("Second pass");
+      expect(await store.getRevision("test-camp")).toBe(rewritten.revision);
+    });
+
+    test("a second store over the same root sees a campaign the first one created", async () => {
+      const first = new FsBriefStore(dir);
+      await first.createCampaign("shared");
+      await first.createBrief({ ...minimalBrief, id: "shared" });
+      expect(await first.findBriefFileById("shared")).toBe("shared.yaml");
+
+      // What this pins is not that `first` exists but the shape `second` is in:
+      // an index with nothing in it, so the lookup can only be answered by the
+      // scan. A cache that answered a miss from its own map would report the
+      // campaign as absent — the index hiding another writer's brief is the
+      // failure the scan-on-miss exists to stop. `first`'s own lookups above
+      // only warm a map `second` cannot see.
+      const second = new FsBriefStore(dir);
+      expect(await second.findBriefFileById("shared")).toBe("shared.yaml");
+      expect(await second.findBriefById("shared")).toMatchObject({ campaignId: "shared" });
+    });
+
+    // Two rebuilds in flight on one instance: publishing a map is an
+    // assignment, so a rebuild that started on an OLDER view of the root can
+    // land after one that started on a newer one. Reading `this.idIndex` back
+    // after the await is what turns that into a wrong answer — the caller gets
+    // whichever map won the assignment race, not the one it scanned for. The
+    // deferred scan is what forces that interleaving; nothing in the filesystem
+    // would produce it on demand.
+    test("a lookup answers from the scan it waited for, not from one that overtook it", async () => {
+      const gates: (() => void)[] = [];
+      const real = store.listBriefs.bind(store);
+      let call = 0;
+      vi.spyOn(store, "listBriefs").mockImplementation(async () => {
+        const mine = (call += 1);
+        if (mine > 2) return real();
+        await new Promise<void>((release) => gates.push(release));
+        // The OLD scan, taken before the newer one below: it has never heard
+        // of `fresh`, so publishing it last is exactly the regression.
+        return mine === 1
+          ? [{ campaignId: "stale", file: "stale.yaml", brief: minimalBrief, revision: "r" }]
+          : [{ campaignId: "fresh", file: "fresh.yaml", brief: minimalBrief, revision: "r" }];
+      });
+
+      const older = store.findBriefFileById("stale");
+      const newer = store.findBriefFileById("fresh");
+      await vi.waitFor(() => expect(gates).toHaveLength(2));
+
+      // Released together, in the order that puts the NEWER scan's publish
+      // first and the older one's second.
+      gates[1]!();
+      gates[0]!();
+
+      expect(await newer).toBe("fresh.yaml");
+      expect(await older).toBe("stale.yaml");
+    });
+
+    test("a release re-derives the root, so a brief file removed out of band cannot leak the reservation", async () => {
+      await store.createCampaign("gone");
+      await store.createBrief({ ...minimalBrief, id: "gone" });
+      expect(await store.findBriefFileById("gone")).toBe("gone.yaml");
+
+      // Nothing in this store ever unlinks a brief file, so this is the only way
+      // the index can go stale — another process, or an operator's `rm`. From
+      // here it is wrong in the one direction a positive cache can be: a HIT for
+      // something that is gone.
+      unlinkSync(join(dir, "gone.yaml"));
+
+      expect(await store.releaseCampaign("gone")).toBe(true);
+      expect(existsSync(join(dir, "gone"))).toBe(false);
+      expect(await store.findBriefFileById("gone")).toBeUndefined();
+    });
+
+    test("createCampaign re-derives the root too, so a slug whose brief file was removed is reservable again", async () => {
+      await store.createBrief({ ...minimalBrief, id: "reusable" });
+      expect(await store.findBriefFileById("reusable")).toBe("reusable.yaml");
+      unlinkSync(join(dir, "reusable.yaml"));
+
+      // The same stale entry, met by the other decision this store makes from
+      // the index. Answered from the map, this throws EEXIST over a slug that
+      // is free, and the slug stays unusable for good.
+      await expect(store.createCampaign("reusable")).resolves.toEqual({
+        campaignId: "reusable",
+        slug: "reusable",
+      });
+    });
+
+    // The half of a stale entry the hit's own `lstat` CANNOT disprove: the
+    // file is still there, still a regular file, and no longer declares the id
+    // it was indexed under. These are the two methods whose FIRST act is a
+    // decision about the root, and both re-derive the index for exactly this —
+    // neither the stat nor any other writer's cleanup will ever drop the entry.
+    test("a release re-derives the root when the file no longer declares the slug", async () => {
+      await store.createCampaign("moved");
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      writeFileSync(join(dir, "moved.yaml"), campYaml.replace("id: camp", "id: elsewhere"));
+
+      // The hit validates, so a cache that trusted it would refuse this
+      // release FOREVER and leak the reservation directory with it.
+      expect(await store.releaseCampaign("moved")).toBe(true);
+      expect(existsSync(join(dir, "moved"))).toBe(false);
+    });
+
+    test("createCampaign re-derives the root when the file no longer declares the slug", async () => {
+      // Deliberately NOT the canonical `<slug>.yaml`: a brief file NAMED after
+      // the slug is "taken" by `findBriefFile`'s own rule (D177), which reads
+      // the name and is right to. The index is the other half of the check —
+      // "a brief whose `id` IS the slug but lives in a differently named file".
+      writeFileSync(join(dir, "a-reusable.yaml"), campYaml.replace("id: camp", "id: reusable"));
+      expect(await store.findBriefFileById("reusable")).toBe("a-reusable.yaml");
+
+      writeFileSync(join(dir, "a-reusable.yaml"), campYaml.replace("id: camp", "id: elsewhere"));
+
+      // The slug is free: no file in this root declares it any more. EEXIST
+      // here would be permanent, and the slug unusable for good.
+      await expect(store.createCampaign("reusable")).resolves.toEqual({
+        campaignId: "reusable",
+        slug: "reusable",
+      });
+    });
+
+    // "Warm" and "cold" here mean what they can mean without a corrupt root
+    // moving underneath: this store, whose index already holds the
+    // earlier-sorting name, and a store built afterwards over the same
+    // directory, which has never recorded anything. Both must answer
+    // `a-dup.yaml`. A store that was itself COLD when it created the canonical
+    // file has no entry to keep and records `dup.yaml`; that is the residual
+    // named at createBrief, and asserting it here would pin the divergence
+    // rather than close it.
+    test("two files declaring one id resolve to the first by name, warm or freshly built", async () => {
+      writeFileSync(join(dir, "a-dup.yaml"), campYaml.replace("id: camp", "id: dup"));
+      writeFileSync(join(dir, "b-dup.yaml"), campYaml.replace("id: camp", "id: dup"));
+      expect(await store.findBriefFileById("dup")).toBe("a-dup.yaml");
+
+      // `createBrief` writes the CANONICAL name for an id, which is not
+      // necessarily the first by name — `a-dup.yaml` still declares `dup`.
+      // Recording that write over the entry made this warm store answer
+      // `dup.yaml` where a store built a second later answers `a-dup.yaml`, so
+      // which file a read or a rewrite targeted depended on cache state alone.
+      // The write still happens; only the mapping is left alone.
+      await store.createBrief({ ...minimalBrief, id: "dup" });
+      expect(existsSync(join(dir, "dup.yaml"))).toBe(true);
+      expect(await store.findBriefFileById("dup")).toBe("a-dup.yaml");
+      expect(await new FsBriefStore(dir).findBriefFileById("dup")).toBe("a-dup.yaml");
+    });
+
+    // A cached hit is a CLAIM about a file, and this store never outlives a
+    // request, so another writer can make the claim false at any time: an
+    // operator's `rm`, a second API process, an editor's own delete. Nothing
+    // here ever unlinks a brief file, so the tests below do it by hand — which
+    // is the point, since no in-band path can produce the state.
+    test("a hit whose file was removed out of band is re-derived, not served from the map", async () => {
+      await store.createBrief({ ...minimalBrief, id: "gone" });
+      expect(await store.findBriefFileById("gone")).toBe("gone.yaml");
+      expect(await store.campaignMeta("gone")).toMatchObject({ hasVersion: true });
+
+      unlinkSync(join(dir, "gone.yaml"));
+
+      // The port's existence answers are the ones a route 404s on. Served from
+      // the map, all three keep reporting a campaign that no longer exists.
+      expect(await store.findBriefFileById("gone")).toBeUndefined();
+      expect(await store.findBriefById("gone")).toBeUndefined();
+      expect(await store.campaignVisibility("gone")).toBe("absent");
+      expect(await store.resolveCampaign("gone")).toBeUndefined();
+      expect(await store.campaignMeta("gone")).toBeUndefined();
+      expect(await store.campaignTeam("gone")).toBeUndefined();
+
+      // `readBrief` rejects on a missing campaign, and rejects the same way
+      // here: identical to the id this root never held, which is the whole
+      // contract — the deleted campaign is indistinguishable from one that was
+      // never created, rather than a lookup that found something.
+      await expect(store.readBrief("gone")).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(store.readBrief("never-existed")).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    test("a hit that is no longer a regular file is not read through", async () => {
+      await store.createBrief({ ...minimalBrief, id: "swapped" });
+      expect(await store.findBriefById("swapped")).toMatchObject({ file: "swapped.yaml" });
+
+      // A parseable brief OUTSIDE the root, which is what makes this a hole
+      // rather than a miss: `listBriefs` would never have listed this name
+      // (`readdir`'s `isFile()` is false for a link), so reading it through
+      // the index would be a way around the listing's own check.
+      const outside = join(dir, "..", `${basename(dir)}-outside.yaml`);
+      writeFileSync(outside, campYaml.replace("id: camp", "id: swapped"));
+      unlinkSync(join(dir, "swapped.yaml"));
+      symlinkSync(outside, join(dir, "swapped.yaml"));
+      try {
+        expect(await store.findBriefFileById("swapped")).toBeUndefined();
+        expect(await store.findBriefById("swapped")).toBeUndefined();
+      } finally {
+        rmSync(outside, { force: true });
+      }
+    });
+
+    // The residual a `stat` cannot see, and the one lookup that can: a file
+    // whose `brief.id` was rewritten in place keeps its name and its inode, so
+    // the hit above still validates — and a request for the OLD id would
+    // otherwise be handed a different campaign's brief, with
+    // `assertOwnedCampaign` accepting it under the id the caller asked for.
+    test("a file whose id was rewritten in place is not served under the old id", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      writeFileSync(join(dir, "moved.yaml"), campYaml.replace("id: camp", "id: stolen"));
+
+      // The mapping is re-derived rather than trusted, so the id it no longer
+      // declares is gone and the one it does declare is findable — the same
+      // answer a store built a second later gives.
+      expect(await store.findBriefById("moved")).toBeUndefined();
+      expect(await store.findBriefById("stolen")).toMatchObject({ file: "moved.yaml" });
+      expect(await new FsBriefStore(dir).findBriefById("moved")).toBeUndefined();
+    });
+
+    test("an id whose file was renamed onto another campaign resolves to the file that declares it", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      // A HIT, so the index holds `moved` when the file changes under it.
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      // The corrupt-root case: one name that no longer declares the id, and a
+      // second file that does. The re-derivation must land on the second file,
+      // not on the first name the stale mapping happened to hold.
+      writeFileSync(join(dir, "moved.yaml"), campYaml.replace("id: camp", "id: stolen"));
+      writeFileSync(join(dir, "z-moved.yaml"), campYaml.replace("id: camp", "id: moved"));
+
+      expect(await store.findBriefById("moved")).toMatchObject({ file: "z-moved.yaml" });
+    });
+
+    // The same residual on the WRITE path, where it is not a wrong answer but
+    // damage: `rewriteBrief` patches the WHOLE target, `id` included, so a
+    // validated cached hit for `moved` against a file that now says `stolen`
+    // would rewrite another campaign's bytes as `moved`. Pre-index the lookup
+    // was a scan and refused; the bytes are in hand for the write anyway.
+    test("a rewrite refuses a file that no longer declares the id, and leaves its bytes alone", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const stolen = campYaml.replace("id: camp", "id: stolen");
+      writeFileSync(join(dir, "moved.yaml"), stolen);
+
+      await expect(
+        store.rewriteBrief({ ...minimalBrief, id: "moved", campaignMessage: "clobbered" }),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(readFileSync(join(dir, "moved.yaml"), "utf8")).toBe(stolen);
+    });
+
+    test("a replace refuses a file that no longer declares the id, and leaves its bytes alone", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const stolen = campYaml.replace("id: camp", "id: stolen");
+      writeFileSync(join(dir, "moved.yaml"), stolen);
+
+      // `replaceBrief`'s own fallback is the second half of the refusal: the
+      // rewrite is ENOENT, so it creates instead, and `wx` on the file that is
+      // really there is EEXIST rather than an overwrite of `stolen`.
+      await expect(
+        store.replaceBrief({ ...minimalBrief, id: "moved", campaignMessage: "clobbered" }),
+      ).rejects.toMatchObject({ code: "EEXIST" });
+      expect(readFileSync(join(dir, "moved.yaml"), "utf8")).toBe(stolen);
+    });
+
+    test("a rewrite re-derives onto the file that declares the id, and spares the other campaign", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      // A HIT, so the index holds the name the write must NOT target.
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const stolen = campYaml.replace("id: camp", "id: stolen");
+      writeFileSync(join(dir, "moved.yaml"), stolen);
+      writeFileSync(join(dir, "z-moved.yaml"), campYaml.replace("id: camp", "id: moved"));
+
+      const rewritten = await store.rewriteBrief({
+        ...minimalBrief,
+        id: "moved",
+        campaignMessage: "Second pass",
+      });
+      expect(rewritten.file).toBe("z-moved.yaml");
+      expect(readFileSync(join(dir, "moved.yaml"), "utf8")).toBe(stolen);
+      expect((await store.readBrief("moved")).campaignMessage).toBe("Second pass");
+    });
+
+    // The suite's own `bad.yaml` shape — a mapping the schema REJECTS, where
+    // `listBriefs` skips the file — under a DIFFERENT id. It is the whole of
+    // the clobber the declared-id comparison exists to stop, and it is a
+    // separate hole from the one above: `parseBrief` refuses on SHAPE, so
+    // "these bytes declare no id" and "these bytes declare `stolen`" were one
+    // answer, and the write below patches the WHOLE target. One shape, two
+    // tests, the id the file declares the only thing that differs.
+    test("a rewrite re-derives off a schema-broken file that declares another id, and leaves its bytes alone", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const stolen = "id: stolen\nproducts: not-an-array\n";
+      writeFileSync(join(dir, "moved.yaml"), stolen);
+
+      // The scan cannot re-derive this one: the file no longer LISTS, which is
+      // why the declared id has to be read from the document rather than from
+      // a listing that has already skipped it. Nothing declares `moved` here,
+      // so the write is owed an ENOENT and not a patch.
+      await expect(
+        store.rewriteBrief({ ...minimalBrief, id: "moved", campaignMessage: "clobbered" }),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(readFileSync(join(dir, "moved.yaml"), "utf8")).toBe(stolen);
+    });
+
+    test("a replace re-derives off a schema-broken file that declares another id, and leaves its bytes alone", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const stolen = "id: stolen\nproducts: not-an-array\n";
+      writeFileSync(join(dir, "moved.yaml"), stolen);
+
+      // `replaceBrief`'s own fallback is the second half of the refusal: the
+      // rewrite is ENOENT, so it creates instead, and `wx` on the file that is
+      // really there is EEXIST rather than an overwrite of `stolen`.
+      await expect(
+        store.replaceBrief({ ...minimalBrief, id: "moved", campaignMessage: "clobbered" }),
+      ).rejects.toMatchObject({ code: "EEXIST" });
+      expect(readFileSync(join(dir, "moved.yaml"), "utf8")).toBe(stolen);
+    });
+
+    // Same bytes, the id the caller asked for. A Save that REPAIRS a file is
+    // the ordinary case this comparison must not break: re-deriving on every
+    // shape failure would answer ENOENT for a file that is sitting right there
+    // under the right name, and `replaceBrief` would turn that into a create.
+    test("a rewrite still repairs a schema-broken file that declares the same id", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const broken = "id: moved\nproducts: not-an-array\n";
+      writeFileSync(join(dir, "moved.yaml"), broken);
+
+      const rewritten = await store.rewriteBrief({
+        ...minimalBrief,
+        id: "moved",
+        campaignMessage: "repaired",
+      });
+      expect(rewritten.file).toBe("moved.yaml");
+      // Repaired, not just written: the file the store now LISTS is the brief
+      // the Save asked for, and it is findable by the id it was broken under.
+      expect(await store.findBriefById("moved")).toMatchObject({
+        brief: { id: "moved", campaignMessage: "repaired" },
+      });
+      expect(readFileSync(join(dir, "moved.yaml"), "utf8")).not.toBe(broken);
+    });
+
+    // The last of the three answers the declared id can give, and the one that
+    // keeps the test above honest about which is which. An `id` that is not a
+    // string names no campaign, so there is no other campaign's bytes at stake
+    // and nothing to re-derive onto: the write still owns the file and repairs
+    // it. The suite's own `bad.yaml` fixture, verbatim.
+    test("a rewrite repairs a file whose id is not a string at all", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const bad = "id: 1\nproducts: not-an-array\n";
+      writeFileSync(join(dir, "moved.yaml"), bad);
+
+      const rewritten = await store.rewriteBrief({
+        ...minimalBrief,
+        id: "moved",
+        campaignMessage: "repaired",
+      });
+      expect(rewritten.file).toBe("moved.yaml");
+      expect(await store.findBriefById("moved")).toMatchObject({
+        brief: { id: "moved", campaignMessage: "repaired" },
+      });
+    });
+
+    // R4.2's carve-out rewrites a `.json` brief WHOLE rather than patching it,
+    // so there is no Document-level refusal to fall back on and the declared
+    // id is the only thing standing between a Save and another campaign's
+    // bytes. Same two shapes, same two answers.
+    test("a rewrite re-derives off a schema-broken JSON brief that declares another id, and leaves its bytes alone", async () => {
+      writeFileSync(
+        join(dir, "moved.json"),
+        JSON.stringify({ ...minimalBrief, id: "moved" }, null, 2),
+      );
+      // A HIT, so the index holds the name the write must NOT target.
+      expect(await store.findBriefFileById("moved")).toBe("moved.json");
+
+      const stolen = JSON.stringify({ id: "stolen", products: "not-an-array" }, null, 2);
+      writeFileSync(join(dir, "moved.json"), stolen);
+
+      await expect(
+        store.rewriteBrief({ ...minimalBrief, id: "moved", campaignMessage: "clobbered" }),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(readFileSync(join(dir, "moved.json"), "utf8")).toBe(stolen);
+    });
+
+    test("a replace leaves a schema-broken JSON brief that declares another id alone", async () => {
+      writeFileSync(
+        join(dir, "moved.json"),
+        JSON.stringify({ ...minimalBrief, id: "moved" }, null, 2),
+      );
+      expect(await store.findBriefFileById("moved")).toBe("moved.json");
+
+      const stolen = JSON.stringify({ id: "stolen", products: "not-an-array" }, null, 2);
+      writeFileSync(join(dir, "moved.json"), stolen);
+
+      // No `wx` refusal here and none is owed: `moved.json` declares no brief
+      // the listing can see, so the canonical `moved.yaml` really is free and
+      // creating it is what a store built this second would do. What must not
+      // happen is `stolen` being written over in the process.
+      const replaced = await store.replaceBrief({
+        ...minimalBrief,
+        id: "moved",
+        campaignMessage: "clobbered",
+      });
+      expect(replaced.file).toBe("moved.yaml");
+      expect(readFileSync(join(dir, "moved.json"), "utf8")).toBe(stolen);
+    });
+
+    // The other half of the same comparison, and the reason it is not simply
+    // "declared id, or ENOENT": bytes that stopped PARSING declare no id at
+    // all, and a Save still owes that file a refusal by name. Re-deriving here
+    // would answer ENOENT, and `replaceBrief` would turn that into a create
+    // over the file that is already there. This is the divergence named at
+    // `findBriefFileById` -- the name is still a hit, the brief is not.
+    test("a rewrite refuses a cached file whose bytes stopped parsing, by name", async () => {
+      await store.createBrief({ ...minimalBrief, id: "rotten" });
+      expect(await store.findBriefFileById("rotten")).toBe("rotten.yaml");
+
+      const corrupt = "id: camp\nproducts: [";
+      writeFileSync(join(dir, "rotten.yaml"), corrupt);
+
+      expect(await store.findBriefFileById("rotten")).toBe("rotten.yaml");
+      await expect(store.rewriteBrief({ ...minimalBrief, id: "rotten" })).rejects.toMatchObject({
+        code: "EBRIEFDOC",
+      });
+      expect(readFileSync(join(dir, "rotten.yaml"), "utf8")).toBe(corrupt);
+    });
+
+    // The `.json` half of that data loss, and the half that needed this lane to
+    // become reachable: pre-index the lookup was a scan, the scan skipped a file
+    // whose bytes would not read, and the write was ENOENT with the operator's
+    // bytes left alone. A warm cached NAME reaches the whole-file rewrite
+    // instead, and R4.2's carve-out has no Document refusal of its own to stop
+    // it — so "an unparseable file refuses the write" is false here unless the
+    // write checks the bytes itself.
+    test("a rewrite refuses a cached JSON brief whose bytes stopped parsing, by name", async () => {
+      writeFileSync(
+        join(dir, "rotten.json"),
+        JSON.stringify({ ...minimalBrief, id: "rotten" }, null, 2),
+      );
+      expect(await store.findBriefFileById("rotten")).toBe("rotten.json");
+
+      const corrupt = '{"id": "rotten", products: ';
+      writeFileSync(join(dir, "rotten.json"), corrupt);
+
+      // Still a hit: the name is right and the file is still a regular file,
+      // which is the same divergence the YAML case above pins.
+      expect(await store.findBriefFileById("rotten")).toBe("rotten.json");
+      await expect(store.rewriteBrief({ ...minimalBrief, id: "rotten" })).rejects.toMatchObject({
+        code: "EBRIEFDOC",
+      });
+      expect(readFileSync(join(dir, "rotten.json"), "utf8")).toBe(corrupt);
+    });
+
+    // The redirect's own half of that comparison, and the last call site still
+    // reading the field it should have answered from. The scan maps an id to a
+    // file that DECLARES it, so on paper the check before it is enough — and
+    // the file it picked is a second read away from the patch, so a writer that
+    // moves the id on in between is overwritten exactly as if the redirect had
+    // never re-derivationed. The comparison belongs on the bytes the write is
+    // about to patch, which is the only place the gap is visible.
+    test("a rewrite refuses a replacement that stopped declaring the id while the scan ran", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      // A HIT, so the index holds the name the write must NOT target.
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const stolen = campYaml.replace("id: camp", "id: stolen");
+      const other = campYaml.replace("id: camp", "id: other");
+      writeFileSync(join(dir, "moved.yaml"), stolen);
+      writeFileSync(join(dir, "z-moved.yaml"), campYaml.replace("id: camp", "id: moved"));
+
+      // The window, made deterministic: `z-moved.yaml` declares `moved` while
+      // the scan reads it and `other` by the time the patch reads it. Nothing
+      // in the filesystem produces that on demand — the interleaving test above
+      // is the one for the scan-on-miss side of the same race.
+      const real = store.listBriefs.bind(store);
+      vi.spyOn(store, "listBriefs").mockImplementation(async () => {
+        const listed = await real();
+        writeFileSync(join(dir, "z-moved.yaml"), other);
+        return listed;
+      });
+
+      await expect(
+        store.rewriteBrief({ ...minimalBrief, id: "moved", campaignMessage: "clobbered" }),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(readFileSync(join(dir, "z-moved.yaml"), "utf8")).toBe(other);
+      expect(readFileSync(join(dir, "moved.yaml"), "utf8")).toBe(stolen);
+    });
+
+    // A root this store cannot stat is a storage failure, not an absent
+    // campaign: answering EIO as "no such campaign" would turn an outage into
+    // a 404 on every route that resolves a campaign first.
+    test("rethrows a non-ENOENT lstat failure from the hit's own stat unchanged", async () => {
+      await store.createBrief(minimalBrief);
+      fsHook.lstat = async (path: string) => {
+        if (path.endsWith("test-camp.yaml")) {
+          throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" });
+        }
+        throw new Error(`unexpected lstat(${path}) in this test`);
+      };
+      await expect(store.findBriefFileById("test-camp")).rejects.toMatchObject({ code: "EIO" });
     });
   });
 });

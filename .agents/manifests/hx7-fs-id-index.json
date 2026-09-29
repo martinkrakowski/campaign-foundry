@@ -1,0 +1,227 @@
+{
+  "version": 1,
+  "lane": "HX7-fs-id-index",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    if ((await this.rebuildIdIndex()).get(slug)) return false;",
+      "after": "    if (this.idIndex.get(slug)) return false;",
+      "because": "deciding from the cache instead of from the scan makes releaseCampaign's 'holds no brief file' guard read a claim the index has not re-checked, and the hit's own stat cannot disprove this case: the file is still there, still a regular file, and no longer declares this slug. The guard would then refuse the release FOREVER, leaking the campaign's reservation directory with it, and nothing else in the class invalidates the entry. The test rewrites the brief file's id in place and expects the release to succeed",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a release re-derives the root when the file no longer declares the slug"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "      (await this.rebuildIdIndex()).get(slug) !== undefined;",
+      "after": "      this.idIndex.get(slug) !== undefined;",
+      "because": "the same stale entry, met by createCampaign's taken-check: a slug no file declares any more, in a differently named file whose id was rewritten in place, is refused with EEXIST over a reservation that is genuinely free, and the slug is unusable for good. This is the other of the two methods whose first act is a decision about the root",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "createCampaign re-derives the root when the file no longer declares the slug"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    if (cached !== undefined && (await this.isIndexedFileLive(cached))) return cached;\n    return (await this.rebuildIdIndex()).get(id);",
+      "after": "    if (cached !== undefined && (await this.isIndexedFileLive(cached))) return cached;\n    return this.idIndex.get(id);",
+      "because": "dropping the scan-on-miss turns a positive-only cache into an authoritative one: a miss is answered from the map instead of the disk, so a brief another FsBriefStore — or another process, or an operator — put in this root is invisible to this instance for the life of the process. The test warms one instance's index and then asks a SECOND FsBriefStore over the same root, which is exactly that case. The other half of what this line owes — answering from the scan it waited for rather than from whichever rebuild won the assignment race — is the next mutation, which keeps the scan and changes only what the caller reads",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a second store over the same root sees a campaign the first one created"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    return (await this.rebuildIdIndex()).get(id);",
+      "after": "    await this.rebuildIdIndex();\n    return this.idIndex.get(id);",
+      "because": "a lookup answers from the scan it waited for, not from the field. The scan still runs here, so the mutation is invisible to any test about a miss being found at all; what it changes is WHICH map the caller reads. Publishing is an assignment, so a rebuild that scanned an OLDER view of the root can land after one that scanned a newer one, and a caller reading the field back gets whichever won that race rather than the scan it performed. The test gates two rebuilds and releases them in the order that puts the newer scan's publish first, so the newer lookup's read lands after the older one's publish and answers undefined for an id its own scan had just found",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a lookup answers from the scan it waited for"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    if (cached !== undefined && (await this.isIndexedFileLive(cached))) return cached;",
+      "after": "    if (cached !== undefined) return cached;",
+      "because": "dropping the hit's own stat is the lane's original bug (fix round: the index is cached for the life of the process, and nothing in this file ever unlinks a brief file, so a cached name outlives the file behind it). Answered from the map alone, a campaign deleted out of band stays 'visible' to resolveCampaign / campaignVisibility / campaignMeta, and a name that has become a symlink is read THROUGH — a way around the regular-file check listBriefs applies. The test warms a hit, unlinks the file, and expects the existence answers to flip to absent; the symlink test covers the second half",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a hit whose file was removed out of band is re-derived"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "      const st = await lstat(resolveConfined(this.dir, file));\n      return st.isFile();\n    } catch (error) {\n      if (isErrno(error, \"ENOENT\")) return false;\n      throw error;",
+      "after": "      const st = await lstat(resolveConfined(this.dir, file));\n      return st.isFile();\n    } catch (error) {\n      if (isErrno(error, \"ENOENT\")) return false;\n      return false;",
+      "because": "the fail-closed half of that stat: a non-ENOENT lstat failure (EACCES, EIO) is a storage failure, and answering it as 'no such campaign' turns an outage into a 404 on every route that resolves a campaign first. The test makes the hit's own lstat fail with EIO and expects that errno to reach the caller unchanged",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "rethrows a non-ENOENT lstat failure from the hit's own stat"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    if (entry === undefined || entry.campaignId === id) return entry;\n    const replacement = (await this.rebuildIdIndex()).get(id);\n    return replacement === undefined ? undefined : this.storedBrief(replacement);",
+      "after": "    return entry;",
+      "because": "a stat sees the NAME, not what the file declares: a brief whose id was rewritten in place keeps its name and its inode, so the hit still validates, and findBriefById would hand assertOwnedCampaign a different campaign's brief under the id the caller asked for. The parse that method already pays for is what makes the comparison free, so a disagreement re-derives the mapping from the directory. Two tests cover both outcomes: the id is simply gone, and the id resolves to the OTHER file that declares it. (Dropping only the COMPARISON is not a mutation this tool can see — the repair left behind then runs on every lookup and answers the same, which is why the claim is the whole block)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a file whose id was rewritten in place is not served under the old id"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    const replacement = (await this.rebuildIdIndex()).get(id);\n    return replacement === undefined ? undefined : this.storedBrief(replacement);",
+      "after": "    return undefined;",
+      "because": "the second half of that repair: a mismatch must be re-derived, not merely refused, or an id that DID move to another file would answer 'no such campaign' for a campaign that is right there. The test that pins it puts a second file declaring the id beside the one that stopped declaring it",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "an id whose file was renamed onto another campaign resolves to the file that declares it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    const indexed = this.idIndex.get(brief.id);\n    if (indexed === undefined || fileName < indexed) this.idIndex.set(brief.id, fileName);",
+      "after": "    this.idIndex.set(brief.id, fileName);",
+      "because": "an unconditional set made the answer depend on cache state: createBrief writes the CANONICAL name for an id, which is not necessarily the first by name, so a warm store picked dup.yaml where a store built a second later picked a-dup.yaml — and reads and rewrites then target different files for one id. The test creates the canonical file over a warm index holding the earlier-sorting one, and asks both this store and a new one",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "two files declaring one id resolve to the first by name"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    const fileName = `${brief.id}.yaml`;\n    const indexed = this.idIndex.get(brief.id);\n    if (indexed === undefined || fileName < indexed) this.idIndex.set(brief.id, fileName);",
+      "after": "    const fileName = `${brief.id}.yaml`;",
+      "because": "recording the write is what makes the read that FOLLOWS a Save a hit rather than a full re-read of the root — the whole point of recording it in createBrief. With the record gone the lookup still succeeds, through the scan-on-miss, which is why the test spies on listBriefs after the create: it can only catch the scan, not the missing entry",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a create is found by the very next lookup"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    const misdeclares = (t: WritableTarget) =>\n      t.declaredId !== undefined && t.declaredId !== brief.id;",
+      "after": "    const misdeclares = (t: WritableTarget) =>\n      t.declaredId === undefined;",
+      "because": "the write path's half of the residual a stat cannot see. patchBriefYaml patches the WHOLE target, id included, so a cached hit for `moved` against a file that now declares `stolen` rewrites another campaign's file as `moved` — a cross-campaign clobber the read path already refuses, and one the rename-based replace makes permanent. Dropping the comparison against the id the caller asked for leaves only the unparseable arm, so a disagreement is never re-derived. The test rewrites a brief whose id another writer moved, and expects ENOENT with the other campaign's bytes byte for byte intact",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a rewrite refuses a file that no longer declares the id"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    const id = (data as { id?: unknown } | null | undefined)?.id;\n    return typeof id === \"string\" ? id : undefined;",
+      "after": "    void data;\n    return parseBriefText(filePath, raw).id;",
+      "because": "the declared id is read at the DOCUMENT level, and going back to parseBriefText's is the clobber this round closed. parseBrief validates SHAPE, so a file that is YAML-valid but schema-invalid and declares another campaign — `id: stolen` beside `products: not-an-array` — declares no id through it, the same answer as bytes that declare none at all, and the write below patches the first as the second. patchBriefYaml refuses only zero or many documents, parse errors and a non-map top level, so it setsIn([\"id\"], \"moved\") straight over a real campaign's id, and R4.2's carve-out rewrites a .json brief whole with no refusal to fall back on. The tests put the suite's own bad.yaml shape under a different id and expect ENOENT with the other campaign's bytes byte for byte intact; the two arms that must keep patching — the same id, and an id that is not a string — are what says the fix is a document-level read and not a refusal",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "re-derives off a schema-broken"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "      try {\n        JSON.parse(raw.toString(\"utf8\"));\n      } catch {\n        throw new BriefDocumentError(filePath, \"the file does not parse as JSON\");\n      }",
+      "after": "      try {\n        JSON.parse(raw.toString(\"utf8\"));\n      } catch {\n        // the whole-file dump goes ahead regardless\n      }",
+      "because": "R4.2's carve-out keeps a .json brief in JSON and is never fail-closed for 'not a YAML Document' — which is not the same as never refusing, because this arm dumps the whole file over whatever is on disk. That is the data loss BriefDocumentError exists to close (R4.1), and the YAML arm closes it with patchBriefYaml. A cached name can outlive the file's parseability, and pre-index this branch was unreachable for a file whose bytes would not read: the lookup was a scan and the scan skipped it, so the write was ENOENT with the operator's bytes left alone. The index is what made the arm reachable, and with the refusal dropped it is a Save replacing a damaged file whole, for a campaign those bytes may not even have been. The test damages a .json brief the index has cached and expects EBRIEFDOC with the bytes byte for byte intact",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a rewrite refuses a cached JSON brief whose bytes stopped parsing"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -12,8 +12,9 @@ import {
 import { basename, dirname, extname, resolve } from "node:path";
 import { isReservedCampaignId, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
+import { parse as parseYaml } from "yaml";
 import { resolveConfined } from "../confined-path.js";
-import { parseBriefText, type ParseBriefOptions } from "../load-brief.js";
+import { parseBriefText, YAML_ALIAS_CAP, type ParseBriefOptions } from "../load-brief.js";
 import {
   TeamsNotSupportedError,
   type BriefStorePort,
@@ -25,6 +26,7 @@ import {
 } from "./brief-store.port.js";
 import {
   BRIEF_SOURCE_EXTS,
+  BriefDocumentError,
   hashBytes,
   isBriefSourceName,
   isErrno,
@@ -61,6 +63,49 @@ function assertNoTeam(teamId: string | null | undefined): void {
 }
 
 /**
+ * The campaign id `raw` DECLARES, read at the DOCUMENT level: the `id` key of
+ * the parsed mapping, when that key is a string.
+ *
+ * Deliberately not `parseBriefText`'s id. `parseBrief` validates SHAPE, so an
+ * operator's half-written file — `id: stolen` beside `products: not-an-array`
+ * — declares no id through it, and "these bytes declare no id" and "these
+ * bytes declare another campaign" came back as the same `undefined`. The write
+ * path must not collapse them: it re-derives on the second and patches on the
+ * first, so a schema-validated answer let a Save patch one campaign's whole
+ * file as another, `id` included, over a root `listBriefs` had skipped.
+ *
+ * The bytes are put through the same extension dispatch and the same
+ * `YAML_ALIAS_CAP` `parseBriefText` uses, so what parses here parses there and
+ * an alias bomb is bounded in both places at once.
+ *
+ * A document that is not a mapping, or whose `id` is not a string, declares no
+ * id at all — and a Save still owes THOSE bytes a refusal by name rather than a
+ * re-derivation. Re-deriving would answer "no such campaign" for a file that is
+ * right there, and `replaceBrief` would turn that refusal into a create over
+ * the bytes the caller asked to repair.
+ */
+function declaredBriefId(filePath: string, raw: string): string | undefined {
+  try {
+    const data =
+      extname(filePath).toLowerCase() === ".json"
+        ? JSON.parse(raw)
+        : parseYaml(raw, { maxAliasCount: YAML_ALIAS_CAP });
+    const id = (data as { id?: unknown } | null | undefined)?.id;
+    return typeof id === "string" ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** What `rewriteBrief` patches, and the comparison it makes on the way there. */
+type WritableTarget = {
+  file: string;
+  filePath: string;
+  raw: Buffer;
+  declaredId: string | undefined;
+};
+
+/**
  * Filesystem implementation of BriefStorePort.
  * Stores briefs under `<projectRoot>/briefs/*.yaml` (or .yml / .json).
  */
@@ -71,6 +116,59 @@ export class FsBriefStore implements BriefStorePort {
   /** Resolved once at construction; the composition root decides it (D167). */
   private readonly dir: string;
   private readonly lockChains = new Map<string, Promise<unknown>>();
+
+  /**
+   * L1: the id -> file name index, and the reason `findBriefFileById` is no
+   * longer a full-directory scan. Measured at a 199-202 ms median over 1,000
+   * campaigns (`scripts/bench-fs-id-lookup.ts`, three runs) against the row's
+   * 5 ms threshold, on the ids `resolveCampaign` / `campaignVisibility` /
+   * `campaignMeta` resolve for the assets, decisions, pools and preview-frame
+   * routes.
+   *
+   * A POSITIVE cache, and deliberately only that:
+   * - a hit is validated and then answered from here: one `lstat` on the
+   *   cached NAME (`isIndexedFileLive`), never a re-read of the brief;
+   * - a miss ALWAYS falls back to a full `listBriefs()` scan
+   *   (`rebuildIdIndex`), which republishes the whole map. A miss is never
+   *   cached, so this cannot hide a brief that another `FsBriefStore`, another
+   *   process or an operator put in this root since the last scan — the first
+   *   lookup from a second instance over the same root is exactly that case,
+   *   and it finds the campaign.
+   *
+   * The `lstat` is what makes a long-lived instance honest. `FsBriefStore`
+   * outlives any request (the ports `Registry` caches one per scope), and
+   * nothing in this file ever unlinks a brief file, so a cached name can
+   * outlive the file behind it: an operator's `rm`, a second API process, an
+   * editor's own "delete campaign". Answered from the map alone, a stale hit
+   * made `resolveCampaign` / `campaignVisibility` / `campaignMeta` report a
+   * campaign that is gone, and a stale hit that is now a SYMLINK would be read
+   * through it — a fresh scan excludes that name, and the index must not be a
+   * way around the listing's regular-file check.
+   *
+   * Residual, and named: a stat sees the NAME, not what the file declares. A
+   * file whose `brief.id` was changed in place out of band is still answered
+   * by `findBriefFileById` (a parse per hit is the cost this lane exists to
+   * remove). The two lookups that read the file anyway fix that differently,
+   * and both have to: `findBriefById` verifies the id it parsed, and
+   * `rewriteBrief` verifies the id in the bytes it is about to patch, so a Save
+   * cannot rewrite one campaign's file as another.
+   *
+   * It holds FILE NAMES and nothing else. A `StoredBrief`'s revision must
+   * always be hashed from the bytes on disk (`getRevision`, and
+   * `rewriteBrief`'s `expectedRevision` check), so caching a revision would
+   * turn a conditional write into an unconditional one and quietly retire
+   * `ECONFLICT`.
+   *
+   * A rebuild REPLACES the map rather than mutating it, so publishing one is a
+   * single assignment and any map a reader is holding stays whole. Nothing else
+   * empties it: a rebuild is the only way entries are dropped, so `clear()`
+   * does not appear anywhere in this file. `createBrief` is the one in-place
+   * writer, and it only ever records the name a write just created. Each
+   * rebuild also RETURNS the map it built so its caller answers from that scan
+   * rather than from the field, and every call site does — see
+   * `rebuildIdIndex`.
+   */
+  private idIndex: Map<string, string> = new Map();
 
   constructor(dir: string) {
     this.dir = resolve(dir);
@@ -98,27 +196,142 @@ export class FsBriefStore implements BriefStorePort {
 
     const briefs: StoredBrief[] = [];
     for (const file of files) {
-      try {
-        const filePath = resolve(this.dir, file);
-        const bytes = await readFile(filePath);
-        const revision = hashBytes(bytes);
-        const brief = parseBriefText(filePath, bytes.toString("utf8"));
-        briefs.push({ campaignId: brief.id, file, brief, revision });
-      } catch (error) {
-        console.warn(`[briefs] skipped ${file}: ${errorMessage(error)}`);
-      }
+      const entry = await this.storedBrief(file);
+      if (entry) briefs.push(entry);
     }
     return briefs;
   }
 
-  async findBriefById(id: string): Promise<StoredBrief | undefined> {
-    const list = await this.listBriefs();
-    return list.find((entry) => entry.brief.id === id);
+  /**
+   * One brief file to its `StoredBrief`, or `undefined` when its bytes will
+   * not read or parse. Split out of `listBriefs` so `findBriefById` skips a
+   * malformed file exactly the way the listing does — letting the parse throw
+   * instead would turn a refusal into a failure on the one file it was asked
+   * for, which is the outcome `listBriefs`'s own warn-and-skip exists to
+   * prevent.
+   */
+  private async storedBrief(file: string): Promise<StoredBrief | undefined> {
+    try {
+      // `resolve`, not `resolveConfined`, unchanged from `listBriefs` — but not
+      // for the reason it was written. Two callers reach this method and only
+      // one of them feeds it a name from this directory's own `readdir`: the
+      // other is `findBriefById`, passing whatever the id index holds. Both are
+      // confined, differently rather than not at all — an index value is a
+      // `readdir` name, or the `${id}.yaml` `createBrief` already put through
+      // `resolveConfined` before writing it — so a second narrowing check here
+      // would rule out nothing either caller can hand over.
+      const filePath = resolve(this.dir, file);
+      const bytes = await readFile(filePath);
+      const brief = parseBriefText(filePath, bytes.toString("utf8"));
+      return { campaignId: brief.id, file, brief, revision: hashBytes(bytes) };
+    } catch (error) {
+      console.warn(`[briefs] skipped ${file}: ${errorMessage(error)}`);
+      return undefined;
+    }
   }
 
+  /**
+   * Republish the id index from a full `listBriefs()` scan — the miss path,
+   * and the only way the map is ever filled in bulk. First file per id wins,
+   * which is what `list.find` over the already-sorted listing answered before
+   * the index existed: two files declaring one id is a corrupt root, and the
+   * answer must not depend on whether the caller arrived warm or cold.
+   *
+   * It RETURNS the map it built, and callers answer from that rather than from
+   * `this.idIndex` after the await. Publishing is an assignment, so a rebuild
+   * that scanned an older view of the root can land after one that scanned a
+   * newer one; a caller that read the field back would get whichever map won
+   * that race instead of the one it waited for, and a decision made from it
+   * (`createCampaign`'s taken-check, `releaseCampaign`'s guard) would be made
+   * from a scan nobody asked for. Each caller answers from a complete scan it
+   * performed itself, and the field is left to be the cache.
+   */
+  private async rebuildIdIndex(): Promise<ReadonlyMap<string, string>> {
+    const listed = await this.listBriefs();
+    const next = new Map<string, string>();
+    for (const entry of listed) {
+      if (!next.has(entry.campaignId)) next.set(entry.campaignId, entry.file);
+    }
+    this.idIndex = next;
+    return next;
+  }
+
+  /**
+   * The brief behind `id`, and the one lookup in this file that gets to check
+   * what the bytes SAY rather than what their name is.
+   *
+   * The stat in `findBriefFileById` cannot see an id rewritten in place: a file
+   * another writer changed from `id: x` to `id: y` still exists, is still a
+   * regular file, and keeps answering the cached name — so a request for the
+   * OLD id would hand `assertOwnedCampaign` a different campaign under the id
+   * the caller asked for. Here the parse has already happened (this method has
+   * always read and parsed the file), so the declared id is free to compare, and
+   * a disagreement re-derives the mapping from the directory exactly as a miss
+   * does: the wrong name goes, and the answer is the file that declares `id`
+   * — the replacement if one exists, `undefined` if the id simply moved.
+   */
+  async findBriefById(id: string): Promise<StoredBrief | undefined> {
+    const file = await this.findBriefFileById(id);
+    if (file === undefined) return undefined;
+    const entry = await this.storedBrief(file);
+    if (entry === undefined || entry.campaignId === id) return entry;
+    const replacement = (await this.rebuildIdIndex()).get(id);
+    return replacement === undefined ? undefined : this.storedBrief(replacement);
+  }
+
+  /**
+   * True when an indexed file name still names a REGULAR file in this root —
+   * the one check `findBriefFileById`'s hit is worth paying for.
+   *
+   * `lstat`, never `stat`: it does not follow the final component, so a name
+   * that has become a symlink reports as `!isFile()` (and is never opened)
+   * rather than being read through to a brief outside the briefs root. That is
+   * the same rule `listBriefs` applies through `readdir`'s `isFile()`, so a
+   * name this accepts is a name a fresh scan would list.
+   *
+   * `resolveConfined`, for the same reason every other reader in this file uses
+   * it: the name is checked for escape before it is stat'd, not after.
+   *
+   * ENOENT (a brief file removed out of band) and "not a regular file" are the
+   * same answer here — the entry is not what it was — so both return false and
+   * the caller re-derives. Any OTHER errno (EACCES, EIO, ENOTDIR on the parent)
+   * propagates unchanged: a root this store cannot stat is a storage failure,
+   * and answering it as "no such campaign" would turn an outage into a 404.
+   */
+  private async isIndexedFileLive(file: string): Promise<boolean> {
+    try {
+      const st = await lstat(resolveConfined(this.dir, file));
+      return st.isFile();
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) return false;
+      throw error;
+    }
+  }
+
+  /**
+   * See `BriefStorePort.findBriefFileById`. One map read and one `lstat` on a
+   * hit; a full directory scan on a miss, never a cached miss — see `idIndex`
+   * for why a miss has to keep paying for the answer.
+   *
+   * A hit whose file is gone (or is no longer a regular file) is NOT a hit: it
+   * falls through to the same scan a miss pays for, which drops the entry by
+   * replacing the whole map. `createCampaign` and `releaseCampaign` do not
+   * consult the cache at all before they DECIDE anything — they scan, and
+   * answer from that scan — for what a stat cannot see: a file that no longer
+   * declares the id it was indexed under.
+   *
+   * The name, not the bytes: a cached file whose contents stopped PARSING is
+   * still a hit here, while `findBriefById` reports that id absent. Pre-index
+   * both said absent. The split is deliberate and is the write path's reason —
+   * `rewriteBrief` must keep handing those bytes to `patchBriefYaml`, which
+   * refuses them by name (R4.1). Deriving them here instead would answer a
+   * corrupt file's id as "no such campaign", and `replaceBrief` would turn
+   * that refusal into a create.
+   */
   async findBriefFileById(id: string): Promise<string | undefined> {
-    const found = await this.findBriefById(id);
-    return found?.file;
+    const cached = this.idIndex.get(id);
+    if (cached !== undefined && (await this.isIndexedFileLive(cached))) return cached;
+    return (await this.rebuildIdIndex()).get(id);
   }
 
   async findBriefFile(
@@ -176,7 +389,32 @@ export class FsBriefStore implements BriefStorePort {
     const content = serializeBrief(filePath, brief);
     await writeFile(filePath, content, { encoding: "utf8", flag: "wx" });
     const revision = hashBytes(Buffer.from(content, "utf8"));
-    return { campaignId: brief.id, file: `${brief.id}.yaml`, brief, revision };
+    // Record the mapping this write just created. The index is a positive
+    // cache with a scan on every miss, so an id it has never seen would be
+    // found by the next scan anyway; recording it here is what makes the read
+    // that FOLLOWS a Save a hit instead of a full re-read of the root.
+    //
+    // Never over an entry that still sorts first (qodo PRRT_kwDOSzP1zc6nOTpw
+    // / coderabbit PRRT_kwDOSzP1zc6nOY4b): `a-dup.yaml` and `dup.yaml` may both
+    // declare `dup`, and `rebuildIdIndex` answers with the first by name. An
+    // unconditional set made a warm store pick `dup.yaml` where a store built
+    // one second later picks `a-dup.yaml` — so which file a read or a rewrite
+    // targeted would depend on cache state alone.
+    //
+    // What this does NOT promise is agreement in the other direction. A store
+    // whose index is still empty when it makes this write — cold, or over a
+    // root it has not scanned — records the canonical name over an on-disk
+    // `a-dup.yaml`, and a scan of that same root then answers `a-dup.yaml`.
+    // Two files declaring one id is a corrupt root, and there is no cheap way
+    // out of it: proving an earlier-sorting file also declares the id means
+    // the full scan this lane exists to remove, on the one write that does not
+    // need it. Both names are files that really declare the id, so neither
+    // answer is a wrong brief — the cost is that a rewrite through one store
+    // lands in the file the other did not read. Named rather than papered over.
+    const fileName = `${brief.id}.yaml`;
+    const indexed = this.idIndex.get(brief.id);
+    if (indexed === undefined || fileName < indexed) this.idIndex.set(brief.id, fileName);
+    return { campaignId: brief.id, file: fileName, brief, revision };
   }
 
   /**
@@ -208,7 +446,21 @@ export class FsBriefStore implements BriefStorePort {
     // alone missed that second case (coderabbit PRRT_kwDOSzP1zc6mgBu7 / qodo
     // PRRT_kwDOSzP1zc6mgEyH): the legacy `reserveVisible` check in
     // `duplicate.post.ts` was id-based and never had this gap.
-    if ((await this.findBriefFile(slug)) || (await this.findBriefFileById(slug))) {
+    //
+    // The EEXIST decision is made from a SCAN, not from the cache, so this
+    // method re-derives what the root holds before it decides. A hit proves
+    // the indexed NAME is a live regular file (see `isIndexedFileLive`), not
+    // that the file still DECLARES this slug — a brief whose id was rewritten
+    // in place out of band would keep its name and lose its claim to the slug,
+    // and the refusal it caused would be permanent. Cheap here: one
+    // reservation per campaign, on a path that is not a read. Asking for the
+    // scan directly rather than clearing the index and going through
+    // `findBriefFileById` is the same one scan either way, minus the window in
+    // which every other reader on this shared instance misses with it.
+    const taken =
+      (await this.findBriefFile(slug)) !== undefined ||
+      (await this.rebuildIdIndex()).get(slug) !== undefined;
+    if (taken) {
       const err = new Error(`Brief "${slug}" already exists.`);
       (err as { code?: string }).code = "EEXIST";
       throw err;
@@ -421,7 +673,18 @@ export class FsBriefStore implements BriefStorePort {
    * touched, so a release can never be tricked into deleting through it.
    */
   async releaseCampaign(slug: string): Promise<boolean> {
-    if (await this.findBriefFileById(slug)) return false;
+    // The one method whose first act is a DECISION about what this root holds,
+    // so it re-derives that rather than deciding from a claim the index has not
+    // re-checked. The failure this prevents is a leak rather than a wrong
+    // answer: a brief file removed outside this store (another process, an
+    // operator's `rm` — nothing in this file ever unlinks one) or one whose id
+    // was rewritten in place leaves an entry the hit's own `lstat` either
+    // cannot see past or cannot disprove, that entry makes the guard below
+    // report "holds a brief file", and the reservation is refused FOREVER,
+    // because no other method invalidates it. Once per failed create, never on
+    // a read. The scan is asked for directly, so the answer comes from the
+    // scan this call made rather than from the shared field it republishes.
+    if ((await this.rebuildIdIndex()).get(slug)) return false;
     if (await this.isCampaignDirUnsafe(slug)) return false;
     const dirPath = resolveConfined(this.dir, slug);
     let entries: string[];
@@ -455,6 +718,17 @@ export class FsBriefStore implements BriefStorePort {
   }
 
   /**
+   * One brief file, with the bytes a write about it needs and the id those
+   * bytes declare — the comparison `findBriefFileById`'s `lstat` cannot make
+   * for the caller, taken here because the write needs the bytes regardless.
+   */
+  private async readWritableTarget(file: string): Promise<WritableTarget> {
+    const filePath = resolveConfined(this.dir, file);
+    const raw = await readFile(filePath);
+    return { file, filePath, raw, declaredId: declaredBriefId(filePath, raw.toString("utf8")) };
+  }
+
+  /**
    * Non-destructive writer for Save and `POST ?replace=1` (R4.1): read the
    * existing bytes, patch the changed paths in place as a YAML Document, and
    * atomically replace the file via a temp rename. Comments, blank lines, key
@@ -464,7 +738,41 @@ export class FsBriefStore implements BriefStorePort {
   async rewriteBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
     assertNoTeam(options?.teamId);
     const file = await this.findBriefFileById(brief.id);
-    if (!file) {
+    let target = file === undefined ? undefined : await this.readWritableTarget(file);
+    // Two answers, and the arm between them is the whole of it. Declaring no id
+    // — bytes that stopped parsing, a document that is not a mapping, an `id`
+    // that is not a string — is a file this write still owns, and `patchBriefYaml`
+    // refuses it by name (R4.1). Declaring a DIFFERENT id is another campaign's
+    // file, and `undefined` is not an answer that covers both. One predicate for
+    // the two, so the second comparison below cannot drift from the first.
+    const misdeclares = (t: WritableTarget) =>
+      t.declaredId !== undefined && t.declaredId !== brief.id;
+    if (target !== undefined && misdeclares(target)) {
+      // A hit the hit's own `lstat` cannot disprove, and the one place it can
+      // still do damage rather than merely answer wrongly: the file is still
+      // there, still a regular file, and no longer declares the id it was
+      // indexed under. `findBriefById` already refuses to serve that pair, but
+      // the write below patches the WHOLE target — `id` included — so a Save
+      // for the old id would rewrite another campaign's file as this one. The
+      // bytes are in hand for the write anyway, so the declared id is free to
+      // compare, and a disagreement re-derives exactly as `findBriefById` does:
+      // the file that declares the id, or ENOENT when none of them does.
+      //
+      // From the map the scan RETURNED, never from the field it published.
+      // Publishing is an assignment, so a rebuild that scanned an OLDER view of
+      // the root can land after this one; reading the field back hands the
+      // redirect whichever map won that race, which under the interleaving the
+      // suite pins can be the very name this branch exists to reject.
+      const replacement = (await this.rebuildIdIndex()).get(brief.id);
+      target = replacement === undefined ? undefined : await this.readWritableTarget(replacement);
+      // The scan maps an id to a file that DECLARES it, which is why the check
+      // above was enough on paper. It is not enough here: the file the scan read
+      // is a second read away from the patch, so a writer that moves the id on
+      // in between is a clobber with the re-derivation already done. Same
+      // comparison, on the bytes this write is about to patch.
+      if (target !== undefined && misdeclares(target)) target = undefined;
+    }
+    if (target === undefined) {
       // Check if there is an inode (e.g. symlink) at canonical path
       const candidate = resolveConfined(this.dir, `${brief.id}.yaml`);
       try {
@@ -479,8 +787,8 @@ export class FsBriefStore implements BriefStorePort {
       (err as { code?: string }).code = "ENOENT";
       throw err;
     }
-    const filePath = resolveConfined(this.dir, file);
-    const raw = await readFile(filePath);
+    const filePath = target.filePath;
+    const raw = target.raw;
     if (options?.expectedRevision) {
       const currentRev = hashBytes(raw);
       if (currentRev !== options.expectedRevision) {
@@ -496,6 +804,29 @@ export class FsBriefStore implements BriefStorePort {
       // Document patch here would write YAML into a `.json` file and hide the
       // brief on the next load. Never Document-patched, never fail-closed for
       // "not a YAML Document".
+      //
+      // Never fail-closed for "not a YAML Document" is not the same as never
+      // fail-closed: the bytes about to be replaced are a WHOLE-FILE dump over
+      // whatever is on disk, which is the data-loss path `BriefDocumentError`
+      // exists to close (R4.1), and the YAML arm closes it with
+      // `patchBriefYaml`. So this arm owes the same check. A cached name can
+      // outlive the file's parseability — the index is a positive cache and an
+      // operator's hand-edit or a truncated write does not go through it — and
+      // pre-index this branch was unreachable for such a file, because the
+      // lookup was a scan and the scan skipped what would not read. Without the
+      // check the index widens the blast radius: a `.json` brief damaged out of
+      // band is replaced whole, by a Save for a campaign that may not even be
+      // the one those bytes used to be.
+      //
+      // The arm above is unchanged, and this is not a contradiction of it: a
+      // `.json` file that PARSES declares whatever it declares, so a valid
+      // document whose `id` is not a string is still the caller's file to
+      // repair, and only the replacement is refused.
+      try {
+        JSON.parse(raw.toString("utf8"));
+      } catch {
+        throw new BriefDocumentError(filePath, "the file does not parse as JSON");
+      }
       content = serializeBrief(filePath, brief);
     } else {
       content = patchBriefYaml(filePath, raw.toString("utf8"), brief);
@@ -515,11 +846,29 @@ export class FsBriefStore implements BriefStorePort {
       throw error;
     }
     const revision = hashBytes(Buffer.from(content, "utf8"));
+    // Nothing is invalidated, and nothing needs to be recorded: the rename
+    // above replaces the brief's own bytes through a temp file and keeps the
+    // name, so the mapping this write resolved is still the mapping on disk —
+    // including on the redirect above, where `rebuildIdIndex` has already
+    // published the name that was patched. Re-asserting it here would be the
+    // line's only job in a normal rewrite, and re-asserting the INDEXED name
+    // after a redirect would put the stale one straight back. A `clear()` is
+    // what must never appear: it would send the read after every autosave PUT
+    // back to a full scan of the root, and the lane would have made the
+    // editor's own hot path into the thing it set out to measure. The revision
+    // is deliberately not recorded either — it is hashed from the bytes above,
+    // never from the index, so `expectedRevision` still compares live data.
     return { campaignId: brief.id, file: basename(filePath), brief, revision };
   }
 
   async replaceBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
     assertNoTeam(options?.teamId);
+    // No index call of its own, and none is owed: this method's only two
+    // successful outcomes are `rewriteBrief`'s and `createBrief`'s below, and
+    // each of those re-asserts the mapping it wrote. Every other path here
+    // propagates without a write — the symlink refusal, `rewriteBrief`'s
+    // ECONFLICT, a `createBrief` EEXIST — so on those the mapping this method
+    // read is still the mapping on disk.
     const file = await this.findBriefFileById(brief.id);
     const candidate = resolveConfined(this.dir, file ?? `${brief.id}.yaml`);
     try {
