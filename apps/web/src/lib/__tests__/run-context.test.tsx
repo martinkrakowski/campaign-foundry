@@ -1160,6 +1160,57 @@ describe("RunProvider — brief picker & persistence", () => {
     expect(result.current.brief.id).toBe("summer-hydration-2026");
   });
 
+  // Fix round (qodo #4). `setBrief` fired every `putLastOpened` as an unordered
+  // fire-and-forget, so two rapid commits could reach the server out of order —
+  // and the server's upsert keeps the LAST write to land, not the last one
+  // issued. A slow first write therefore left the pointer naming the campaign
+  // the user had already left. The writes are serialized instead, so the order
+  // commits happen in is the order the server records.
+  test("rapid switches record the last one opened even when the earlier write answers last (qodo #4)", async () => {
+    const issued: string[] = [];
+    const landed: string[] = [];
+    const hold: (() => void)[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+      const u = String(url);
+      if ((init as RequestInit)?.method === "PUT" && u === `${API}/campaigns/last-opened`) {
+        const campaignId = (
+          JSON.parse(String((init as RequestInit).body)) as { campaignId: string }
+        ).campaignId;
+        issued.push(campaignId);
+        // The FIRST pointer write is held until the test releases it, so an
+        // unserialized implementation completes them in the opposite order.
+        if (issued.length === 1) {
+          return new Promise<Response>((res) => {
+            hold.push(() => {
+              landed.push(campaignId);
+              res(json({ campaignId }));
+            });
+          });
+        }
+        landed.push(campaignId);
+        return Promise.resolve(json({ campaignId }));
+      }
+      if (u === `${API}/campaigns/jobs`) return Promise.resolve(json({}));
+      if (u === `${API}/campaigns/result`) return Promise.resolve(json(EMPTY_REPORT));
+      return Promise.resolve(json(EMPTY_REPORT));
+    });
+
+    const { result } = setup();
+    await act(async () => {
+      result.current.setBrief({ ...DEFAULT_BRIEF, id: "first" });
+      result.current.setBrief({ ...DEFAULT_BRIEF, id: "second" });
+    });
+    // Serialized: the second write has not gone out while the first is held.
+    expect(issued).toEqual(["first"]);
+    await act(async () => {
+      for (const release of hold) release();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(issued).toEqual(["first", "second"]);
+    // The server's row ends on the campaign the user actually opened last.
+    expect(landed).toEqual(["first", "second"]);
+  });
+
   test("the blank brief releases the shell but keeps the last-opened pointer (D37/H5)", async () => {
     const { result } = setup();
     const pointers = () =>

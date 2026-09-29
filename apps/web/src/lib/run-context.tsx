@@ -984,6 +984,24 @@ export function RunProvider({ children }: { children: ReactNode }) {
     setDecisions({});
   }, []);
 
+  // The last-opened pointer's write queue (PT-5e). Every commit that names a
+  // campaign enqueues here instead of firing its own request, so two rapid
+  // switches cannot reach the server out of order — the server's upsert keeps
+  // the LAST write to LAND, and an unordered pair of fire-and-forget PUTs can
+  // land in the opposite order to the one they were issued in, leaving the
+  // pointer naming the campaign the user has already left (fix round, qodo #4).
+  // Each link settles its own failure, so one failed write never stalls the
+  // rest and the queue never rejects — the same contract `enqueueDecisions`
+  // keeps for the same reason.
+  const pointerQueue = useRef<Promise<void>>(Promise.resolve());
+  const enqueuePointer = useCallback((campaignId: string) => {
+    pointerQueue.current = pointerQueue.current.then(() =>
+      putLastOpened(campaignId).catch(() => {
+        /* the pointer is advisory — never fail a commit over it */
+      }),
+    );
+  }, []);
+
   // Loading or committing a brief swaps which run the grid should show. Only ever called
   // as a deliberate commit — the editor's Save and the picker's select — never per
   // keystroke, so this won't wipe the grid mid-edit. Behaviour:
@@ -1028,10 +1046,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // Fire-and-forget by design. A pointer that did not land costs the next
       // bare url a redirect to the picker; blocking a Save, a pick or a page
       // load on it would trade a convenience for the work the user asked for.
+      // Queued rather than fired directly, so the server records them in the
+      // order the commits happened (see `enqueuePointer`).
       if (next.id) {
-        void putLastOpened(page ? page.fetchId : next.id).catch(() => {
-          /* the pointer is advisory — never fail a commit over it */
-        });
+        enqueuePointer(page ? page.fetchId : next.id);
       }
       // (1) Already showing this brief's run — leave the grid (and decisions) intact.
       // The run's recorded target is left alone too: the run on screen was produced by
@@ -1110,7 +1128,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
           });
       });
     },
-    [adoptJob, clearRunState, run],
+    [adoptJob, clearRunState, enqueuePointer, run],
   );
 
   // The latest `setBrief`, readable from `openPageCampaign`'s stable closure (the
