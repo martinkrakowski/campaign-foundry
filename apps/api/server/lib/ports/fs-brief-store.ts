@@ -61,6 +61,25 @@ function assertNoTeam(teamId: string | null | undefined): void {
 }
 
 /**
+ * The campaign id `raw` declares, or `undefined` when those bytes are not a
+ * parseable brief at all.
+ *
+ * Unparseable is deliberately NOT "a different id", and the two answers must
+ * not be collapsed. A Save hands the very same bytes to `patchBriefYaml`, which
+ * refuses them by name (R4.1), and a `.json` brief is rewritten whole — so the
+ * write path owes the caller a refusal, not a lookup. Re-deriving from a root
+ * that never listed this file would answer "no such campaign" for a file that
+ * is right there, and `replaceBrief` would turn that refusal into a create.
+ */
+function declaredBriefId(filePath: string, raw: string): string | undefined {
+  try {
+    return parseBriefText(filePath, raw).id;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Filesystem implementation of BriefStorePort.
  * Stores briefs under `<projectRoot>/briefs/*.yaml` (or .yml / .json).
  */
@@ -586,6 +605,22 @@ export class FsBriefStore implements BriefStorePort {
   }
 
   /**
+   * One brief file, with the bytes a write about it needs and the id those
+   * bytes declare — the comparison `findBriefFileById`'s `lstat` cannot make
+   * for the caller, taken here because the write needs the bytes regardless.
+   */
+  private async readWritableTarget(file: string): Promise<{
+    file: string;
+    filePath: string;
+    raw: Buffer;
+    declaredId: string | undefined;
+  }> {
+    const filePath = resolveConfined(this.dir, file);
+    const raw = await readFile(filePath);
+    return { file, filePath, raw, declaredId: declaredBriefId(filePath, raw.toString("utf8")) };
+  }
+
+  /**
    * Non-destructive writer for Save and `POST ?replace=1` (R4.1): read the
    * existing bytes, patch the changed paths in place as a YAML Document, and
    * atomically replace the file via a temp rename. Comments, blank lines, key
@@ -595,7 +630,22 @@ export class FsBriefStore implements BriefStorePort {
   async rewriteBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
     assertNoTeam(options?.teamId);
     const file = await this.findBriefFileById(brief.id);
-    if (!file) {
+    let target = file === undefined ? undefined : await this.readWritableTarget(file);
+    if (target !== undefined && target.declaredId !== undefined && target.declaredId !== brief.id) {
+      // A hit the hit's own `lstat` cannot disprove, and the one place it can
+      // still do damage rather than merely answer wrongly: the file is still
+      // there, still a regular file, and no longer declares the id it was
+      // indexed under. `findBriefById` already refuses to serve that pair, but
+      // the write below patches the WHOLE target — `id` included — so a Save
+      // for the old id would rewrite another campaign's file as this one. The
+      // bytes are in hand for the write anyway, so the declared id is free to
+      // compare, and a disagreement re-derives exactly as `findBriefById` does:
+      // the file that declares the id, or ENOENT when none of them does.
+      await this.rebuildIdIndex();
+      const replacement = this.idIndex.get(brief.id);
+      target = replacement === undefined ? undefined : await this.readWritableTarget(replacement);
+    }
+    if (target === undefined) {
       // Check if there is an inode (e.g. symlink) at canonical path
       const candidate = resolveConfined(this.dir, `${brief.id}.yaml`);
       try {
@@ -610,8 +660,8 @@ export class FsBriefStore implements BriefStorePort {
       (err as { code?: string }).code = "ENOENT";
       throw err;
     }
-    const filePath = resolveConfined(this.dir, file);
-    const raw = await readFile(filePath);
+    const filePath = target.filePath;
+    const raw = target.raw;
     if (options?.expectedRevision) {
       const currentRev = hashBytes(raw);
       if (currentRev !== options.expectedRevision) {
@@ -646,15 +696,18 @@ export class FsBriefStore implements BriefStorePort {
       throw error;
     }
     const revision = hashBytes(Buffer.from(content, "utf8"));
-    // The mapping is UNCHANGED by this write, and that is the point: the rename
+    // Nothing is invalidated, and nothing needs to be recorded: the rename
     // above replaces the brief's own bytes through a temp file and keeps the
-    // name, so `brief.id` still resolves to `file`. Re-asserted rather than
-    // cleared, because clearing here would send the read after every autosave
-    // PUT back to a full scan of the root — the lane would have made the
-    // editor's own hot path into the thing it set out to measure. The
-    // revision is deliberately not recorded: it is hashed from the bytes above,
+    // name, so the mapping this write resolved is still the mapping on disk —
+    // including on the redirect above, where `rebuildIdIndex` has already
+    // published the name that was patched. Re-asserting it here would be the
+    // line's only job in a normal rewrite, and re-asserting the INDEXED name
+    // after a redirect would put the stale one straight back. A `clear()` is
+    // what must never appear: it would send the read after every autosave PUT
+    // back to a full scan of the root, and the lane would have made the
+    // editor's own hot path into the thing it set out to measure. The revision
+    // is deliberately not recorded either — it is hashed from the bytes above,
     // never from the index, so `expectedRevision` still compares live data.
-    this.idIndex.set(brief.id, file);
     return { campaignId: brief.id, file: basename(filePath), brief, revision };
   }
 

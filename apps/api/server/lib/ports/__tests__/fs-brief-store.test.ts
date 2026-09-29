@@ -1163,6 +1163,59 @@ describe("FsBriefStore", () => {
       expect(await store.findBriefById("moved")).toMatchObject({ file: "z-moved.yaml" });
     });
 
+    // The same residual on the WRITE path, where it is not a wrong answer but
+    // damage: `rewriteBrief` patches the WHOLE target, `id` included, so a
+    // validated cached hit for `moved` against a file that now says `stolen`
+    // would rewrite another campaign's bytes as `moved`. Pre-index the lookup
+    // was a scan and refused; the bytes are in hand for the write anyway.
+    test("a rewrite refuses a file that no longer declares the id, and leaves its bytes alone", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const stolen = campYaml.replace("id: camp", "id: stolen");
+      writeFileSync(join(dir, "moved.yaml"), stolen);
+
+      await expect(
+        store.rewriteBrief({ ...minimalBrief, id: "moved", campaignMessage: "clobbered" }),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(readFileSync(join(dir, "moved.yaml"), "utf8")).toBe(stolen);
+    });
+
+    test("a replace refuses a file that no longer declares the id, and leaves its bytes alone", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const stolen = campYaml.replace("id: camp", "id: stolen");
+      writeFileSync(join(dir, "moved.yaml"), stolen);
+
+      // `replaceBrief`'s own fallback is the second half of the refusal: the
+      // rewrite is ENOENT, so it creates instead, and `wx` on the file that is
+      // really there is EEXIST rather than an overwrite of `stolen`.
+      await expect(
+        store.replaceBrief({ ...minimalBrief, id: "moved", campaignMessage: "clobbered" }),
+      ).rejects.toMatchObject({ code: "EEXIST" });
+      expect(readFileSync(join(dir, "moved.yaml"), "utf8")).toBe(stolen);
+    });
+
+    test("a rewrite re-derives onto the file that declares the id, and spares the other campaign", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      // A HIT, so the index holds the name the write must NOT target.
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const stolen = campYaml.replace("id: camp", "id: stolen");
+      writeFileSync(join(dir, "moved.yaml"), stolen);
+      writeFileSync(join(dir, "z-moved.yaml"), campYaml.replace("id: camp", "id: moved"));
+
+      const rewritten = await store.rewriteBrief({
+        ...minimalBrief,
+        id: "moved",
+        campaignMessage: "Second pass",
+      });
+      expect(rewritten.file).toBe("z-moved.yaml");
+      expect(readFileSync(join(dir, "moved.yaml"), "utf8")).toBe(stolen);
+      expect((await store.readBrief("moved")).campaignMessage).toBe("Second pass");
+    });
+
     // A root this store cannot stat is a storage failure, not an absent
     // campaign: answering EIO as "no such campaign" would turn an outage into
     // a 404 on every route that resolves a campaign first.
