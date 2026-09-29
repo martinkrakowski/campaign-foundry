@@ -7,6 +7,7 @@ import {
   readdirSync,
   rmSync,
   chmodSync,
+  utimesSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -882,6 +883,14 @@ describe("FsJobStore", () => {
       );
       (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
 
+      // The job lock (reapStaleRunningLocked), not luck, is what makes this
+      // idempotent: spy on the actual write so two racing reaps can't be
+      // mistaken for two writes that happened to agree.
+      const writeSpy = vi.spyOn(
+        store as unknown as { writeJobEntry: (entry: StoredJob) => Promise<void> },
+        "writeJobEntry",
+      );
+
       // Two concurrent reads
       const [stored1, stored2] = await Promise.all([
         store.getStoredJob(id),
@@ -893,11 +902,97 @@ describe("FsJobStore", () => {
       expect(stored1?.job.error).toBe(STALE_RUNNING_MESSAGE);
       expect(stored2?.job.status).toBe("failed");
       expect(stored2?.job.error).toBe(STALE_RUNNING_MESSAGE);
+      expect(writeSpy).toHaveBeenCalledTimes(1);
 
       // The file on disk should have the failed status (last write wins, but content is same)
       const disk = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
       expect(disk.job.status).toBe("failed");
       expect(disk.job.error).toBe(STALE_RUNNING_MESSAGE);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a job completed between the stale read and the reap stays completed", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await store.createJob("campaign-race-complete");
+      // `store` (instance A) caches the running entry.
+      const cachedFirst = await store.getStoredJob(id);
+      expect(cachedFirst?.job.status).toBe("running");
+      const cache = (
+        store as unknown as {
+          memoryCache: Map<string, { entry: StoredJob; mtimeMs: number }>;
+        }
+      ).memoryCache;
+      const cachedMtime = cache.get(id)!.mtimeMs;
+
+      // A different (fresh) store instance completes the job right away —
+      // simulating another process/instance finishing the run — while it is
+      // nowhere near stale, so its own read does not reap it first and its
+      // JOB_TTL_MS retention timer is nowhere near firing yet.
+      const storeB = new FsJobStore(dir);
+      await storeB.completeJob(id, payload());
+
+      // Make A's CACHED copy look stale without advancing the clock (which
+      // would also fire storeB's real completion-retention timer): splice
+      // an old startedAt into the entry object A already cached. This is
+      // exactly what a real stale cache entry looks like once enough time
+      // has actually passed.
+      const staleCached = cache.get(id)!;
+      cache.set(id, {
+        entry: {
+          ...staleCached.entry,
+          startedAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+        },
+        mtimeMs: cachedMtime,
+      });
+
+      // Force the file's mtime back to what A cached: the coarse-mtime
+      // scenario where A's cheap freshness check says "still fresh" and it
+      // would read straight from its (now-stale) cache. The re-read inside
+      // reapStaleRunningLocked is what still catches the completion even
+      // when the mtime check alone could not.
+      utimesSync(store.jobPath(id), new Date(cachedMtime), new Date(cachedMtime));
+
+      const stored = await store.getStoredJob(id);
+      expect(stored?.job.status).toBe("completed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a second read after a reap answers from the cache without re-reading disk", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await store.createJob("campaign-cache-after-reap");
+      const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
+      writeFileSync(
+        store.jobPath(id),
+        JSON.stringify({
+          ...raw,
+          createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+          startedAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+        }),
+        "utf8",
+      );
+      (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
+
+      const first = await store.getStoredJob(id);
+      expect(first?.job.status).toBe("failed");
+
+      // writeJobEntry (fs-job-store.ts) sets memoryCache on every write,
+      // including the reaper's rewrite — so a second read must answer from
+      // that cache alone and never touch disk again.
+      const diskRead = vi.spyOn(
+        store as unknown as { readEntryFromDisk: (id: string) => Promise<unknown> },
+        "readEntryFromDisk",
+      );
+
+      const second = await store.getStoredJob(id);
+      expect(second?.job.status).toBe("failed");
+      expect(second?.job.error).toBe(STALE_RUNNING_MESSAGE);
+      expect(diskRead).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

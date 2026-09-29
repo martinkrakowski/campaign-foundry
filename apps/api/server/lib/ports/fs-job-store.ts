@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -64,6 +65,18 @@ export class FsJobStore implements JobStorePort {
   /** Resolved once at construction; the composition root decides it (D167). */
   private readonly dir: string;
   private readonly lockChains = new Map<string, Promise<unknown>>();
+  /**
+   * Which lock keys the CURRENT async call chain already holds, so
+   * `withJobLock` can tell "this is a nested call from code that is already
+   * inside this key's critical section" (run inline — the queue below is
+   * strictly FIFO per key, so queuing behind ourselves would wait forever)
+   * apart from "this is a separate, genuinely concurrent caller" (queue
+   * normally). Nesting happens both inside this file (e.g. `getStoredJob`
+   * reaping under the id lock while called from `progressJob`, which already
+   * holds it) and from callers outside it that fence a read inside their own
+   * `withJobLock` section (`report.ts`, `decisions.ts` via `retireDecisions`).
+   */
+  private readonly lockContext = new AsyncLocalStorage<ReadonlySet<string>>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly queuedTimers = new Map<string, NodeJS.Timeout>();
   private readonly memoryCache = new Map<string, CacheItem>();
@@ -159,22 +172,27 @@ export class FsJobStore implements JobStorePort {
   }
 
   /**
-   * If the entry is a running job whose startedAt (or createdAt as fallback)
-   * is older than the run deadline plus the grace period, rewrite it as failed
-   * with the stale running message, set settledAt to now, and schedule expireLater.
-   * Returns the (possibly rewritten) entry, or undefined if the entry was
-   * deleted (e.g., a settled job past its TTL).
-   * Must be called under withJobLock for the job id.
+   * Cheap, read-only check: is this a running job whose startedAt (or
+   * createdAt as fallback, for rows written before that field existed) is
+   * older than the run deadline plus the grace period? A plain time
+   * comparison against whatever entry the caller has in hand (cached or
+   * freshly read) — no lock, no disk I/O — so the common case (a running
+   * job well inside its deadline, polled repeatedly while it works) never
+   * pays for either.
    */
-  private async maybeReapStaleRunning(entry: StoredJob): Promise<StoredJob | undefined> {
-    if (entry.job.status !== "running") return entry;
-    const now = Date.now();
-    const threshold = JOB_TTL_MS + STALE_GRACE_MS;
-    // Use startedAt if present (job was transitioned from queued), fall back to createdAt
-    // for rows written before this change.
+  private isStaleRunning(entry: StoredJob): boolean {
+    if (entry.job.status !== "running") return false;
     const startTime = entry.startedAt ?? entry.createdAt;
-    if (now - startTime < threshold) return entry;
-    // Stale running job: rewrite as failed
+    return Date.now() - startTime >= JOB_TTL_MS + STALE_GRACE_MS;
+  }
+
+  /**
+   * Rewrite a running entry as failed with the stale running message, set
+   * settledAt to now, and schedule expireLater. Callers must have already
+   * confirmed `isStaleRunning(entry)` on a freshly read copy — see
+   * `reapStaleRunningLocked`, the only caller.
+   */
+  private async reapStaleRunning(entry: StoredJob): Promise<StoredJob> {
     const updated: StoredJob = {
       ...entry,
       job: {
@@ -184,11 +202,63 @@ export class FsJobStore implements JobStorePort {
         log: null,
         error: STALE_RUNNING_MESSAGE,
       },
-      settledAt: now,
+      settledAt: Date.now(),
     };
     await this.writeJobEntry(updated);
     this.expireLater(entry.id);
     return updated;
+  }
+
+  /**
+   * Called once `isStaleRunning` says a cached or just-read entry looks past
+   * its deadline. Takes the id's lock and RE-READS the file fresh before
+   * deciding anything: between that earlier look and this call actually
+   * running, another id-locked write on this instance (completeJob, failJob,
+   * a heartbeat) — or the very call chain that is already holding this id's
+   * lock when it reads through here — could have settled the job. Reaps only
+   * if the freshest copy on disk is STILL running and STILL stale; otherwise
+   * returns that freshest copy untouched, so a job someone else finished in
+   * the meantime is never overwritten as crashed.
+   *
+   * `withJobLock` is reentrant for a lock the current call chain already
+   * holds (see its doc), so this is safe to call whether or not the caller
+   * already holds `id`'s lock.
+   */
+  private async reapStaleRunningLocked(id: string): Promise<StoredJob | undefined> {
+    return this.withJobLock(id, async () => {
+      const fresh = await this.readEntryFromDisk(id);
+      if (fresh === undefined) return undefined;
+      if (!this.isStaleRunning(fresh)) {
+        const freshStat = await stat(this.jobPath(id)).catch(() => undefined);
+        if (freshStat) this.memoryCache.set(id, { entry: fresh, mtimeMs: freshStat.mtimeMs });
+        return fresh;
+      }
+      return this.reapStaleRunning(fresh);
+    });
+  }
+
+  /**
+   * Raw disk read for `id`: undefined if the file is gone (cache is cleared
+   * to match) or unparsable (the corrupt file is deleted, same handling as
+   * the cold-read path in `getStoredJob`).
+   */
+  private async readEntryFromDisk(id: string): Promise<StoredJob | undefined> {
+    let raw: string;
+    try {
+      raw = await readFile(this.jobPath(id), "utf8");
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) {
+        this.memoryCache.delete(id);
+        return undefined;
+      }
+      throw error;
+    }
+    try {
+      return JSON.parse(raw) as StoredJob;
+    } catch {
+      await this.deleteJob(id);
+      return undefined;
+    }
   }
 
   async getStoredJob(id: string): Promise<StoredJob | undefined> {
@@ -231,9 +301,13 @@ export class FsJobStore implements JobStorePort {
         this.expireLater(id);
         return updated;
       }
-      // Check for stale running job (cached)
-      const reaped = await this.maybeReapStaleRunning(cached.entry);
-      if (reaped !== cached.entry) return reaped;
+      // Check for stale running job (cached). A cheap time comparison first
+      // — only when it looks stale do we pay for the lock and a fresh
+      // re-read (reapStaleRunningLocked), so a running job well inside its
+      // deadline never touches either on a normal poll.
+      if (this.isStaleRunning(cached.entry)) {
+        return this.reapStaleRunningLocked(id);
+      }
       return cached.entry;
     }
 
@@ -274,9 +348,13 @@ export class FsJobStore implements JobStorePort {
       this.expireLater(id);
       return updated;
     }
-    // Check for stale running job (disk read)
-    const reaped = await this.maybeReapStaleRunning(entry);
-    if (reaped !== entry) return reaped;
+    // Check for stale running job (disk read). Same cheap-check-first shape
+    // as the cached branch above; reapStaleRunningLocked re-reads the file
+    // again under the lock rather than trusting this `entry`, in case a
+    // concurrent id-locked write landed between this read and the lock.
+    if (this.isStaleRunning(entry)) {
+      return this.reapStaleRunningLocked(id);
+    }
     this.memoryCache.set(id, { entry, mtimeMs: st.mtimeMs });
     return entry;
   }
@@ -504,8 +582,18 @@ export class FsJobStore implements JobStorePort {
   }
 
   withJobLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const held = this.lockContext.getStore();
+    if (held?.has(key)) {
+      // Reentrant: the caller is already running inside this key's critical
+      // section (see the `lockContext` field doc). Run inline — we are
+      // already serialized against every other user of this key.
+      return fn();
+    }
+    const nextContext = new Set(held ?? []);
+    nextContext.add(key);
+    const runInContext = () => this.lockContext.run(nextContext, fn);
     const previous = this.lockChains.get(key) ?? Promise.resolve();
-    const run = previous.then(fn, fn);
+    const run = previous.then(runInContext, runInContext);
     const settled = run.then(
       () => undefined,
       () => undefined,
