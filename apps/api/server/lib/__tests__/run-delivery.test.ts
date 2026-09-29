@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler } from "h3";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { resetProjectRoot } from "@campaignfoundry/shared";
 import { LOCAL_TENANT } from "../tenant.js";
 import { createJob, enqueueJob, getJob, getRunningJobId, resetJobs } from "../jobs.js";
+import { getBriefStore } from "../ports/index.js";
 import { InProcessRunDelivery } from "../ports/in-process-run-delivery.js";
 import {
   getRunDelivery,
@@ -65,10 +67,16 @@ async function awaitSettled(jobId: string): Promise<void> {
 describe("RunRequest serialisation and delivery (PT-6b1, D171, D174d)", () => {
   let dir: string;
   const origOut = process.env.OUTPUT_DIR;
+  const origRoot = process.env.PROJECT_ROOT;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "cf-deliv-"));
     process.env.OUTPUT_DIR = dir;
+    // PT-5c2: generate now requires a known campaign — isolate PROJECT_ROOT
+    // (never the ambient one) and mint "camp-deliv" every test here sends.
+    process.env.PROJECT_ROOT = dir;
+    resetProjectRoot();
+    await getBriefStore(LOCAL_TENANT).createCampaign("camp-deliv");
     setCapabilities({ motion: true });
     resetRunDelivery();
     runCampaignSpy.mockClear();
@@ -80,6 +88,9 @@ describe("RunRequest serialisation and delivery (PT-6b1, D171, D174d)", () => {
     rmSync(dir, { recursive: true, force: true });
     if (origOut === undefined) delete process.env.OUTPUT_DIR;
     else process.env.OUTPUT_DIR = origOut;
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+    resetProjectRoot();
     setCapabilities({ motion: false, reason: "not probed" });
   });
 

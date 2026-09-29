@@ -3,7 +3,10 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
+import { resetProjectRoot } from "@campaignfoundry/shared";
 import { setCapabilities } from "../../../lib/capabilities.js";
+import { getBriefStore } from "../../../lib/ports/index.js";
+import { LOCAL_TENANT } from "../../../lib/tenant.js";
 import planHandler from "../plan.post.js";
 
 const web = (handler: EventHandler) => {
@@ -50,8 +53,28 @@ const variationBrief = (over: Record<string, unknown> = {}) => ({
 describe("POST /campaigns/plan", () => {
   // Tests simulate a post-boot server: the probe has landed (the boot-window race
   // itself is covered in capability-race.test.ts).
-  beforeEach(() => setCapabilities({ motion: true }));
-  afterEach(() => setCapabilities({ motion: false, reason: "not probed" }));
+  //
+  // PT-5c2: plan now requires a known campaign (campaignMeta), so each test
+  // needs its own isolated root with "camp" minted — never the process's
+  // ambient PROJECT_ROOT (memoized, and shared with whatever else runs in
+  // this worker).
+  let dir: string;
+  const origRoot = process.env.PROJECT_ROOT;
+
+  beforeEach(async () => {
+    setCapabilities({ motion: true });
+    dir = mkdtempSync(join(tmpdir(), "cf-plan-known-"));
+    process.env.PROJECT_ROOT = dir;
+    resetProjectRoot();
+    await getBriefStore(LOCAL_TENANT).createCampaign("camp");
+  });
+  afterEach(() => {
+    setCapabilities({ motion: false, reason: "not probed" });
+    rmSync(dir, { recursive: true, force: true });
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+    resetProjectRoot();
+  });
 
   test("motion slots carry motion + durationSec; static slots do not; estimate carries frames", async () => {
     setCapabilities({ motion: true });
@@ -289,6 +312,20 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
   const freshHandler = async (entries: unknown[] | undefined) => {
     dir = mkdtempSync(join(tmpdir(), "cf-plan-pool-"));
     process.env.PROJECT_ROOT = dir;
+    vi.resetModules();
+    // The fresh module registry starts in the boot window ("not probed"); settle it
+    // so these post-boot tests do not wait out the probe.
+    const capabilities = await import("../../../lib/capabilities.js");
+    capabilities.setCapabilities({ motion: true });
+    // PT-5c2: plan requires a known campaign — mint "camp" in the SAME fresh
+    // module registry `vi.resetModules()` just built (a static import at this
+    // file's top would hold the store's OLD registry, a different `Map`).
+    // Minted BEFORE the pool file below: `createCampaign`'s own `mkdir` (no
+    // `{ recursive: true }`) would EEXIST against a "briefs/camp/" the pool
+    // write had already created.
+    const ports = await import("../../../lib/ports/index.js");
+    const tenant = await import("../../../lib/tenant.js");
+    await ports.getBriefStore(tenant.LOCAL_TENANT).createCampaign("camp");
     if (entries !== undefined) {
       mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
       writeFileSync(
@@ -301,11 +338,6 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
         }),
       );
     }
-    vi.resetModules();
-    // The fresh module registry starts in the boot window ("not probed"); settle it
-    // so these post-boot tests do not wait out the probe.
-    const capabilities = await import("../../../lib/capabilities.js");
-    capabilities.setCapabilities({ motion: true });
     return web((await import("../plan.post.js")).default as EventHandler);
   };
 
@@ -350,6 +382,13 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
   test("returns 422 when the pool's briefId does not match its directory", async () => {
     dir = mkdtempSync(join(tmpdir(), "cf-plan-pool-mismatch-"));
     process.env.PROJECT_ROOT = dir;
+    vi.resetModules();
+    const capabilities = await import("../../../lib/capabilities.js");
+    capabilities.setCapabilities({ motion: true });
+    // Minted BEFORE the pool file below — see `freshHandler`'s own comment.
+    const ports = await import("../../../lib/ports/index.js");
+    const tenant = await import("../../../lib/tenant.js");
+    await ports.getBriefStore(tenant.LOCAL_TENANT).createCampaign("camp");
     mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
     writeFileSync(
       join(dir, "briefs", "camp", "pools.json"),
@@ -360,9 +399,6 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
         entries: [{ id: "h1", text: "Stay wild", status: "approved" }],
       }),
     );
-    vi.resetModules();
-    const capabilities = await import("../../../lib/capabilities.js");
-    capabilities.setCapabilities({ motion: true });
     const handler = web((await import("../plan.post.js")).default as EventHandler);
     const res = await post(handler, pooledBrief());
     expect(res.status).toBe(422);
@@ -456,7 +492,7 @@ describe("POST /campaigns/plan with headline: pool://copy", () => {
       new Request("http://x/campaigns/briefs/src/duplicate", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ newId: "dup-camp" }),
+        body: JSON.stringify({ name: "dup-camp" }),
       }),
     );
     expect(dupRes.status).toBe(201);

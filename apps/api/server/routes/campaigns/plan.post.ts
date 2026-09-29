@@ -19,6 +19,14 @@ import { requestTenant } from "../../lib/tenant.js";
  * A run arriving before the boot capability probe settles waits for it (bounded by
  * the probe's own timeout); if the probe still has not landed the answer is 503 with
  * a retry hint — never a 400 that reads as an invalid brief.
+ *
+ * PT-5c2: the brief's campaign must be known — `campaignMeta(brief.id)` defined,
+ * on both backends (unlike `campaignVisibility`/`resolveCampaign`, which miss a
+ * versionless campaign on fs) — else 404, hidden and missing answering the
+ * identical body. This route no longer special-cases a hidden campaign's pool
+ * alone: since every editor session opens an already-minted campaign
+ * (PT-5c1), the whole route is now gated the same way `generate` and
+ * `preview-frame` are.
  */
 export default defineEventHandler(async (event) => {
   const capabilities = await waitForCapabilities();
@@ -42,9 +50,12 @@ export default defineEventHandler(async (event) => {
 
   const scope = requestTenant(event);
   const briefs = getBriefStore(scope);
-  const hidePool = briefs.supportsTeams && (await briefs.campaignVisibility(brief.id)) === "hidden";
+  if ((await briefs.campaignMeta(brief.id)) === undefined) {
+    setResponseStatus(event, 404);
+    return { error: `Campaign "${brief.id}" not found.` };
+  }
 
-  const input = await planInputFor(scope, brief, { hidePool });
+  const input = await planInputFor(scope, brief);
   if (!input.success) {
     setResponseStatus(event, 422);
     return { error: input.error.message };

@@ -28,6 +28,7 @@ import {
   ratioDisplayName,
   unitDisplayName,
 } from "@/components/campaign/display-names";
+import { templatePreviewBlocked, templatePreviewReady } from "@/components/campaign/messages";
 
 /**
  * One layer kind's band in the miniature. A Record over the whole vocabulary,
@@ -137,7 +138,7 @@ const PREVIEW_TONE = "bold";
  */
 export function TemplateLibrary() {
   const { templateLibraryOpen, closeTemplateLibrary } = useCreateCampaign();
-  const { brief, setBrief } = useRun();
+  const { brief, briefApplied, setBrief } = useRun();
   const [entries, setEntries] = useState<CreativeTemplate[] | null>(null);
   const [error, setError] = useState(false);
   /**
@@ -288,8 +289,8 @@ export function TemplateLibrary() {
    * supply one.
    */
   const renderPreview = () => {
-    /* istanbul ignore next -- unreachable: the verb is `disabled` unless both are present, and a disabled button dispatches no click. Disabled and not absent is deliberate here: a campaign without a product is a precondition the operator CAN fix, which DESIGN.md §5 answers with a disabled control and the reason beside it. */
-    if (pinnable === null || product === undefined) return;
+    /* istanbul ignore next -- unreachable: the verb is `disabled` unless all three are present, and a disabled button dispatches no click. Disabled and not absent is deliberate here: a campaign without a product (or with none open at all, PT-5c2) is a precondition the operator CAN fix, which DESIGN.md §5 answers with a disabled control and the reason beside it. */
+    if (pinnable === null || product === undefined || !briefApplied) return;
     // Supersede any earlier request before issuing this one: a second press
     // must not leave two composites racing to paint the same box.
     renderAbort.current?.abort();
@@ -471,7 +472,7 @@ export function TemplateLibrary() {
           versions={versionsOf(entries as CreativeTemplate[], shown.id)}
           briefs={briefs}
           pinned={pinnable}
-          canRender={pinnable !== null && product !== undefined}
+          canRender={pinnable !== null && product !== undefined && briefApplied}
           frame={frame}
           rendering={rendering}
           renderFailed={renderFailed}
@@ -585,9 +586,7 @@ function TemplateDetail({
                 </Button>
                 {/* T-D4, said out loud: the cost is the operator's to spend. */}
                 <p className="text-center text-[10px] text-text-muted">
-                  {canRender
-                    ? "Nothing happens until you ask — a preview builds the real creative."
-                    : "A preview needs a campaign with a product open, and a template that campaign can use."}
+                  {canRender ? templatePreviewReady : templatePreviewBlocked}
                 </p>
                 {renderFailed ? (
                   <p className="text-center text-[11px] text-error">Could not render a preview.</p>

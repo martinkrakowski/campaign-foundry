@@ -48,6 +48,18 @@ describe("CommandBar — states", () => {
 
   test("shows the error status when a run fails", async () => {
     const user = userEvent.setup();
+    // PT-5c2: Execute only answers a press once a campaign is applied.
+    localStorage.setItem(
+      "cf:brief",
+      JSON.stringify({
+        id: "seed",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "Hi",
+        template: storedTemplate,
+        products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+      }),
+    );
     mockPipelineApi({ post: () => new Response("boom", { status: 500 }) });
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
     await user.click(screen.getByText(/Execute/));

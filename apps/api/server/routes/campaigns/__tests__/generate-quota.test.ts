@@ -3,10 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler } from "h3";
-import { err } from "@campaignfoundry/shared";
+import { err, resetProjectRoot } from "@campaignfoundry/shared";
 import { getRunningJobId, resetJobs } from "../../../lib/jobs.js";
 import { setCapabilities } from "../../../lib/capabilities.js";
 import {
+  getBriefStore,
   resetProviderKeyStore,
   resetUsageStore,
   setProviderKeyStore,
@@ -102,9 +103,16 @@ describe("POST /campaigns/generate — admission is gated on the org's monthly q
     throw new Error(`timed out waiting for job ${jobId} to settle`);
   }
 
-  beforeEach(() => {
+  const origRoot = process.env.PROJECT_ROOT;
+
+  beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "cf-generate-quota-"));
     process.env.OUTPUT_DIR = dir;
+    // PT-5c2: generate now requires a known campaign — isolate PROJECT_ROOT
+    // (never the ambient one) and mint "camp" every test here sends.
+    process.env.PROJECT_ROOT = dir;
+    resetProjectRoot();
+    await getBriefStore(LOCAL_TENANT).createCampaign("camp");
     setCapabilities({ motion: true });
     runCampaignSpy.mockClear();
   });
@@ -115,6 +123,9 @@ describe("POST /campaigns/generate — admission is gated on the org's monthly q
     rmSync(dir, { recursive: true, force: true });
     if (origOut === undefined) delete process.env.OUTPUT_DIR;
     else process.env.OUTPUT_DIR = origOut;
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+    resetProjectRoot();
     setCapabilities({ motion: false, reason: "not probed" });
   });
 

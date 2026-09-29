@@ -11,8 +11,12 @@ import { requestTenant } from "../../lib/tenant.js";
  * POST /campaigns/briefs — persist a campaign brief.
  *
  * Body is a brief (same validator as generate). Lookup is by `brief.id`, not
- * filename: 409 if any briefs/ file already has that id, unless `?replace=1`
- * (repeated `replace` still counts; the first value wins). Replace rewrites that
+ * filename. The target campaign must already be KNOWN (PT-5c2: `POST /campaigns`
+ * is the only path that mints one now) — a hidden and a missing target answer
+ * the identical 404, and nothing is written for either. A known target already
+ * carrying a version 409s unless `?replace=1` (repeated `replace` still counts;
+ * the first value wins); a KNOWN but versionless target (a blank `POST /campaigns`
+ * create) accepts this write as its first Save either way. Replace rewrites that
  * same file in its own format. Creates use exclusive `wx` writes under
  * `projectRoot()/briefs/`.
  *
@@ -38,10 +42,10 @@ import { requestTenant } from "../../lib/tenant.js";
  * runs, so naming a campaign hidden by team 404s instead of exfiltrating its
  * assets into the new one.
  *
- * D166 item 3: the target id's own visibility is checked with
- * `campaignVisibility`, before any copy or write, rather than relying on
- * `createBrief`'s eventual EEXIST — an existing-but-hidden target must never
- * have its asset directory written into ahead of that conflict.
+ * D166 item 3 / PT-5c2: the target id's own state is checked with
+ * `campaignMeta`, before any copy or write, rather than relying on
+ * `createBrief`'s eventual EEXIST — an unknown or existing-but-hidden target
+ * must never have its asset directory written into ahead of that refusal.
  */
 export default defineEventHandler(async (event) => {
   const scope = requestTenant(event);
@@ -89,30 +93,30 @@ export default defineEventHandler(async (event) => {
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
   try {
     const stored = await store.withBriefLock(brief.id, async () => {
-      // D166 item 3: the target's visibility is checked (and, when it is
-      // hidden or already visible-and-not-replacing, refused) BEFORE any
-      // asset copy or write below — never after, which would let a copy land
-      // in a hidden campaign's asset directory ahead of the eventual EEXIST.
+      // PT-5c2: `POST /campaigns/briefs` no longer creates a campaign that
+      // does not exist — Create is `POST /campaigns` now, so the target must
+      // be KNOWN (`campaignMeta` defined, on both backends) before any asset
+      // copy or write below runs, never after, which would let a copy land
+      // ahead of the eventual refusal. `campaignMeta` answers undefined for
+      // absent AND hidden alike (PT-2d), so both answer the SAME 404 here —
+      // the old hidden-target 409 (D166 item 3, EEXIST) retires with it: a
+      // hidden campaign is no longer distinguishable from a missing one at
+      // this route.
       //
       // D177 (PT-5b2): a `POST /campaigns` blank create leaves a campaign row
-      // with no version yet — `campaignVisibility` still answers "visible"
-      // for it (unchanged: `resolveCampaign` and this method are the two
-      // that see a versionless row, unlike the version-joined reads), so
-      // "visible" alone can no longer mean "taken" here. `getRevision`
-      // (undefined for a versionless row on both backends — the fs one has
-      // no file at all, only a reserved directory) tells the two apart: this
-      // Save is that row's first, not a collision, and `store.createBrief`
-      // below now knows to add version 1 to it instead of refusing.
-      const targetVisibility = await store.campaignVisibility(brief.id);
-      const hasVersion =
-        targetVisibility === "visible" ? (await store.getRevision(brief.id)) !== undefined : false;
-      if (targetVisibility === "hidden" || (hasVersion && !replace)) {
+      // with no version yet — `campaignMeta` still answers it (unlike
+      // `campaignVisibility`/`resolveCampaign`, which miss a versionless row
+      // on fs), so `hasVersion` is what tells "this Save is that row's
+      // first" (not a collision, `store.createBrief` below adds version 1 to
+      // it) apart from "already taken" (refused unless `?replace=1`).
+      const meta = await store.campaignMeta(brief.id);
+      if (!meta) {
+        throw new CampaignNotFoundError(brief.id);
+      }
+      if (meta.hasVersion && !replace) {
         const existErr = new Error(`Brief "${brief.id}" already exists.`);
         (existErr as { code?: string }).code = "EEXIST";
         throw existErr;
-      }
-      if (targetVisibility === "absent" && isReservedCampaignId(brief.id)) {
-        throw new Error(`"${brief.id}" is reserved; choose another campaign id.`);
       }
 
       // Copy any brief-scoped assets and rewrite paths only after validation succeeds (Save as…)
@@ -181,10 +185,6 @@ export default defineEventHandler(async (event) => {
     }
     if (isErrno(error, "EFORBIDDEN")) {
       setResponseStatus(event, 403);
-      return { error: errorMessage(error) };
-    }
-    if (errorMessage(error).includes("is reserved")) {
-      setResponseStatus(event, 400);
       return { error: errorMessage(error) };
     }
     throw error;

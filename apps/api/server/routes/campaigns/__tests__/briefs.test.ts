@@ -174,6 +174,11 @@ describe("GET /campaigns/briefs", () => {
         { method: "get", path: "/campaigns/briefs", handler: listHandler },
       ]);
 
+      // PT-5c2: briefs.post.ts no longer mints a campaign that does not
+      // exist — mint it first, as a real `POST /campaigns` would.
+      const { getBriefStore } = await import("../../../lib/ports/index.js");
+      await getBriefStore(LOCAL_TENANT).createCampaign("camp-pg");
+
       await call(jsonReq("http://x/campaigns/briefs", "POST", brief({ id: "camp-pg" })));
       const res = await call(new Request("http://x/campaigns/briefs"));
       expect(res.status).toBe(200);
@@ -212,10 +217,47 @@ describe("authoring briefs", () => {
 
   const api = async () => {
     const h = await handlersFor(dir);
+    const createHandler = mount([{ method: "post", path: "/campaigns/briefs", handler: h.create }]);
+    // The SAME fresh module registry `handlersFor` just built (`vi.resetModules()`)
+    // — a static top-of-file import of the store would be a different `Map`.
+    const ports = await import("../../../lib/ports/index.js");
+    const { LOCAL_TENANT: tenant } = await import("../../../lib/tenant.js");
+    /**
+     * A real `POST /campaigns` blank-created (versionless) reservation —
+     * `campaign.json` meta file included (PT-5b3) — for a fixture that needs
+     * one under this exact fresh registry. Best-effort: an EEXIST means an
+     * earlier step in this test already reserved or saved it.
+     */
+    const mint = (id: string) =>
+      ports
+        .getBriefStore(tenant)
+        .createCampaign(id)
+        .catch(() => undefined);
+    /**
+     * PT-5c2: `POST /campaigns/briefs` no longer mints a campaign that does
+     * not exist — Create is `POST /campaigns` now. This suite still authors
+     * its fixtures with one POST straight to `/campaigns/briefs` (Save's own
+     * behaviour is what it means to pin, not the create flow, which
+     * `create.test.ts` owns), so the wrapper mints the body's `id` first —
+     * best-effort, same as `mint` above: any other failure (a reserved id, an
+     * unsafe one) is left for the real handler to answer on its own terms.
+     * `req` is cloned to read `id` without consuming the body the real
+     * handler still needs to parse.
+     */
+    const create = async (req: Request): Promise<Response> => {
+      try {
+        const body = (await req.clone().json()) as { id?: unknown };
+        if (typeof body.id === "string") await mint(body.id);
+      } catch {
+        // Not JSON, or no string id — the real handler answers its own 400.
+      }
+      return createHandler(req);
+    };
     return {
       h,
+      mint,
       list: () => mount([{ method: "get", path: "/campaigns/briefs", handler: h.list }]),
-      create: () => mount([{ method: "post", path: "/campaigns/briefs", handler: h.create }]),
+      create: () => create,
       update: () => mount([{ method: "put", path: "/campaigns/briefs/:id", handler: h.update }]),
       duplicate: () =>
         mount([{ method: "post", path: "/campaigns/briefs/:id/duplicate", handler: h.duplicate }]),
@@ -318,8 +360,8 @@ describe("authoring briefs", () => {
   // `briefs/camp/` directory, not a file — the first Save's own `camp.yaml`
   // write is a different filesystem entry the directory never blocks.
   test("POST without replace succeeds as the first Save onto a reserved (blank-created) slug", async () => {
-    mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
-    const { create, list } = await api();
+    const { create, list, mint } = await api();
+    await mint("camp");
     const res = await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     expect(res.status).toBe(201);
     expect(await res.json()).toMatchObject({ file: "camp.yaml", brief: brief() });
@@ -349,8 +391,8 @@ describe("authoring briefs", () => {
   });
 
   test("POST ?replace=1 against a blank-created (versionless) campaign adds version 1, never 500s", async () => {
-    mkdirSync(join(dir, "briefs", "camp"), { recursive: true });
-    const { create } = await api();
+    const { create, mint } = await api();
+    await mint("camp");
     const res = await create()(jsonReq("http://x/campaigns/briefs?replace=1", "POST", brief()));
     expect(res.status).toBe(201);
     expect(existsSync(campYaml())).toBe(true);
@@ -446,13 +488,20 @@ describe("authoring briefs", () => {
     expect(["Hi", "Other"]).toContain(onDisk.campaignMessage);
   });
 
-  test("POST 409 on a pre-existing unparseable file does not overwrite it", async () => {
+  // PT-5c2: `campaignMeta`'s `hasVersion` matches by id, which — like
+  // `listBriefs` — skips a file that fails to parse; there is no
+  // "briefs/camp/" reservation directory either (this file predates
+  // `POST /campaigns`, D179), so `campaignMeta("camp")` answers unknown and
+  // the route 404s before ever touching the file — never the old 409 an OS
+  // `wx` EEXIST used to surface. The safety property this test pins
+  // (untouched bytes) still holds: a 404 writes nothing, same as a 409 did.
+  test("POST 404s on a pre-existing unparseable file never known to campaignMeta, and does not touch it", async () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     const original = "not-valid-yaml: [";
     writeFileSync(campYaml(), original);
     const { create } = await api();
     const res = await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(404);
     expect(readFileSync(campYaml(), "utf8")).toBe(original);
   });
 
@@ -846,7 +895,7 @@ describe("authoring briefs", () => {
     const { create, duplicate } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     const res = await duplicate()(
-      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "camp-copy" }),
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "camp-copy" }),
     );
     expect(res.status).toBe(201);
     const json = (await res.json()) as { file: string; brief: { id: string; products: unknown[] } };
@@ -868,23 +917,11 @@ describe("authoring briefs", () => {
     expect(json.brief.id).toBe("my-copy");
   });
 
-  test("duplicate with neither newId nor name answers 400", async () => {
+  test("duplicate with no name answers 400", async () => {
     const { create, duplicate } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     const res = await duplicate()(
       jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { overrides: {} }),
-    );
-    expect(res.status).toBe(400);
-  });
-
-  test("duplicate with both newId and name answers 400", async () => {
-    const { create, duplicate } = await api();
-    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
-    const res = await duplicate()(
-      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", {
-        newId: "camp-copy",
-        name: "Camp Copy",
-      }),
     );
     expect(res.status).toBe(400);
   });
@@ -933,7 +970,7 @@ describe("authoring briefs", () => {
     writeFileSync(yamlPath("camp.json"), JSON.stringify(brief()));
     const { duplicate } = await api();
     const res = await duplicate()(
-      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "from-json" }),
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "from-json" }),
     );
     expect(res.status).toBe(201);
     expect(((await res.json()) as { file: string }).file).toBe("from-json.yaml");
@@ -944,7 +981,7 @@ describe("authoring briefs", () => {
     writeFileSync(yamlPath("sample-campaign.yaml"), validBrief.replace("id: good", "id: camp"));
     const { duplicate } = await api();
     const res = await duplicate()(
-      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "from-sample" }),
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "from-sample" }),
     );
     expect(res.status).toBe(201);
     expect(((await res.json()) as { file: string }).file).toBe("from-sample.yaml");
@@ -953,7 +990,7 @@ describe("authoring briefs", () => {
   test("duplicate returns 404 when the source is missing", async () => {
     const { duplicate } = await api();
     const res = await duplicate()(
-      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy" }),
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "copy" }),
     );
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: 'Brief "camp" not found.' });
@@ -967,7 +1004,7 @@ describe("authoring briefs", () => {
     try {
       const { duplicate } = await api();
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy" }),
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "copy" }),
       );
       expect(res.status).toBe(500);
     } finally {
@@ -981,41 +1018,43 @@ describe("authoring briefs", () => {
     const original = readFileSync(campYaml());
     const { duplicate } = await api();
     const res = await duplicate()(
-      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy" }),
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "copy" }),
     );
     expect(res.status).toBe(404);
     expect(readFileSync(campYaml())).toEqual(original);
     expect(existsSync(yamlPath("copy.yaml"))).toBe(false);
   });
 
-  test("duplicate returns 409 when any file already has newId", async () => {
+  test("duplicate by name dedupes past a pre-existing brief at the candidate slug", async () => {
     const { create, duplicate } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief({ id: "copy" })));
     const original = readFileSync(yamlPath("copy.yaml"));
     const res = await duplicate()(
-      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy" }),
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "Copy" }),
     );
-    expect(res.status).toBe(409);
-    expect(await res.json()).toEqual({ error: 'Brief "copy" already exists.' });
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { file: string }).file).toBe("copy-2.yaml");
+    // the pre-existing "copy" brief is untouched
     expect(readFileSync(yamlPath("copy.yaml"))).toEqual(original);
   });
 
-  test("duplicate 409s when newId lives in a differently named file", async () => {
+  test("duplicate by name dedupes past a candidate living in a differently named file", async () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     writeFileSync(yamlPath("sample.yaml"), validBrief.replace("id: good", "id: camp"));
     writeFileSync(yamlPath("other.yaml"), validBrief.replace("id: good", "id: copy"));
     const original = readFileSync(yamlPath("other.yaml"));
     const { duplicate } = await api();
     const res = await duplicate()(
-      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy" }),
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "Copy" }),
     );
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { file: string }).file).toBe("copy-2.yaml");
     expect(readFileSync(yamlPath("other.yaml"))).toEqual(original);
     expect(existsSync(yamlPath("copy.yaml"))).toBe(false);
   });
 
-  test("duplicate 409s without overwriting a pre-existing dest file", async () => {
+  test("duplicate by name dedupes past a pre-existing non-brief file at the candidate slug", async () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     writeFileSync(campYaml(), validBrief.replace("id: good", "id: camp"));
     mkdirSync(yamlPath("camp"), { recursive: true });
@@ -1032,15 +1071,15 @@ describe("authoring briefs", () => {
     writeFileSync(dest, "UNPARSED");
     const { duplicate } = await api();
     const res = await duplicate()(
-      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy" }),
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "Copy" }),
     );
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as { file: string }).file).toBe("copy-2.yaml");
     expect(readFileSync(dest, "utf8")).toBe("UNPARSED");
-    // createBrief is wx; writing the dest pool first left an orphan here
     expect(existsSync(yamlPath("copy", "pools.json"))).toBe(false);
   });
 
-  test("duplicate returns 400 when a symlink sits at briefs/<newId>.yaml", async () => {
+  test("duplicate returns 400 when a symlink sits at the derived-slug destination", async () => {
     mkdirSync(join(dir, "briefs"), { recursive: true });
     writeFileSync(campYaml(), validBrief.replace("id: good", "id: camp"));
     const outside = join(dir, "outside.yaml");
@@ -1048,7 +1087,7 @@ describe("authoring briefs", () => {
     symlinkSync(outside, yamlPath("copy.yaml"));
     const { duplicate } = await api();
     const res = await duplicate()(
-      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy" }),
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "copy" }),
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "Refusing to write through a symlink." });
@@ -1063,7 +1102,7 @@ describe("authoring briefs", () => {
       .spyOn(getBriefStore(LOCAL_TENANT), "createBrief")
       .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
     const res = await duplicate()(
-      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy" }),
+      jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "copy" }),
     );
     expect(res.status).toBe(500);
     expect(existsSync(yamlPath("copy.yaml"))).toBe(false);
@@ -1073,7 +1112,7 @@ describe("authoring briefs", () => {
   test("duplicate rejects an unsafe source id with 400", async () => {
     const { duplicate } = await api();
     const res = await duplicate()(
-      jsonReq("http://x/campaigns/briefs/Bad/duplicate", "POST", { newId: "copy" }),
+      jsonReq("http://x/campaigns/briefs/Bad/duplicate", "POST", { name: "copy" }),
     );
     expect(res.status).toBe(400);
     expect(existsSync(yamlPath("copy.yaml"))).toBe(false);
@@ -1082,9 +1121,8 @@ describe("authoring briefs", () => {
   test.each([
     ["a missing body object", 42],
     ["null", null],
-    ["a missing newId", {}],
-    ["a non-string newId", { newId: 1 }],
-    ["an unsafe newId", { newId: "Not Safe" }],
+    ["a missing name", {}],
+    ["a non-string name", { name: 1 }],
   ])("duplicate rejects %s with 400", async (_label, body) => {
     const { create, duplicate } = await api();
     await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
@@ -1106,7 +1144,7 @@ describe("authoring briefs", () => {
     };
     try {
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy" }),
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "copy" }),
       );
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: "non-error parse failure" });
@@ -1153,7 +1191,7 @@ describe("authoring briefs", () => {
       await create()(jsonReq("http://x/campaigns/briefs", "POST", pooledSource()));
       poolFile("camp");
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "camp-copy" }),
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "camp-copy" }),
       );
       expect(res.status).toBe(201);
       // the copied pool carries the DESTINATION brief id — a byte copy would have
@@ -1176,13 +1214,18 @@ describe("authoring briefs", () => {
       const { create, duplicate } = await api();
       await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "camp-copy" }),
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "camp-copy" }),
       );
       expect(res.status).toBe(201);
       expect(existsSync(yamlPath("camp-copy", "pools.json"))).toBe(false);
     });
 
-    test("duplicate of a brief without a pool removes a leftover dest pool", async () => {
+    // PT-5c2: `createCampaign`'s own `mkdir` (no `{ recursive: true }`) treats
+    // ANY pre-existing "briefs/<slug>/" directory as taken — including a
+    // leftover, orphaned pool with no campaign ever reserved behind it — so
+    // the derived-name path dedupes past it exactly as it would a real
+    // campaign, rather than writing (or deleting a stale pool) into it.
+    test("duplicate by name dedupes past a leftover dest directory, never touching what is in it", async () => {
       const { create, duplicate } = await api();
       await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
       mkdirSync(yamlPath("camp-copy"), { recursive: true });
@@ -1196,10 +1239,13 @@ describe("authoring briefs", () => {
         }),
       );
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "camp-copy" }),
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "camp-copy" }),
       );
       expect(res.status).toBe(201);
-      expect(existsSync(yamlPath("camp-copy", "pools.json"))).toBe(false);
+      expect(((await res.json()) as { file: string }).file).toBe("camp-copy-2.yaml");
+      // The leftover directory and its stale pool are untouched.
+      expect(existsSync(yamlPath("camp-copy", "pools.json"))).toBe(true);
+      expect(existsSync(yamlPath("camp-copy-2", "pools.json"))).toBe(false);
     });
 
     test("duplicate of a brief whose source pool is malformed answers 422", async () => {
@@ -1208,7 +1254,7 @@ describe("authoring briefs", () => {
       mkdirSync(yamlPath("camp"), { recursive: true });
       writeFileSync(yamlPath("camp", "pools.json"), "{not-json");
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "dest" }),
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "dest" }),
       );
       expect(res.status).toBe(422);
       expect(((await res.json()) as { error: string }).error).toMatch(
@@ -1238,7 +1284,7 @@ describe("authoring briefs", () => {
       await create()(jsonReq("http://x/campaigns/briefs", "POST", pooledSource()));
       poolFile("camp", "other");
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "dest" }),
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "dest" }),
       );
       expect(res.status).toBe(422);
       expect(await res.json()).toEqual({
@@ -1255,7 +1301,7 @@ describe("authoring briefs", () => {
       await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
       const res = await duplicate()(
         jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", {
-          newId: "tuned",
+          name: "tuned",
           overrides: { targetRegion: "FR", targetAudience: "paris" },
         }),
       );
@@ -1276,7 +1322,7 @@ describe("authoring briefs", () => {
       await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
       const res = await duplicate()(
         jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", {
-          newId: "copied",
+          name: "copied",
           overrides: null,
         }),
       );
@@ -1293,7 +1339,7 @@ describe("authoring briefs", () => {
       const { create, duplicate } = await api();
       await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy", overrides }),
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "copy", overrides }),
       );
       expect(res.status).toBe(400);
       expect(existsSync(yamlPath("copy.yaml"))).toBe(false);
@@ -1308,7 +1354,7 @@ describe("authoring briefs", () => {
       await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
       const res = await duplicate()(
         jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", {
-          newId: "copy",
+          name: "copy",
           overrides: { mode: "variation" },
         }),
       );
@@ -1330,7 +1376,7 @@ describe("authoring briefs", () => {
       const original = readFileSync(campYaml());
       const res = await duplicate()(
         jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", {
-          newId: "tuned",
+          name: "tuned",
           overrides: over,
         }),
       );
@@ -1342,7 +1388,7 @@ describe("authoring briefs", () => {
       expect(readFileSync(campYaml())).toEqual(original);
     });
 
-    test("duplicate refuses a symlinked briefs/<newId> directory with 400", async () => {
+    test("duplicate refuses a symlinked briefs/<derived-slug> directory with 400", async () => {
       const { create, duplicate } = await api();
       await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
       poolFile("camp");
@@ -1350,7 +1396,7 @@ describe("authoring briefs", () => {
       mkdirSync(elsewhere, { recursive: true });
       symlinkSync(elsewhere, join(dir, "briefs", "copy"));
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "copy" }),
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "copy" }),
       );
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: "Refusing to write through a symlink." });
@@ -1370,7 +1416,7 @@ describe("authoring briefs", () => {
         .spyOn(getBriefStore(LOCAL_TENANT), "createBrief")
         .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId: "camp-fail" }),
+        jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: "camp-fail" }),
       );
       spy.mockRestore();
       expect(res.status).toBe(500);
@@ -1640,7 +1686,7 @@ describe("authoring briefs", () => {
       await create()(jsonReq("http://x/campaigns/briefs", "POST", initialBrief));
 
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/dup-src/duplicate", "POST", { newId: "dup-dest" }),
+        jsonReq("http://x/campaigns/briefs/dup-src/duplicate", "POST", { name: "dup-dest" }),
       );
       expect(res.status).toBe(201);
 
@@ -1683,7 +1729,7 @@ describe("authoring briefs", () => {
       mkdirSync(join(dir, "briefs"), { recursive: true });
       writeFileSync(yamlPath("source-camp.yaml"), dumpBrief(initialBrief));
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/source-camp/duplicate", "POST", { newId: "dest-camp" }),
+        jsonReq("http://x/campaigns/briefs/source-camp/duplicate", "POST", { name: "dest-camp" }),
       );
       expect(res.status).toBe(201);
       expect(readFileSync(join(assetsDir, "dest-camp", "extra.png"), "utf8")).toBe(
@@ -1712,7 +1758,7 @@ describe("authoring briefs", () => {
 
       await create()(jsonReq("http://x/campaigns/briefs", "POST", initialBrief));
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/unref-src/duplicate", "POST", { newId: "unref-dest" }),
+        jsonReq("http://x/campaigns/briefs/unref-src/duplicate", "POST", { name: "unref-dest" }),
       );
       expect(res.status).toBe(201);
       // unreferenced asset in source bin is copied because duplicate operates on the source brief ID
@@ -1773,25 +1819,28 @@ describe("authoring briefs", () => {
       );
     });
 
-    test("rejected duplicate (409 duplicate id) does not copy assets into target", async () => {
+    test("a rejected duplicate write leaves no assets in the target it minted", async () => {
       const { create, duplicate } = await api();
       const assetsDir = join(dir, "assets", "inputs");
       mkdirSync(join(assetsDir, "dup-existing-src"), { recursive: true });
       writeFileSync(join(assetsDir, "dup-existing-src", "new-asset.png"), "NEW-ASSET-DATA");
 
       const initial1 = brief({ id: "dup-existing-src" });
-      const initial2 = brief({ id: "dup-existing-dest" });
       await create()(jsonReq("http://x/campaigns/briefs", "POST", initial1));
-      await create()(jsonReq("http://x/campaigns/briefs", "POST", initial2));
 
+      const { getBriefStore } = await import("../../../lib/ports/index.js");
+      const spy = vi
+        .spyOn(getBriefStore(LOCAL_TENANT), "createBrief")
+        .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
       const res = await duplicate()(
         jsonReq("http://x/campaigns/briefs/dup-existing-src/duplicate", "POST", {
-          newId: "dup-existing-dest",
+          name: "dup-existing-dest",
         }),
       );
-      expect(res.status).toBe(409);
+      spy.mockRestore();
+      expect(res.status).toBe(500);
 
-      // Target must NOT have received new-asset.png
+      // The reservation's own cleanup removes whatever was copied in before the failure.
       expect(existsSync(join(assetsDir, "dup-existing-dest", "new-asset.png"))).toBe(false);
     });
 
@@ -1859,7 +1908,7 @@ describe("authoring briefs", () => {
       await create()(jsonReq("http://x/campaigns/briefs", "POST", nestedBrief));
 
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/nested-src/duplicate", "POST", { newId: "nested-dest" }),
+        jsonReq("http://x/campaigns/briefs/nested-src/duplicate", "POST", { name: "nested-dest" }),
       );
       expect(res.status).toBe(201);
 
@@ -1934,17 +1983,20 @@ describe("authoring briefs", () => {
       },
     );
 
+    // PT-5c2: `?replace=1` skips the early (`!replace`) reserved check, so a
+    // never-minted reserved id now reaches the campaignMeta gate like any
+    // other unknown id — a reserved word can never be minted (`createCampaign`
+    // refuses it too), so it is permanently "missing", answering the SAME 404
+    // as any other unknown target rather than the old 400.
     test.each(["cache", "jobs", "orgs", "packages"] as const)(
-      "POST /campaigns/briefs?replace=1 on non-existent reserved id refuses with 400",
+      "POST /campaigns/briefs?replace=1 on a never-minted reserved id answers 404, like any other unknown target",
       async (id) => {
         const { create } = await api();
         const res = await create()(
           jsonReq("http://x/campaigns/briefs?replace=1", "POST", brief({ id })),
         );
-        expect(res.status).toBe(400);
-        expect(await res.json()).toEqual({
-          error: `"${id}" is reserved; choose another campaign id.`,
-        });
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual({ error: `Campaign "${id}" not found` });
       },
     );
 
@@ -1970,17 +2022,15 @@ describe("authoring briefs", () => {
     });
 
     test.each(["cache", "jobs", "orgs", "packages"] as const)(
-      "POST /campaigns/briefs/:id/duplicate refuses reserved newId %s with 400",
-      async (newId) => {
+      "POST /campaigns/briefs/:id/duplicate skips a reserved-word slug %s and lands on the next suffix",
+      async (word) => {
         const { create, duplicate } = await api();
         await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
         const res = await duplicate()(
-          jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { newId }),
+          jsonReq("http://x/campaigns/briefs/camp/duplicate", "POST", { name: word }),
         );
-        expect(res.status).toBe(400);
-        expect(await res.json()).toEqual({
-          error: `"${newId}" is reserved; choose another campaign id.`,
-        });
+        expect(res.status).toBe(201);
+        expect(((await res.json()) as { file: string }).file).toBe(`${word}-2.yaml`);
       },
     );
 
@@ -1994,7 +2044,7 @@ describe("authoring briefs", () => {
       );
 
       const res = await duplicate()(
-        jsonReq("http://x/campaigns/briefs/cache/duplicate", "POST", { newId: "new-camp" }),
+        jsonReq("http://x/campaigns/briefs/cache/duplicate", "POST", { name: "new-camp" }),
       );
       expect(res.status).toBe(201);
       const body = (await res.json()) as { brief: { id: string; campaignMessage: string } };

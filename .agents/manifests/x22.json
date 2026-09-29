@@ -15,7 +15,7 @@
         "api",
         "apps/api/server/routes/campaigns/__tests__/briefs.test.ts",
         "-t",
-        "duplicate returns 400 when a symlink sits at briefs/<newId>.yaml"
+        "duplicate returns 400 when a symlink sits at the derived-slug destination"
       ],
       "verdict": "caught"
     },
@@ -32,7 +32,7 @@
         "api",
         "apps/api/server/routes/campaigns/__tests__/briefs.test.ts",
         "-t",
-        "duplicate returns 400 when a symlink sits at briefs/<newId>.yaml"
+        "duplicate returns 400 when a symlink sits at the derived-slug destination"
       ],
       "verdict": "caught"
     }

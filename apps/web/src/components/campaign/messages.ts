@@ -944,6 +944,26 @@ export const executeStillEstimating =
  */
 export const executeNoEstimate =
   "Couldn't work out the estimate — the run will still go, and the server will refuse it if the plan is impossible.";
+/**
+ * Execute pressed while the shell still holds its starting brief (PT-5c2: the API
+ * now refuses to run a campaign it never minted) — before any campaign is open, or
+ * after one closes. No confirm opens; there is nothing to spend credits on yet.
+ */
+export const executeNoBriefApplied = "Open or create a campaign before running the pipeline.";
+
+/* ── The template library's Render preview (TM3, T-D4) ───────────────────────── */
+
+/** Shown beside Render preview once it can run — the cost is the operator's to spend. */
+export const templatePreviewReady =
+  "Nothing happens until you ask — a preview builds the real creative.";
+/**
+ * Shown when Render preview is disabled: no pinnable template, no product, or
+ * (PT-5c2) no campaign open — the API now refuses to render one it never
+ * minted, the same as it refuses to run one. "Open" mirrors executeNoBriefApplied's
+ * wording; D35 retired "applied" as a user-facing word (H8).
+ */
+export const templatePreviewBlocked =
+  "A preview needs an open campaign with a product, and a template that campaign can use.";
 
 /* ── The header's model selector ─────────────────────────────────────────────── */
 

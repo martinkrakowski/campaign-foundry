@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
+import { resetProjectRoot } from "@campaignfoundry/shared";
 import {
   getCapabilities,
   NOT_PROBED_REASON,
@@ -10,6 +11,7 @@ import {
   setCapabilities,
 } from "../../../lib/capabilities.js";
 import { createJob, getJob, resetJobs } from "../../../lib/jobs.js";
+import { getBriefStore } from "../../../lib/ports/index.js";
 import planHandler from "../plan.post.js";
 import generateHandler from "../generate.post.js";
 
@@ -101,13 +103,18 @@ const origOut = process.env.OUTPUT_DIR;
 const origRoot = process.env.PROJECT_ROOT;
 const defaultWait = probeWait.timeoutMs;
 
-beforeEach(() => {
+beforeEach(async () => {
   // The generate run paths start a background job on 202; point OUTPUT_DIR and
   // PROJECT_ROOT at a throwaway dir so the job never touches the repo. It does not
   // fail fast: it runs to completion, which is why afterEach settles it.
   dir = mkdtempSync(join(tmpdir(), "cf-caprace-"));
   process.env.OUTPUT_DIR = dir;
   process.env.PROJECT_ROOT = dir;
+  // `projectRoot()` is memoized per process, not per test — without this the
+  // brief store keeps resolving whichever dir the FIRST test in this file set.
+  resetProjectRoot();
+  // PT-5c2: plan and generate now require a known campaign.
+  await getBriefStore(LOCAL_TENANT).createCampaign("camp");
   // The boot-window snapshot, exactly as the module starts out.
   setCapabilities({ motion: false, reason: NOT_PROBED_REASON });
 });
@@ -123,6 +130,7 @@ async function teardown(settleTimeoutMs = 9_000): Promise<void> {
     else process.env.OUTPUT_DIR = origOut;
     if (origRoot === undefined) delete process.env.PROJECT_ROOT;
     else process.env.PROJECT_ROOT = origRoot;
+    resetProjectRoot();
     rmSync(dir, { recursive: true, force: true });
   }
 }

@@ -14,7 +14,11 @@ import {
 } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CommandBar } from "../CommandBar";
-import { executeNoEstimate, executeStillEstimating } from "@/components/campaign/messages";
+import {
+  executeNoBriefApplied,
+  executeNoEstimate,
+  executeStillEstimating,
+} from "@/components/campaign/messages";
 
 const variationBrief = {
   id: "seed",
@@ -32,6 +36,22 @@ const variationBrief = {
 const seedVariation = () => {
   localStorage.setItem("cf:brief-picked", "1");
   localStorage.setItem("cf:brief", JSON.stringify(variationBrief));
+};
+
+/** A classic (non-variation) applied brief — PT-5c2: Execute only answers the
+ *  press once a real campaign is applied, never the shell's starting brief. */
+const classicBrief = {
+  id: "seed",
+  targetRegion: "DE",
+  targetAudience: "a",
+  campaignMessage: "Hi",
+  template: storedTemplate,
+  products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+};
+
+const seedApplied = () => {
+  localStorage.setItem("cf:brief-picked", "1");
+  localStorage.setItem("cf:brief", JSON.stringify(classicBrief));
 };
 
 const okEstimate = { creatives: 12, axisProductSize: 36, feasible: true, genaiCalls: 0 };
@@ -58,6 +78,7 @@ describe("CommandBar", () => {
 
   test("confirms and runs the full pipeline", async () => {
     const user = userEvent.setup();
+    seedApplied();
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
     expect(screen.getByText(/Standing by/)).toBeTruthy();
     await user.click(screen.getByText(/Execute/));
@@ -69,8 +90,24 @@ describe("CommandBar", () => {
     );
   });
 
+  // PT-5c2: the API now refuses to generate for a campaign it never minted
+  // (`POST /campaigns/generate` 404s), so pressing Execute against the shell's
+  // starting brief (no campaign applied) must never reach that POST at all —
+  // it answers with why instead of opening the credit-spending confirm.
+  test("Execute against the starting (unapplied) brief answers why and never posts", async () => {
+    const user = userEvent.setup();
+    const post = vi.fn(() => json({ jobId: "job-1" }, 202));
+    mockPipelineApi({ post });
+    renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
+    await user.click(screen.getByText(/Execute/));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText(executeNoBriefApplied)).toBeTruthy();
+    expect(post).not.toHaveBeenCalled();
+  });
+
   test("cancel closes the confirm dialog without running", async () => {
     const user = userEvent.setup();
+    seedApplied();
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
     await user.click(screen.getByText(/Execute/));
     const dialog = await screen.findByRole("dialog");
@@ -458,6 +495,7 @@ const classes = (el: Element): readonly string[] => el.className.split(/\s+/);
 describe("CommandBar — control boundaries carry border-control", () => {
   test("the telemetry toggle and the confirm dialog's Cancel keep the ≥3:1 hairline", async () => {
     const user = userEvent.setup();
+    seedApplied();
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
 
     const telemetry = screen.getByRole("button", { name: "Toggle telemetry logs" });

@@ -531,6 +531,28 @@ describe("FsBriefStore", () => {
       await expect(store.campaignMeta("lstat-fails")).rejects.toMatchObject({ code: "EIO" });
     });
 
+    // campaignDirExists's own rethrow (PT-5c2 fix round, qodo PRRT_kwDOSzP1zc6m7irI):
+    // it runs only once isCampaignDirUnsafe and readCampaignMeta have both answered
+    // cleanly (a genuinely unreserved ref), so its own non-ENOENT lstat failure needs
+    // a second, distinct lstat call on the same never-created slug — the first (inside
+    // isCampaignDirUnsafe) must still answer ENOENT so the walk reaches this method.
+    test("rethrows a non-ENOENT lstat failure from campaignDirExists unchanged", async () => {
+      let calls = 0;
+      fsHook.lstat = async (path: string) => {
+        if (!path.endsWith("dir-exists-lstat-fails")) {
+          throw new Error(`unexpected lstat(${path}) in this test`);
+        }
+        calls += 1;
+        if (calls === 1) {
+          throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+        }
+        throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" });
+      };
+      await expect(store.campaignMeta("dir-exists-lstat-fails")).rejects.toMatchObject({
+        code: "EIO",
+      });
+    });
+
     test("a versionless create answers its recorded name/type and hasVersion: false", async () => {
       await store.createCampaign("versionless", { name: "Versionless", type: "short-video" });
       expect(await store.campaignMeta("versionless")).toEqual({
@@ -587,6 +609,41 @@ describe("FsBriefStore", () => {
       mkdirSync(metaPath);
       await expect(store.campaignMeta("unreadable-meta")).rejects.toMatchObject({
         code: "EISDIR",
+      });
+    });
+
+    // PT-5c2 fix round (qodo PRRT_kwDOSzP1zc6m7iq6): a saved version already
+    // proves the campaign known on its own, so a corrupt campaign.json must
+    // not block generate/plan/preview/save for it — unlike the versionless
+    // case above, where campaign.json is the ONLY signal and stays fail-closed.
+    test("a saved version tolerates an unreadable campaign.json, answering null name/type", async () => {
+      await store.createCampaign("tolerant-meta", { name: "Will Be Lost", type: "display-ad" });
+      await store.createBrief({ ...minimalBrief, id: "tolerant-meta" });
+      const metaPath = join(dir, "tolerant-meta", "campaign.json");
+      rmSync(metaPath);
+      mkdirSync(metaPath); // same EISDIR-inducing trick as the rethrow test above
+      expect(await store.campaignMeta("tolerant-meta")).toEqual({
+        campaignId: "tolerant-meta",
+        slug: "tolerant-meta",
+        name: null,
+        type: null,
+        hasVersion: true,
+      });
+    });
+
+    // PT-5c2 fix round (qodo PRRT_kwDOSzP1zc6m7irI): a bare `briefs/<slug>/`
+    // reservation made before campaign.json existed (pre-PT-5b3) must still
+    // answer known — neither `createCampaign` nor `createBrief` ever runs
+    // here, only a plain `mkdirSync`, the shape a build from before PT-5b3
+    // would have left behind.
+    test("a bare pre-campaign.json reservation directory still answers known", async () => {
+      mkdirSync(join(dir, "bare-reservation"));
+      expect(await store.campaignMeta("bare-reservation")).toEqual({
+        campaignId: "bare-reservation",
+        slug: "bare-reservation",
+        name: null,
+        type: null,
+        hasVersion: false,
       });
     });
   });

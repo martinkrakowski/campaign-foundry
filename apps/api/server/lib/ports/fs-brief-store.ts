@@ -252,6 +252,25 @@ export class FsBriefStore implements BriefStorePort {
   }
 
   /**
+   * True when `briefs/<slug>` is a genuine directory — never a symlink,
+   * which `lstat`'s own semantics already exclude (it never follows the
+   * final component, so a link's own stat is never `isDirectory()`).
+   * Absent (ENOENT) answers false, not an error. Used by `campaignMeta`
+   * (PT-5c2, qodo PRRT_kwDOSzP1zc6m7irI) to still recognise a reservation
+   * made before `campaign.json` existed (pre-PT-5b3).
+   */
+  private async campaignDirExists(slug: string): Promise<boolean> {
+    let st;
+    try {
+      st = await lstat(resolveConfined(this.dir, slug));
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) return false;
+      throw error;
+    }
+    return st.isDirectory();
+  }
+
+  /**
    * `campaign.json`'s own reader (PT-5b3). `undefined` only for ENOENT — a
    * pre-lane reservation (or a versioned brief with no reserved directory at
    * all, the common case for every campaign that existed before this lane)
@@ -283,21 +302,42 @@ export class FsBriefStore implements BriefStorePort {
    * See `BriefStorePort.campaignMeta` (PT-5b3). `ref` IS the slug on this
    * backend (D179): `campaign.json` lives inside the same reserved directory
    * a Save never touches, so name/type answer the same whether or not a
-   * version has been saved yet (item 4: Saving never clears them). Absent
-   * both a version and any meta file → undefined (an unknown ref, 404 at the
-   * route).
+   * version has been saved yet (item 4: Saving never clears them).
+   *
+   * PT-5c2 fix round (qodo PRRT_kwDOSzP1zc6m7iq6): a saved version already
+   * proves the campaign known on its own — `readCampaignMeta`'s own
+   * fail-closed stance (a malformed `campaign.json` propagates, per its own
+   * doc comment) stays exactly that strict when meta is the ONLY signal
+   * (`hasVersion` false), but must not turn into a 500 that blocks
+   * generate/plan/preview/save for a campaign this store can already prove
+   * exists a different way. `name`/`type` degrade to null in that case,
+   * same as a campaign that never had a meta file at all.
+   *
+   * PT-5c2 fix round (qodo PRRT_kwDOSzP1zc6m7irI): neither a saved version
+   * nor a readable `campaign.json` still answers known when a genuine
+   * (non-symlink) `briefs/<ref>/` directory exists — a reservation made
+   * before `campaign.json` existed (pre-PT-5b3). Absent all three →
+   * undefined (an unknown ref, 404 at the route).
    */
   async campaignMeta(ref: string): Promise<CampaignMeta | undefined> {
     const hasVersion = Boolean(await this.findBriefFileById(ref));
-    const meta = await this.readCampaignMeta(ref);
-    if (!meta && !hasVersion) return undefined;
-    return {
-      campaignId: ref,
-      slug: ref,
-      name: meta?.name ?? null,
-      type: meta?.type ?? null,
-      hasVersion,
-    };
+    let meta: { name: string | null; type: string | null } | undefined;
+    try {
+      meta = await this.readCampaignMeta(ref);
+    } catch (error) {
+      if (!hasVersion) throw error;
+      meta = undefined;
+    }
+    if (meta) {
+      return { campaignId: ref, slug: ref, name: meta.name, type: meta.type, hasVersion };
+    }
+    if (hasVersion) {
+      return { campaignId: ref, slug: ref, name: null, type: null, hasVersion: true };
+    }
+    if (await this.campaignDirExists(ref)) {
+      return { campaignId: ref, slug: ref, name: null, type: null, hasVersion: false };
+    }
+    return undefined;
   }
 
   /**

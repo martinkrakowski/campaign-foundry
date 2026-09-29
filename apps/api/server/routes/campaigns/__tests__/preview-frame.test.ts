@@ -12,11 +12,13 @@ import {
   OpenRouterImageGenerator,
   ProceduralBackgroundGenerator,
 } from "@campaignfoundry/CreativeGeneration";
+import { resetProjectRoot } from "@campaignfoundry/shared";
 import route, {
   previewAdapters,
   previewBackgroundGenerator,
   resetPreviewAdapters,
 } from "../preview-frame.post.js";
+import { getBriefStore } from "../../../lib/ports/index.js";
 import { runEnvironment } from "../../../lib/run-environment.js";
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
 
@@ -93,17 +95,22 @@ describe("POST /campaigns/preview-frame", () => {
   let dir: string;
   const origRoot = process.env.PROJECT_ROOT;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "cf-preview-frame-"));
     mkdirSync(join(dir, "assets", "inputs"), { recursive: true });
     writeFileSync(join(dir, "assets", "inputs", "alpha-logo.png"), ONE_PX_PNG);
     process.env.PROJECT_ROOT = dir;
+    // `projectRoot()` is memoized per process, not per test.
+    resetProjectRoot();
+    // PT-5c2: preview-frame now requires a known campaign.
+    await getBriefStore(LOCAL_TENANT).createCampaign("camp");
     resetPreviewAdapters();
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
     if (origRoot === undefined) delete process.env.PROJECT_ROOT;
     else process.env.PROJECT_ROOT = origRoot;
+    resetProjectRoot();
   });
 
   test("returns image/png whose dimensions match the requested ratio, with the cache key in the header", async () => {
@@ -119,6 +126,14 @@ describe("POST /campaigns/preview-frame", () => {
     expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a"); // PNG signature
     expect(bytes.readUInt32BE(16)).toBe(1080);
     expect(bytes.readUInt32BE(20)).toBe(1920);
+  });
+
+  // PT-5c2: the campaign must be known (`campaignMeta`) — an id never minted
+  // through `POST /campaigns` answers 404, and nothing is rendered for it.
+  test("answers 404 for a campaign never minted through POST /campaigns", async () => {
+    const res = await mount()(jsonReq({ brief: { ...brief(), id: "never-minted" }, cell: cell() }));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'Campaign "never-minted" not found.' });
   });
 
   test("a display-size cell renders the exact pixel canvas, not a scaled ratio", async () => {
