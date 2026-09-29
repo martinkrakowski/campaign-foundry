@@ -3912,6 +3912,57 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     expect(polls).toBe(0);
   });
 
+  // The same property on the OTHER mount path. `restoreDefaultBrief` used to
+  // take the effect's `active` flag BY VALUE, so the `superseded()` guard it
+  // closes over could never see cleanup's `active = false`: a job lookup still
+  // out when the provider unmounted went on to `adoptJob`, whose `beginRun`
+  // created a fresh poller after cleanup had already aborted the previous one.
+  // The two threads name one mechanism (qodo #7, coderabbit "Use live mount
+  // state in restoreDefaultBrief").
+  test("a default-brief job lookup that lands after unmount starts no poller (qodo #7, coderabbit)", async () => {
+    let resolveJobLookup!: (r: Response) => void;
+    const jobLookupPromise = new Promise<Response>((r) => {
+      resolveJobLookup = r;
+    });
+    let polls = 0;
+    mockPipelineApi({
+      // No `opened`: the pointer answers "no pointer", which is the one path
+      // that reaches `restoreDefaultBrief`.
+      result: (url) =>
+        url.includes(`/campaigns/jobs?campaignId=${DEFAULT_BRIEF.id}`)
+          ? jobLookupPromise
+          : json(EMPTY_REPORT),
+      job: () => {
+        polls += 1;
+        return jobOk({
+          halted: false,
+          assets: [asset()],
+          log: { entries: [], campaignId: DEFAULT_BRIEF.id },
+        });
+      },
+    });
+
+    const { result, unmount } = setup();
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([url]) =>
+            String(url).includes(`/campaigns/jobs?campaignId=${DEFAULT_BRIEF.id}`),
+          ),
+      ).toBe(true),
+    );
+    unmount();
+    await act(async () => {
+      resolveJobLookup(json({ jobId: "job-orphan" }));
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // Nothing adopted the orphaned job, so no poller was ever started for it.
+    expect(polls).toBe(0);
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
+  });
+
   test('adopting a job commits the persisted report, not the job\'s own (possibly partial) result (greptile "Re-roll adoption drops creatives")', async () => {
     // The job being adopted is a selective re-roll: its own completed payload
     // carries only the one regenerated cell, but the server has already merged

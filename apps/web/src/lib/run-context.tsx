@@ -1276,56 +1276,63 @@ export function RunProvider({ children }: { children: ReactNode }) {
    * this race-free (coderabbit "Discover jobs for the default brief after reload",
    * and the same "Close the gap…" finding this mirrors from setBrief).
    */
-  const restoreDefaultBrief = useCallback(
-    (active: boolean) => {
-      const startBrief = DEFAULT_BRIEF;
-      // Captured before any network call: a run that actually starts for this
-      // brief (adoptJob's own beginRun — from a job discovered below, or from
-      // the user pressing Generate while discovery is still in flight) moves this,
-      // so a persisted-run read that resolves afterward is refused rather than
-      // overwriting fresher (or in-flight) state with whatever was on disk before.
-      const owned = runSeq.current;
-      const superseded = () =>
-        !active ||
-        briefDecidedRef.current ||
-        briefIdRef.current !== startBrief.id ||
-        runSeq.current !== owned;
-      void fetchRunningJob(startBrief.id).then((jobId) => {
-        // `runSeq.current !== owned` also catches a run that started (this tab's
-        // own Generate, or another discovery) while this lookup was still in
-        // flight — see setBrief's identical guard (greptile "Stale lookup replaces
-        // newer run").
-        if (superseded()) return;
-        if (jobId) {
-          void adoptJob(startBrief, jobId, { adopted: true });
-          return;
-        }
-        void fetchPersistedRun(startBrief.id)
-          .then((d) => {
-            if (superseded()) return;
-            // A successful read is proof of membership for this brief — heals a
-            // stale 403 from an earlier, since-resolved failure (F6: "a later
-            // successful fetch heals it"), whether or not this brief happens to
-            // have a run on disk.
-            setMembershipError(null);
-            if (!d) return; // no run on disk
-            setRun({ result: d, target: startBrief });
-            if (d.assets?.length) setAssetVersion((v) => v + 1);
-          })
-          .catch((err) => {
-            if (superseded()) return;
-            // See the identical guard in `setBrief`'s own `fetchPersistedRun`
-            // catch above: a typed check, never a match against the server's own
-            // message text.
-            if (isNoMembershipError(err)) {
-              setMembershipError(NO_ORGANISATION_YET_MESSAGE);
-            }
-            /* F6: could-not-ask is not absence — restore nothing, claim nothing. */
-          });
-      });
-    },
-    [adoptJob],
-  );
+  const restoreDefaultBrief = useCallback(() => {
+    const startBrief = DEFAULT_BRIEF;
+    // Captured before any network call: a run that actually starts for this
+    // brief (adoptJob's own beginRun — from a job discovered below, or from
+    // the user pressing Generate while discovery is still in flight) moves this,
+    // so a persisted-run read that resolves afterward is refused rather than
+    // overwriting fresher (or in-flight) state with whatever was on disk before.
+    const owned = runSeq.current;
+    // `mountedRef`, NOT a copy of the mount effect's `active` flag (fix round,
+    // qodo #7 and coderabbit "Use live mount state in restoreDefaultBrief" —
+    // one mechanism). A boolean parameter is captured BY VALUE, so the guard
+    // closed over the `true` it was called with and could never observe
+    // cleanup setting the effect's own flag false: a job lookup still in flight
+    // at unmount went on to `adoptJob`, whose `beginRun` created a fresh
+    // poller after cleanup had already aborted the previous one, and a
+    // persisted-run answer could `setRun` on a provider that no longer exists.
+    // The ref is the same liveness signal `setBrief`'s own discovery chain
+    // uses, and the effect sets it back to true when StrictMode re-runs it.
+    const superseded = () =>
+      !mountedRef.current ||
+      briefDecidedRef.current ||
+      briefIdRef.current !== startBrief.id ||
+      runSeq.current !== owned;
+    void fetchRunningJob(startBrief.id).then((jobId) => {
+      // `runSeq.current !== owned` also catches a run that started (this tab's
+      // own Generate, or another discovery) while this lookup was still in
+      // flight — see setBrief's identical guard (greptile "Stale lookup replaces
+      // newer run").
+      if (superseded()) return;
+      if (jobId) {
+        void adoptJob(startBrief, jobId, { adopted: true });
+        return;
+      }
+      void fetchPersistedRun(startBrief.id)
+        .then((d) => {
+          if (superseded()) return;
+          // A successful read is proof of membership for this brief — heals a
+          // stale 403 from an earlier, since-resolved failure (F6: "a later
+          // successful fetch heals it"), whether or not this brief happens to
+          // have a run on disk.
+          setMembershipError(null);
+          if (!d) return; // no run on disk
+          setRun({ result: d, target: startBrief });
+          if (d.assets?.length) setAssetVersion((v) => v + 1);
+        })
+        .catch((err) => {
+          if (superseded()) return;
+          // See the identical guard in `setBrief`'s own `fetchPersistedRun`
+          // catch above: a typed check, never a match against the server's own
+          // message text.
+          if (isNoMembershipError(err)) {
+            setMembershipError(NO_ORGANISATION_YET_MESSAGE);
+          }
+          /* F6: could-not-ask is not absence — restore nothing, claim nothing. */
+        });
+    });
+  }, [adoptJob]);
 
   // On first load, restore the campaign the user last opened (DEFAULT if none) and
   // hydrate that campaign's own persisted run — so a reload after a previous session
@@ -1389,7 +1396,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
           openPageCampaign(campaignId);
           return;
         }
-        restoreDefaultBrief(active);
+        restoreDefaultBrief();
       })
       .catch(() => {
         /* F6: could-not-ask is not absence — restore nothing, claim nothing. A
