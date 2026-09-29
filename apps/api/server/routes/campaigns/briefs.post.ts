@@ -4,9 +4,36 @@ import { extractSourceAssetBriefIds, rewriteAssetPaths } from "../../lib/asset-f
 import { isExistsError, isErrno, SYMLINK_WRITE_ERROR } from "../../lib/brief-files.js";
 import { parseBrief } from "../../lib/load-brief.js";
 import { getAssetStore, getBriefStore, TeamsNotSupportedError } from "../../lib/ports/index.js";
+import type { BriefStorePort } from "../../lib/ports/brief-store.port.js";
 import { assertSourceVisible, CampaignNotFoundError, canAssignTeam } from "../../lib/ownership.js";
 
 import { requestTenant } from "../../lib/tenant.js";
+
+/**
+ * D181 fix round: a reserved id is refused at Save only when NOTHING exists
+ * for it yet, anywhere in this org — an already-minted campaign (grandfathered,
+ * D181's own scope note: existing campaigns are not renamed) must still
+ * complete its first Save, whether its row is visible to this caller or
+ * hidden by team. A hidden one must NOT read as "reserved and absent" here:
+ * it falls through to `campaignMeta`'s own undefined-for-hidden-or-missing
+ * check below, so it 404s exactly like any other hidden target, never
+ * distinguishable from a genuinely missing one (PT-2d) and never given this
+ * route's reserved-specific message.
+ *
+ * `campaignVisibility` (team-aware; "hidden" is possible only on Postgres)
+ * answers that on its own. On fs, which has no hidden state, `campaignMeta`
+ * is used instead — fs's own `campaignVisibility` only recognises a
+ * VERSIONED brief (`findBriefFileById`) and would miss a still-versionless
+ * `POST /campaigns` reservation, which is exactly the case being
+ * grandfathered.
+ */
+async function campaignExistsAnywhere(store: BriefStorePort, id: string): Promise<boolean> {
+  if (store.supportsTeams) {
+    return (await store.campaignVisibility(id)) !== "absent";
+  }
+  return (await store.campaignMeta(id)) !== undefined;
+}
+
 /**
  * POST /campaigns/briefs — persist a campaign brief.
  *
@@ -49,6 +76,7 @@ import { requestTenant } from "../../lib/tenant.js";
  */
 export default defineEventHandler(async (event) => {
   const scope = requestTenant(event);
+  const store = getBriefStore(scope);
   let brief: CampaignBrief;
   let teamId: string | undefined;
   try {
@@ -64,7 +92,8 @@ export default defineEventHandler(async (event) => {
     brief = parseBrief(briefBody);
     const rawReplace = getQuery(event).replace;
     const replace = (Array.isArray(rawReplace) ? rawReplace[0] : rawReplace) === "1";
-    if (!replace && isReservedCampaignId(brief.id)) {
+    const reserved = isReservedCampaignId(brief.id);
+    if (!replace && reserved && !(await campaignExistsAnywhere(store, brief.id))) {
       throw new Error(`"${brief.id}" is reserved; choose another campaign id.`);
     }
   } catch (error) {
@@ -72,7 +101,6 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
-  const store = getBriefStore(scope);
   // Checked before canAssignTeam, and — the point of this order (D166, PT-2c,
   // coderabbit thread U_YF) — before ANY of the Save-as asset copying below:
   // on the fs backend (item 5), copying first and only then hitting

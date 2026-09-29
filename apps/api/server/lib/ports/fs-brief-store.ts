@@ -147,7 +147,13 @@ export class FsBriefStore implements BriefStorePort {
 
   async createBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
     assertNoTeam(options?.teamId);
-    if (isReservedCampaignId(brief.id)) {
+    // D181 fix round: a reserved id is refused only when NOTHING already
+    // exists for it — a pre-lane reservation (or a real brief) grandfathers
+    // this Save as its first version, same as any other known-but-versionless
+    // target. `campaignMeta` recognises a still-versionless `<slug>/`
+    // directory (`campaignDirExists`), unlike `campaignVisibility`, which
+    // would miss it and wrongly refuse.
+    if (isReservedCampaignId(brief.id) && !(await this.campaignMeta(brief.id))) {
       throw new Error(`"${brief.id}" is reserved; choose another campaign id.`);
     }
     const filePath = resolveConfined(this.dir, `${brief.id}.yaml`);

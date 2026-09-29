@@ -308,7 +308,6 @@ export class PgBriefStore implements BriefStorePort {
     teamId: string | null | undefined,
   ): Promise<StoredBrief> {
     assertSafeSlug(brief.id);
-    assertNotReserved(brief.id);
     return this.db.transaction(async (tx) => {
       if (teamId !== null && teamId !== undefined) await this.assertTeamInOrg(tx, teamId);
       const { rows: inserted } = await tx.query<{ id: string }>(
@@ -326,6 +325,11 @@ export class PgBriefStore implements BriefStorePort {
         // `rewriteBriefInternal` uses, so a concurrent write to this exact
         // row serialises on it rather than reading a version count this
         // transaction is about to invalidate.
+        //
+        // D181 fix round: a row already existing here is exactly what
+        // grandfathers a reserved slug (D181's scope note) — `assertNotReserved`
+        // never runs in this branch, reserved or not, because this write is
+        // onto a campaign that already exists, not a fresh mint of one.
         const { rows: existing } = await tx.query<{ id: string; team_id: string | null }>(
           `select id, team_id from campaign where org_id = $1 and slug = $2 for update`,
           [this.orgId, brief.id],
@@ -354,6 +358,13 @@ export class PgBriefStore implements BriefStorePort {
         if (teamId !== undefined) {
           await tx.query(`update campaign set team_id = $1 where id = $2`, [teamId, campaignId]);
         }
+      } else {
+        // A brand-new row: nothing existed for this slug a moment ago, so a
+        // reserved id may never mint fresh here (D181) — checked AFTER the
+        // insert, not before, precisely so an already-existing row (the
+        // branch above) is never refused as reserved. Throwing rolls this
+        // insert back with the rest of the transaction.
+        assertNotReserved(brief.id);
       }
       const yaml = dumpBrief(brief);
       const revision = hashBytes(Buffer.from(yaml, "utf8"));

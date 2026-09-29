@@ -173,7 +173,15 @@ export function validateIdentity(state: EditorState, existingIds?: string[]): Fi
   } else if (
     isReservedCampaignId(state.briefId) &&
     // An existing campaign keeps its id: only a NEW id may not be reserved, as on the API.
-    !(state.source.kind === "file" && state.source.loadedId === state.briefId)
+    !(state.source.kind === "file" && state.source.loadedId === state.briefId) &&
+    // D181 fix round: a versionless campaign the editor SEEDED from the server
+    // (`BriefEditor`'s `markSeeded`, mirroring the API's own grandfather rule)
+    // is likewise an existing campaign, not a fresh mint — its own slug must
+    // not be refused as reserved on its first Save. Compared against the
+    // SEEDED slug, not `briefId` generally: a user who renames this draft
+    // AWAY from that slug and onto a different reserved word still gets the
+    // error — only the campaign's own id is grandfathered, never a rename.
+    !(state.source.kind === "new" && state.source.seeded?.slug === state.briefId)
   ) {
     errors.briefId = messages.briefIdReserved(state.briefId);
   }
