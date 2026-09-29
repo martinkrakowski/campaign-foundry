@@ -1101,7 +1101,15 @@ describe("FsBriefStore", () => {
       });
     });
 
-    test("two files declaring one id resolve to the first by name, warm or cold alike", async () => {
+    // "Warm" and "cold" here mean what they can mean without a corrupt root
+    // moving underneath: this store, whose index already holds the
+    // earlier-sorting name, and a store built afterwards over the same
+    // directory, which has never recorded anything. Both must answer
+    // `a-dup.yaml`. A store that was itself COLD when it created the canonical
+    // file has no entry to keep and records `dup.yaml`; that is the residual
+    // named at createBrief, and asserting it here would pin the divergence
+    // rather than close it.
+    test("two files declaring one id resolve to the first by name, warm or freshly built", async () => {
       writeFileSync(join(dir, "a-dup.yaml"), campYaml.replace("id: camp", "id: dup"));
       writeFileSync(join(dir, "b-dup.yaml"), campYaml.replace("id: camp", "id: dup"));
       expect(await store.findBriefFileById("dup")).toBe("a-dup.yaml");

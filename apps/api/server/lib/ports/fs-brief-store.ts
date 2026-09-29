@@ -185,9 +185,14 @@ export class FsBriefStore implements BriefStorePort {
    */
   private async storedBrief(file: string): Promise<StoredBrief | undefined> {
     try {
-      // `resolve`, not `resolveConfined`, unchanged from `listBriefs`: these
-      // names came out of this directory's own `readdir`, so none of them can
-      // escape it, and narrowing the check is not what this lane is for.
+      // `resolve`, not `resolveConfined`, unchanged from `listBriefs` — but not
+      // for the reason it was written. Two callers reach this method and only
+      // one of them feeds it a name from this directory's own `readdir`: the
+      // other is `findBriefById`, passing whatever the id index holds. Both are
+      // confined, differently rather than not at all — an index value is a
+      // `readdir` name, or the `${id}.yaml` `createBrief` already put through
+      // `resolveConfined` before writing it — so a second narrowing check here
+      // would rule out nothing either caller can hand over.
       const filePath = resolve(this.dir, file);
       const bytes = await readFile(filePath);
       const brief = parseBriefText(filePath, bytes.toString("utf8"));
@@ -354,8 +359,18 @@ export class FsBriefStore implements BriefStorePort {
     // declare `dup`, and `rebuildIdIndex` answers with the first by name. An
     // unconditional set made a warm store pick `dup.yaml` where a store built
     // one second later picks `a-dup.yaml` — so which file a read or a rewrite
-    // targeted would depend on cache state alone. This write is still made:
-    // the mapping is only ever taken when it agrees with a rebuild.
+    // targeted would depend on cache state alone.
+    //
+    // What this does NOT promise is agreement in the other direction. A store
+    // whose index is still empty when it makes this write — cold, or over a
+    // root it has not scanned — records the canonical name over an on-disk
+    // `a-dup.yaml`, and a scan of that same root then answers `a-dup.yaml`.
+    // Two files declaring one id is a corrupt root, and there is no cheap way
+    // out of it: proving an earlier-sorting file also declares the id means
+    // the full scan this lane exists to remove, on the one write that does not
+    // need it. Both names are files that really declare the id, so neither
+    // answer is a wrong brief — the cost is that a rewrite through one store
+    // lands in the file the other did not read. Named rather than papered over.
     const fileName = `${brief.id}.yaml`;
     const indexed = this.idIndex.get(brief.id);
     if (indexed === undefined || fileName < indexed) this.idIndex.set(brief.id, fileName);
