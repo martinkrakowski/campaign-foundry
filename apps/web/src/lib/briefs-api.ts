@@ -449,6 +449,42 @@ export async function getCampaign(ref: string, signal?: AbortSignal): Promise<Ca
   };
 }
 
+/**
+ * The campaign this user last opened, from the server (PT-5e, D173, D180) —
+ * `null` when there is none to hand back.
+ *
+ * `null` is the answer for three different facts, deliberately, because the
+ * caller's response to all three is the same (send the visitor to the picker):
+ * no pointer recorded, a pointer to a campaign since deleted, and a pointer to
+ * one now hidden by team. The server answers the last two with exactly the body
+ * it answers the first with (D166, PT-2d — a hidden campaign must not be
+ * distinguishable from a missing one), so the client never learns which it was.
+ *
+ * A read that FAILED is not `null` and throws: could-not-ask is never answered
+ * as "there is nothing" (D83/F6). Every caller here is a redirect decision, and
+ * a redirect that fires on a failed read would send a user away from a page
+ * they can already see.
+ */
+export async function fetchLastOpened(): Promise<string | null> {
+  const data = await requestJson(`${API}/campaigns/last-opened`);
+  if (typeof data !== "object" || data === null) return null;
+  const { campaignId } = data as { campaignId?: unknown };
+  return typeof campaignId === "string" ? campaignId : null;
+}
+
+/**
+ * Record the campaign this user just opened (PT-5e, D173, D180). `campaignId`
+ * is a uuid or a slug (D178) — the server resolves it and stores the real id.
+ *
+ * Throws on failure, and every caller treats that as advisory: the pointer is a
+ * convenience that decides where a BARE url goes, never an address (D37), so a
+ * write that did not land costs a redirect and nothing else. It must not fail a
+ * save, a pick, or a page load.
+ */
+export async function putLastOpened(campaignId: string): Promise<void> {
+  await requestJson(`${API}/campaigns/last-opened`, jsonInit("PUT", { campaignId }));
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;

@@ -13,6 +13,7 @@ import {
   resetDecisionStore,
   resetDraftStore,
   resetJobStore,
+  resetLastOpenedStore,
   resetOutputStore,
   resetPoolStore,
   resetProviderKeyStore,
@@ -76,6 +77,7 @@ export function resetAllStores(): void {
   resetOutputStore();
   resetDecisionStore();
   resetDraftStore();
+  resetLastOpenedStore();
   resetUsageStore();
   resetProviderKeyStore();
 }

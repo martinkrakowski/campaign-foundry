@@ -18,7 +18,6 @@ import {
   fetchPersistedRun,
   fetchRunningJob,
   normalizeRunResult,
-  isStoredBrief,
   DECISIONS_CONFLICT_MESSAGE,
   DECISIONS_UNSAVED_MESSAGE,
   DECISIONS_UNREADABLE_MESSAGE,
@@ -33,6 +32,7 @@ import {
   jobOk,
   mockPipelineApi,
   EMPTY_REPORT,
+  openedCampaign,
   renderWithRun,
   fakeDecisionsApi,
   seedPersistedRun,
@@ -115,39 +115,6 @@ describe("useRun", () => {
         }),
       ),
     ).toBe("hydra-bottle @ 1:1 · v4 · headline-top-bold");
-  });
-});
-
-describe("isStoredBrief", () => {
-  test("refuses a stored brief with valid id/products but no template (L3a)", () => {
-    // A `cf:brief` persisted before this lane carries no template — but since
-    // L3a the template is required on CampaignBrief, and the predicate claims
-    // `value is CampaignBrief`: asserting that without verifying the template
-    // would hand the shell a brief the pipeline rejects. The template must pass
-    // the same five-field contract the editor's draft restore applies.
-    expect(
-      isStoredBrief({
-        id: "stored-brief",
-        targetRegion: "FR",
-        targetAudience: "x",
-        campaignMessage: "y",
-        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
-      }),
-    ).toBe(false);
-  });
-
-  test("accepts a stored brief whose template satisfies the full contract", () => {
-    expect(
-      isStoredBrief({
-        schemaVersion: BRIEF_SCHEMA_VERSION,
-        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
-        id: "stored-brief",
-        targetRegion: "FR",
-        targetAudience: "x",
-        campaignMessage: "y",
-        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
-      }),
-    ).toBe(true);
   });
 });
 
@@ -922,18 +889,21 @@ describe("RunProvider — review decisions", () => {
       outputPath: "alpha/1x1/v2.png",
     });
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({
+    mockPipelineApi({
+      opened: openedCampaign({
         id: "seed",
         template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         targetRegion: "DE",
         targetAudience: "a",
         campaignMessage: "Hi",
         products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+        // a variation run can only exist under a randomized brief, so the
+        // campaign the pointer names is one — which is also why the restore can
+        // stand on its own now that it is a server read (PT-5e) rather than a
+        // synchronous local copy the test had to amend after mounting.
+        mode: "variation",
+        variation: { count: 1 },
       }),
-    );
-    mockPipelineApi({
       report: { halted: false, assets: [variant], log: { entries: [], campaignId: "seed" } },
       post: (_url, init) => {
         bodies.push(JSON.parse(init.body as string));
@@ -943,14 +913,6 @@ describe("RunProvider — review decisions", () => {
         jobOk({ halted: false, assets: [{ ...variant, attempt: 4 }], log: { entries: [] } }),
     });
     const { result } = setup();
-    // a variation run can only exist under a randomized brief
-    act(() =>
-      result.current.setBrief({
-        ...result.current.brief,
-        mode: "variation",
-        variation: { count: 1 },
-      } as never),
-    );
     await waitFor(() => expect(result.current.assets).toHaveLength(1));
     act(() => result.current.decide("alpha/v2", "rejected"));
     await act(async () => {
@@ -1183,19 +1145,108 @@ describe("RunProvider — brief picker & persistence", () => {
       campaignMessage: "y",
       products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
     };
-    localStorage.setItem("cf:brief", JSON.stringify(stored));
+    mockPipelineApi({ opened: openedCampaign(stored) });
     const { result } = setup();
     await waitFor(() => expect(result.current.brief.id).toBe("stored-brief"));
   });
 
-  test("ignores a malformed stored brief", async () => {
-    localStorage.setItem("cf:brief", "{ not json");
+  // PT-5e: there is no stored JSON left to be malformed — the server names the
+  // campaign or it does not. A pointer read that FAILS restores nothing at all
+  // (F6: could-not-ask is not absence), so the shell keeps the default brief
+  // AND runs no default-brief discovery — the second half is what makes the
+  // first able to fail.
+  test("a failed pointer read leaves the shell on the default brief and starts no discovery", async () => {
+    // `lastOpened`, not `result` (fix round, coderabbit PRRT_kwDOSzP1zc6nENjV):
+    // the pointer URL is answered before any `result` handler runs, so `result`
+    // left this read SUCCEEDING with `null` — and a null pointer is exactly the
+    // path that starts `restoreDefaultBrief`, so the assertion below held for a
+    // read that had not failed at all.
+    mockPipelineApi({ lastOpened: () => Promise.reject(new Error("down")) });
     const { result } = setup();
-    await waitFor(() => expect(result.current.brief.id).toBe("summer-hydration-2026")); // falls back to default
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([url]) => String(url).includes("/campaigns/last-opened")),
+      ).toBe(true),
+    );
+    // A macrotask, so the read's rejection and its `.catch` have both run.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
+    // No default-brief job lookup went out — the discovery a NULL pointer
+    // starts, and a failed one must not.
+    expect(
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.some(([url]) =>
+          String(url).includes(`/campaigns/jobs?campaignId=${DEFAULT_BRIEF.id}`),
+        ),
+    ).toBe(false);
   });
 
-  test("the blank brief releases the shell but keeps the last-opened record (D37/H5)", async () => {
+  // Fix round (qodo #4). `setBrief` fired every `putLastOpened` as an unordered
+  // fire-and-forget, so two rapid commits could reach the server out of order —
+  // and the server's upsert keeps the LAST write to land, not the last one
+  // issued. A slow first write therefore left the pointer naming the campaign
+  // the user had already left. The writes are serialized instead, so the order
+  // commits happen in is the order the server records.
+  test("rapid switches record the last one opened even when the earlier write answers last (qodo #4)", async () => {
+    const issued: string[] = [];
+    const landed: string[] = [];
+    const hold: (() => void)[] = [];
+    vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+      const u = String(url);
+      if ((init as RequestInit)?.method === "PUT" && u === `${API}/campaigns/last-opened`) {
+        const campaignId = (
+          JSON.parse(String((init as RequestInit).body)) as { campaignId: string }
+        ).campaignId;
+        issued.push(campaignId);
+        // The FIRST pointer write is held until the test releases it, so an
+        // unserialized implementation completes them in the opposite order.
+        if (issued.length === 1) {
+          return new Promise<Response>((res) => {
+            hold.push(() => {
+              landed.push(campaignId);
+              res(json({ campaignId }));
+            });
+          });
+        }
+        landed.push(campaignId);
+        return Promise.resolve(json({ campaignId }));
+      }
+      if (u === `${API}/campaigns/jobs`) return Promise.resolve(json({}));
+      if (u === `${API}/campaigns/result`) return Promise.resolve(json(EMPTY_REPORT));
+      return Promise.resolve(json(EMPTY_REPORT));
+    });
+
     const { result } = setup();
+    await act(async () => {
+      result.current.setBrief({ ...DEFAULT_BRIEF, id: "first" });
+      result.current.setBrief({ ...DEFAULT_BRIEF, id: "second" });
+    });
+    // Serialized: the second write has not gone out while the first is held.
+    expect(issued).toEqual(["first"]);
+    await act(async () => {
+      for (const release of hold) release();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(issued).toEqual(["first", "second"]);
+    // The server's row ends on the campaign the user actually opened last.
+    expect(landed).toEqual(["first", "second"]);
+  });
+
+  test("the blank brief releases the shell but keeps the last-opened pointer (D37/H5)", async () => {
+    const { result } = setup();
+    const pointers = () =>
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.filter(([url, init]) => {
+          const u = String(url);
+          return u.includes("/campaigns/last-opened") && (init as RequestInit)?.method === "PUT";
+        })
+        .map(([, init]) => JSON.parse(String((init as RequestInit).body)).campaignId);
     await act(async () => {
       result.current.setBrief({
         id: "keeper",
@@ -1205,12 +1256,12 @@ describe("RunProvider — brief picker & persistence", () => {
         products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
       } as never);
     });
-    expect(localStorage.getItem("cf:brief")).not.toBeNull();
+    expect(pointers()).toEqual(["keeper"]);
 
-    // D37: cf:brief is the "last opened" convenience, never an address — the URL
-    // names the open brief. Releasing the shell's campaign (visiting /brief/new
-    // opens no brief) must not destroy the pointer to the one the user opened
-    // last: the bare /brief redirect and the grid's restore read it (H5).
+    // D37: the last-opened pointer is a convenience, never an address — the URL
+    // names the open campaign. Releasing the shell's campaign (visiting
+    // /brief/new opens none) must not destroy the pointer to the one the user
+    // opened last: the bare routes follow it, and the shell restores from it.
     await act(async () => {
       result.current.setBrief({
         id: "",
@@ -1221,7 +1272,7 @@ describe("RunProvider — brief picker & persistence", () => {
       } as never);
     });
     expect(result.current.brief.id).toBe("");
-    expect(JSON.parse(localStorage.getItem("cf:brief") ?? "null")?.id).toBe("keeper");
+    expect(pointers()).toEqual(["keeper"]); // unchanged: a blank brief writes none
   });
 
   test("setBrief keeps the current run when the id already matches", async () => {
@@ -1259,10 +1310,9 @@ describe("RunProvider — brief picker & persistence", () => {
     expect(result.current.briefPickerOpen).toBe(true);
   });
 
-  test("restores the persisted run for the stored brief on mount", async () => {
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({
+  test("restores the persisted run for the last-opened campaign on mount", async () => {
+    mockPipelineApi({
+      opened: openedCampaign({
         id: "stored",
         template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         targetRegion: "FR",
@@ -1270,12 +1320,204 @@ describe("RunProvider — brief picker & persistence", () => {
         campaignMessage: "y",
         products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
       }),
-    );
-    mockPipelineApi({
       report: { halted: false, assets: [asset()], log: { entries: [], campaignId: "stored" } },
     });
     const { result } = setup();
     await waitFor(() => expect(result.current.assets).toHaveLength(1));
+  });
+
+  /**
+   * PT-5e (D173, D180) — the pointer is a SERVER record, per (org, user). These
+   * are the two properties a `localStorage` record could not have, and the two
+   * the lane is for.
+   */
+  test("the pointer survives a reload: a second mount, with no local record, restores the same campaign", async () => {
+    mockPipelineApi({
+      opened: openedCampaign({
+        id: "durable",
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "m",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      }),
+    });
+    // A reload keeps localStorage but rebuilds every piece of state; a device
+    // that has never seen this app has neither. Both must read the same
+    // campaign off the server, which is the whole claim.
+    localStorage.clear();
+    const first = setup();
+    await waitFor(() => expect(first.result.current.brief.id).toBe("durable"));
+    first.unmount();
+    localStorage.clear();
+    const second = setup();
+    await waitFor(() => expect(second.result.current.brief.id).toBe("durable"));
+  });
+
+  test("the pointer is per user: another user's session restores its own campaign, not this one's", async () => {
+    // Two users in one org share every server resource but never a pointer row,
+    // so "another device" is only another device for the SAME user.
+    const mine = { id: "mine", template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE) };
+    const theirs = { id: "theirs", template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE) };
+    const pointer = { campaignId: "" };
+    vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+      const u = String(url);
+      const method = (init as RequestInit)?.method ?? "GET";
+      if (u.includes("/campaigns/last-opened") && method === "PUT") {
+        pointer.campaignId = (
+          JSON.parse(String((init as RequestInit).body)) as { campaignId: string }
+        ).campaignId;
+        return Promise.resolve(json({ campaignId: pointer.campaignId }));
+      }
+      if (u.includes("/campaigns/last-opened")) {
+        // The server answers per session user, exactly as the real route does.
+        return Promise.resolve(json({ campaignId: pointer.campaignId || null }));
+      }
+      if (u.includes("/campaigns/briefs")) {
+        const brief = pointer.campaignId === "mine" ? mine : theirs;
+        return Promise.resolve(
+          json({ briefs: [{ file: `${brief.id}.json`, campaignId: brief.id, brief }] }),
+        );
+      }
+      if (u.includes("/campaigns/")) {
+        const id = u.slice(`${API}/campaigns/`.length);
+        return Promise.resolve(
+          json({ campaignId: id, slug: id, name: null, type: null, hasVersion: false }),
+        );
+      }
+      return Promise.resolve(json(EMPTY_REPORT));
+    });
+
+    const { result } = setup();
+    await act(async () => {
+      result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        id: "mine",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "m",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      } as never);
+    });
+    expect(pointer.campaignId).toBe("mine");
+    // A different user then opens their own campaign: the pointer moves, and the
+    // first user's is not what either of them reads afterwards.
+    await act(async () => {
+      result.current.setBrief({ ...theirs, targetRegion: "", targetAudience: "" } as never);
+    });
+    expect(pointer.campaignId).toBe("theirs");
+  });
+
+  // The no-pointer half of the restore (PT-5e). `DEFAULT_BRIEF` is a real
+  // campaign to Generate — nothing gates it on `briefApplied` — so its run is
+  // discovered exactly like any other campaign's, and the shell adopts it.
+  test("a user with no pointer restores the default brief's own persisted run", async () => {
+    mockPipelineApi({
+      report: {
+        halted: false,
+        assets: [asset({ productId: "p1" })],
+        log: { entries: [], campaignId: DEFAULT_BRIEF.id },
+      },
+    });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
+  });
+
+  test("a campaign opened while the default-brief job lookup is in flight wins", async () => {
+    // The mount's discovery is guarded, not trusted: a campaign the user opens
+    // while it is still asking about the default one supersedes it, and its
+    // late answer must not start a poller for the campaign just left behind.
+    // One pending answer PER job lookup — the mount's and the commit's own both
+    // go out, and resolving the wrong one would answer a different campaign.
+    const pending = new Map<string, (r: Response) => void>();
+    mockPipelineApi({
+      result: (url) => {
+        if (!url.includes("/campaigns/jobs")) return Promise.resolve(json(EMPTY_REPORT));
+        return new Promise<Response>((resolve) => pending.set(url, resolve));
+      },
+    });
+    const mountLookup = `${API}/campaigns/jobs?campaignId=${DEFAULT_BRIEF.id}`;
+    const { result } = setup();
+    await waitFor(() => expect(pending.has(mountLookup)).toBe(true));
+    act(() => {
+      result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        id: "opened-in-the-meantime",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "m",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      } as never);
+    });
+    // The mount's own late answer, naming a job for the campaign left behind.
+    pending.get(mountLookup)!(json({ jobId: "job-for-the-campaign-left-behind" }));
+    // A macrotask, so the whole lookup chain settles before the answer is
+    // judged — a single microtask leaves the parse half of it in flight.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.brief.id).toBe("opened-in-the-meantime");
+    expect(result.current.loading).toBe(false);
+  });
+
+  test("a failed default-brief read that lands after a campaign was opened commits nothing", async () => {
+    // The read failed AND it is stale: F6 says a read that cannot be trusted
+    // claims nothing, so neither a run nor a membership notice may come from
+    // it. (A failure that is NOT stale still names the denial — setBrief's own
+    // catch covers that, and is asserted above.)
+    let rejectResult: ((reason: unknown) => void) | undefined;
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/result")
+          ? new Promise<Response>((_resolve, reject) => {
+              rejectResult = reject;
+            })
+          : json(EMPTY_REPORT),
+    });
+    const { result } = setup();
+    await waitFor(() => expect(rejectResult).toBeTypeOf("function"));
+    act(() => {
+      result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        id: "opened-in-the-meantime",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "m",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      } as never);
+    });
+    rejectResult!(new Error("down"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.brief.id).toBe("opened-in-the-meantime");
+    expect(result.current.assets).toEqual([]);
+    expect(result.current.membershipError).toBeNull();
+  });
+
+  test("a pointer answer that is not a campaign object reads as no pointer", async () => {
+    // The lenient parse, in the shell's own terms: this server never answers
+    // that way, so reading it as "no pointer" is the same best-effort stance
+    // every other untrusted field here already takes — never a hard failure
+    // over a page the user is only trying to load.
+    vi.mocked(globalThis.fetch).mockImplementation((url) =>
+      String(url).includes("/campaigns/last-opened")
+        ? Promise.resolve(json("not a pointer"))
+        : Promise.resolve(json(EMPTY_REPORT)),
+    );
+    const { result } = setup();
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([url]) => String(url).includes("/campaigns/last-opened")),
+      ).toBe(true),
+    );
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
   });
 
   test("setBrief loads the target brief's own persisted run", async () => {
@@ -1457,9 +1699,8 @@ describe("RunProvider — log-only and superseded restores", () => {
     json({ halted: true, assets: [], log: { entries: [], campaignId: id } });
 
   test("restores a halted, log-only run on mount (no assets, no version bump)", async () => {
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({
+    mockPipelineApi({
+      opened: openedCampaign({
         id: "halted",
         template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
         targetRegion: "FR",
@@ -1467,8 +1708,6 @@ describe("RunProvider — log-only and superseded restores", () => {
         campaignMessage: "y",
         products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
       }),
-    );
-    mockPipelineApi({
       report: { halted: true, assets: [], log: { entries: [], campaignId: "halted" } },
     });
     const { result } = setup();
@@ -1691,6 +1930,18 @@ describe("RunProvider — job polling", () => {
           : json(EMPTY_REPORT),
     });
     const { result } = setup();
+    // The mount restore is a server read now (PT-5e), so it is still in flight
+    // here; let it finish before sampling the version, or this would measure
+    // the restore's own bump rather than the lost job's silence.
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([url]) =>
+            String(url).includes("/campaigns/result?campaignId=summer-hydration-2026"),
+          ),
+      ).toBe(true),
+    );
     const versionBefore = result.current.assetVersion;
     await act(async () => {
       await result.current.execute();
@@ -2551,7 +2802,10 @@ describe("RunProvider — estimate and packaging", () => {
         report: { halted: false, assets: [asset()], log: { entries: [], campaignId: "camp" } },
       });
       localStorage.setItem("cf:brief-picked", "1");
-      localStorage.setItem("cf:brief", JSON.stringify(variationStoredBrief));
+      mockPipelineApi({
+        opened: openedCampaign(variationStoredBrief),
+        report: { halted: false, assets: [asset()], log: { entries: [], campaignId: "camp" } },
+      });
       const { result } = setup();
       await waitFor(() => expect(result.current.assets).toHaveLength(1)); // the classic report restored
       expect(result.current.runMode).toBe("brief");
@@ -2570,9 +2824,8 @@ describe("RunProvider — estimate and packaging", () => {
 
     test("the other direction blocks too: a randomized run recorded under a classic brief", async () => {
       localStorage.setItem("cf:brief-picked", "1");
-      localStorage.setItem(
-        "cf:brief",
-        JSON.stringify({
+      mockPipelineApi({
+        opened: openedCampaign({
           id: "camp",
           template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
           targetRegion: "DE",
@@ -2580,8 +2833,6 @@ describe("RunProvider — estimate and packaging", () => {
           campaignMessage: "Hi",
           products: variationStoredBrief.products,
         }),
-      );
-      mockPipelineApi({
         report: {
           halted: false,
           assets: [asset({ variantIndex: 0, outputPath: "alpha/1x1/v0.png" })],
@@ -3100,13 +3351,13 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
 
   test("reload adopts a running job: queries running job, sets loading, polls and commits", async () => {
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
     let queriedJob = false;
     let resolveJob!: (res: Response) => void;
     const jobPromise = new Promise<Response>((r) => {
       resolveJob = r;
     });
     mockPipelineApi({
+      opened: openedCampaign(activeBrief),
       result: (url) => {
         if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
           queriedJob = true;
@@ -3141,13 +3392,13 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     // re-roll) payload while also healing any stale membershipError. A membership
     // denial must never be treated as "no run on disk".
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
     let queriedJob = false;
     let resolveJob!: (res: Response) => void;
     const jobPromise = new Promise<Response>((r) => {
       resolveJob = r;
     });
     mockPipelineApi({
+      opened: openedCampaign(activeBrief),
       result: (url) => {
         if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
           queriedJob = true;
@@ -3192,9 +3443,9 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
     // folded into `null` too, surfacing as a plain "job interrupted" error with no
     // mention of the real cause.
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
     let queriedJob = false;
     mockPipelineApi({
+      opened: openedCampaign(activeBrief),
       result: (url) => {
         if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
           queriedJob = true;
@@ -3224,9 +3475,9 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
 
   test("reload when no job is running (404) leaves the page as today", async () => {
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
     let queriedJob = false;
     mockPipelineApi({
+      opened: openedCampaign(activeBrief),
       result: (url) => {
         if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
           queriedJob = true;
@@ -3248,9 +3499,9 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
 
   test("reload with network failure leaves the page as today", async () => {
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
     let queriedJob = false;
     mockPipelineApi({
+      opened: openedCampaign(activeBrief),
       result: (url) => {
         if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
           queriedJob = true;
@@ -3325,8 +3576,8 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
 
   test("adoptJob uses the generic message when polling rejects with a non-Error", async () => {
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
     mockPipelineApi({
+      opened: openedCampaign(activeBrief),
       result: (url) => {
         if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
           return json({ jobId: "job-reload-1" });
@@ -3342,13 +3593,13 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
   });
 
   test("setBrief racing mount restore prevents mount path from adopting stale brief", async () => {
-    const localBrief = { ...activeBrief, campaignMessage: "from-local-storage" };
+    const localBrief = { ...activeBrief, campaignMessage: "from-the-pointer" };
     const editorBrief = { ...activeBrief, campaignMessage: "from-editor" };
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:brief", JSON.stringify(localBrief));
 
     let jobQueries = 0;
     mockPipelineApi({
+      opened: openedCampaign(localBrief),
       result: (url) => {
         if (url.includes("/campaigns/jobs?campaignId=active-campaign")) {
           jobQueries += 1;
@@ -3371,13 +3622,12 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
 
     await waitFor(() => expect(result.current.assets).toHaveLength(1));
     expect(result.current.brief.campaignMessage).toBe("from-editor");
-    // Both the mount restore and setBrief ask independently (job lookup is
-    // unconditional, not gated behind a guard) — the guard only decides whose
-    // ANSWER is used. Mount's own answer must be discarded: `briefDecidedRef`
-    // is already true by the time its callback runs (setBrief set it
-    // synchronously), so only setBrief's adoption ever commits — one result, under
-    // the edited brief, not the stale localStorage one mount started restoring.
-    expect(jobQueries).toBe(2);
+    // Only setBrief's lookup goes out. The mount restore resolves the pointer's
+    // campaign through `openPageCampaign`, whose own token a deliberate commit
+    // bumps (`setBrief` does, synchronously) — so the mount path is superseded
+    // before it would have asked about jobs, and one result commits, under the
+    // edited brief, never the campaign the pointer named.
+    expect(jobQueries).toBe(1);
     expect(result.current.loading).toBe(false);
   });
 
@@ -3481,9 +3731,9 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
 
   test('mount restore reads the persisted report AFTER checking for a job, closing the restore/lookup gap (qodo #1, coderabbit "Close the gap between result restoration and job lookup")', async () => {
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem("cf:brief", JSON.stringify(activeBrief));
     let calls = 0;
     mockPipelineApi({
+      opened: openedCampaign(activeBrief),
       result: (url) => {
         if (!url.includes("campaignId=active-campaign")) return json(EMPTY_REPORT); // unrelated
         // Counted across BOTH endpoints: only the FIRST request this provider makes
@@ -3737,6 +3987,57 @@ describe("RunProvider — running job awareness on reload and brief switch", () 
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(polls).toBe(0);
+  });
+
+  // The same property on the OTHER mount path. `restoreDefaultBrief` used to
+  // take the effect's `active` flag BY VALUE, so the `superseded()` guard it
+  // closes over could never see cleanup's `active = false`: a job lookup still
+  // out when the provider unmounted went on to `adoptJob`, whose `beginRun`
+  // created a fresh poller after cleanup had already aborted the previous one.
+  // The two threads name one mechanism (qodo #7, coderabbit "Use live mount
+  // state in restoreDefaultBrief").
+  test("a default-brief job lookup that lands after unmount starts no poller (qodo #7, coderabbit)", async () => {
+    let resolveJobLookup!: (r: Response) => void;
+    const jobLookupPromise = new Promise<Response>((r) => {
+      resolveJobLookup = r;
+    });
+    let polls = 0;
+    mockPipelineApi({
+      // No `opened`: the pointer answers "no pointer", which is the one path
+      // that reaches `restoreDefaultBrief`.
+      result: (url) =>
+        url.includes(`/campaigns/jobs?campaignId=${DEFAULT_BRIEF.id}`)
+          ? jobLookupPromise
+          : json(EMPTY_REPORT),
+      job: () => {
+        polls += 1;
+        return jobOk({
+          halted: false,
+          assets: [asset()],
+          log: { entries: [], campaignId: DEFAULT_BRIEF.id },
+        });
+      },
+    });
+
+    const { result, unmount } = setup();
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([url]) =>
+            String(url).includes(`/campaigns/jobs?campaignId=${DEFAULT_BRIEF.id}`),
+          ),
+      ).toBe(true),
+    );
+    unmount();
+    await act(async () => {
+      resolveJobLookup(json({ jobId: "job-orphan" }));
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // Nothing adopted the orphaned job, so no poller was ever started for it.
+    expect(polls).toBe(0);
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
   });
 
   test('adopting a job commits the persisted report, not the job\'s own (possibly partial) result (greptile "Re-roll adoption drops creatives")', async () => {
@@ -4111,17 +4412,15 @@ describe("RunProvider — the page's ?campaign= (PT-5c3, D180)", () => {
     expect(result.current.brief.campaignMessage).toBe("m");
   });
 
-  test("a cf:brief entry that merely names this campaign's slug is never trusted directly — the listing decides (qodo: organisation switches reuse another brief)", async () => {
+  test("a stale cached brief for this campaign's slug is never trusted directly — the listing decides (qodo: organisation switches reuse another brief)", async () => {
     // Slugs are unique per organisation, not globally (pg-brief-store.ts's
-    // `resolveCampaign`: `where org_id = $1 and slug = $2`). A `cf:brief` left
-    // over from a DIFFERENT organisation's same-slug campaign would satisfy a
-    // bare `parsed.id === meta.slug` match by coincidence — so that shortcut is
-    // gone, and the listing (scoped to the caller's own session) always answers.
+    // `resolveCampaign`: `where org_id = $1 and slug = $2`). A copy left over
+    // from a DIFFERENT organisation's same-slug campaign would satisfy a bare
+    // `parsed.id === meta.slug` match by coincidence — so that shortcut is gone,
+    // and the listing (scoped to the caller's own session) always answers. The
+    // pointer carries an id, never a brief, so there is no cached copy left to
+    // trust at all.
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({ ...storedBrief, campaignMessage: "a stale, other-org message" }),
-    );
     pageCampaignApi({ briefs: [{ file: `${SLUG}.yaml`, brief: storedBrief, campaignId: UUID }] });
     const { result } = setup();
     await act(async () => {
@@ -4482,10 +4781,18 @@ describe("RunProvider — the page's ?campaign= (PT-5c3, D180)", () => {
     });
     // Nothing committed: no run fetch went out (it rides the brief's commit), and
     // the blank placeholder was never written over the campaign's real, already-
-    // saved brief in `cf:brief`.
+    // saved brief. The pointer is an id, so a listing outage cannot blank it.
     expect(result.current.brief.id).not.toBe(SLUG);
     expect(result.current.assets).toEqual([]);
-    expect(localStorage.getItem("cf:brief")).toBeNull();
+    expect(
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.some(
+          ([url, init]) =>
+            String(url).includes("/campaigns/last-opened") &&
+            (init as RequestInit)?.method === "PUT",
+        ),
+    ).toBe(false);
   });
 
   test("a failed listing still names a versionless campaign through its placeholder", async () => {
@@ -4561,9 +4868,10 @@ describe("RunProvider — the page's ?campaign= (PT-5c3, D180)", () => {
   });
 
   test("re-opening the page's campaign keeps the run on screen and asks about jobs by the page's id", async () => {
-    seedPersistedRun([asset()], { id: SLUG });
+    const seeded = seedPersistedRun([asset()], { id: SLUG });
     const urls: string[] = [];
     mockPipelineApi({
+      opened: seeded,
       result: (url) => {
         urls.push(url);
         if (url.includes("/campaigns/result")) {
@@ -4757,6 +5065,202 @@ describe("RunProvider — the page's ?campaign= (PT-5c3, D180)", () => {
     // Could-not-ask is not absence: the restored run stays on screen.
     expect(result.current.assets).toHaveLength(1);
     expect(result.current.membershipError).toBeNull();
+  });
+
+  // Fix round (qodo PRRT_kwDOSzP1zc6nELaK). The mount effect's pointer read is
+  // ONE request; the page's own `?campaign=` open is a `getCampaign` and then a
+  // `listBriefs`. The pointer therefore normally answers first, and because
+  // `briefDecidedRef` only flips when the page's open COMMITS, the pointer's
+  // `openPageCampaign` bumped `pageCampaignSeq` and threw the URL's campaign
+  // away — showing one campaign under another's id, and writing the wrong one
+  // back as the pointer. The listing here is held until the pointer has been
+  // answered, so the ordering the finding names is the ordering the test runs.
+  const pointerRaceApi = (opts: {
+    pointer: string;
+    /** Held so the page's own open cannot commit before the pointer answers. */
+    holdListing?: boolean;
+  }) => {
+    let releaseListing!: () => void;
+    const listing = opts.holdListing
+      ? new Promise<Response>((res) => {
+          releaseListing = () =>
+            res(
+              json({
+                briefs: [
+                  { file: `${SLUG}.yaml`, brief: storedBrief, campaignId: UUID },
+                  {
+                    file: "other.yaml",
+                    brief: { ...storedBrief, id: "other-slug", campaignMessage: "the pointer's" },
+                    campaignId: opts.pointer,
+                  },
+                ],
+              }),
+            );
+        })
+      : Promise.resolve(
+          json({
+            briefs: [
+              { file: `${SLUG}.yaml`, brief: storedBrief, campaignId: UUID },
+              {
+                file: "other.yaml",
+                brief: { ...storedBrief, id: "other-slug", campaignMessage: "the pointer's" },
+                campaignId: opts.pointer,
+              },
+            ],
+          }),
+        );
+    vi.mocked(globalThis.fetch).mockImplementation((url) => {
+      const u = String(url);
+      if (u === `${API}/campaigns/last-opened`)
+        return Promise.resolve(json({ campaignId: opts.pointer }));
+      if (u === `${API}/campaigns/briefs`) return listing;
+      if (u === `${API}/campaigns/${UUID}` || u === `${API}/campaigns/${opts.pointer}`) {
+        return Promise.resolve(
+          json({
+            campaignId: u.endsWith(UUID) ? UUID : opts.pointer,
+            slug: u.endsWith(UUID) ? SLUG : "other-slug",
+            name: "Autumn Launch",
+            type: "social-post",
+            hasVersion: true,
+          }),
+        );
+      }
+      return Promise.resolve(json(EMPTY_REPORT));
+    });
+    return () => releaseListing?.();
+  };
+
+  test("a full page load of ?campaign= keeps the URL's campaign: the mount pointer never supersedes it (qodo PRRT_kwDOSzP1zc6nELaK)", async () => {
+    const OTHER = "018f6d2a-1111-7b4a-8d21-3f9e2a5b6c7d";
+    const releaseListing = pointerRaceApi({ pointer: OTHER, holdListing: true });
+    const probe = () => {
+      usePageCampaignParam();
+      return useRun();
+    };
+    window.history.replaceState(null, "", `/grid?campaign=${UUID}`);
+    const { result, unmount } = renderHook(probe, { wrapper });
+    // The pointer has answered and its own open has run to completion; only
+    // then is the page's held listing released.
+    await waitFor(() => expect(result.current.brief.id).not.toBe(SLUG));
+    await act(async () => {
+      releaseListing();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // The URL is the source of truth (D180): the campaign it names is the one
+    // on screen — not the pointer's, under the URL's id.
+    expect(result.current.brief.id).toBe(SLUG);
+    expect(result.current.brief.campaignMessage).toBe("m");
+    unmount();
+    window.history.replaceState(null, "", "/grid");
+  });
+
+  test("a page open that starts while the mount pointer is in flight wins it (qodo PRRT_kwDOSzP1zc6nELaK)", async () => {
+    const OTHER = "018f6d2a-1111-7b4a-8d21-3f9e2a5b6c7d";
+    // A deferred Response PER pointer read, not one shared promise: a Response
+    // body is read once, and two callers read the pointer on a bare page (the
+    // shell's restore and the page's redirect), so a single shared Response
+    // would starve the second of them and quietly disarm this test.
+    const pointerReads: (() => void)[] = [];
+    // The visitor's own page open is held mid-flight, so the pointer's answer
+    // lands while it is still resolving — the window the seq guard exists for.
+    let releaseListing!: () => void;
+    const listingHeld = new Promise<Response>((r) => {
+      releaseListing = () =>
+        r(
+          json({
+            briefs: [
+              { file: `${SLUG}.yaml`, brief: storedBrief, campaignId: UUID },
+              {
+                file: "other.yaml",
+                brief: { ...storedBrief, id: "other-slug", campaignMessage: "the pointer's" },
+                campaignId: OTHER,
+              },
+            ],
+          }),
+        );
+    });
+    vi.mocked(globalThis.fetch).mockImplementation((url) => {
+      const u = String(url);
+      if (u === `${API}/campaigns/last-opened`) {
+        return new Promise<Response>((res) => {
+          pointerReads.push(() => res(json({ campaignId: OTHER })));
+        });
+      }
+      if (u === `${API}/campaigns/briefs`) return listingHeld;
+      if (u === `${API}/campaigns/${UUID}` || u === `${API}/campaigns/${OTHER}`) {
+        return Promise.resolve(
+          json({
+            campaignId: u.endsWith(UUID) ? UUID : OTHER,
+            slug: u.endsWith(UUID) ? SLUG : "other-slug",
+            name: "Autumn Launch",
+            type: "social-post",
+            hasVersion: true,
+          }),
+        );
+      }
+      return Promise.resolve(json(EMPTY_REPORT));
+    });
+    // A BARE page, so the mount effect does ask for the pointer at all.
+    window.history.replaceState(null, "", "/grid");
+    const probe = () => {
+      usePageCampaignParam();
+      return useRun();
+    };
+    const { result, unmount } = renderHook(probe, { wrapper });
+    // A navigation to a campaign-addressed url while that read is still out:
+    // the visitor's own page, which must own the campaign.
+    await act(async () => {
+      result.current.openPageCampaign(UUID);
+    });
+    await act(async () => {
+      for (const answer of pointerReads) answer();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await act(async () => {
+      releaseListing();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // Without the seq guard the pointer's own open superseded this one and the
+    // shell fell all the way back to the default brief.
+    expect(result.current.brief.id).toBe(SLUG);
+    expect(result.current.brief.campaignMessage).toBe("m");
+    unmount();
+  });
+
+  // Fix round (qodo #5). A bare page whose pointer is null opened the picker
+  // and left the shell exactly as it was, so the picker appeared OVER the
+  // previous campaign's creatives — under a url that names no campaign at all.
+  // The pointer is advisory and its write is fire-and-forget, so "the shell
+  // holds a campaign but the server has no pointer for it" is reachable (a
+  // write that did not land, or a campaign deleted/hidden elsewhere), not
+  // hypothetical.
+  test("a bare page with no pointer releases the campaign the shell was showing (qodo #5)", async () => {
+    mockPipelineApi(); // no `opened`: the server answers "no pointer"
+    localStorage.setItem("cf:brief-picked", "1");
+    window.history.replaceState(null, "", "/grid");
+    // The page hook mounts only once the shell is holding a campaign, so this
+    // is the navigation under test rather than a first visit.
+    let showPage = false;
+    const Page = () => {
+      usePageCampaignParam();
+      return null;
+    };
+    const pageWrapper = ({ children }: { children: ReactNode }) =>
+      createElement(RunProvider, null, showPage ? createElement(Page) : null, children);
+    const { result, rerender } = renderHook(() => useRun(), { wrapper: pageWrapper });
+    await act(async () => {
+      result.current.setBrief({ ...DEFAULT_BRIEF, id: "previous-campaign" });
+    });
+    expect(result.current.brief.id).toBe("previous-campaign");
+    expect(result.current.briefApplied).toBe(true);
+    showPage = true;
+    rerender();
+    await waitFor(() => expect(result.current.briefPickerOpen).toBe(true));
+    // The picker is open AND the shell let go: the bare url names no campaign,
+    // so the one it was showing is not this page's (D180).
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
+    expect(result.current.briefApplied).toBe(false);
+    expect(result.current.assets).toEqual([]);
   });
 
   test("the page hook hands the URL's ?campaign= through, and a bare page hands null", async () => {

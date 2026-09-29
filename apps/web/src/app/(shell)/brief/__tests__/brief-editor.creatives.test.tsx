@@ -310,7 +310,10 @@ const writes = (calls: readonly { url: string; method: string }[]) =>
       c.method !== "GET" &&
       !c.url.includes("/campaigns/plan") &&
       !c.url.includes("/campaigns/preview-frame") &&
-      !/\/campaigns\/[^/]+\/draft$/.test(c.url),
+      !/\/campaigns\/[^/]+\/draft$/.test(c.url) &&
+      // The last-opened pointer is not a brief write (PT-5e): it names a
+      // campaign, and is PUT on every deliberate open by design.
+      !c.url.includes("/campaigns/last-opened"),
   );
 
 const list = () => screen.getByRole("list", { name: messages.creativesLegend });

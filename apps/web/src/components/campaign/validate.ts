@@ -69,15 +69,17 @@ import {
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /**
- * Top-level directory names under an org's output root that are reserved by
- * the orchestrator or infrastructure and cannot be used as campaign identifiers.
+ * Campaign identifiers the orchestrator reserves for itself, and which cannot
+ * name a campaign: the top-level directory names under an org's output root
+ * (`cache`, `jobs`, `orgs`, `packages`), and `last-opened` — the static
+ * `/campaigns/last-opened` route (PT-5e, D180).
  *
  * Mirrored from CampaignOrchestration/Treatment.vo.ts. Value-importing from the
  * package root barrel fails the Next.js webpack build (node:fs UnhandledSchemeError
  * via project-root.ts), and Treatment.vo has no subpath export in package.json
  * (the same reason SAFE_ID_PATTERN is mirrored above). Pinned by validate.test.ts.
  */
-export const RESERVED_CAMPAIGN_IDS = ["cache", "jobs", "orgs", "packages"] as const;
+export const RESERVED_CAMPAIGN_IDS = ["cache", "jobs", "last-opened", "orgs", "packages"] as const;
 export type ReservedCampaignId = (typeof RESERVED_CAMPAIGN_IDS)[number];
 
 export function isReservedCampaignId(id: string): id is ReservedCampaignId {

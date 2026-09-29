@@ -124,8 +124,17 @@ const isDecisionsUrl = (u: string) => u.includes("/campaigns/decisions");
 type Verdicts = Record<string, "approved" | "rejected">;
 
 let seededVerdicts: Verdicts | undefined;
+/**
+ * The campaign this test seeded (PT-5e), if any. A test that seeds a campaign
+ * and then re-mocks the API to drive one route — a re-roll's job, a second
+ * campaign's report — means the same thing by the second mock, so the seed is a
+ * property of the TEST rather than of one mock installation, exactly as
+ * `seededVerdicts` is. Cleared per test, so nothing leaks into the next.
+ */
+let seededCampaign: OpenedCampaign | undefined;
 afterEach(() => {
   seededVerdicts = undefined;
+  seededCampaign = undefined;
 });
 
 /**
@@ -208,26 +217,91 @@ const jobSnapshot = (report: MockReport): MockReport => ({
 });
 
 /**
+ * The campaign the shell should restore on mount, as the SERVER now holds it
+ * (PT-5e, D173): the last-opened pointer, the campaign's own meta, and the
+ * listing entry whose brief the restore takes. `cf:brief` is retired, so a test
+ * that wants the shell holding a campaign seeds this instead of a localStorage
+ * blob — which is also closer to what a real request sequence looks like.
+ */
+export interface OpenedCampaign {
+  /** The campaign id (uuid or slug) every one of the three answers names. */
+  readonly id: string;
+  /** The stored brief the listing hands back for it. */
+  readonly brief: unknown;
+}
+
+export type MockPipelineApiOptions = {
+  report?: MockReport;
+  jobId?: string;
+  post?: PostFn;
+  job?: GetFn;
+  result?: GetFn;
+  plan?: PostFn;
+  packagePost?: PostFn;
+  packages?: GetFn;
+  /** The decisions the server holds (a fresh fake), or a fake a test drives. */
+  decisions?: Verdicts | ReturnType<typeof fakeDecisionsApi>;
+  /** The campaign the last-opened pointer names (absent = no pointer at all). */
+  opened?: OpenedCampaign;
+  /**
+   * `GET /campaigns/last-opened` itself (PT-5e). The pointer is answered from
+   * `opened` above, BEFORE any `result` handler runs — a per-test `result`
+   * therefore never sees this URL, so a test that means "the pointer read
+   * FAILED" (F6: could-not-ask is not absence) could not express it and its
+   * assertion passed against a pointer that had in fact answered `null`. This
+   * override is how such a test says so.
+   */
+  lastOpened?: GetFn;
+};
+
+/**
+ * Seed the campaign the shell restores on mount, and return what was seeded —
+ * for a test whose only fixture is the brief itself. A test that then re-mocks
+ * the API to drive one route passes the return value back as `opened`, so the
+ * campaign survives the re-mock.
+ */
+export const seedOpenedCampaign = (
+  brief: { id: string } & Record<string, unknown>,
+  opts: Omit<MockPipelineApiOptions, "opened"> = {},
+): OpenedCampaign => {
+  const opened = openedCampaign(brief);
+  mockPipelineApi({ ...opts, opened });
+  return opened;
+};
+
+/** What `mockPipelineApi` last resolved the campaign to, for a test that needs it. */
+export const currentSeededCampaign = (): OpenedCampaign | undefined => seededCampaign;
+
+/**
+ * The server's answers for a campaign the shell restores on mount (PT-5e,
+ * D173): the last-opened pointer, `GET /campaigns/:id`, and the listing entry
+ * whose brief the restore takes. `cf:brief` is retired, so a test that wants the
+ * shell holding a campaign passes this where it used to write a localStorage
+ * blob — which is also closer to the request sequence a real page makes.
+ */
+export const openedCampaign = (
+  brief: { id: string } & Record<string, unknown>,
+): OpenedCampaign => ({
+  id: brief.id,
+  brief,
+});
+
+/**
  * Shared pipeline fetch router. Default POST is 202 `{ jobId }` (`job-1` unless
  * `jobId` is set); GET `${API}/campaigns/jobs/` is a completed snapshot of
  * `report` (empty job if omitted); any other GET returns `report` (or `EMPTY_REPORT`).
+ *
+ * `opened` adds the three campaign-addressed answers the bare pages and the
+ * mount restore read (PT-5e): the pointer, `GET /campaigns/:id`, and the
+ * listing. Without it the pointer answers "no pointer", so a page that did not
+ * ask for a campaign takes the picker's path — which is what an unseeded test
+ * wants.
  */
-export const mockPipelineApi = (
-  opts: {
-    report?: MockReport;
-    jobId?: string;
-    post?: PostFn;
-    job?: GetFn;
-    result?: GetFn;
-    plan?: PostFn;
-    packagePost?: PostFn;
-    packages?: GetFn;
-    /** The decisions the server holds (a fresh fake), or a fake a test drives. */
-    decisions?: Verdicts | ReturnType<typeof fakeDecisionsApi>;
-  } = {},
-) => {
+export const mockPipelineApi = (opts: MockPipelineApiOptions = {}) => {
   if (!vi.isMockFunction(globalThis.fetch)) vi.spyOn(globalThis, "fetch");
   const report = opts.report ?? EMPTY_REPORT;
+  const opened = opts.opened ?? seededCampaign;
+  if (opened) seededCampaign = opened;
   const given = opts.decisions;
   const decisions: ReturnType<typeof fakeDecisionsApi> =
     given !== undefined && typeof given.handle === "function"
@@ -259,13 +333,46 @@ export const mockPipelineApi = (
     if (isPackagesGetUrl(u)) {
       return Promise.resolve(opts.packages ? opts.packages(u) : json({ error: "Not found" }, 404));
     }
+    // The last-opened pointer (PT-5e). Matched on the exact path, before the
+    // per-test `result` handler, so a test that routes some other URL cannot
+    // accidentally answer the pointer with a body that parses as a campaign —
+    // and `lastOpened` is how a test drives THIS url when `opened` cannot say
+    // what it needs (a read that fails).
+    if (u === `${API}/campaigns/last-opened`) {
+      if (opts.lastOpened) return Promise.resolve(opts.lastOpened(u));
+      return Promise.resolve(json({ campaignId: opened?.id ?? null }));
+    }
+    if (opened) {
+      if (u === `${API}/campaigns/briefs`) {
+        return Promise.resolve(
+          json({
+            briefs: [{ file: `${opened.id}.yaml`, campaignId: opened.id, brief: opened.brief }],
+          }),
+        );
+      }
+      if (u === `${API}/campaigns/${encodeURIComponent(opened.id)}`) {
+        return Promise.resolve(
+          json({
+            campaignId: opened.id,
+            slug: opened.id,
+            name: null,
+            type: null,
+            hasVersion: true,
+          }),
+        );
+      }
+    }
     return Promise.resolve(opts.result ? opts.result(u) : json(report));
   });
 };
 
 /**
- * Seed a persisted run that RunProvider restores on mount: stores a brief (so the
- * picker won't auto-open) and points the default fetch at a report with `assets`.
+ * Seed a persisted run that RunProvider restores on mount: the server holds the
+ * campaign (so the picker won't auto-open) and points at a report with `assets`.
+ *
+ * Since PT-5e the campaign is seeded as the server holds it — the last-opened
+ * pointer plus that campaign's own brief — because `cf:brief`, the localStorage
+ * copy of the whole brief this used to write, is retired (D173).
  */
 export const seedPersistedRun = (
   assets: Asset[],
@@ -275,17 +382,24 @@ export const seedPersistedRun = (
     policyHash?: string;
     seed?: number;
     decisions?: Verdicts | ReturnType<typeof fakeDecisionsApi>;
+    /**
+     * Extra fields for the seeded campaign's stored brief (merged over the
+     * default body) — the server's copy of a brief is an ordinary brief, so a
+     * test that needs a particular `type` or `mode` says so here rather than
+     * editing a localStorage blob that no longer exists.
+     */
+    brief?: Record<string, unknown>;
   } = {},
-) => {
+): OpenedCampaign => {
   const id = opts.id ?? "seed";
   // A classic brief never produces `variantIndex` assets, so a run carrying them must
   // sit under a randomized brief — otherwise the fixture models a state the app cannot
   // reach, and the re-roll mode guard (rightly) refuses it.
   const randomized = assets.some((asset) => asset.variantIndex !== undefined);
   localStorage.setItem("cf:brief-picked", "1");
-  localStorage.setItem(
-    "cf:brief",
-    JSON.stringify({
+  const opened: OpenedCampaign = {
+    id,
+    brief: {
       id,
       targetRegion: "DE",
       targetAudience: "a",
@@ -299,8 +413,9 @@ export const seedPersistedRun = (
       ...(randomized
         ? { mode: "variation", variation: { count: Math.max(1, assets.length) } }
         : {}),
-    }),
-  );
+      ...(opts.brief ?? {}),
+    },
+  };
   mockPipelineApi({
     report: {
       halted: opts.halted ?? false,
@@ -309,8 +424,13 @@ export const seedPersistedRun = (
       ...(opts.policyHash !== undefined ? { policyHash: opts.policyHash } : {}),
       ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
     },
+    opened,
     ...(opts.decisions !== undefined ? { decisions: opts.decisions } : {}),
   });
+  // Returned so a test that re-mocks the API to drive one route (a re-roll's
+  // job, a second campaign's report) can re-apply the same seeded campaign
+  // instead of restating the brief.
+  return opened;
 };
 
 interface NextControls {

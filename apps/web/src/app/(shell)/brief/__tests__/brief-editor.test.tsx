@@ -4,10 +4,10 @@ import * as messages from "@/components/campaign/messages";
 import { screen, waitFor, within, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
-  renderWithRun as renderWithShell,
+  ShellProviders,
   json,
   nextMock,
-  ShellProviders,
+  renderWithRun as renderWithShell,
 } from "@/__tests__/helpers";
 import { API, useRun } from "@/lib/run-context";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
@@ -187,6 +187,13 @@ const routes = (handlers: {
   post?: (url: string, body?: Record<string, unknown>) => Response | Promise<Response>;
   put?: (url: string, body?: Record<string, unknown>) => Response | Promise<Response>;
   capabilities?: () => Response | Promise<Response>;
+  /**
+   * PT-5e — `GET /campaigns/last-opened`, the per-user pointer the shell
+   * restores from. Defaults to "no pointer", which is what a shell that has
+   * opened nothing answers; a test whose subject is "the shell is on this
+   * campaign" names it here.
+   */
+  lastOpened?: () => Response | Promise<Response>;
   /** `GET /campaigns/:id` — PT-5c1's campaign-meta lookup, keyed by the uuid/slug in the URL. */
   meta?: (id: string) => Response | Promise<Response>;
   /** PT-5d — `/campaigns/:id/draft` and the W3 latest-draft lookup. Defaults
@@ -212,6 +219,12 @@ const routes = (handlers: {
     });
     if (method === "GET" && u === `${API}/campaigns/capabilities`) {
       return Promise.resolve(handlers.capabilities?.() ?? json({ motion: true }));
+    }
+    // PT-5e — the last-opened pointer. Ahead of the `meta` branch below, whose
+    // id test would otherwise match the literal `last-opened` segment and answer
+    // a campaign-meta body where the route answers a pointer.
+    if (method === "GET" && u === `${API}/campaigns/last-opened`) {
+      return Promise.resolve(handlers.lastOpened?.() ?? json({ campaignId: null }));
     }
     // PT-5d — checked before the "briefs" list prefix below, which `/campaigns/briefs/draft`
     // would otherwise also match (it starts with the same `${API}/campaigns/briefs` prefix).
@@ -280,11 +293,19 @@ const routes = (handlers: {
           json({ file: `${stored.id}.yaml`, brief: stored, revision: "mock-rev" }, 201),
       );
     }
-    if (method === "PUT")
+    if (method === "PUT") {
+      // PT-5e — the last-opened pointer, answered here rather than falling into
+      // the brief-write default below (whose `{ file, brief, revision }` body
+      // means nothing to a pointer read, and would make a test's `put` handler
+      // count a pointer write as a save).
+      if (u === `${API}/campaigns/last-opened`) {
+        return Promise.resolve(json({ campaignId: parsed?.campaignId ?? null }));
+      }
       return Promise.resolve(
         handlers.put?.(u, parsed) ??
           json({ file: "x.yaml", brief: brief("x"), revision: "mock-rev" }),
       );
+    }
     return Promise.resolve(json({}, 404));
   });
   return calls;
@@ -317,13 +338,34 @@ const routes = (handlers: {
  * itself is what they assert about, and a draft is explicitly not one (item 3:
  * "PUT never calls parseBrief").
  */
+/**
+ * The conditional brief writes (`PUT /campaigns/briefs/:id`), which is what
+ * "the save" means in every test below. Filtered rather than "every PUT"
+ * because PT-5e added one more PUT to the page: opening a campaign records
+ * the last-opened pointer, and a PUT that names no revision is not a save.
+ */
+const briefPuts = (
+  calls: readonly { url: string; method: string; body?: Record<string, unknown> }[],
+) => calls.filter((c) => c.method === "PUT" && c.url.includes("/campaigns/briefs/"));
+
+/** The campaigns this run PUT to `/campaigns/last-opened`, in order (PT-5e). */
+const pointerWrites = (
+  calls: readonly { url: string; method: string; body?: { campaignId?: string } }[],
+) =>
+  calls
+    .filter((c) => c.method === "PUT" && c.url.includes("/campaigns/last-opened"))
+    .map((c) => c.body?.campaignId);
+
 const writes = (calls: readonly { url: string; method: string }[]) =>
   calls.filter(
     (c) =>
       c.method !== "GET" &&
       !c.url.includes("/campaigns/plan") &&
       !c.url.includes("/campaigns/preview-frame") &&
-      !/\/campaigns\/[^/]+\/draft$/.test(c.url),
+      !/\/campaigns\/[^/]+\/draft$/.test(c.url) &&
+      // The last-opened pointer is not a brief write (PT-5e): it names a
+      // campaign, and is PUT on every deliberate open by design.
+      !c.url.includes("/campaigns/last-opened"),
   );
 
 const waitForEditorReady = async () =>
@@ -434,7 +476,7 @@ describe("BriefPage — data flow", () => {
 
     await saveVia(user, "Save");
     await waitFor(() => {
-      const put = calls.find((c) => c.method === "PUT");
+      const put = briefPuts(calls)[0];
       expect(put?.url).toContain("revision=rev-abc");
     });
   });
@@ -686,8 +728,10 @@ describe("BriefPage — data flow", () => {
   });
 
   test("the blank route stays blank, however loud the shell is about its active brief", async () => {
-    localStorage.setItem("cf:brief", JSON.stringify(brief("camp")));
-    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    const calls = routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      lastOpened: () => json({ campaignId: "camp" }),
+    });
     renderWithRun(<Editor />);
 
     // wait for the listing, which is what used to trigger the adoption: a blank draft is
@@ -983,14 +1027,14 @@ describe("BriefPage — data flow", () => {
 
     // the first save guards with the load-time revision...
     await saveVia(user, "Save");
-    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(1));
+    await waitFor(() => expect(briefPuts(calls).length).toBe(1));
     // ...and the second must guard with the revision the first PUT returned. Discarding
     // it replayed rev-load, the write 409'd with an untrue "Brief was modified by
     // another user.", and the only way out was reloading the brief.
     await saveVia(user, "Save");
-    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(2));
+    await waitFor(() => expect(briefPuts(calls).length).toBe(2));
 
-    const puts = calls.filter((c) => c.method === "PUT");
+    const puts = briefPuts(calls);
     expect(puts[0].url).toContain("revision=rev-load");
     expect(puts[1].url).toContain("revision=rev-2");
   });
@@ -1012,7 +1056,7 @@ describe("BriefPage — data flow", () => {
     );
 
     await saveVia(user, "Save");
-    await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
+    await waitFor(() => expect(briefPuts(calls).length).toBeGreaterThan(0));
 
     // the user types while the request is still pending
     await user.type(screen.getByLabelText("Target Audience"), " who hike");
@@ -1028,8 +1072,8 @@ describe("BriefPage — data flow", () => {
     // (c) the next save answers the guard with the revision the first save was
     // handed back, rather than replaying the load-time one and 409ing
     await saveVia(user, "Save");
-    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(2));
-    const puts = calls.filter((c) => c.method === "PUT");
+    await waitFor(() => expect(briefPuts(calls).length).toBe(2));
+    const puts = briefPuts(calls);
     expect(puts[1].url).toContain("revision=rev-2");
   });
 
@@ -1058,8 +1102,8 @@ describe("BriefPage — data flow", () => {
     // the fresh revision was adopted, so the next Save answers the guard instead of
     // the user reloading the brief
     await saveVia(user, "Save");
-    await waitFor(() => expect(calls.filter((c) => c.method === "PUT").length).toBe(2));
-    const puts = calls.filter((c) => c.method === "PUT");
+    await waitFor(() => expect(briefPuts(calls).length).toBe(2));
+    const puts = briefPuts(calls);
     expect(puts[1].url).toContain("revision=rev-fresh");
   });
 
@@ -1197,20 +1241,48 @@ describe("BriefPage — data flow", () => {
   // POST of the on-screen draft, zero brief writes.
 
   test("arriving on the blank route lets go of the campaign being left", async () => {
-    const calls = routes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
-    // the shell is on `camp`, with unsaved edits to it in storage
-    localStorage.setItem("cf:brief", JSON.stringify(brief("camp")));
+    // the shell is on `camp`, with its own server draft on file
+    const calls = routes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      lastOpened: () => json({ campaignId: "camp" }),
+    });
     calls.drafts.seed("camp", fromBrief(brief("camp"), { file: "camp.yaml" }), "r1");
 
     renderWithRun(<Editor />);
 
-    // D37/H5: the last-opened record survives — visiting /brief/new opens no brief,
-    // so it must not destroy the pointer to the one the user opened last. (The bare
-    // /brief redirect and the grid's restore read it.)
+    // The blank route let go: the campaign's name is the empty draft's, so the
+    // shell released it…
     await waitFor(() =>
-      expect(JSON.parse(localStorage.getItem("cf:brief") ?? "null")?.id).toBe("camp"),
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(""),
     );
-    // …and camp's own server draft is untouched: a routeless mount (PT-5d) never
+    // …and nothing about the last-opened pointer moved (D37/H5 — visiting
+    // /brief/new opens no campaign, so it must not destroy the pointer to the
+    // one the user opened last). The pointer lives on the server now, so
+    // "untouched" is exactly "this client never wrote one": not even a restore
+    // of `camp` behind the release, which is the other half of the property.
+    //
+    // Let the mount effect's restore have every chance to run first (fix round,
+    // coderabbit PRRT_kwDOSzP1zc6nENjb). The wait above is on a field that is
+    // blank from the first render, so it can finish long before the read and
+    // the restore it would trigger — a write landing after this assertion went
+    // unnoticed. Every link of that chain (read, meta, listing, commit, pointer
+    // write) resolves through a promise, so a macrotask boundary drains it all.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(pointerWrites(calls)).toEqual([]);
+    // The mechanism behind that, asserted directly: the blank route's release
+    // is a CHILD effect of the provider, so it has already decided the campaign
+    // by the time the provider's own mount effect runs, and the restore returns
+    // before it reads the pointer at all. Without this the test could not fail —
+    // the no-write assertion is also what a restore of `camp` would be stopped
+    // by further guards downstream, so it holds even when the read is not
+    // prevented here. Removing the early return makes this line go red.
+    expect(calls.some((c) => c.method === "GET" && c.url === `${API}/campaigns/last-opened`)).toBe(
+      false,
+    );
+    // camp's own server draft is untouched too: a routeless mount (PT-5d) never
     // fetches, writes or deletes any campaign's draft — all three effects gate on
     // a defined routeId, and this one has none.
     expect(calls.some((c) => c.url.includes("/campaigns/camp/draft"))).toBe(false);
@@ -1926,8 +1998,12 @@ describe("BriefPage — data flow", () => {
 
     const user = userEvent.setup();
     await saveVia(user, "Save");
+    // A brief write, specifically: opening the campaign also PUTs the last-opened
+    // pointer (PT-5e), and that one carries no revision.
     await waitFor(() =>
-      expect(calls.find((c) => c.method === "PUT")?.url).toContain("revision=rev-live"),
+      expect(
+        calls.find((c) => c.method === "PUT" && c.url.includes("/campaigns/briefs/"))?.url,
+      ).toContain("revision=rev-live"),
     );
   });
 
@@ -2819,7 +2895,9 @@ describe("BriefPage — capabilities and motion", () => {
     await waitFor(() => expect(save().disabled).toBe(false));
     await saveVia(user, "Save");
     const put = await waitFor(() => {
-      const call = calls.find((c) => c.method === "PUT");
+      // A brief write, specifically: opening the campaign also PUTs the
+      // last-opened pointer (PT-5e), which carries no revision.
+      const call = briefPuts(calls)[0];
       expect(call).toBeTruthy();
       return call!;
     });
@@ -4278,9 +4356,9 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
     // The capability D35 preserved when "Apply to run" was retired: a brand-new brief
     // that has never touched disk must still be runnable, or retiring that verb was a
     // regression. SG-D22's second form keeps it — `execute(draftBrief)` runs the
-    // projection the gate validated, with no write and no commit to the shell (D37's
-    // `cf:brief` is a last-opened POINTER, so committing an id with no file would send
-    // a later reload to M3's "no such brief").
+    // projection the gate validated, with no write and no commit to the shell (the
+    // last-opened pointer is a POINTER, so committing an id with no file would send
+    // a later restore to M3's "no such brief").
     await user.click(slot(messages.editorValidate) as HTMLElement);
     await user.click(slot(messages.generate) as HTMLElement);
     await user.click(within(confirm()).getByRole("button", { name: messages.generate }));
@@ -4298,16 +4376,15 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
   });
 
   test("the blank route can run nothing, and the header offers no way around it (D37)", async () => {
-    // D37 keeps `cf:brief` as a *last-opened* record so the bare /brief route can hand
-    // the visitor back. It is a pointer, not an application: arriving at the blank
-    // route released the campaign. The header used to be where that mattered — its
+    // D37 keeps the last-opened pointer so the bare routes can hand the visitor
+    // back. It is a pointer, not an application: arriving at the blank route
+    // released the campaign. The header used to be where that mattered — its
     // Generate would otherwise have spent credits on the previous brief — and with the
     // verb gone the invariant is pinned where the verb now is: the blank route's draft
     // is empty, so the slot offers Validate, the press refuses, and the header carries
     // no run verb to reach past it.
     const user = userEvent.setup();
-    localStorage.setItem("cf:brief", JSON.stringify(brief("camp")));
-    const calls = routes({});
+    const calls = routes({ lastOpened: () => json({ campaignId: "camp" }) });
     renderWithRun(
       <>
         <Header />

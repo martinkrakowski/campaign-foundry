@@ -3,12 +3,14 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
 import {
-  renderWithRun,
-  seedPersistedRun,
   makeAsset,
   mockPipelineApi,
-  storedTemplate,
+  openedCampaign,
+  renderWithRun,
   seedDecisions,
+  seedOpenedCampaign,
+  seedPersistedRun,
+  storedTemplate,
 } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CommandBar } from "@/components/shell/CommandBar";
@@ -21,9 +23,9 @@ import RunsPage from "@/app/(shell)/runs/page";
 beforeEach(() => localStorage.setItem("cf:brief-picked", "1"));
 
 const seedSingle = (assets: ReturnType<typeof makeAsset>[], postPending = false) => {
-  localStorage.setItem(
-    "cf:brief",
-    JSON.stringify({
+  const report = { halted: false, assets, log: { entries: [], campaignId: "seed" } };
+  mockPipelineApi({
+    opened: openedCampaign({
       id: "seed",
       targetRegion: "DE",
       targetAudience: "a",
@@ -31,9 +33,6 @@ const seedSingle = (assets: ReturnType<typeof makeAsset>[], postPending = false)
       template: storedTemplate,
       products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
     }),
-  );
-  const report = { halted: false, assets, log: { entries: [], campaignId: "seed" } };
-  mockPipelineApi({
     report,
     ...(postPending ? { post: () => new Promise<Response>(() => {}) } : {}),
   });
@@ -49,9 +48,8 @@ describe("CommandBar — states", () => {
   test("shows the error status when a run fails", async () => {
     const user = userEvent.setup();
     // PT-5c2: Execute only answers a press once a campaign is applied.
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({
+    mockPipelineApi({
+      opened: openedCampaign({
         id: "seed",
         targetRegion: "DE",
         targetAudience: "a",
@@ -59,8 +57,8 @@ describe("CommandBar — states", () => {
         template: storedTemplate,
         products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
       }),
-    );
-    mockPipelineApi({ post: () => new Response("boom", { status: 500 }) });
+      post: () => new Response("boom", { status: 500 }),
+    });
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
     await user.click(screen.getByText(/Execute/));
     await user.click(within(await screen.findByRole("dialog")).getByText("Generate"));
@@ -116,17 +114,14 @@ describe("ExportPage — approved render without a proof", () => {
 
 describe("Sidebar — localized fallback", () => {
   test("falls back to the campaign message when no localized copy is set", async () => {
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({
-        id: "nolocale",
-        targetRegion: "DE",
-        targetAudience: "a",
-        campaignMessage: "Plain message",
-        template: storedTemplate,
-        products: [{ id: "p", name: "P", primaryColor: "#111111", logoPath: "l.png" }],
-      }),
-    );
+    seedOpenedCampaign({
+      id: "nolocale",
+      targetRegion: "DE",
+      targetAudience: "a",
+      campaignMessage: "Plain message",
+      template: storedTemplate,
+      products: [{ id: "p", name: "P", primaryColor: "#111111", logoPath: "l.png" }],
+    });
     renderWithRun(<Sidebar />);
     expect(await screen.findByText("Plain message")).toBeTruthy();
   });
@@ -134,9 +129,8 @@ describe("Sidebar — localized fallback", () => {
 
 describe("TelemetryDrawer — clipboard edges", () => {
   const seedLog = () => {
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({
+    mockPipelineApi({
+      opened: openedCampaign({
         id: "log3",
         targetRegion: "DE",
         targetAudience: "a",
@@ -144,8 +138,6 @@ describe("TelemetryDrawer — clipboard edges", () => {
         template: storedTemplate,
         products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
       }),
-    );
-    mockPipelineApi({
       report: {
         halted: false,
         assets: [],

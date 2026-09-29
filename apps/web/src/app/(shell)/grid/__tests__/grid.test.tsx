@@ -127,18 +127,14 @@ describe("GridPage", () => {
   });
 
   test("a short-video brief shows the type display name on the review summary, never the raw id", async () => {
-    seedPersistedRun([makeAsset()]);
-    const stored = JSON.parse(localStorage.getItem("cf:brief") ?? "{}") as Record<string, unknown>;
-    localStorage.setItem("cf:brief", JSON.stringify({ ...stored, type: "short-video" }));
+    seedPersistedRun([makeAsset()], { brief: { type: "short-video" } });
     renderWithRun(<GridPage />);
     expect(await screen.findByText(typeDisplayName("short-video"))).toBeTruthy();
     expect(screen.queryByText("short-video")).toBeNull();
   });
 
   test("a stored type banner shows Social post on the review summary, never an empty chip", async () => {
-    seedPersistedRun([makeAsset()]);
-    const stored = JSON.parse(localStorage.getItem("cf:brief") ?? "{}") as Record<string, unknown>;
-    localStorage.setItem("cf:brief", JSON.stringify({ ...stored, type: "banner" }));
+    seedPersistedRun([makeAsset()], { brief: { type: "banner" } });
     renderWithRun(<GridPage />);
     expect(await screen.findByText(typeDisplayName("social-post"))).toBeTruthy();
     expect(screen.queryByText("banner")).toBeNull();
@@ -309,19 +305,6 @@ describe("GridPage", () => {
     ];
 
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({
-        id: "camp",
-        targetRegion: "DE",
-        targetAudience: "a",
-        campaignMessage: "Stay wild",
-        template: storedTemplate,
-        products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
-        mode: "variation",
-        variation: { count: 2 },
-      }),
-    );
 
     const report = {
       halted: false,
@@ -333,6 +316,19 @@ describe("GridPage", () => {
       post: () => json({ jobId: "job-reload-test" }, 202),
       job: () => jobOk(report),
       result: () => json(report),
+      opened: {
+        id: "camp",
+        brief: {
+          id: "camp",
+          targetRegion: "DE",
+          targetAudience: "a",
+          campaignMessage: "Stay wild",
+          template: storedTemplate,
+          products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+          mode: "variation",
+          variation: { count: 2 },
+        },
+      },
     });
 
     // 1. Freshly run the campaign
@@ -374,20 +370,6 @@ describe("GridPage", () => {
     });
     const rerolled = { ...original, attempt: 1, treatment: "headline-bottom-bold" };
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({
-        id: "seed",
-        targetRegion: "DE",
-        targetAudience: "a",
-        campaignMessage: "Hi",
-        template: storedTemplate,
-        products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
-        // a variation run (variantIndex assets) can only exist under a randomized brief
-        mode: "variation",
-        variation: { count: 1 },
-      }),
-    );
     seedDecisions({ "alpha/v0": "rejected" });
     mockPipelineApi({
       report: { halted: false, assets: [original], log: { entries: [], campaignId: "seed" } },
@@ -397,6 +379,20 @@ describe("GridPage", () => {
           assets: [rerolled],
           log: { entries: [], campaignId: "seed" },
         }),
+      opened: {
+        id: "seed",
+        brief: {
+          id: "seed",
+          targetRegion: "DE",
+          targetAudience: "a",
+          campaignMessage: "Hi",
+          template: storedTemplate,
+          products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+          // a variation run (variantIndex assets) can only exist under a randomized brief
+          mode: "variation",
+          variation: { count: 1 },
+        },
+      },
     });
     renderWithRun(<Harness />);
     expect(await screen.findByText("alpha @ 1:1 · v0 · headline-top-subtle")).toBeTruthy();
@@ -456,8 +452,9 @@ describe("GridPage", () => {
   test("Approve and Reject pause while a run is in flight, name the run as why, and return after it", async () => {
     const user = userEvent.setup();
     let finishPost!: (res: Response) => void;
-    seedPersistedRun([makeAsset()]);
+    const seeded = seedPersistedRun([makeAsset()]);
     mockPipelineApi({
+      opened: seeded,
       report: {
         halted: false,
         assets: [makeAsset()],
@@ -562,19 +559,19 @@ describe("GridPage", () => {
     mockPipelineApi({
       post: () => new Promise<Response>(() => {}), // pending
       report: { halted: false, assets: [makeAsset()], log: { entries: [], campaignId: "seed" } },
+      opened: {
+        id: "seed",
+        brief: {
+          id: "seed",
+          targetRegion: "DE",
+          targetAudience: "a",
+          campaignMessage: "Hi",
+          template: storedTemplate,
+          products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+        },
+      },
     });
     localStorage.setItem("cf:brief-picked", "1");
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({
-        id: "seed",
-        targetRegion: "DE",
-        targetAudience: "a",
-        campaignMessage: "Hi",
-        template: storedTemplate,
-        products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
-      }),
-    );
     renderWithRun(<Harness />);
     await screen.findByText("Approve"); // run restored
     await user.click(screen.getByText("regen"));
@@ -660,8 +657,9 @@ describe("GridPage", () => {
       makeAsset({ productId: "gamma", outputPath: "gamma/1x1.png" }),
       makeAsset({ productId: "delta", outputPath: "delta/1x1.png" }),
     ];
-    seedPersistedRun(seedAssets);
+    const seeded = seedPersistedRun(seedAssets);
     mockPipelineApi({
+      opened: seeded,
       result: (url) =>
         url.includes("campaignId=other")
           ? json({ halted: false, assets: otherAssets, log: { entries: [], campaignId: "other" } })
@@ -882,9 +880,10 @@ describe("GridPage — motion cells", () => {
       complianceScore: 0.9,
       descriptor: { ...original.descriptor!, motion: "accent-wipe" },
     });
-    seedPersistedRun([original]);
+    const seeded = seedPersistedRun([original]);
     let body: unknown;
     mockPipelineApi({
+      opened: seeded,
       report: { halted: false, assets: [original], log: { entries: [], campaignId: "seed" } },
       post: (_u, init) => {
         body = JSON.parse(String(init.body));

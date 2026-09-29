@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-5e-last-opened-on-the-server",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/pg-last-opened-store.ts",
+      "before": "      `select campaign_id, ${TO_ISO} as updated_at\n         from last_opened\n        where org_id = $1 and user_id = $2`,\n      [this.orgId, userId],",
+      "after": "      `select campaign_id, ${TO_ISO} as updated_at\n         from last_opened\n        where org_id = $1 -- mutant: no user filter, so any user's pointer answers\n        limit 1`,\n      [this.orgId],",
+      "because": "dropping the user_id filter from the pointer read hands every user in an org whichever pointer row sorts first, so one person's last-opened campaign is another's (D173: the pointer is per (org, user), which is what makes it follow them to another device)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-last-opened-store.test.ts",
+        "-t",
+        "two users in one org keep independent pointers"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

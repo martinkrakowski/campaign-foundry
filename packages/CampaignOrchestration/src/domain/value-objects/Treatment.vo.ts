@@ -16,10 +16,14 @@ export type ToneKind = (typeof TONE_VALUES)[number];
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /**
- * Top-level directory names under an org's output root that are reserved by
- * the orchestrator or infrastructure and cannot be used as campaign identifiers.
+ * Campaign identifiers the orchestrator reserves for itself, and which cannot
+ * name a campaign: the top-level directory names under an org's output root
+ * (`cache`, `jobs`, `orgs`, `packages`), and `last-opened` — the static
+ * `/campaigns/last-opened` route (PT-5e, D180). That route would shadow a
+ * campaign slugged `last-opened`'s own `GET /campaigns/:id`, which is the only
+ * id such a campaign has on the file backend (D179).
  */
-export const RESERVED_CAMPAIGN_IDS = ["cache", "jobs", "orgs", "packages"] as const;
+export const RESERVED_CAMPAIGN_IDS = ["cache", "jobs", "last-opened", "orgs", "packages"] as const;
 export type ReservedCampaignId = (typeof RESERVED_CAMPAIGN_IDS)[number];
 
 export function isReservedCampaignId(id: string): id is ReservedCampaignId {

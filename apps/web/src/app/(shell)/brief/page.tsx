@@ -1,32 +1,23 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { BRIEF_KEY, isStoredBrief } from "@/lib/run-context";
-import { SAFE_ID_PATTERN } from "@/components/campaign/validate";
 import { campaignRoute } from "@/lib/campaign-route";
+import { useLastOpenedRedirect } from "@/lib/run-context";
 
 /**
  * D37: the bare `/brief` route never renders an editor — the URL is the single source
  * of truth for which brief is open, and this route names none. It hands the visitor to
- * the brief they last opened (the one thing `cf:brief` still earns) or, when no
- * last-opened brief is recorded, to the grid.
+ * the brief they last opened, or, when there is none, to the grid and the picker.
+ *
+ * PT-5e (D173, D180): "the brief they last opened" is the server's per-user pointer
+ * now, not a `localStorage` copy only that browser could read. A pointer to a campaign
+ * that has since been deleted, or become hidden by team, reads as no pointer at all —
+ * the server answers those two identically (D166) — so both land on the picker, and
+ * nothing here can tell them apart.
+ *
+ * The redirect target is the editor's own route, `campaignRoute(id)`, which the
+ * editor loads from the server exactly as it loads any campaign its route names.
  */
 export default function BriefIndexPage() {
-  const router = useRouter();
-  useEffect(() => {
-    let id: string | undefined;
-    try {
-      const parsed: unknown = JSON.parse(localStorage.getItem(BRIEF_KEY) ?? "null");
-      if (isStoredBrief(parsed)) id = parsed.id;
-    } catch {
-      // Unreadable storage is the same as no record: there is no brief to offer.
-    }
-    // SAFE_ID_PATTERN is the one rule a brief id answers to (the same one the
-    // Save-as backstop and the [id] route enforce): a malformed id cannot name a
-    // brief, so it is refused here rather than sent to a route that cannot load it.
-    if (id !== undefined && SAFE_ID_PATTERN.test(id)) router.replace(campaignRoute(id));
-    else router.replace("/grid");
-  }, [router]);
+  useLastOpenedRedirect(campaignRoute);
   return null;
 }

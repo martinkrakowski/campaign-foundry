@@ -231,6 +231,30 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
       }
     });
 
+    // PT-5e item 0: `last-opened` is reserved BEFORE `GET /campaigns/last-opened`
+    // exists, because a static route of that name shadows a campaign slugged
+    // `last-opened`'s own `GET /campaigns/:id` — and on fs that slug is the
+    // campaign's only id (D179), so the shadowing would cost it the route
+    // entirely. `slugify("Last Opened")` is exactly `last-opened`, so this is
+    // the one realistic way a user reaches the reserved id by accident.
+    test("a campaign named `Last Opened` gets a slug other than `last-opened`", async () => {
+      const harness = await setup();
+      try {
+        const { create } = mount();
+        const first = await create(createReq({ name: "Last Opened" }));
+        const firstBody = (await first.json()) as { campaignId: string; slug: string };
+        expect(firstBody.slug).not.toBe("last-opened");
+        expect(firstBody.slug).toBe("last-opened-2");
+
+        // …and the campaign it minted is reachable by its own id, which is the
+        // property the reservation exists to protect (on fs the slug IS the id).
+        const meta = await getBriefStore(LOCAL_TENANT).campaignMeta(firstBody.slug);
+        expect(meta?.campaignId).toBe(firstBody.campaignId);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
     if (backend === "fs") {
       // coderabbit PRRT_kwDOSzP1zc6mgBu7 / qodo PRRT_kwDOSzP1zc6mgEyH:
       // FsBriefStore.createCampaign must see an id living in a differently
