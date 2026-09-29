@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "FU-plan-review-gate",
+  "mutations": [
+    {
+      "file": "tools/plan-review/cli.ts",
+      "before": "return current === reviewed ? undefined : id;",
+      "after": "return undefined;",
+      "because": "without the hash comparison, check treats every reviewed row as unchanged and clears a lane whose plan row was rewritten after its review — the gate would rubber-stamp a stale row.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/plan-review/__tests__/cli.test.ts",
+        "-t",
+        "changed since the review"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

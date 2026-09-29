@@ -4,6 +4,7 @@ import type { EventKind, Stage, WaveEvent } from "./types.js";
 // The vocabulary, for error messages only — acceptance of an event is always
 // decided by W1's reader below, never by a second hand-written check.
 const STAGES: readonly Stage[] = [
+  "plan-review",
   "dispatch",
   "implement",
   "gate",
