@@ -767,27 +767,93 @@ describe("BriefPage — data flow", () => {
     expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull();
   });
 
-  // PT-5d — retired. Both "Save as... on the blank route..." and "Save on the
-  // blank route mints the campaign first..." (and "saving on the blank route
-  // stops the URL calling it new", below the recovery-draft tests) exercised
-  // Save/Save as… on a routeless mount (`routeId === undefined`) whose
-  // `state.briefId` had been seeded directly to a non-empty value by the OLD
-  // `saveDraftToStorage`/`loadDraftFromStorage` recovery path — the shape a
-  // pre-PT-5c1 draft's raw `restore` dispatch produced. That path is provably
-  // the ONLY way to reach it: `IdentitySection`'s "Campaign Name" input
-  // dispatches `campaignName`, never `briefId` (D168 retired client-side slug
-  // derivation), `initialEditorState()` sets `briefId: ""`, and
-  // `validateIdentity` fails `SAFE_ID_PATTERN.test("")` unconditionally — so
-  // typing alone can never produce a non-empty `briefId` for a `"new"` source
-  // with no `seeded` identity, and Save/Save as… both refuse before ever
-  // reaching the network (confirmed by running this suite against the
-  // pre-PT-5d code with the seed line removed: same refusal, same reason).
-  // PT-5d retires the recovery mechanism that was the only way to reach this
-  // shape (server drafts require a real, already-minted campaign — the FK
-  // `0014_draft.sql` adds), and the routeless mount itself is unreachable
-  // through normal navigation now that `/brief/new` never mounts a bare
-  // editor (`app/(shell)/brief/new/page.tsx`). There is no state left for
-  // these tests to exercise.
+  // PT-5d — `state.briefId` becomes non-empty only through `markSeeded`,
+  // which needs a resolved route (D168 retired typing-derives-the-slug, so
+  // typing into Campaign Name can never do it for an unseeded source, and
+  // `validateIdentity` fails `SAFE_ID_PATTERN.test("")` unconditionally).
+  // `routeId === undefined` is therefore unreachable through normal
+  // navigation now (`/brief/new` never mounts a bare editor), and Save/Save
+  // as… would refuse before the network anyway if it somehow were — but the
+  // mint branches below are PT-5c2's, not this lane's, so they stay and keep
+  // their coverage: seed the identity at a real route, then drop the route
+  // out from under the SAME mounted instance. `state` is a reducer (it does
+  // not reset on a prop change) and the load effect's own
+  // `if (routeId === undefined) return;` leaves a seeded "new" source's
+  // `state.source` exactly as it was — the one way left to reach this branch
+  // without a raw state injection.
+  const dropRoute = (view: ReturnType<typeof renderWithRun>) =>
+    view.rerender(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <Editor />
+          <CreateCampaignDialog />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+
+  test("Save on the blank route mints the campaign first, then saves the draft into it", async () => {
+    const user = userEvent.setup();
+    // Seeded under a DIFFERENT slug ("fresh-camp") than the typed name
+    // ("fresh"): a controlled input's `fireEvent.change` to the value it
+    // already displays (here, the `briefId` fallback `campaignNameValue`
+    // falls back to) never fires onChange at all — React's own value
+    // tracker sees no change — so the seed and the typed name must differ.
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh-camp")) });
+    const view = renderWithRun(<Editor id="fresh-camp" />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh-camp"),
+    );
+    await fillValidDraft(user, "fresh");
+    dropRoute(view);
+
+    await saveVia(user, "Save");
+
+    // D37: the URL is the source of truth — the mint's own campaignId names it.
+    await waitFor(() =>
+      expect(nextMock().router.replace).toHaveBeenCalledWith(campaignRoute("fresh")),
+    );
+
+    const posts = calls.filter((c) => c.method === "POST");
+    const mintIndex = posts.findIndex((c) => c.url === `${API}/campaigns`);
+    const saveIndex = posts.findIndex((c) => c.url === `${API}/campaigns/briefs`);
+    expect(mintIndex).toBeGreaterThanOrEqual(0);
+    expect(saveIndex).toBeGreaterThan(mintIndex);
+    expect(posts[mintIndex]?.body).toMatchObject({ name: "fresh" });
+    // The draft is saved under the MINTED slug, not the abandoned draft's own id.
+    expect(posts[saveIndex]?.body).toMatchObject({ id: "fresh" });
+  });
+
+  // Also covers `handleSaveAs`'s own `sourceRouteId === undefined` branch
+  // (no `teamOf`) and this lane's `if (sourceRouteId !== undefined)` guard on
+  // the post-Save-as draft DELETE.
+  test("Save as... on the blank route also stops the URL calling it new", async () => {
+    const user = userEvent.setup();
+    const calls = routes({ meta: () => json(blankCampaignMeta("fresh")) });
+    const view = renderWithRun(<Editor id="fresh" />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh"),
+    );
+    dropRoute(view);
+    await fillValidDraft(user, "fresh");
+
+    await saveVia(user, "Save as");
+    await user.type(screen.getByLabelText("New campaign name"), "elsewhere");
+    await user.click(
+      within(screen.getByRole("dialog", { name: /Save as/ })).getByRole("button", { name: "Save" }),
+    );
+
+    // D37: the copy's identity lives in the URL — the mint's own campaignId names it.
+    await waitFor(() =>
+      expect(nextMock().router.replace).toHaveBeenCalledWith(campaignRoute("elsewhere")),
+    );
+
+    // PT-5c2: no campaign was open (routeId undefined at Save-as time) — the
+    // mint carries no `teamOf` at all, and this lane's own post-Save-as
+    // DELETE has nothing to target either.
+    const mint = calls.find((c) => c.method === "POST" && c.url === `${API}/campaigns`);
+    expect(mint?.body).not.toHaveProperty("teamOf");
+    expect(calls.some((c) => c.method === "DELETE" && c.url.includes("/draft"))).toBe(false);
+  });
 
   test("Save as... keeps the copy's revision, so the next save still guards the write", async () => {
     const user = userEvent.setup();
@@ -1150,11 +1216,9 @@ describe("BriefPage — data flow", () => {
     expect(calls.some((c) => c.url.includes("/campaigns/camp/draft"))).toBe(false);
   });
 
-  // PT-5d — retired; see the comment above "Save as... keeps the copy's
-  // revision..." earlier in this describe block. Same shape: Save on a
-  // routeless mount, refused before it ever reaches the network because
-  // typing can never fill `state.briefId` for a `"new"` source with no
-  // `seeded` identity.
+  // PT-5d — a duplicate of "Save on the blank route mints the campaign
+  // first..." above (same seed-then-drop-the-route setup); retired rather
+  // than kept as a second copy of the same assertion.
 
   // Corrected for D35/D41: "Apply to run" is retired and the chip has two states.
   // What the old test pinned — that committing the draft retires the unapplied badge —

@@ -762,16 +762,17 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * campaign with no version yet, the same shape a versionless campaign's
    * `state.source` carries) — a stale one (a Save landed elsewhere since the
    * draft was taken) is silently skipped, leaving the freshly loaded or
-   * seeded brief on screen rather than superseded content. Keyed on
-   * `routeId` (not on `state`, which the restore itself changes) so a
-   * listing refresh never re-fetches or re-dispatches for a route already
-   * settled.
+   * seeded brief on screen rather than superseded content. The dependency
+   * array, not a ref, is what makes this run once per route: `state` is
+   * deliberately NOT a dependency (only read via closure at fire time), so a
+   * listing refresh or a keystroke — anything that leaves `routeId` and
+   * `routeAlreadyResolved` unchanged — never re-runs this effect at all;
+   * React's own `Object.is` comparison on those two already answers "is this
+   * still the route already settled", so a second, hand-rolled guard here
+   * would only ever duplicate it.
    */
-  const restoredDraftForRouteRef = useRef<string | null>(null);
   useEffect(() => {
     if (routeId === undefined || !routeAlreadyResolved) return;
-    if (restoredDraftForRouteRef.current === routeId) return;
-    restoredDraftForRouteRef.current = routeId;
     const currentRevision = state.source.kind === "file" ? (state.source.revision ?? null) : null;
     let cancelled = false;
     void (async () => {
