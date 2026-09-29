@@ -1261,6 +1261,26 @@ describe("FsBriefStore", () => {
       expect((await store.readBrief("moved")).campaignMessage).toBe("Second pass");
     });
 
+    // The other half of the same comparison, and the reason it is not simply
+    // "declared id, or ENOENT": bytes that stopped PARSING declare no id at
+    // all, and a Save still owes that file a refusal by name. Re-deriving here
+    // would answer ENOENT, and `replaceBrief` would turn that into a create
+    // over the file that is already there. This is the divergence named at
+    // `findBriefFileById` -- the name is still a hit, the brief is not.
+    test("a rewrite refuses a cached file whose bytes stopped parsing, by name", async () => {
+      await store.createBrief({ ...minimalBrief, id: "rotten" });
+      expect(await store.findBriefFileById("rotten")).toBe("rotten.yaml");
+
+      const corrupt = "id: camp\nproducts: [";
+      writeFileSync(join(dir, "rotten.yaml"), corrupt);
+
+      expect(await store.findBriefFileById("rotten")).toBe("rotten.yaml");
+      await expect(store.rewriteBrief({ ...minimalBrief, id: "rotten" })).rejects.toMatchObject({
+        code: "EBRIEFDOC",
+      });
+      expect(readFileSync(join(dir, "rotten.yaml"), "utf8")).toBe(corrupt);
+    });
+
     // A root this store cannot stat is a storage failure, not an absent
     // campaign: answering EIO as "no such campaign" would turn an outage into
     // a 404 on every route that resolves a campaign first.
