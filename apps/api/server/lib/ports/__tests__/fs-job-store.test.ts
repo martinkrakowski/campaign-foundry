@@ -1050,6 +1050,41 @@ describe("FsJobStore", () => {
     }
   });
 
+  test("reapStaleRunningLocked returns undefined when the fresh read finds the file gone", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await store.createJob("campaign-vanished-during-reap");
+      const first = await store.getStoredJob(id);
+      expect(first?.job.status).toBe("running");
+
+      const cache = (
+        store as unknown as {
+          memoryCache: Map<string, { entry: StoredJob; mtimeMs: number }>;
+        }
+      ).memoryCache;
+      const cached = cache.get(id)!;
+      // Make the cached copy look stale without advancing the clock (same
+      // splice-in technique as the completed-during-reap race test above).
+      cache.set(id, {
+        entry: { ...cached.entry, startedAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) },
+        mtimeMs: cached.mtimeMs,
+      });
+
+      // Simulate the file having vanished by the time the reap's fresh read
+      // runs (deleted by a concurrent process or eviction between the cache
+      // check and the lock).
+      vi.spyOn(
+        store as unknown as { readEntryFromDisk: (id: string) => Promise<StoredJob | undefined> },
+        "readEntryFromDisk",
+      ).mockResolvedValueOnce(undefined);
+
+      const stored = await store.getStoredJob(id);
+      expect(stored).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("eviction may now retire a reaped job", async () => {
     vi.useFakeTimers();
     try {

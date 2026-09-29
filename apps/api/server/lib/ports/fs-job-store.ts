@@ -249,8 +249,8 @@ export class FsJobStore implements JobStorePort {
       const fresh = await this.readEntryFromDisk(id);
       if (fresh === undefined) return undefined;
       if (!this.isStaleRunning(fresh)) {
-        const freshStat = await stat(this.jobPath(id)).catch(() => undefined);
-        if (freshStat) this.memoryCache.set(id, { entry: fresh, mtimeMs: freshStat.mtimeMs });
+        const freshStat = await stat(this.jobPath(id));
+        this.memoryCache.set(id, { entry: fresh, mtimeMs: freshStat.mtimeMs });
         return fresh;
       }
       return this.reapStaleRunning(fresh);
@@ -331,23 +331,8 @@ export class FsJobStore implements JobStorePort {
       return cached.entry;
     }
 
-    let raw: string;
-    try {
-      raw = await readFile(this.jobPath(id), "utf8");
-    } catch (error) {
-      if (isErrno(error, "ENOENT")) return undefined;
-      throw error;
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      await this.deleteJob(id);
-      return undefined;
-    }
-
-    const entry = parsed as StoredJob;
+    const entry = await this.readEntryFromDisk(id);
+    if (entry === undefined) return undefined;
     if (entry.settledAt !== undefined && Date.now() - entry.settledAt >= JOB_TTL_MS) {
       await this.deleteJob(id);
       return undefined;
