@@ -332,11 +332,14 @@ export function CreateCampaignDialog() {
 
   /** Resume: nothing is minted — the caller's latest server draft already
    *  names a real campaign (PT-5d item 5), so this navigates straight to it
-   *  rather than opening `/brief/new` again to re-ask the same question. */
+   *  rather than opening `/brief/new` again to re-ask the same question.
+   *  Only ever pressed from the resume prompt this ref's own non-null value
+   *  raised (`handleCreate`), and nothing in between resets it — the
+   *  non-null assertion documents that, rather than a dead `if` branch. */
   const handleResume = () => {
-    const latest = latestDraftRef.current;
+    const latest = latestDraftRef.current!;
     closeAndReset();
-    if (latest !== null) router.push(campaignRoute(latest.campaignId));
+    router.push(campaignRoute(latest.campaignId));
   };
 
   const cancelResumePrompt = () => setResumePrompt(false);

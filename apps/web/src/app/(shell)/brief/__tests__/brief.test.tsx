@@ -120,4 +120,20 @@ describe("/brief/new — resume or create (PT-5c1, PT-5d, W3)", () => {
     // (`/brief/{id}`) is what loads it, exercised in brief-editor.test.tsx.
     expect(screen.queryByLabelText("Campaign Name")).toBeNull();
   });
+
+  test("unmounting before the latest-draft fetch answers navigates nowhere", async () => {
+    let resolveLatest: ((r: Response) => void) | null = null;
+    mockPipelineApi({
+      result: (u) =>
+        isLatestDraftUrl(u)
+          ? new Promise<Response>((resolve) => (resolveLatest = resolve))
+          : json({}),
+    });
+    const view = renderNewBriefPage();
+    await waitFor(() => expect(resolveLatest).not.toBeNull());
+    view.unmount();
+    resolveLatest!(json({ latest: { campaignId: "too-late" } }));
+    await Promise.resolve();
+    expect(nextMock().router.replace).not.toHaveBeenCalled();
+  });
 });

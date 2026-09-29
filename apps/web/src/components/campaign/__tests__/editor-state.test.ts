@@ -1776,6 +1776,15 @@ describe("server draft persistence (PT-5d, D173, D177)", () => {
     expect(draft?.state.briefId).toBe("camp");
   });
 
+  test("fetchServerDraft answers a null base revision for a versionless campaign's draft", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({ draft: { state: { ...base(), briefId: "fresh" }, baseRevision: null } }),
+    );
+    const draft = await fetchServerDraft("fresh");
+    expect(draft?.baseRevision).toBeNull();
+    expect(draft?.state.briefId).toBe("fresh");
+  });
+
   test("fetchServerDraft answers null for a non-ok response, a network failure, bad JSON, or a malformed body", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ draft: null }, false));
     expect(await fetchServerDraft("camp")).toBeNull();

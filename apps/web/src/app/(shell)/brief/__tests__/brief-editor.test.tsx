@@ -5922,7 +5922,15 @@ describe("VE1 — undo and redo in the editor", () => {
     // restore-then-still-pristine render must not purge it: the
     // return-to-pristine purge only fires for a divergence THIS session
     // witnessed (`draftDivergedRef`), never for the mount's own restore.
-    const pristine = fromBrief(brief("camp") as never, { file: "camp.yaml", revision: "r1" });
+    // `capabilities` matches the default `routes()` capabilities probe
+    // answers (`{ motion: true }`) — `fromBrief` itself defaults it to
+    // `null`, and the probe's own dispatch is what moves it, so a draft this
+    // exactly-equal to what's on screen after that probe lands must carry
+    // the SAME value, or `valuesEqual` would (correctly) call it different.
+    const pristine = {
+      ...fromBrief(brief("camp") as never, { file: "camp.yaml", revision: "r1" }),
+      capabilities: { motion: true },
+    };
     calls.drafts.seed("camp", pristine, "r1");
     renderWithRun(<Editor id="camp" />);
     await waitFor(() => expect(nameField().value).toBe("camp"));

@@ -566,6 +566,33 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.getByText(messages.discardGuardTitle)).toBeTruthy();
   });
+
+  test("two activations of Create before the draft check answers reach the network once", async () => {
+    const user = userEvent.setup();
+    let releaseLatest!: (r: Response) => void;
+    const held = new Promise<Response>((resolve) => {
+      releaseLatest = resolve;
+    });
+    mockPipelineApi({
+      result: (u) => (u.includes("/campaigns/briefs/draft") ? held : json({})),
+    });
+    const create = vi.spyOn(createCampaignLib, "createCampaign").mockResolvedValue({
+      campaignId: "c1",
+    });
+    renderDialog();
+    await openDialog(user);
+    await fillValid(user);
+    const confirm = screen.getByRole("button", { name: messages.createCampaignConfirm });
+
+    // `checkingDraftRef` is what makes a second click, landing before the
+    // first draft check has even answered, a no-op rather than a second
+    // concurrent flow.
+    await user.click(confirm);
+    await user.click(confirm);
+
+    releaseLatest(json({ latest: null }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+  });
 });
 
 describe("the inline discard guard (W2(a) / D90)", () => {

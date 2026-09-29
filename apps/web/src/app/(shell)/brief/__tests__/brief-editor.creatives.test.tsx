@@ -297,13 +297,20 @@ const frameCalls = (calls: readonly Call[]) =>
  */
 const lastCell = (calls: readonly Call[]) =>
   (frameCalls(calls).at(-1)?.body?.cell ?? {}) as Record<string, unknown>;
-/** Calls that actually WROTE something — a plan and a frame persist nothing. */
+/**
+ * Calls that actually WROTE something — a plan and a frame persist nothing,
+ * and neither does a draft PUT/DELETE (PT-5d): the autosave effect fires on
+ * any non-pristine state, debounced 1 s, which this file's own real-timer
+ * `settle()` waits can cross — a draft is explicitly not the campaign brief
+ * these assertions mean (item 3: "PUT never calls parseBrief").
+ */
 const writes = (calls: readonly { url: string; method: string }[]) =>
   calls.filter(
     (c) =>
       c.method !== "GET" &&
       !c.url.includes("/campaigns/plan") &&
-      !c.url.includes("/campaigns/preview-frame"),
+      !c.url.includes("/campaigns/preview-frame") &&
+      !/\/campaigns\/[^/]+\/draft$/.test(c.url),
   );
 
 const list = () => screen.getByRole("list", { name: messages.creativesLegend });
