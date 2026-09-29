@@ -35,6 +35,20 @@ export function rowHash(markdown: string, id: string): string {
 export type Risk = "high" | "normal";
 
 /**
+ * `rowPrefix`'s own prefix, continued by everything up to the next `|` (or
+ * end of line, for a row with no further cells), captured as group 1 — the
+ * row's second cell. The capture is unconditional (`[^|]*` matches even zero
+ * characters), so a line this pattern's prefix matches always matches the
+ * whole pattern too: there is no "matched the prefix, then failed to
+ * re-match" state, which is why `rowRisk` never needs a second, separate
+ * `exec` the way an `exec`-after-`test` pair would.
+ */
+function rowSecondCellPattern(id: string): RegExp {
+  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^[ \\t]*\\|\\s*\\*\\*${escaped}\\*\\*\\s*\\|([^|]*)`);
+}
+
+/**
  * A row's risk tier, read from its SECOND cell: `**high**` marks it high;
  * anything else — the literal word `normal`, or a table with no Risk column
  * at all, whose second cell holds the "Delivers" prose instead, as in the
@@ -44,14 +58,18 @@ export type Risk = "high" | "normal";
  * either, and defaults to `normal` rather than being guessed at.
  */
 export function rowRisk(markdown: string, id: string): Risk {
-  const prefix = rowPrefix(id);
-  const matches = markdown.split("\n").filter((line) => prefix.test(line));
+  const pattern = rowSecondCellPattern(id);
+  const matches: RegExpExecArray[] = [];
+  for (const line of markdown.split("\n")) {
+    const match = pattern.exec(line);
+    if (match !== null) matches.push(match);
+  }
   if (matches.length !== 1) {
     throw new Error(`expected exactly one plan row for ${id}, found ${matches.length}`);
   }
-  const line = matches[0];
-  const consumed = prefix.exec(line)?.[0] ?? "";
-  const secondCell = line.slice(consumed.length).split("|", 1)[0]?.trim() ?? "";
+  // Non-null: the capture group above is unconditional, so a match here
+  // always carries one — see rowSecondCellPattern's own comment.
+  const secondCell = matches[0][1]!.trim();
   return secondCell === "**high**" ? "high" : "normal";
 }
 

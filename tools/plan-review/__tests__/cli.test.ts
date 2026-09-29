@@ -874,4 +874,29 @@ describe("the entry guard", () => {
       process.exitCode = undefined;
     }
   });
+
+  test("pre-pr-check through the real entry wires readdir, exists and env from the process", async () => {
+    // The only command that reaches those three deps — exercised here so the
+    // real entry's own wiring (not just runCli's logic) is covered.
+    vi.resetModules();
+    const originalCwd = process.cwd();
+    const dir = tempDir();
+    mkdirSync(join(dir, "docs", "planning"), { recursive: true });
+    process.chdir(dir);
+    const saved = process.argv;
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    process.argv = [saved[0] ?? "node", cliPath, "pre-pr-check", "UNKNOWN-LANE", "--wave", "w06"];
+    try {
+      await import("../cli.js");
+      await vi.waitFor(() =>
+        expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("risk=normal")),
+      );
+      expect(process.exitCode).toBe(0);
+    } finally {
+      process.argv = saved;
+      logSpy.mockRestore();
+      process.exitCode = undefined;
+      process.chdir(originalCwd);
+    }
+  });
 });

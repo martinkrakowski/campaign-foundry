@@ -103,10 +103,12 @@ describe("discoverRisk", () => {
   });
 
   test("a file that cannot be read is skipped in favour of the next", async () => {
+    // "a-broken.md" must sort BEFORE "b-ok.md", or the loop would return on
+    // the working file before ever trying the broken one — proving nothing.
     const io = {
-      readdir: async (): Promise<readonly string[]> => ["broken.md", "a.md"],
+      readdir: async (): Promise<readonly string[]> => ["b-ok.md", "a-broken.md"],
       readFile: async (path: string): Promise<string> => {
-        if (path.endsWith("broken.md")) throw new Error("EACCES");
+        if (path.endsWith("a-broken.md")) throw new Error("EACCES");
         return highPlan;
       },
     };

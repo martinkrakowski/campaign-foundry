@@ -371,7 +371,7 @@ async function planReviewFor(
 }
 
 /** The `wave` field carried by any of this lane's own events in `dirEvents`, or undefined. */
-function laneWaveIn(events: readonly WaveEvent[], lane: string): string | undefined {
+export function laneWaveIn(events: readonly WaveEvent[], lane: string): string | undefined {
   for (const event of events) {
     if (event.lane === lane) return event.wave;
   }

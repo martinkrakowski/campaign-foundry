@@ -7,6 +7,7 @@ import {
   collect,
   derivePrefix,
   joinPrForLane,
+  laneWaveIn,
   LEGACY_WAVE_LOG_ROOT,
   LOG_TAIL_BYTES,
   parseChecks,
@@ -23,7 +24,7 @@ import {
   type PrFact,
   type TailHandle,
 } from "../lib/collect.js";
-import type { WaveStatus } from "../lib/types.js";
+import type { WaveEvent, WaveStatus } from "../lib/types.js";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -2375,5 +2376,27 @@ describe("collect — D184's pre-PR-review gate (risk)", () => {
     };
     const status = await collect(deps, ROOT, "2026-09-28T12:00:00Z");
     expect(laneRow(status, "HX1")?.derived.risk).toBe("high-risk PR open without pre-PR review");
+  });
+});
+
+describe("laneWaveIn", () => {
+  const event = (lane: string, wave: string): WaveEvent => ({
+    ts: "2026-09-28T10:00:00Z",
+    wave,
+    lane,
+    stage: "dispatch",
+    event: "started",
+  });
+
+  test("the wave field carried by the lane's own event", () => {
+    expect(laneWaveIn([event("HX1", "R"), event("HX4", "R")], "HX1")).toBe("R");
+  });
+
+  test("undefined when no event in the list names this lane", () => {
+    expect(laneWaveIn([event("HX4", "R")], "HX1")).toBeUndefined();
+  });
+
+  test("an empty event list is undefined too", () => {
+    expect(laneWaveIn([], "HX1")).toBeUndefined();
   });
 });
