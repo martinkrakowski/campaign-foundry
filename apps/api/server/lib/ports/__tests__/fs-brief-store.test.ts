@@ -1261,6 +1261,132 @@ describe("FsBriefStore", () => {
       expect((await store.readBrief("moved")).campaignMessage).toBe("Second pass");
     });
 
+    // The suite's own `bad.yaml` shape — a mapping the schema REJECTS, where
+    // `listBriefs` skips the file — under a DIFFERENT id. It is the whole of
+    // the clobber the declared-id comparison exists to stop, and it is a
+    // separate hole from the one above: `parseBrief` refuses on SHAPE, so
+    // "these bytes declare no id" and "these bytes declare `stolen`" were one
+    // answer, and the write below patches the WHOLE target. One shape, two
+    // tests, the id the file declares the only thing that differs.
+    test("a rewrite re-derives off a schema-broken file that declares another id, and leaves its bytes alone", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const stolen = "id: stolen\nproducts: not-an-array\n";
+      writeFileSync(join(dir, "moved.yaml"), stolen);
+
+      // The scan cannot re-derive this one: the file no longer LISTS, which is
+      // why the declared id has to be read from the document rather than from
+      // a listing that has already skipped it. Nothing declares `moved` here,
+      // so the write is owed an ENOENT and not a patch.
+      await expect(
+        store.rewriteBrief({ ...minimalBrief, id: "moved", campaignMessage: "clobbered" }),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(readFileSync(join(dir, "moved.yaml"), "utf8")).toBe(stolen);
+    });
+
+    test("a replace re-derives off a schema-broken file that declares another id, and leaves its bytes alone", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const stolen = "id: stolen\nproducts: not-an-array\n";
+      writeFileSync(join(dir, "moved.yaml"), stolen);
+
+      // `replaceBrief`'s own fallback is the second half of the refusal: the
+      // rewrite is ENOENT, so it creates instead, and `wx` on the file that is
+      // really there is EEXIST rather than an overwrite of `stolen`.
+      await expect(
+        store.replaceBrief({ ...minimalBrief, id: "moved", campaignMessage: "clobbered" }),
+      ).rejects.toMatchObject({ code: "EEXIST" });
+      expect(readFileSync(join(dir, "moved.yaml"), "utf8")).toBe(stolen);
+    });
+
+    // Same bytes, the id the caller asked for. A Save that REPAIRS a file is
+    // the ordinary case this comparison must not break: re-deriving on every
+    // shape failure would answer ENOENT for a file that is sitting right there
+    // under the right name, and `replaceBrief` would turn that into a create.
+    test("a rewrite still repairs a schema-broken file that declares the same id", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const broken = "id: moved\nproducts: not-an-array\n";
+      writeFileSync(join(dir, "moved.yaml"), broken);
+
+      const rewritten = await store.rewriteBrief({
+        ...minimalBrief,
+        id: "moved",
+        campaignMessage: "repaired",
+      });
+      expect(rewritten.file).toBe("moved.yaml");
+      // Repaired, not just written: the file the store now LISTS is the brief
+      // the Save asked for, and it is findable by the id it was broken under.
+      expect(await store.findBriefById("moved")).toMatchObject({
+        brief: { id: "moved", campaignMessage: "repaired" },
+      });
+      expect(readFileSync(join(dir, "moved.yaml"), "utf8")).not.toBe(broken);
+    });
+
+    // The last of the three answers the declared id can give, and the one that
+    // keeps the test above honest about which is which. An `id` that is not a
+    // string names no campaign, so there is no other campaign's bytes at stake
+    // and nothing to re-derive onto: the write still owns the file and repairs
+    // it. The suite's own `bad.yaml` fixture, verbatim.
+    test("a rewrite repairs a file whose id is not a string at all", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const bad = "id: 1\nproducts: not-an-array\n";
+      writeFileSync(join(dir, "moved.yaml"), bad);
+
+      const rewritten = await store.rewriteBrief({
+        ...minimalBrief,
+        id: "moved",
+        campaignMessage: "repaired",
+      });
+      expect(rewritten.file).toBe("moved.yaml");
+      expect(await store.findBriefById("moved")).toMatchObject({
+        brief: { id: "moved", campaignMessage: "repaired" },
+      });
+    });
+
+    // R4.2's carve-out rewrites a `.json` brief WHOLE rather than patching it,
+    // so there is no Document-level refusal to fall back on and the declared
+    // id is the only thing standing between a Save and another campaign's
+    // bytes. Same two shapes, same two answers.
+    test("a rewrite re-derives off a schema-broken JSON brief that declares another id, and leaves its bytes alone", async () => {
+      writeFileSync(join(dir, "moved.json"), JSON.stringify({ ...minimalBrief, id: "moved" }, null, 2));
+      // A HIT, so the index holds the name the write must NOT target.
+      expect(await store.findBriefFileById("moved")).toBe("moved.json");
+
+      const stolen = JSON.stringify({ id: "stolen", products: "not-an-array" }, null, 2);
+      writeFileSync(join(dir, "moved.json"), stolen);
+
+      await expect(
+        store.rewriteBrief({ ...minimalBrief, id: "moved", campaignMessage: "clobbered" }),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(readFileSync(join(dir, "moved.json"), "utf8")).toBe(stolen);
+    });
+
+    test("a replace leaves a schema-broken JSON brief that declares another id alone", async () => {
+      writeFileSync(join(dir, "moved.json"), JSON.stringify({ ...minimalBrief, id: "moved" }, null, 2));
+      expect(await store.findBriefFileById("moved")).toBe("moved.json");
+
+      const stolen = JSON.stringify({ id: "stolen", products: "not-an-array" }, null, 2);
+      writeFileSync(join(dir, "moved.json"), stolen);
+
+      // No `wx` refusal here and none is owed: `moved.json` declares no brief
+      // the listing can see, so the canonical `moved.yaml` really is free and
+      // creating it is what a store built this second would do. What must not
+      // happen is `stolen` being written over in the process.
+      const replaced = await store.replaceBrief({
+        ...minimalBrief,
+        id: "moved",
+        campaignMessage: "clobbered",
+      });
+      expect(replaced.file).toBe("moved.yaml");
+      expect(readFileSync(join(dir, "moved.json"), "utf8")).toBe(stolen);
+    });
+
     // The other half of the same comparison, and the reason it is not simply
     // "declared id, or ENOENT": bytes that stopped PARSING declare no id at
     // all, and a Save still owes that file a refusal by name. Re-deriving here

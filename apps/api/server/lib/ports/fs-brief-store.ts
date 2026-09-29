@@ -12,8 +12,9 @@ import {
 import { basename, dirname, extname, resolve } from "node:path";
 import { isReservedCampaignId, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
+import { parse as parseYaml } from "yaml";
 import { resolveConfined } from "../confined-path.js";
-import { parseBriefText, type ParseBriefOptions } from "../load-brief.js";
+import { parseBriefText, YAML_ALIAS_CAP, type ParseBriefOptions } from "../load-brief.js";
 import {
   TeamsNotSupportedError,
   type BriefStorePort,
@@ -61,19 +62,35 @@ function assertNoTeam(teamId: string | null | undefined): void {
 }
 
 /**
- * The campaign id `raw` declares, or `undefined` when those bytes are not a
- * parseable brief at all.
+ * The campaign id `raw` DECLARES, read at the DOCUMENT level: the `id` key of
+ * the parsed mapping, when that key is a string.
  *
- * Unparseable is deliberately NOT "a different id", and the two answers must
- * not be collapsed. A Save hands the very same bytes to `patchBriefYaml`, which
- * refuses them by name (R4.1), and a `.json` brief is rewritten whole — so the
- * write path owes the caller a refusal, not a lookup. Re-deriving from a root
- * that never listed this file would answer "no such campaign" for a file that
- * is right there, and `replaceBrief` would turn that refusal into a create.
+ * Deliberately not `parseBriefText`'s id. `parseBrief` validates SHAPE, so an
+ * operator's half-written file — `id: stolen` beside `products: not-an-array`
+ * — declares no id through it, and "these bytes declare no id" and "these
+ * bytes declare another campaign" came back as the same `undefined`. The write
+ * path must not collapse them: it re-derives on the second and patches on the
+ * first, so a schema-validated answer let a Save patch one campaign's whole
+ * file as another, `id` included, over a root `listBriefs` had skipped.
+ *
+ * The bytes are put through the same extension dispatch and the same
+ * `YAML_ALIAS_CAP` `parseBriefText` uses, so what parses here parses there and
+ * an alias bomb is bounded in both places at once.
+ *
+ * A document that is not a mapping, or whose `id` is not a string, declares no
+ * id at all — and a Save still owes THOSE bytes a refusal by name rather than a
+ * re-derivation. Re-deriving would answer "no such campaign" for a file that is
+ * right there, and `replaceBrief` would turn that refusal into a create over
+ * the bytes the caller asked to repair.
  */
 function declaredBriefId(filePath: string, raw: string): string | undefined {
   try {
-    return parseBriefText(filePath, raw).id;
+    const data =
+      extname(filePath).toLowerCase() === ".json"
+        ? JSON.parse(raw)
+        : parseYaml(raw, { maxAliasCount: YAML_ALIAS_CAP });
+    const id = (data as { id?: unknown } | null | undefined)?.id;
+    return typeof id === "string" ? id : undefined;
   } catch {
     return undefined;
   }
