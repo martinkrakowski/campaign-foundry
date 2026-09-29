@@ -1364,9 +1364,18 @@ describe("POST /campaigns/briefs onto a grandfathered reserved slug (D181 fix ro
           // Mint directly through the store, bypassing `createCampaign`'s own
           // (correct, unchanged) reserved-id refusal — simulating a campaign
           // minted BEFORE this lane, when `templates` was not yet reserved.
+          // On fs this must be GENUINE evidence — a real campaign.json, the
+          // same shape `createCampaign` itself writes — not a bare directory
+          // (D181 fix round 2, Fable: a bare directory is exactly what
+          // `FsPoolStore.writePool`'s inline-brief path can create for ANY
+          // id, so `hasGenuineReservation` no longer trusts it alone).
           if (backend === "fs") {
             const fsHarness = harness as Awaited<ReturnType<typeof setupFsHarness>>;
             mkdirSync(join(fsHarness.projectRoot, "briefs", "templates"), { recursive: true });
+            writeFileSync(
+              join(fsHarness.projectRoot, "briefs", "templates", "campaign.json"),
+              JSON.stringify({ name: "Templates", type: null }),
+            );
           } else {
             const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
             await pgHarness.db.query(
@@ -1405,14 +1414,70 @@ describe("POST /campaigns/briefs onto a grandfathered reserved slug (D181 fix ro
           expect(await res.json()).toEqual({
             error: `"templates" is reserved; choose another campaign id.`,
           });
+
+          // S1 (D181 fix round 2): the refused mint leaves nothing behind —
+          // a genuinely rolled-back attempt, not a row/directory some later
+          // caller could stumble into and read as a real reservation.
+          if (backend === "postgres") {
+            const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+            const { rows } = await pgHarness.db.query(
+              `select 1 from campaign where org_id = 'local' and slug = 'templates'`,
+            );
+            expect(rows).toEqual([]);
+          } else {
+            const fsHarness = harness as Awaited<ReturnType<typeof setupFsHarness>>;
+            expect(existsSync(join(fsHarness.projectRoot, "briefs", "templates"))).toBe(false);
+          }
         } finally {
           await harness.cleanup();
         }
       });
+
+      if (backend === "fs") {
+        // Bug 2 (Fable, D181 fix round 2): `FsPoolStore.writePool`'s
+        // inline-brief path (`POST /campaigns/pools/copy` with `{ brief }`)
+        // `mkdir`s `briefs/<id>/` as a side effect, for ANY id — reserved or
+        // not — with no campaign behind it. Before this fix that bare
+        // directory alone made `campaignMeta` (and so the old grandfather
+        // check) answer "known", letting a fresh reserved mint through a
+        // side door `createCampaign` itself would have refused.
+        test("a bare briefs/templates/ directory (pools.json, no campaign.json, no version) does not grandfather a reserved mint", async () => {
+          const harness = await setup();
+          const fsHarness = harness as Awaited<ReturnType<typeof setupFsHarness>>;
+          try {
+            mkdirSync(join(fsHarness.projectRoot, "briefs", "templates"), { recursive: true });
+            writeFileSync(
+              join(fsHarness.projectRoot, "briefs", "templates", "pools.json"),
+              JSON.stringify({
+                briefId: "templates",
+                generatedAt: new Date().toISOString(),
+                model: "test",
+                entries: [],
+              }),
+            );
+
+            const createBrief = mountTenantRoute(briefsPostHandler, {
+              method: "POST",
+              path: "/campaigns/briefs",
+              tenant: LOCAL_TENANT,
+            });
+            const res = await createBrief(briefsReq(sampleBrief("templates")));
+            expect(res.status).toBe(400);
+            expect(await res.json()).toEqual({
+              error: `"templates" is reserved; choose another campaign id.`,
+            });
+            expect(
+              existsSync(join(fsHarness.projectRoot, "briefs", "templates.yaml")),
+            ).toBe(false);
+          } finally {
+            await harness.cleanup();
+          }
+        });
+      }
     },
   );
 
-  test("a hidden (other team) pre-minted `templates` campaign answers the same 404 as missing", async () => {
+  test("a hidden (other team) pre-minted `templates` campaign answers the identical 400 a genuinely missing reserved id does (PT-2d)", async () => {
     const harness = await setupPgHarness();
     try {
       await harness.db.query(
@@ -1432,16 +1497,23 @@ describe("POST /campaigns/briefs onto a grandfathered reserved slug (D181 fix ro
         path: "/campaigns/briefs",
         tenant: t2Member,
       });
-      const hidden = await createBrief(briefsReq(sampleBrief("templates")));
-      expect(hidden.status).toBe(404);
-      expect(await hidden.json()).toEqual({ error: `Campaign "templates" not found` });
 
-      // Same status, same body shape as a genuinely missing (non-reserved)
-      // target — proving this is the ordinary hidden-or-missing 404 path
-      // (PT-2d), never this route's reserved-specific message.
-      const missing = await createBrief(briefsReq(sampleBrief("genuinely-missing")));
-      expect(missing.status).toBe(404);
-      expect(await missing.json()).toEqual({ error: `Campaign "genuinely-missing" not found` });
+      // D181 fix round 2 (Fable, PT-2d): a hidden reserved campaign must NOT
+      // be distinguishable from a genuinely missing reserved id — either
+      // status alone would leak that a hidden campaign exists under that
+      // slug to a caller who cannot see it.
+      const hidden = await createBrief(briefsReq(sampleBrief("templates")));
+      const expectedBody = { error: `"templates" is reserved; choose another campaign id.` };
+      expect(hidden.status).toBe(400);
+      expect(await hidden.json()).toEqual(expectedBody);
+
+      // Now the SAME slug, SAME harness, SAME caller — genuinely missing
+      // (the row deleted, not merely hidden) — for a same-id, same-db
+      // apples-to-apples comparison rather than two different reserved ids.
+      await harness.db.query(`delete from campaign where org_id = 'local' and slug = 'templates'`);
+      const missing = await createBrief(briefsReq(sampleBrief("templates")));
+      expect(missing.status).toBe(hidden.status);
+      expect(await missing.json()).toEqual(expectedBody);
     } finally {
       await harness.cleanup();
     }
