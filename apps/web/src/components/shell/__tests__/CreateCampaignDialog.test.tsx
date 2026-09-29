@@ -9,12 +9,7 @@ import {
 import { CreateCampaignProvider, useCreateCampaign } from "@/lib/create-campaign-context";
 import { campaignRoute } from "@/lib/campaign-route";
 import { BriefsApiError } from "@/lib/briefs-api";
-import { ShellProviders, nextMock } from "@/__tests__/helpers";
-import {
-  editorReducer,
-  initialEditorState,
-  saveDraftToStorage,
-} from "@/components/campaign/editor-state";
+import { ShellProviders, nextMock, mockPipelineApi, json } from "@/__tests__/helpers";
 import {
   formatDisplayName,
   modeDisplayName,
@@ -38,8 +33,8 @@ const Harness = () => {
   );
 };
 
-/** W3: the dialog reads `isDirty` from the guard's provider — the same tree the
- *  shell layout builds (the shared helper supplies EditorDirtyProvider). */
+/** W3: the shared helper's shell tree (`RunProvider`, `EditorDirtyProvider`) is
+ *  what wires the fetch mock the draft checks below use. */
 const renderDialog = () =>
   render(
     <ShellProviders>
@@ -372,17 +367,22 @@ describe("CreateCampaignDialog", () => {
 });
 
 describe("the abandoned-draft two-way (W3 / F19)", () => {
+  /** The campaign whose autosaved draft `GET /campaigns/briefs/draft` answers below. */
+  const DRAFT_CAMPAIGN_ID = "draft-camp-1";
+
   /**
-   * The abandoned draft, written the way the editor's autosave effect does: a
-   * non-pristine editor state under the blank route's one stable key (H6).
+   * The caller's latest server draft (PT-5d item 5), the way `GET
+   * /campaigns/briefs/draft` answers one that exists — the editor's own
+   * autosave effect only ever PUTs a non-pristine state, so a draft existing
+   * at all already means "half-written", never a fresh, untouched one.
    */
   const stashAbandonedDraft = () => {
-    saveDraftToStorage(
-      editorReducer(initialEditorState(), {
-        type: "patch",
-        patch: { campaignName: "Half-written" },
-      }),
-    );
+    mockPipelineApi({
+      result: (u) =>
+        u.includes("/campaigns/briefs/draft")
+          ? json({ latest: { campaignId: DRAFT_CAMPAIGN_ID } })
+          : json({}),
+    });
   };
 
   const raiseTwoWay = async (user: ReturnType<typeof userEvent.setup>) => {
@@ -405,7 +405,7 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     expect(nextMock().router.push).not.toHaveBeenCalled();
   });
 
-  test("Resume mints nothing, keeps the draft, and lands on the blank route", async () => {
+  test("Resume mints nothing and navigates straight to the draft's own campaign (PT-5d item 5)", async () => {
     stashAbandonedDraft();
     const create = vi.spyOn(createCampaignLib, "createCampaign");
     const user = userEvent.setup();
@@ -413,11 +413,13 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     const prompt = await raiseTwoWay(user);
     await user.click(within(prompt).getByRole("button", { name: messages.resumeDraftResume }));
 
-    await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith("/brief/new"));
+    // F19's whole point: nothing is minted, and the destination is the SAME
+    // campaign the server draft names — its own route restores it (BriefEditor's
+    // own PT-5d restore effect), never `/brief/new` re-asking the same question.
+    await waitFor(() =>
+      expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute(DRAFT_CAMPAIGN_ID)),
+    );
     expect(create).not.toHaveBeenCalled();
-    // F19's whole point: the abandoned draft is exactly where it was, so the
-    // recovery effect restores it untouched on the blank route.
-    expect(localStorage.getItem("cf:draft:new")).not.toBeNull();
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull(),
     );
@@ -490,8 +492,10 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 
-  test("a stored but pristine draft asks nothing — a pristine draft holds no work to lose", async () => {
-    saveDraftToStorage(initialEditorState());
+  test("no server draft asks nothing — the autosave effect never PUTs a pristine state to begin with", async () => {
+    // The default fetch mock answers no draft at all (no `stashAbandonedDraft`
+    // call): the same shape a pristine editor's own autosave leaves the server
+    // in, since BriefEditor's PT-5d autosave effect only PUTs while diverged.
     vi.spyOn(createCampaignLib, "createCampaign").mockResolvedValue({ campaignId: "c1" });
     const user = userEvent.setup();
     renderDialog();
@@ -511,14 +515,14 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     await raiseTwoWay(user);
     fireEvent.keyDown(window, { key: "Escape" });
 
-    // Back to the form, answers intact; nothing was minted, the draft untouched.
+    // Back to the form, answers intact; nothing was minted, the draft untouched
+    // (server-side, never asked to change).
     expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
     expect(screen.getByRole("dialog", { name: messages.createCampaignTitle })).toBeTruthy();
     expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
       "Summer Spark",
     );
     expect(create).not.toHaveBeenCalled();
-    expect(localStorage.getItem("cf:draft:new")).not.toBeNull();
 
     // Cancel dismisses the same way — and the two-way raises again on a fresh
     // press, because the dismissed prompt state was cleared, not left open.

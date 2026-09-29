@@ -25,8 +25,7 @@ import {
 import { createCampaign } from "@/lib/create-campaign";
 import { campaignRoute } from "@/lib/campaign-route";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
-import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
-import { hasRecoverableDraft } from "@/components/campaign/editor-state";
+import { fetchLatestServerDraft } from "@/components/campaign/editor-state";
 import { unknownErrorMessage } from "@/lib/briefs-api";
 import {
   formatDisplayName,
@@ -158,9 +157,6 @@ export function CreateCampaignDialog() {
   const { createDialogOpen, closeCreateDialog } = useCreateCampaign();
   const router = useRouter();
   const pathname = usePathname();
-  // W3 — read only. The dialog never guards: the create gesture was already guarded
-  // by the entry point that opened it (D67); `isDirty` scopes the F19 two-way below.
-  const { isDirty } = useGuardedNavigation();
   const [name, setName] = useState("");
   const [type, setType] = useState<CampaignType>(DEFAULT_CAMPAIGN_TYPE);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -293,6 +289,15 @@ export function CreateCampaignDialog() {
     }
   };
 
+  // PT-5d item 5 — which campaign `handleCreate`'s own draft check found, so
+  // `handleResume` (pressed after the prompt renders) knows where to go
+  // without asking the server again.
+  const latestDraftRef = useRef<{ campaignId: string } | null>(null);
+  // Guards the same double-activation window `createInFlightRef` guards for
+  // `runCreate` — `handleCreate` now awaits a fetch before it ever reaches
+  // that ref, so a second press inside that window needs its own latch.
+  const checkingDraftRef = useRef(false);
+
   const handleCreate = async () => {
     // The refusal ladder collapsed with the Identity fields: only the name can
     // be missing. Type has a default (D108).
@@ -302,34 +307,36 @@ export function CreateCampaignDialog() {
       return;
     }
     setNameInvalid(false);
-    // W3 (F19) — before minting a brand-new campaign, ask about the abandoned
-    // draft it would leave stranded. The scope term is the lane's heart, and
-    // both halves are mandatory:
-    //
-    // `isDirty && pathname === "/brief/new"` — only there do the guard's question and
-    // this one concern the *same* draft. `setDirty` is driven by any mounted editor,
-    // not just the blank one, so without the route term a stale `cf:draft:new` from an
-    // earlier session plus a dirty editor on a named route would stay silent and the
-    // user would mint a second campaign with the first abandoned draft unmentioned —
-    // F19 unfixed. On the blank route, asking again after the guard's "Leave" would
-    // be the D67 double prompt.
-    //
-    // No capture-before-the-guard is needed: `guardedAction` never clears the flag and
-    // no navigation has happened, so the value at press time is the value at gesture
-    // start — and the gesture starts at four call sites this dialog does not own.
-    if (hasRecoverableDraft() && !(isDirty && pathname === "/brief/new")) {
-      setResumePrompt(true);
-      return;
+    if (checkingDraftRef.current) return;
+    checkingDraftRef.current = true;
+    try {
+      // W3 (F19) — before minting a brand-new campaign, ask about the
+      // abandoned draft it would leave stranded (PT-5d item 5: the caller's
+      // own latest server draft, across every campaign). The scope term:
+      // skip the prompt when that draft's OWN campaign is the one already
+      // open (`pathname === campaignRoute(latest.campaignId)`) — asking
+      // about the draft the operator is already looking at would be the D67
+      // double prompt this dialog does not own (the navigation guard's own
+      // question, for the same draft).
+      const latest = await fetchLatestServerDraft();
+      latestDraftRef.current = latest;
+      if (latest !== null && pathname !== campaignRoute(latest.campaignId)) {
+        setResumePrompt(true);
+        return;
+      }
+      await runCreate();
+    } finally {
+      checkingDraftRef.current = false;
     }
-    await runCreate();
   };
 
-  /** Resume: the draft stays on disk, nothing is minted — `/brief/new` finds
-   *  a recoverable draft (`hasRecoverableDraft`) and resumes the editor from
-   *  it, rather than opening the dialog again (PT-5c1). */
+  /** Resume: nothing is minted — the caller's latest server draft already
+   *  names a real campaign (PT-5d item 5), so this navigates straight to it
+   *  rather than opening `/brief/new` again to re-ask the same question. */
   const handleResume = () => {
+    const latest = latestDraftRef.current;
     closeAndReset();
-    router.push("/brief/new");
+    if (latest !== null) router.push(campaignRoute(latest.campaignId));
   };
 
   const cancelResumePrompt = () => setResumePrompt(false);
