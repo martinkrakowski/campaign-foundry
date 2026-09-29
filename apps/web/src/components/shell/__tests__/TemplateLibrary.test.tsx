@@ -11,6 +11,7 @@ import { blankBrief } from "@/components/campaign/editor-state";
 import { TemplateLibrary } from "../TemplateLibrary";
 import { BrowseBriefsButton } from "../Sidebar";
 import { EMPTY_REPORT, json, mockPipelineApi, storedTemplate } from "@/__tests__/helpers";
+import { templatePreviewBlocked } from "@/components/campaign/messages";
 
 /**
  * PT-5c2: Render preview now also requires an APPLIED campaign (`briefApplied`
@@ -338,9 +339,7 @@ describe("the detail view (TM3)", () => {
     await user.click(screen.getByRole("button", { name: "release the campaign" }));
     const button = await openDetail(user);
     expect(button).toHaveProperty("disabled", true);
-    expect(
-      screen.getByText(/A preview needs an open, applied campaign with a product/),
-    ).toBeTruthy();
+    expect(screen.getByText(templatePreviewBlocked)).toBeTruthy();
     expect(previewCalls()).toHaveLength(0);
   });
 
@@ -354,9 +353,7 @@ describe("the detail view (TM3)", () => {
     renderLibrary();
     const button = await openDetail(user);
     expect(button).toHaveProperty("disabled", true);
-    expect(
-      screen.getByText(/A preview needs an open, applied campaign with a product/),
-    ).toBeTruthy();
+    expect(screen.getByText(templatePreviewBlocked)).toBeTruthy();
     await user.click(button);
     expect(previewCalls()).toHaveLength(0);
   });

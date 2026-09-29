@@ -14,7 +14,11 @@ import {
 } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CommandBar } from "../CommandBar";
-import { executeNoEstimate, executeStillEstimating } from "@/components/campaign/messages";
+import {
+  executeNoBriefApplied,
+  executeNoEstimate,
+  executeStillEstimating,
+} from "@/components/campaign/messages";
 
 const variationBrief = {
   id: "seed",
@@ -97,7 +101,7 @@ describe("CommandBar", () => {
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
     await user.click(screen.getByText(/Execute/));
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByText("Open or create a campaign before running the pipeline.")).toBeTruthy();
+    expect(screen.getByText(executeNoBriefApplied)).toBeTruthy();
     expect(post).not.toHaveBeenCalled();
   });
 

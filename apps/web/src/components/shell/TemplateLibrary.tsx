@@ -28,6 +28,7 @@ import {
   ratioDisplayName,
   unitDisplayName,
 } from "@/components/campaign/display-names";
+import { templatePreviewBlocked, templatePreviewReady } from "@/components/campaign/messages";
 
 /**
  * One layer kind's band in the miniature. A Record over the whole vocabulary,
@@ -585,9 +586,7 @@ function TemplateDetail({
                 </Button>
                 {/* T-D4, said out loud: the cost is the operator's to spend. */}
                 <p className="text-center text-[10px] text-text-muted">
-                  {canRender
-                    ? "Nothing happens until you ask — a preview builds the real creative."
-                    : "A preview needs an open, applied campaign with a product, and a template that campaign can use."}
+                  {canRender ? templatePreviewReady : templatePreviewBlocked}
                 </p>
                 {renderFailed ? (
                   <p className="text-center text-[11px] text-error">Could not render a preview.</p>

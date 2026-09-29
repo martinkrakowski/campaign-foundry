@@ -951,6 +951,19 @@ export const executeNoEstimate =
  */
 export const executeNoBriefApplied = "Open or create a campaign before running the pipeline.";
 
+/* ── The template library's Render preview (TM3, T-D4) ───────────────────────── */
+
+/** Shown beside Render preview once it can run — the cost is the operator's to spend. */
+export const templatePreviewReady =
+  "Nothing happens until you ask — a preview builds the real creative.";
+/**
+ * Shown when Render preview is disabled: no pinnable template, no product, or
+ * (PT-5c2) no campaign applied — the API now refuses to render one it never
+ * minted, the same as it refuses to run one.
+ */
+export const templatePreviewBlocked =
+  "A preview needs an open, applied campaign with a product, and a template that campaign can use.";
+
 /* ── The header's model selector ─────────────────────────────────────────────── */
 
 /** The trigger's tooltip; assistive tech reads it as the control's name too. */
