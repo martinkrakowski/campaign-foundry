@@ -280,6 +280,53 @@ describe("FsJobStore", () => {
     expect(order).toEqual([1, 2]);
   });
 
+  test("a timer started inside withJobLock queues normally once fired, even though its context still names the key (reentrancy applies only while that acquisition is active)", async () => {
+    // Real timers on purpose: AsyncLocalStorage propagates the scheduling
+    // context into a real Timeout's callback (that is the whole bug this
+    // proves), but vitest's fake-timer clock invokes callbacks as a plain
+    // JS call from the test's own context, which never carries the stale
+    // store — a fake-timer version of this test would pass whether or not
+    // the fix is applied.
+    const order: string[] = [];
+    let timerRun: Promise<void> = Promise.resolve();
+
+    // Acquire "j", schedule a real setTimeout inside the critical section
+    // (mirroring `expireLater`), and release. The timer has not fired yet.
+    await store.withJobLock("j", async () => {
+      setTimeout(() => {
+        timerRun = store.withJobLock("j", async () => {
+          order.push("timer");
+        });
+      }, 10);
+    });
+
+    // A second, unrelated holder takes "j" from outside and runs long — long
+    // enough that the timer above fires while this holder is still inside
+    // its critical section.
+    let releaseSecond: () => void = () => {};
+    const second = store.withJobLock("j", async () => {
+      order.push("second-start");
+      await new Promise<void>((resolve) => {
+        releaseSecond = resolve;
+      });
+      order.push("second-end");
+    });
+
+    // Let the 10ms timer fire while `second` is still parked on its own
+    // unresolved promise.
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    // The timer must not have run inline: it inherited "j" in its context
+    // from the FIRST (already-released) acquisition, but that acquisition
+    // is no longer active, so it must queue behind `second` like any other
+    // genuinely concurrent caller instead of jumping the line.
+    expect(order).toEqual(["second-start"]);
+
+    releaseSecond();
+    await second;
+    await timerRun;
+    expect(order).toEqual(["second-start", "second-end", "timer"]);
+  });
+
   test("cached settled job is expired and deleted on getStoredJob when past TTL", async () => {
     const id = await store.createJob("camp");
     await store.failJob(id, "err");

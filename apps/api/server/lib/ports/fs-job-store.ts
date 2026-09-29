@@ -75,8 +75,22 @@ export class FsJobStore implements JobStorePort {
    * reaping under the id lock while called from `progressJob`, which already
    * holds it) and from callers outside it that fence a read inside their own
    * `withJobLock` section (`report.ts`, `decisions.ts` via `retireDecisions`).
+   *
+   * The value per key is a token, not a bare membership flag, because
+   * AsyncLocalStorage context propagates into every continuation `fn`
+   * starts — including a `setTimeout` callback or a fire-and-forget promise
+   * that OUTLIVES this acquisition (`expireLater`, `expireQueuedLater`). Such
+   * a callback still sees the key in its inherited context long after the
+   * lock that added it has been released and handed to someone else, so
+   * membership alone is not enough to tell "still inside the acquisition
+   * that set this" from "a stale context left over from a finished one".
+   * `token.active` is flipped to `false` in a `finally` the moment this
+   * acquisition's `fn` settles, so the fast path below only fires while the
+   * acquisition is genuinely still on the stack; a timer or detached promise
+   * that fires after release reads `active: false` (or, once a later caller
+   * takes the key, a token it does not hold at all) and queues normally.
    */
-  private readonly lockContext = new AsyncLocalStorage<ReadonlySet<string>>();
+  private readonly lockContext = new AsyncLocalStorage<ReadonlyMap<string, { active: boolean }>>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly queuedTimers = new Map<string, NodeJS.Timeout>();
   private readonly memoryCache = new Map<string, CacheItem>();
@@ -590,15 +604,32 @@ export class FsJobStore implements JobStorePort {
 
   withJobLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const held = this.lockContext.getStore();
-    if (held?.has(key)) {
+    const inherited = held?.get(key);
+    if (inherited?.active) {
       // Reentrant: the caller is already running inside this key's critical
       // section (see the `lockContext` field doc). Run inline — we are
-      // already serialized against every other user of this key.
+      // already serialized against every other user of this key. A token
+      // left over from an acquisition that has since released (`active:
+      // false`) fails this check and falls through to queuing normally,
+      // which is exactly what a timer or detached promise scheduled inside
+      // that earlier acquisition must do.
       return fn();
     }
-    const nextContext = new Set(held ?? []);
-    nextContext.add(key);
-    const runInContext = () => this.lockContext.run(nextContext, fn);
+    const token = { active: true };
+    const nextContext = new Map(held ?? []);
+    nextContext.set(key, token);
+    const runInContext = async () => {
+      try {
+        return await this.lockContext.run(nextContext, fn);
+      } finally {
+        // Flip before `run` (below) settles, so the next queued holder for
+        // this key — and any timer/detached promise still holding a
+        // reference to this token via an inherited context — sees `active:
+        // false` as soon as this acquisition is done, not merely once the
+        // lock-chain bookkeeping below has run.
+        token.active = false;
+      }
+    };
     const previous = this.lockChains.get(key) ?? Promise.resolve();
     const run = previous.then(runInContext, runInContext);
     const settled = run.then(
