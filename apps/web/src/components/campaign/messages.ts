@@ -958,11 +958,12 @@ export const templatePreviewReady =
   "Nothing happens until you ask — a preview builds the real creative.";
 /**
  * Shown when Render preview is disabled: no pinnable template, no product, or
- * (PT-5c2) no campaign applied — the API now refuses to render one it never
- * minted, the same as it refuses to run one.
+ * (PT-5c2) no campaign open — the API now refuses to render one it never
+ * minted, the same as it refuses to run one. "Open" mirrors executeNoBriefApplied's
+ * wording; D35 retired "applied" as a user-facing word (H8).
  */
 export const templatePreviewBlocked =
-  "A preview needs an open, applied campaign with a product, and a template that campaign can use.";
+  "A preview needs an open campaign with a product, and a template that campaign can use.";
 
 /* ── The header's model selector ─────────────────────────────────────────────── */
 
