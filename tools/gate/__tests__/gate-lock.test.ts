@@ -863,7 +863,18 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
       const out = join(dir, "args");
       const result = runLockIn(
         dir,
-        ["run", "lane-a", "--", "sh", "-c", 'printf "%s\\n" "$@" > "$TMPDIR/args"', "args", "--", "a b", "c d"],
+        [
+          "run",
+          "lane-a",
+          "--",
+          "sh",
+          "-c",
+          'printf "%s\\n" "$@" > "$TMPDIR/args"',
+          "args",
+          "--",
+          "a b",
+          "c d",
+        ],
         {},
         15_000,
         shell,
