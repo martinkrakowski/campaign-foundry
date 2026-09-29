@@ -231,6 +231,20 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
       }
     });
 
+    // HX1/D181: `templates` is a directory under `routes/campaigns/` (a saved
+    // creative template's own route), so a campaign slugged `templates` would
+    // shadow it — the same collision `cache` above is reserved to prevent, just
+    // via RESERVED_ROUTE_SEGMENTS rather than RESERVED_STORE_AREAS.
+    test("a campaign named `Templates` gets a slug other than `templates`", async () => {
+      const harness = await setup();
+      try {
+        const res = await mount().create(createReq({ name: "Templates" }));
+        expect(((await res.json()) as { slug: string }).slug).toBe("templates-2");
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
     // PT-5e item 0: `last-opened` is reserved BEFORE `GET /campaigns/last-opened`
     // exists, because a static route of that name shadows a campaign slugged
     // `last-opened`'s own `GET /campaigns/:id` — and on fs that slug is the
