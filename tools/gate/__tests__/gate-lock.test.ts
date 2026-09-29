@@ -336,7 +336,7 @@ describe("gate-lock.sh", () => {
   test("heartbeat refreshes the beat, and fails loudly without a lock", () => {
     const dir = scratch();
     seedLock(dir, { pid: process.pid, beat: 1000 });
-    const result = runLockIn(dir, ["heartbeat"]);
+    const result = runLockIn(dir, ["heartbeat"], { CF_GATE_CALLER_PID: String(process.pid) });
     expect(result.status).toBe(0);
     expect(Number(lockFile(dir, "beat"))).toBeGreaterThan(1000);
 
@@ -344,6 +344,15 @@ describe("gate-lock.sh", () => {
     const orphan = runLockIn(empty, ["heartbeat"]);
     expect(orphan.status).not.toBe(0);
     expect(orphan.stderr).toContain("no lock");
+  });
+
+  test("a heartbeat from a pid that does not hold the lock is refused and touches nothing", () => {
+    const dir = scratch();
+    seedLock(dir, { pid: 424242, beat: 1000 });
+    const result = runLockIn(dir, ["heartbeat"], { CF_GATE_CALLER_PID: "999999" });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("heartbeat refused");
+    expect(lockFile(dir, "beat").trim()).toBe("1000");
   });
 
   test("status reports free, and reports the holder with its liveness", () => {
@@ -365,10 +374,12 @@ describe("gate-lock.sh", () => {
     expect(lifeless.stdout).toContain("not alive");
   });
 
-  test("release removes the lock and is idempotent when it is already gone", () => {
+  test("release removes the holder's own lock and is idempotent when it is already gone", () => {
     const dir = scratch();
     seedLock(dir, { pid: process.pid, owner: "lane-a" });
-    const result = runLockIn(dir, ["release", "lane-a"]);
+    const result = runLockIn(dir, ["release", "lane-a"], {
+      CF_GATE_CALLER_PID: String(process.pid),
+    });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("released");
     expect(existsSync(lockDir(dir))).toBe(false);
@@ -376,6 +387,35 @@ describe("gate-lock.sh", () => {
     const again = runLockIn(dir, ["release", "lane-a"]);
     expect(again.status).toBe(0);
     expect(again.stdout).toContain("nothing to release");
+  });
+
+  test("a release from a holder whose lock was reclaimed is refused and leaves the new lock intact", () => {
+    // The original holder's pid is a reaped one: another gate reclaimed its
+    // stale lock (dead pid) and now owns it. The old holder's cleanup must
+    // not delete the replacement.
+    const dir = scratch();
+    const dead = reapedPid();
+    seedLock(dir, { pid: dead, owner: "lane-a" });
+    const reclaim = runLockIn(dir, ["acquire", "lane-b"], { CF_GATE_CALLER_PID: "434343" });
+    expect(reclaim.status).toBe(0);
+    expect(lockFile(dir, "owner").trim()).toBe("lane-b");
+
+    // The old gate's release: right owner name is not enough on its own…
+    const wrongPid = runLockIn(dir, ["release", "lane-b"], { CF_GATE_CALLER_PID: String(dead) });
+    expect(wrongPid.status).not.toBe(0);
+    expect(wrongPid.stderr).toContain("release refused");
+    expect(lockFile(dir, "owner").trim()).toBe("lane-b");
+
+    // …and the wrong lane name is refused even with a matching pid.
+    const wrongOwner = runLockIn(dir, ["release", "lane-a"], { CF_GATE_CALLER_PID: "434343" });
+    expect(wrongOwner.status).not.toBe(0);
+    expect(wrongOwner.stderr).toContain("release refused");
+    expect(lockFile(dir, "owner").trim()).toBe("lane-b");
+
+    // The rightful holder still releases it.
+    const right = runLockIn(dir, ["release", "lane-b"], { CF_GATE_CALLER_PID: "434343" });
+    expect(right.status).toBe(0);
+    expect(existsSync(lockDir(dir))).toBe(false);
   });
 
   test("an unknown subcommand exits 2 with the usage", () => {

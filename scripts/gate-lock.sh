@@ -5,9 +5,9 @@
 # holder self-healing instead of an orphan someone releases by hand.
 #
 #   gate-lock.sh acquire <lane>   take the lock; exit 75 means BUSY
-#   gate-lock.sh release <lane>   drop it (the holder's trap, or a human by hand)
+#   gate-lock.sh release <lane>   drop it — only the lock's own owner and pid may
 #   gate-lock.sh status           print who holds it and whether they look alive
-#   gate-lock.sh heartbeat        refresh the beat (the holder's loop calls this)
+#   gate-lock.sh heartbeat        refresh the beat — only on the caller's own lock
 #
 # The lock is a directory at ${TMPDIR:-/tmp}/cf-gate.lock — mkdir is the
 # atomic test-and-set, there is nothing else in POSIX sh — holding four files:
@@ -20,7 +20,10 @@
 # already gone would be reclaimed instantly and never block anyone. gate.sh
 # passes its own pid in CF_GATE_CALLER_PID; a direct invocation falls back to
 # this process, which makes such a lock trivially reclaimable — direct use is
-# for poking at the lock, not for holding it through a real gate.
+# for poking at the lock, not for holding it through a real gate. Release and
+# heartbeat honour the same variable: they act only when the lock still names
+# that owner and pid, so a holder whose lock was reclaimed can neither delete
+# the replacement nor keep refreshing its beat.
 #
 # acquire judges a held lock in this order, and says so on stdout before it
 # reclaims:
@@ -230,6 +233,10 @@ acquire() {
   done
 }
 
+# Release the lock — but only the caller's own. After a reclaim, a stale
+# holder's cleanup must not delete the lock that replaced it: the removal
+# happens only when the lock still names this owner AND this caller's pid.
+# Anything else warns and fails, and leaves the lock alone.
 release() {
   if [ ! -d "$LOCK" ]; then
     printf '%s\n' "gate-lock: nothing to release — no lock at $LOCK"
@@ -237,8 +244,12 @@ release() {
   fi
   owner=$(cat "$LOCK/owner" 2>/dev/null)
   pid=$(cat "$LOCK/pid" 2>/dev/null)
+  if [ "$owner" != "$1" ] || [ "$pid" != "$recorded_pid" ]; then
+    printf '%s\n' "gate-lock: release refused — the lock at $LOCK names ${owner:-unknown} (pid ${pid:-?}), not $1 (pid $recorded_pid); it was left alone" >&2
+    return 1
+  fi
   rm -rf "$LOCK"
-  printf '%s\n' "gate-lock: released by $1 (was held by ${owner:-unknown}, pid ${pid:-?})"
+  printf '%s\n' "gate-lock: released by $1 (pid $recorded_pid)"
   return 0
 }
 
@@ -265,9 +276,19 @@ status() {
   return 0
 }
 
+# Refresh the beat — only on the caller's own lock. A holder whose lock was
+# reclaimed must not keep refreshing the lock that replaced it: the beat is
+# written only when the lock still names this pid, and the refusal is what
+# tells the holder's loop (and the gate, at its next step boundary) that the
+# lock is lost.
 heartbeat() {
   if [ ! -d "$LOCK" ]; then
     printf '%s\n' "gate-lock: heartbeat — no lock at $LOCK; nothing to refresh" >&2
+    return 1
+  fi
+  pid=$(cat "$LOCK/pid" 2>/dev/null)
+  if [ "$pid" != "$recorded_pid" ]; then
+    printf '%s\n' "gate-lock: heartbeat refused — the lock at $LOCK names pid ${pid:-?}, not this holder (pid $recorded_pid); the beat was not touched" >&2
     return 1
   fi
   if ! printf '%s\n' "$(date +%s)" > "$LOCK/beat" 2>/dev/null; then

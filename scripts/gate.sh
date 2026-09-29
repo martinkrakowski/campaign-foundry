@@ -200,7 +200,9 @@ release_lock() {
       wait "$HEARTBEAT_PID" 2>/dev/null
       HEARTBEAT_PID=""
     fi
-    sh "$LOCK_SCRIPT" release "$LANE" >/dev/null 2>&1
+    # The release must carry this shell's pid: gate-lock releases only the
+    # lock that still names this owner and pid — never one that replaced it.
+    CF_GATE_CALLER_PID=$$ sh "$LOCK_SCRIPT" release "$LANE" >/dev/null 2>&1
     LOCK_HELD=0
     printf '%s\n' "gate: lock released, heartbeat stopped"
   fi
@@ -237,7 +239,11 @@ start_heartbeat() {
     trap - INT TERM EXIT
     while :; do
       sleep "$HB_SECONDS"
-      sh "$LOCK_SCRIPT" heartbeat >/dev/null 2>&1 || exit 1
+      # The heartbeat is ownership-checked on the lock side too: it refreshes
+      # only a lock that still names THIS gate's pid ($$ is this shell's even
+      # inside the subshell), so after a reclaim the loop fails and dies
+      # instead of refreshing whoever replaced us.
+      CF_GATE_CALLER_PID=$$ sh "$LOCK_SCRIPT" heartbeat >/dev/null 2>&1 || exit 1
     done
   ) >/dev/null 2>&1 &
   HEARTBEAT_PID=$!
