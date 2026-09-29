@@ -123,9 +123,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "    } else if (draftDivergedRef.current) {\n      draftDivergedRef.current = false;\n      pendingDraftRef.current = null;\n      enqueueDraftWrite(() => deleteServerDraft(routeId));\n    }",
+      "before": "    } else if (draftDivergedRef.current) {",
       "after": "    }",
-      "because": "Drop the return-to-pristine purge (the finding as reported): the autosave effect still never removes a stored draft, so an undone brief comes back after reload — with undo one keystroke away, returning to exactly pristine is easy, and the stale draft arrives with no history left to undo it. Re-anchored for PT-5d, then again for the bot fix round: `deleteServerDraft` replaces `purgeDraftFromStorage`, and the write now goes through `enqueueDraftWrite` (the client-side write chain) instead of a bare call, but the branch this mutation deletes — the return-to-pristine cleanup itself — is the same one.",
+      "because": "Drop the return-to-pristine purge (the finding as reported): the autosave effect still never removes a stored draft, so an undone brief comes back after reload — with undo one keystroke away, returning to exactly pristine is easy, and the stale draft arrives with no history left to undo it. Re-anchored for PT-5d, then again for the bot fix round: `deleteServerDraft` replaces `purgeDraftFromStorage`, and the write now goes through `enqueueDraftWrite` (the client-side write chain) instead of a bare call, but the branch this mutation deletes — the return-to-pristine cleanup itself — is the same one. Re-anchored again for the D185 fix round, which clears the failed flag between the two lines: the branch is still the same return-to-pristine cleanup, and it is now the one that answers a deliberate Revert on a \"file\" source as well, so the same test still witnesses the same mutation.",
       "command": [
         "yarn",
         "vitest",

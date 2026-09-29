@@ -1,8 +1,10 @@
-import { describe, test, expect, beforeEach } from "vitest";
+import { describe, test, expect, beforeEach, vi } from "vitest";
+import { useEffect } from "react";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { nextMock, mockPipelineApi, json } from "@/__tests__/helpers";
 import { NO_ORGANISATION_YET_MESSAGE } from "@/lib/auth-errors";
+import { useEditorDirty } from "@/lib/editor-dirty-context";
 import ShellLayout from "../layout";
 
 // ShellLayout provides its own RunProvider, so render it directly.
@@ -61,6 +63,28 @@ describe("ShellLayout", () => {
       </ShellLayout>,
     );
     expect(screen.queryByText("Pipeline Orchestrator")).toBeNull();
+  });
+
+  test("the shell mounts the D185 leave guard, so a dirty editor registers one beforeunload listener", async () => {
+    // The guard renders nothing, so the mount cannot be asserted on the DOM.
+    // What is observable is its effect: a child that marks the editor dirty
+    // produces a registered `beforeunload` listener, and the shell's own mount
+    // under `EditorDirtyProvider` is the only thing here that could. Without
+    // this, deleting the mount would leave every other leave-guard test green.
+    const add = vi.spyOn(window, "addEventListener");
+    const MarkDirty = () => {
+      const { setDirty } = useEditorDirty();
+      useEffect(() => setDirty(true), [setDirty]);
+      return null;
+    };
+    render(
+      <ShellLayout>
+        <MarkDirty />
+      </ShellLayout>,
+    );
+    await waitFor(() =>
+      expect(add.mock.calls.filter(([type]) => type === "beforeunload")).toHaveLength(1),
+    );
   });
 
   test("a 403 no_membership on the mount restore shows the no-organisation notice, above every route", async () => {

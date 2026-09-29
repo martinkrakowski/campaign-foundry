@@ -11,6 +11,7 @@ import { CreateCampaignProvider } from "@/lib/create-campaign-context";
 import { EditorPanelsProvider, useEditorPanels } from "@/lib/editor-panels-context";
 import { MobileRailProvider, useMobileRail } from "@/lib/mobile-rail-context";
 import { Header } from "@/components/shell/Header";
+import { EditorUnloadGuard } from "@/components/shell/EditorUnloadGuard";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { SidebarShell } from "@/components/shell/SidebarShell";
 import { ColumnResizeHandle } from "@/components/shell/ColumnResizeHandle";
@@ -34,6 +35,11 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
   return (
     <RunProvider>
       <EditorDirtyProvider>
+        {/* D185 — the one `beforeunload` listener, under the provider that
+            holds every kind of unsaved work, so the tab-close and reload paths
+            are covered as well as the in-app ones. It renders nothing and
+            registers its listener only while there is something to lose. */}
+        <EditorUnloadGuard />
         {/* W1 — the create moment's open state and seed channel, one provider under
             the guard so every entry point can ask (D67) and then open the dialog. */}
         <CreateCampaignProvider>
