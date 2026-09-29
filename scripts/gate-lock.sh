@@ -507,8 +507,25 @@ heartbeat() {
     printf '%s\n' "gate-lock: heartbeat refused — the lock at $LOCK names pid ${pid:-?}, not this holder (pid $recorded_pid); the beat was not touched" >&2
     return 1
   fi
-  if ! printf '%s\n' "$(date +%s)" > "$LOCK/beat" 2>/dev/null; then
+  # Refresh the beat by REPLACING it, never by truncating it. `acquire` and
+  # `status` both read this file, and an empty beat reads as stale
+  # (beat_is_stale), so a reader that caught the moment between the truncation
+  # and the write would judge a live, heartbeating holder's lock reclaimable
+  # and take it. Write the new value beside the old one and rename: within one
+  # directory that is the same atomic rename the lock's own creation uses, and
+  # the previous beat stays readable right up to it. Measured on this host: a
+  # reader looping on the file saw an empty value 10 times in 7 seconds.
+  beat_new="$LOCK/beat.new.$$"
+  if ! printf '%s\n' "$(date +%s)" > "$beat_new" 2>/dev/null; then
     printf '%s\n' "gate-lock: heartbeat — cannot write $LOCK/beat" >&2
+    return 1
+  fi
+  if ! mv "$beat_new" "$LOCK/beat" 2>/dev/null; then
+    # A lock reclaimed under us in the window above takes its directory with
+    # it, so the rename fails; the file we wrote goes with it, and the refusal
+    # is what tells this loop its lock is gone.
+    rm -f "$beat_new" 2>/dev/null
+    printf '%s\n' "gate-lock: heartbeat — cannot replace $LOCK/beat" >&2
     return 1
   fi
   return 0

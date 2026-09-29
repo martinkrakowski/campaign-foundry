@@ -582,9 +582,13 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
 
   test("its heartbeat keeps the beat fresh for as long as the command runs", () => {
     const dir = scratch();
-    // A 1s tick must land inside a deliberate 2s hold; date +%s is second
-    // granularity, so anything shorter is a coin flip, not a test. The 15s
-    // timeout is calibrated to that hold, not raised to hide a flake.
+    // A 1s tick has to land while the command is still running, and the
+    // command polls for it in a bounded loop rather than reading once after a
+    // fixed sleep: `date +%s` is second granularity, so a single read is a
+    // coin flip on a loaded host, and a coin flip in a test is a flake. The
+    // bound is the assertion — the command exits non-zero if the beat never
+    // moves — and the 20s timeout is calibrated to the bound, not raised to
+    // hide one.
     const result = runLockIn(
       dir,
       [
@@ -593,13 +597,47 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
         "--",
         "sh",
         "-c",
-        'sleep 2; test "$(cat "$TMPDIR/cf-gate.lock/beat")" -gt "$(cat "$TMPDIR/cf-gate.lock/started")"',
+        'i=0; while [ "$i" -lt 10 ]; do if [ "$(cat "$TMPDIR/cf-gate.lock/beat" 2>/dev/null)" -gt "$(cat "$TMPDIR/cf-gate.lock/started" 2>/dev/null)" ] 2>/dev/null; then exit 0; fi; i=$((i + 1)); sleep 1; done; exit 1',
       ],
       { CF_GATE_HEARTBEAT_SECONDS: "1" },
     );
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("heartbeat pid");
-  }, 15_000);
+  }, 20_000);
+
+  test("a reader never catches the beat empty while the heartbeat refreshes it", async () => {
+    const dir = scratch();
+    // `acquire` and `status` read the beat, and an empty one reads as STALE:
+    // a reader that caught a heartbeat mid-write would judge a live,
+    // heartbeating holder's lock reclaimable, and take it. The beat is
+    // replaced by a rename, so a reader sees the previous beat or the next one
+    // and never nothing. Hammering the file for the life of a run that
+    // heartbeats every second is the only way to look at that window; the
+    // sample count is asserted too, so a reader that stalled cannot pass this
+    // by having read nothing.
+    const { done } = startLockIn(dir, ["run", "lane-a", "--", "sleep", "7"], {
+      CF_GATE_HEARTBEAT_SECONDS: "1",
+    });
+    await waitForLock(dir);
+    const beat = join(lockDir(dir), "beat");
+    let reads = 0;
+    let empty = 0;
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      let value: string;
+      try {
+        value = readFileSync(beat, "utf8");
+      } catch {
+        continue;
+      }
+      reads += 1;
+      if (value === "") empty += 1;
+    }
+    expect({ reads: reads > 1000, empty }).toEqual({ reads: true, empty: 0 });
+    process.kill(Number(lockFile(dir, "pid").trim()), "SIGTERM");
+    const result = await done;
+    expect(result.status).toBe(143);
+  }, 20_000);
 
   /**
    * One signal, from outside, at a `run` that is holding the lock around a
