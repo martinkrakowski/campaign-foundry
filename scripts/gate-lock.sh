@@ -6,6 +6,7 @@
 #
 #   gate-lock.sh acquire <lane>   take the lock; exit 75 means BUSY
 #   gate-lock.sh release <lane>   drop it — only the lock's own owner and pid may
+#   gate-lock.sh verify <lane>    exit 0 only while the lock still names this holder
 #   gate-lock.sh status           print who holds it and whether they look alive
 #   gate-lock.sh heartbeat        refresh the beat — only on the caller's own lock
 #
@@ -70,7 +71,7 @@ esac
 recorded_pid="${CF_GATE_CALLER_PID:-$$}"
 
 usage() {
-  printf '%s\n' "usage: $0 acquire <lane> | release <lane> | status | heartbeat" >&2
+  printf '%s\n' "usage: $0 acquire <lane> | release <lane> | verify <lane> | status | heartbeat" >&2
   exit 2
 }
 
@@ -253,6 +254,25 @@ release() {
   return 0
 }
 
+# Verify the lock still names this holder — the gate calls this at every
+# locked-step boundary, so a gate whose lock was reclaimed (or whose loop
+# could no longer vouch for it) fails as lock lost instead of continuing
+# unprotected. This holder is the lane AND the caller's pid, exactly what
+# release requires.
+verify() {
+  if [ ! -d "$LOCK" ]; then
+    printf '%s\n' "gate-lock: verify — no lock at $LOCK" >&2
+    return 1
+  fi
+  owner=$(cat "$LOCK/owner" 2>/dev/null)
+  pid=$(cat "$LOCK/pid" 2>/dev/null)
+  if [ "$owner" != "$1" ] || [ "$pid" != "$recorded_pid" ]; then
+    printf '%s\n' "gate-lock: verify failed — the lock at $LOCK names ${owner:-unknown} (pid ${pid:-?}), not $1 (pid $recorded_pid)" >&2
+    return 1
+  fi
+  return 0
+}
+
 status() {
   if [ ! -d "$LOCK" ]; then
     printf '%s\n' "gate-lock: free (no lock at $LOCK)"
@@ -306,6 +326,10 @@ case "${1:-}" in
   release)
     [ $# -ge 2 ] || usage
     release "$2"
+    ;;
+  verify)
+    [ $# -ge 2 ] || usage
+    verify "$2"
     ;;
   status)
     [ $# -eq 1 ] || usage

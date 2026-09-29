@@ -23,6 +23,13 @@
 # falls through to it) releases the lock AND kills that loop, on failure and
 # on signal alike.
 #
+# At every locked-step boundary the gate also verifies the lock is still its
+# own: the heartbeat loop is running (its failure marker catches the zombie a
+# kill -0 cannot) and the lock still names this gate — either failing fails
+# the gate as "lock lost", so a holder whose lock was reclaimed stops its
+# protected steps instead of running them beside whoever holds the name. The
+# between-steps window is testable via CF_GATE_TEST_PAUSE_BEFORE_STEP.
+#
 # A coverage threshold failure fails the gate even when vitest exits 0: the
 # test:cov step's output is captured, replayed for the human, and scanned for
 # `ERROR: Coverage` — a piped read (M3) reported exit 0 while coverage failed,
@@ -188,6 +195,7 @@ fi
 
 LOCK_HELD=0
 HEARTBEAT_PID=""
+HB_FAILED="${TMPDIR:-/tmp}/cf-gate.hbfailed.$$"
 COVLOG=""
 cov_failed=0
 
@@ -219,6 +227,7 @@ cleanup() {
   if [ -n "$COVLOG" ]; then
     rm -f "$COVLOG"
   fi
+  rm -f "$HB_FAILED"
   exit "$status"
 }
 trap cleanup EXIT
@@ -242,12 +251,34 @@ start_heartbeat() {
       # The heartbeat is ownership-checked on the lock side too: it refreshes
       # only a lock that still names THIS gate's pid ($$ is this shell's even
       # inside the subshell), so after a reclaim the loop fails and dies
-      # instead of refreshing whoever replaced us.
-      CF_GATE_CALLER_PID=$$ sh "$LOCK_SCRIPT" heartbeat >/dev/null 2>&1 || exit 1
+      # instead of refreshing whoever replaced us. Its failure is recorded in
+      # a marker file the foreground gate checks at every locked-step boundary
+      # — a dead loop is a zombie its parent's kill -0 cannot see.
+      CF_GATE_CALLER_PID=$$ sh "$LOCK_SCRIPT" heartbeat >/dev/null 2>&1 || {
+        printf '%s\n' "lost" > "$HB_FAILED" 2>/dev/null
+        exit 1
+      }
     done
   ) >/dev/null 2>&1 &
   HEARTBEAT_PID=$!
   printf '%s\n' "gate: heartbeat pid $HEARTBEAT_PID (every ${HB_SECONDS}s while the lock is held)"
+}
+
+# The foreground gate never waits on the heartbeat, so it would otherwise
+# never learn that the loop died (a dead background child is a zombie its own
+# parent's kill -0 reports as alive) or that the lock was reclaimed. At every
+# locked-step boundary — before and after each locked step — it checks both:
+# the loop is alive (and did not leave its failure marker), and the lock still
+# names this gate. Either failure is "lock lost": the protected steps must not
+# continue on a lock someone else holds or is about to.
+check_lock_intact() {
+  if [ -f "$HB_FAILED" ]; then
+    return 1
+  fi
+  if [ -z "$HEARTBEAT_PID" ] || ! kill -0 "$HEARTBEAT_PID" 2>/dev/null; then
+    return 1
+  fi
+  CF_GATE_CALLER_PID=$$ sh "$LOCK_SCRIPT" verify "$LANE" >/dev/null 2>&1
 }
 
 # The test:cov step runs with its output captured, replayed for the human, and
@@ -287,6 +318,18 @@ while IFS="$TAB" read -r name cmd; do
     LOCK_HELD=1
     start_heartbeat
   fi
+  if [ "$LOCK_HELD" -eq 1 ]; then
+    # Test hook (CF_GATE_TEST_PAUSE_BEFORE_STEP): between locked steps, for
+    # the test that removes or replaces the lock in exactly that window.
+    if [ -n "${CF_GATE_TEST_PAUSE_BEFORE_STEP:-}" ]; then
+      touch "$CF_GATE_TEST_PAUSE_BEFORE_STEP" 2>/dev/null
+      while [ -f "$CF_GATE_TEST_PAUSE_BEFORE_STEP" ]; do sleep 1; done
+    fi
+    if ! check_lock_intact; then
+      printf '%s\n' "gate: FAILED — lock lost before step '$name' (the heartbeat died or the lock no longer names this gate)" >&2
+      exit 1
+    fi
+  fi
   cov_failed=0
   case "$name" in
     test:cov)
@@ -306,6 +349,12 @@ while IFS="$TAB" read -r name cmd; do
   if [ "$code" -ne 0 ]; then
     printf '%s\n' "gate: FAILED at step '$name' (exit $code)" >&2
     exit "$code"
+  fi
+  if [ "$LOCK_HELD" -eq 1 ]; then
+    if ! check_lock_intact; then
+      printf '%s\n' "gate: FAILED — lock lost after step '$name' (the heartbeat died or the lock no longer names this gate)" >&2
+      exit 1
+    fi
   fi
   if [ "$LOCK_HELD" -eq 1 ] && [ "$step_no" -eq "$last_locked" ]; then
     release_lock
