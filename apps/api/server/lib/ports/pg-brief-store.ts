@@ -462,6 +462,18 @@ export class PgBriefStore implements BriefStorePort {
   }
 
   /**
+   * See `BriefStorePort.hasGenuineReservation` (D181 fix round 2). On
+   * Postgres `campaignMeta` is already exact — a `campaign` row is real
+   * evidence on its own, unlike fs's bare-directory fallback, because
+   * `writePool`'s own insert (`pg-pool-store.ts`) writes only the `pool`
+   * table, which has no foreign key to `campaign` (`0005_pool.sql`) and
+   * `campaignMeta` never reads.
+   */
+  async hasGenuineReservation(ref: string): Promise<boolean> {
+    return (await this.campaignMeta(ref)) !== undefined;
+  }
+
+  /**
    * See `BriefStorePort.releaseCampaign` (PT-5b2 fix-round item 2). One
    * statement: the `not exists` guard is the same "still zero versions"
    * check `createBriefInternal`'s conflict branch reads, so a concurrent

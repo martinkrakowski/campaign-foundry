@@ -147,13 +147,12 @@ export class FsBriefStore implements BriefStorePort {
 
   async createBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
     assertNoTeam(options?.teamId);
-    // D181 fix round: a reserved id is refused only when NOTHING already
-    // exists for it — a pre-lane reservation (or a real brief) grandfathers
-    // this Save as its first version, same as any other known-but-versionless
-    // target. `campaignMeta` recognises a still-versionless `<slug>/`
-    // directory (`campaignDirExists`), unlike `campaignVisibility`, which
-    // would miss it and wrongly refuse.
-    if (isReservedCampaignId(brief.id) && !(await this.campaignMeta(brief.id))) {
+    // D181 fix round 2: a reserved id is refused only when there is no GENUINE
+    // evidence for it — `hasGenuineReservation`, never the plain `campaignMeta`
+    // (whose own bare-directory fallback `FsPoolStore.writePool`'s inline-brief
+    // path can trigger for ANY id, reserved or not, with no real reservation
+    // behind it — see that method's own doc comment).
+    if (isReservedCampaignId(brief.id) && !(await this.hasGenuineReservation(brief.id))) {
       throw new Error(`"${brief.id}" is reserved; choose another campaign id.`);
     }
     const filePath = resolveConfined(this.dir, `${brief.id}.yaml`);
@@ -353,6 +352,22 @@ export class FsBriefStore implements BriefStorePort {
       return { campaignId: ref, slug: ref, name: null, type: null, hasVersion: false };
     }
     return undefined;
+  }
+
+  /**
+   * See `BriefStorePort.hasGenuineReservation` (D181 fix round 2). Real
+   * evidence is a saved version (`findBriefFileById`) or a readable
+   * `campaign.json` (`readCampaignMeta`) — deliberately NOT `campaignMeta`'s
+   * own bare-directory fallback (`campaignDirExists`), which exists to
+   * recognise a pre-PT-5b3 reservation with no meta file, but which
+   * `FsPoolStore.writePool`'s inline-brief `mkdir` can produce for ANY id.
+   * A `readCampaignMeta` failure (a corrupt or unreadable `campaign.json`)
+   * propagates unchanged, same fail-closed stance the rest of this store
+   * takes — it is not treated as "no evidence".
+   */
+  async hasGenuineReservation(ref: string): Promise<boolean> {
+    if (await this.findBriefFileById(ref)) return true;
+    return (await this.readCampaignMeta(ref)) !== undefined;
   }
 
   /**

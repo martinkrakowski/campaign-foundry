@@ -4,35 +4,9 @@ import { extractSourceAssetBriefIds, rewriteAssetPaths } from "../../lib/asset-f
 import { isExistsError, isErrno, SYMLINK_WRITE_ERROR } from "../../lib/brief-files.js";
 import { parseBrief } from "../../lib/load-brief.js";
 import { getAssetStore, getBriefStore, TeamsNotSupportedError } from "../../lib/ports/index.js";
-import type { BriefStorePort } from "../../lib/ports/brief-store.port.js";
 import { assertSourceVisible, CampaignNotFoundError, canAssignTeam } from "../../lib/ownership.js";
 
 import { requestTenant } from "../../lib/tenant.js";
-
-/**
- * D181 fix round: a reserved id is refused at Save only when NOTHING exists
- * for it yet, anywhere in this org — an already-minted campaign (grandfathered,
- * D181's own scope note: existing campaigns are not renamed) must still
- * complete its first Save, whether its row is visible to this caller or
- * hidden by team. A hidden one must NOT read as "reserved and absent" here:
- * it falls through to `campaignMeta`'s own undefined-for-hidden-or-missing
- * check below, so it 404s exactly like any other hidden target, never
- * distinguishable from a genuinely missing one (PT-2d) and never given this
- * route's reserved-specific message.
- *
- * `campaignVisibility` (team-aware; "hidden" is possible only on Postgres)
- * answers that on its own. On fs, which has no hidden state, `campaignMeta`
- * is used instead — fs's own `campaignVisibility` only recognises a
- * VERSIONED brief (`findBriefFileById`) and would miss a still-versionless
- * `POST /campaigns` reservation, which is exactly the case being
- * grandfathered.
- */
-async function campaignExistsAnywhere(store: BriefStorePort, id: string): Promise<boolean> {
-  if (store.supportsTeams) {
-    return (await store.campaignVisibility(id)) !== "absent";
-  }
-  return (await store.campaignMeta(id)) !== undefined;
-}
 
 /**
  * POST /campaigns/briefs — persist a campaign brief.
@@ -79,6 +53,7 @@ export default defineEventHandler(async (event) => {
   const store = getBriefStore(scope);
   let brief: CampaignBrief;
   let teamId: string | undefined;
+  let replace: boolean;
   try {
     const rawBody: unknown = await readBody(event);
     if (typeof rawBody !== "object" || rawBody === null || Array.isArray(rawBody)) {
@@ -91,14 +66,29 @@ export default defineEventHandler(async (event) => {
     teamId = rawTeamId as string | undefined;
     brief = parseBrief(briefBody);
     const rawReplace = getQuery(event).replace;
-    const replace = (Array.isArray(rawReplace) ? rawReplace[0] : rawReplace) === "1";
-    const reserved = isReservedCampaignId(brief.id);
-    if (!replace && reserved && !(await campaignExistsAnywhere(store, brief.id))) {
-      throw new Error(`"${brief.id}" is reserved; choose another campaign id.`);
-    }
+    replace = (Array.isArray(rawReplace) ? rawReplace[0] : rawReplace) === "1";
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: errorMessage(error) };
+  }
+
+  // D181 fix round 2 (S2): kept OUT of the body-parse try/catch above, which
+  // exists for validation errors only — a `hasGenuineReservation` storage
+  // failure must surface as a 500, never folded into this route's 400 with
+  // raw error text.
+  //
+  // D181 fix round 2 (Fable, PT-2d): `hasGenuineReservation` is visible-only
+  // (Postgres) and evidence-only (fs, never a bare directory another write
+  // path could have created — see its own doc comment) — a hidden campaign
+  // under a reserved slug therefore answers the SAME 400 "reserved" message a
+  // genuinely missing one does, never the 404 a hidden NON-reserved target
+  // gets. Distinguishing them would let a caller learn that another team
+  // holds a campaign under that slug, exactly the oracle PT-2d exists to
+  // close.
+  const reserved = isReservedCampaignId(brief.id);
+  if (!replace && reserved && !(await store.hasGenuineReservation(brief.id))) {
+    setResponseStatus(event, 400);
+    return { error: `"${brief.id}" is reserved; choose another campaign id.` };
   }
 
   // Checked before canAssignTeam, and — the point of this order (D166, PT-2c,
@@ -115,8 +105,6 @@ export default defineEventHandler(async (event) => {
     return { error: `Not authorized to assign team "${teamId}".` };
   }
 
-  const rawReplace = getQuery(event).replace;
-  const replace = (Array.isArray(rawReplace) ? rawReplace[0] : rawReplace) === "1";
   const rawRevision = getQuery(event).revision;
   const expectedRevision = Array.isArray(rawRevision) ? rawRevision[0] : rawRevision;
   try {
