@@ -3,14 +3,16 @@ import { screen, waitFor, within, act, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
 import {
-  renderWithRun,
-  seedPersistedRun,
-  makeAsset,
   exerciseFocusTrap,
   json,
+  makeAsset,
   mockPipelineApi,
-  storedTemplate,
+  openedCampaign,
+  renderWithRun,
   seedDecisions,
+  seedOpenedCampaign,
+  seedPersistedRun,
+  storedTemplate,
 } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
 import { CommandBar } from "../CommandBar";
@@ -35,7 +37,7 @@ const variationBrief = {
 
 const seedVariation = () => {
   localStorage.setItem("cf:brief-picked", "1");
-  localStorage.setItem("cf:brief", JSON.stringify(variationBrief));
+  seedOpenedCampaign(variationBrief);
 };
 
 /** A classic (non-variation) applied brief — PT-5c2: Execute only answers the
@@ -51,7 +53,7 @@ const classicBrief = {
 
 const seedApplied = () => {
   localStorage.setItem("cf:brief-picked", "1");
-  localStorage.setItem("cf:brief", JSON.stringify(classicBrief));
+  seedOpenedCampaign(classicBrief);
 };
 
 const okEstimate = { creatives: 12, axisProductSize: 36, feasible: true, genaiCalls: 0 };
@@ -139,8 +141,8 @@ describe("CommandBar", () => {
     // The mismatch the mode guard refuses: a persisted classic report that restores
     // under a brief on file which is a randomized campaign (R6 — the re-roll would
     // POST the recorded brief, whose mode disagrees with the classic targets).
-    localStorage.setItem("cf:brief", JSON.stringify(variationBrief));
     mockPipelineApi({
+      opened: openedCampaign(variationBrief),
       report: { halted: false, assets: [makeAsset()], log: { entries: [], campaignId: "seed" } },
     });
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
@@ -187,7 +189,9 @@ describe("CommandBar", () => {
     seedVariation();
     mockPipelineApi({ plan: () => okPlan() });
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
-    expect(screen.getByText("Estimating…")).toBeTruthy();
+    // The estimate starts once the shell holds the campaign, which the pointer
+    // restore now fetches (PT-5e) — so this waits rather than assuming.
+    expect(await screen.findByText("Estimating…")).toBeTruthy();
     // The verb is never disabled for being mid-estimate (GB-D3) — that greying-out is
     // what made a hung estimate look like "unable to generate a campaign". A settled
     // feasible plan opens the confirm as before.
@@ -400,7 +404,7 @@ describe("CommandBar", () => {
       },
     });
     const { unmount } = renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
-    expect(screen.getByText("Estimating…")).toBeTruthy();
+    expect(await screen.findByText("Estimating…")).toBeTruthy();
     await waitFor(() => expect(resolvePlan).toEqual(expect.any(Function)));
     expect(signal?.aborted).toBe(false);
     unmount();
@@ -447,6 +451,12 @@ describe("CommandBar — the press always answers (H2)", () => {
       },
     });
     renderWithRun(<CommandBar onToggleTelemetry={() => {}} />);
+    // The estimate debounce arms only once the shell holds the campaign, and the
+    // pointer restore that puts it there is a server read (PT-5e) — so the
+    // microtasks it needs are flushed before the timers are advanced.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(300); // debounce fires; the deadline (8 s) is now armed
     });

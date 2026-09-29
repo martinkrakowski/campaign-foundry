@@ -2,11 +2,13 @@ import { describe, test, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
-  renderWithRun,
+  EMPTY_REPORT,
   exerciseFocusTrap,
   json,
   mockPipelineApi,
-  EMPTY_REPORT,
+  openedCampaign,
+  renderWithRun,
+  seedOpenedCampaign,
   storedTemplate,
 } from "@/__tests__/helpers";
 import { useRun } from "@/lib/run-context";
@@ -75,25 +77,22 @@ describe("ModelSelector", () => {
   });
 
   test("flags a reuse brief that may skip the model", async () => {
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({
-        id: "reuse",
-        targetRegion: "DE",
-        targetAudience: "a",
-        campaignMessage: "Hi",
-        template: storedTemplate,
-        products: [
-          {
-            id: "p",
-            name: "P",
-            primaryColor: "#111111",
-            logoPath: "l.png",
-            inputAsset: "assets/x.png",
-          },
-        ],
-      }),
-    );
+    seedOpenedCampaign({
+      id: "reuse",
+      targetRegion: "DE",
+      targetAudience: "a",
+      campaignMessage: "Hi",
+      template: storedTemplate,
+      products: [
+        {
+          id: "p",
+          name: "P",
+          primaryColor: "#111111",
+          logoPath: "l.png",
+          inputAsset: "assets/x.png",
+        },
+      ],
+    });
     renderWithRun(<ModelSelector />);
     const note = await screen.findByRole("note");
     expect(note.textContent).toContain("reuse brief · model may be skipped");
@@ -191,9 +190,8 @@ describe("BriefPicker", () => {
 
 describe("TelemetryDrawer", () => {
   const seedLog = () => {
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({
+    mockPipelineApi({
+      opened: openedCampaign({
         id: "log",
         targetRegion: "DE",
         targetAudience: "a",
@@ -201,8 +199,6 @@ describe("TelemetryDrawer", () => {
         template: storedTemplate,
         products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
       }),
-    );
-    mockPipelineApi({
       report: {
         halted: false,
         assets: [],
@@ -222,9 +218,8 @@ describe("TelemetryDrawer", () => {
   });
 
   test("renders a placeholder time for an unparseable timestamp", async () => {
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({
+    mockPipelineApi({
+      opened: openedCampaign({
         id: "log2",
         targetRegion: "DE",
         targetAudience: "a",
@@ -232,8 +227,6 @@ describe("TelemetryDrawer", () => {
         template: storedTemplate,
         products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
       }),
-    );
-    mockPipelineApi({
       report: {
         halted: false,
         assets: [],
@@ -284,17 +277,17 @@ describe("TelemetryDrawer", () => {
     // Nothing to restore, and the generate POST never settles: the run stays in
     // flight with an empty log — the one state where a skeleton says something the
     // "[SYSTEM] Ready" idle line would get wrong.
-    localStorage.setItem(
-      "cf:brief",
-      JSON.stringify({
+    mockPipelineApi({
+      opened: openedCampaign({
         id: "log4",
         targetRegion: "DE",
         targetAudience: "a",
         campaignMessage: "Hi",
         products: [],
       }),
-    );
-    mockPipelineApi({ report: EMPTY_REPORT, post: () => new Promise<Response>(() => {}) });
+      report: EMPTY_REPORT,
+      post: () => new Promise<Response>(() => {}),
+    });
 
     const Harness = () => {
       const { execute } = useRun();

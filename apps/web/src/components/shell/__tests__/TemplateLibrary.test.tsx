@@ -10,7 +10,13 @@ import { EditorDirtyProvider } from "@/lib/editor-dirty-context";
 import { blankBrief } from "@/components/campaign/editor-state";
 import { TemplateLibrary } from "../TemplateLibrary";
 import { BrowseBriefsButton } from "../Sidebar";
-import { EMPTY_REPORT, json, mockPipelineApi, storedTemplate } from "@/__tests__/helpers";
+import {
+  EMPTY_REPORT,
+  json,
+  mockPipelineApi,
+  openedCampaign,
+  storedTemplate,
+} from "@/__tests__/helpers";
 import { templatePreviewBlocked } from "@/components/campaign/messages";
 
 /**
@@ -46,7 +52,6 @@ const appliedBrief = {
 
 beforeEach(() => {
   localStorage.setItem("cf:brief-picked", "1");
-  localStorage.setItem("cf:brief", JSON.stringify(appliedBrief));
 });
 
 const imageText = (version: number): CreativeTemplate => ({
@@ -78,10 +83,19 @@ interface LibraryMock {
   readonly briefs?: readonly unknown[];
   readonly briefsFail?: boolean;
   readonly preview?: () => Response | Promise<Response>;
+  /**
+   * Whether the shell holds an applied campaign (the suite's default). `false`
+   * answers the last-opened pointer with no campaign, so the shell starts from
+   * DEFAULT_BRIEF — and, because the shell's restore reads the same briefs
+   * listing the template provenance does, that listing is then the test's own
+   * rather than the seeded campaign's.
+   */
+  readonly opened?: boolean;
 }
 
 const mockLibrary = (opts: LibraryMock = {}) =>
   mockPipelineApi({
+    opened: opts.opened === false ? undefined : openedCampaign(appliedBrief),
     result: (url) => {
       if (url.includes("/campaigns/templates")) {
         return opts.templatesStatus === undefined
@@ -347,8 +361,10 @@ describe("the detail view (TM3)", () => {
   // (`POST /campaigns/preview-frame` 404s), so Render preview against the
   // shell's UNAPPLIED starting brief must stay disabled and dispatch nothing.
   test("Render preview against the shell's starting (unapplied) brief is disabled and posts nothing", async () => {
-    localStorage.removeItem("cf:brief"); // fall through to DEFAULT_BRIEF, the shell's starting brief
-    mockLibrary({ templates: [imageText(3)] });
+    // No pointer at all, so the shell starts from DEFAULT_BRIEF — the same
+    // unapplied starting brief as before, reached by having opened nothing
+    // rather than by clearing a local record (PT-5e retired that record).
+    mockLibrary({ templates: [imageText(3)], opened: false });
     const user = userEvent.setup();
     renderLibrary();
     const button = await openDetail(user);
@@ -587,7 +603,11 @@ describe("provenance (T-D5)", () => {
   });
 
   test("names the campaign that pinned this exact version, labelled as provenance", async () => {
-    mockLibrary({ templates: [imageText(3)], briefs: [usedBy("spring-launch", 3)] });
+    // The shell holds no campaign of its own here: the listing the template's
+    // provenance is read from is the server's, and the shell's own restore
+    // (which would answer the same URL with the suite's seeded campaign) must
+    // not stand in for it.
+    mockLibrary({ templates: [imageText(3)], briefs: [usedBy("spring-launch", 3)], opened: false });
     const user = userEvent.setup();
     renderLibrary();
     await open(user);
@@ -626,7 +646,7 @@ describe("provenance (T-D5)", () => {
   });
 
   test("a brief listing that failed says so — not that nothing has used it", async () => {
-    mockLibrary({ templates: [imageText(3)], briefsFail: true });
+    mockLibrary({ templates: [imageText(3)], briefsFail: true, opened: false });
     const user = userEvent.setup();
     renderLibrary();
     await open(user);

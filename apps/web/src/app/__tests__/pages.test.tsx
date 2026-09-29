@@ -1,4 +1,4 @@
-import { describe, test, expect, afterEach } from "vitest";
+import { describe, test, expect, afterEach, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
@@ -11,10 +11,11 @@ import {
   json,
   EMPTY_REPORT,
 } from "@/__tests__/helpers";
-import { API } from "@/lib/run-context";
+import { API, useRun } from "@/lib/run-context";
 import { Header } from "@/components/shell/Header";
 import * as messages from "@/components/campaign/messages";
 import CompliancePage from "@/app/(shell)/compliance/page";
+import GridPage from "@/app/(shell)/grid/page";
 import ExportPage from "@/app/(shell)/export/page";
 import RunsPage from "@/app/(shell)/runs/page";
 import IndexPage from "@/app/page";
@@ -335,5 +336,125 @@ describe("the shell pages carry ?campaign= (PT-5c3, D180)", () => {
     expect(mobileCompliance.getAttribute("href")).toBe(`/compliance?campaign=${SLUG}`);
     expect(mobileCompliance.getAttribute("aria-current")).toBe("page");
     expect(mobileGrid.getAttribute("aria-current")).toBeNull();
+  });
+});
+
+/**
+ * PT-5e item 3 (D173, D180) — a BARE shell url follows the per-user
+ * last-opened pointer: the campaign the user last had, in the URL, so the page
+ * is shareable and a reload needs no memory of this browser. With no pointer
+ * the visitor goes to the grid and is offered the picker, which is where a
+ * campaign is chosen from.
+ *
+ * One test per bare URL, in both directions, because "each bare url redirects"
+ * is only true if every one of them does it — a hook that only the grid calls
+ * would pass any single assertion.
+ */
+describe("the bare shell urls follow the last-opened pointer (PT-5e)", () => {
+  const UUID = "018f6d2a-9c3e-7b4a-8d21-3f9e2a5b6c7d";
+
+  afterEach(() => window.history.replaceState(null, "", "/grid"));
+
+  /** The server holds this user's last-opened campaign, and nothing else. */
+  const withPointer = () =>
+    mockPipelineApi({
+      opened: { id: UUID, brief: { id: UUID, products: [] } },
+    });
+
+  const bareUrls = [
+    { path: "/grid", page: <GridPage /> },
+    { path: "/export", page: <ExportPage /> },
+    { path: "/runs", page: <RunsPage /> },
+    { path: "/compliance", page: <CompliancePage /> },
+  ] as const;
+
+  test.each(bareUrls)("$path redirects to the last-opened campaign", async ({ path, page }) => {
+    nextMock().nav.pathname = path;
+    window.history.replaceState(null, "", path);
+    withPointer();
+    renderWithRun(page);
+    await waitFor(() =>
+      expect(nextMock().router.replace).toHaveBeenCalledWith(`${path}?campaign=${UUID}`),
+    );
+  });
+
+  // `/grid` is the fallback itself and is covered by the test below; the other
+  // three have somewhere to go.
+  test.each(bareUrls.filter((u) => u.path !== "/grid"))(
+    "$path falls back to the grid when there is no pointer",
+    async ({ path, page }) => {
+      nextMock().nav.pathname = path;
+      window.history.replaceState(null, "", path);
+      renderWithRun(page);
+      await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/grid"));
+    },
+  );
+
+  test("a bare /grid with no pointer stays put and opens the picker", async () => {
+    // The grid IS the fallback, so it must not replace itself — a self-replace
+    // re-runs the effect that issued it, and would fetch and replace forever.
+    nextMock().nav.pathname = "/grid";
+    window.history.replaceState(null, "", "/grid");
+    const Probe = () => <span data-testid="picker">{String(useRun().briefPickerOpen)}</span>;
+    renderWithRun(
+      <>
+        <GridPage />
+        <Probe />
+      </>,
+    );
+    await waitFor(() => expect(screen.getByTestId("picker").textContent).toBe("true"));
+    expect(nextMock().router.replace).not.toHaveBeenCalled();
+  });
+
+  test("a page that already names a campaign is left alone — the URL is the source of truth", async () => {
+    // The pointer would say `other`, but this URL says `UUID`; the redirect
+    // must not fire and overwrite the page the visitor actually asked for.
+    nextMock().nav.pathname = "/grid";
+    window.history.replaceState(null, "", `/grid?campaign=${UUID}`);
+    mockPipelineApi({ opened: { id: "other", brief: { id: "other", products: [] } } });
+    renderWithRun(<GridPage />);
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([url]) => String(url).includes("/campaigns/last-opened")),
+      ).toBe(true),
+    );
+    expect(nextMock().router.replace).not.toHaveBeenCalled();
+  });
+
+  test("a failed pointer read navigates nowhere (F6: could-not-ask is not absence)", async () => {
+    nextMock().nav.pathname = "/runs";
+    window.history.replaceState(null, "", "/runs");
+    // The pointer read itself, not some other request, is what has to fail.
+    vi.mocked(globalThis.fetch).mockImplementation(() => Promise.reject(new Error("down")));
+    renderWithRun(<RunsPage />);
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([url]) => String(url).includes("/campaigns/last-opened")),
+      ).toBe(true),
+    );
+    expect(nextMock().router.replace).not.toHaveBeenCalled();
+  });
+
+  test("unmounting before the pointer answers navigates nowhere", async () => {
+    nextMock().nav.pathname = "/export";
+    window.history.replaceState(null, "", "/export");
+    let resolvePointer: ((r: Response) => void) | null = null;
+    vi.mocked(globalThis.fetch).mockImplementation((url) =>
+      String(url).includes("/campaigns/last-opened")
+        ? new Promise<Response>((resolve) => {
+            resolvePointer = resolve;
+          })
+        : Promise.resolve(json(EMPTY_REPORT)),
+    );
+    const view = renderWithRun(<ExportPage />);
+    await waitFor(() => expect(resolvePointer).not.toBeNull());
+    view.unmount();
+    resolvePointer!(json({ campaignId: UUID }));
+    await Promise.resolve();
+    expect(nextMock().router.replace).not.toHaveBeenCalled();
   });
 });

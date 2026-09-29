@@ -2,10 +2,7 @@
 
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { BRIEF_SCHEMA_VERSION } from "@campaignfoundry/CampaignOrchestration/brief-schema-version";
-import {
-  isBriefTemplate,
-  templateFromCanonical,
-} from "@campaignfoundry/CampaignOrchestration/brief-template";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import {
   createContext,
@@ -17,11 +14,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import {
+  fetchLastOpened,
   getCampaign,
   listBriefs,
   listPackages,
   packageCampaign,
+  putLastOpened,
   unknownErrorMessage,
   type PackagedPlatform,
   type PlanEstimate,
@@ -518,40 +518,20 @@ const RETIRED_DECISIONS_KEY = "cf:decisions";
 const BRIEF_PICKED_KEY = "cf:brief-picked";
 
 /**
- * localStorage key for the last-opened brief (D37). The URL is the single source of
- * truth for *which brief is open* — `/brief/{id}` — so this key no longer addresses
- * anything: it survives as a "last opened" convenience, read by the bare `/brief`
- * redirect and by the grid's restore below, and written whenever a brief is opened
- * or committed.
+ * `cf:brief` — the last-opened brief as a whole JSON blob in localStorage — is
+ * RETIRED (PT-5e, D173). It could only ever be read by the browser that wrote
+ * it, so a second device, a second profile or a cleared cache silently lost it,
+ * and D173 puts the last-opened campaign on the server for exactly that reason.
+ * What replaces it is an id, not a brief: `GET /campaigns/last-opened` names the
+ * campaign and the brief is loaded from the server's own copy of it (the
+ * listing's entry, or `GET /campaigns/:id` for a versionless campaign), so
+ * there is no stored JSON left to trust and no shape guard left to keep. The
+ * key is not read or written anywhere.
+ *
+ * The URL remains the single source of truth for *which campaign is open* — it
+ * always did (D37): `/brief/{id>` for the editor, `?campaign=<id>` for the
+ * shell pages (D180).
  */
-export const BRIEF_KEY = "cf:brief";
-
-/**
- * Minimal shape guard for a brief restored from storage (don't trust hand-edited
- * JSON). Since L3a the template is required on `CampaignBrief`, so a stored
- * record that predates it (valid id/products, no template) is refused: restoring
- * it as a `CampaignBrief` would hand the shell a brief the pipeline rejects.
- * The template must satisfy the same five-field contract the editor's draft
- * guard applies — `isBriefTemplate` is the one check at both storage boundaries.
- */
-export function isStoredBrief(value: unknown): value is CampaignBrief {
-  if (typeof value !== "object" || value === null) return false;
-  const b = value as Partial<CampaignBrief>;
-  return (
-    typeof b.id === "string" &&
-    b.id.length > 0 &&
-    Array.isArray(b.products) &&
-    b.products.length > 0 &&
-    b.products.every(
-      (p) =>
-        p &&
-        typeof p.id === "string" &&
-        typeof p.name === "string" &&
-        typeof p.primaryColor === "string",
-    ) &&
-    isBriefTemplate(b.template)
-  );
-}
 
 /**
  * The brief the shell starts with. The HITL surface (the /brief view) edits a
@@ -1034,16 +1014,24 @@ export function RunProvider({ children }: { children: ReactNode }) {
       setBriefState(next);
       setError(null);
       setMembershipError(null);
-      // Record the last-opened brief so a reload restores it (and its run) instead of
-      // DEFAULT, and so the bare /brief route can hand the visitor back to it. D37:
-      // this is a convenience record, never an address — the blank brief releases the
-      // shell's active campaign but deliberately does NOT erase it (H5): visiting
-      // /brief/new opens no brief, so it must not destroy the pointer to the one the
-      // user opened last.
-      try {
-        if (next.id) localStorage.setItem(BRIEF_KEY, JSON.stringify(next));
-      } catch {
-        /* storage unavailable — brief just won't persist across reloads */
+      // Record the last-opened campaign on the SERVER (PT-5e, D173, D180), so a
+      // reload and a second device both come back to it — which is the whole
+      // point of the move off `cf:brief`, a record only the browser that wrote
+      // it could read. D37 still holds: a pointer is a convenience, never an
+      // address. The blank brief releases the shell's active campaign but
+      // deliberately does NOT write one (H5): visiting /brief/new opens no
+      // campaign, so it must not destroy the pointer to the one the user opened
+      // last. `page.fetchId` is preferred over `next.id` where there is one: on
+      // Postgres the brief's own id is the SLUG while the pointer stores the
+      // uuid (D178/D179), and the route resolves either.
+      //
+      // Fire-and-forget by design. A pointer that did not land costs the next
+      // bare url a redirect to the picker; blocking a Save, a pick or a page
+      // load on it would trade a convenience for the work the user asked for.
+      if (next.id) {
+        void putLastOpened(page ? page.fetchId : next.id).catch(() => {
+          /* the pointer is advisory — never fail a commit over it */
+        });
       }
       // (1) Already showing this brief's run — leave the grid (and decisions) intact.
       // The run's recorded target is left alone too: the run on screen was produced by
@@ -1275,12 +1263,85 @@ export function RunProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // On first load, restore the brief the user last had (DEFAULT if none) and hydrate
-  // that brief's own persisted run — so a reload after a previous session brings back
-  // the right brief and its creatives, not DEFAULT with an empty grid. D37: this is
-  // the last-opened convenience at work on the grid, never an address — the editor
+  /**
+   * Today's start-from-DEFAULT restore, kept for the one caller that still needs
+   * it: a user with no last-opened pointer at all. A pointer restores through
+   * `openPageCampaign` instead (PT-5e), so this is the no-pointer path alone.
+   *
+   * `DEFAULT_BRIEF` is a real campaign to Generate (nothing gates it on
+   * `briefApplied`), so its run is discovered exactly like any other's: a job
+   * holds it (adopt and poll) or none does, in which case any persisted report is
+   * already final. Job lookup goes FIRST, not the persisted report: see setBrief's
+   * comment on the write-before-complete ordering in `generate.post.ts` that makes
+   * this race-free (coderabbit "Discover jobs for the default brief after reload",
+   * and the same "Close the gap…" finding this mirrors from setBrief).
+   */
+  const restoreDefaultBrief = useCallback(
+    (active: boolean) => {
+      const startBrief = DEFAULT_BRIEF;
+      // Captured before any network call: a run that actually starts for this
+      // brief (adoptJob's own beginRun — from a job discovered below, or from
+      // the user pressing Generate while discovery is still in flight) moves this,
+      // so a persisted-run read that resolves afterward is refused rather than
+      // overwriting fresher (or in-flight) state with whatever was on disk before.
+      const owned = runSeq.current;
+      const superseded = () =>
+        !active ||
+        briefDecidedRef.current ||
+        briefIdRef.current !== startBrief.id ||
+        runSeq.current !== owned;
+      void fetchRunningJob(startBrief.id).then((jobId) => {
+        // `runSeq.current !== owned` also catches a run that started (this tab's
+        // own Generate, or another discovery) while this lookup was still in
+        // flight — see setBrief's identical guard (greptile "Stale lookup replaces
+        // newer run").
+        if (superseded()) return;
+        if (jobId) {
+          void adoptJob(startBrief, jobId, { adopted: true });
+          return;
+        }
+        void fetchPersistedRun(startBrief.id)
+          .then((d) => {
+            if (superseded()) return;
+            // A successful read is proof of membership for this brief — heals a
+            // stale 403 from an earlier, since-resolved failure (F6: "a later
+            // successful fetch heals it"), whether or not this brief happens to
+            // have a run on disk.
+            setMembershipError(null);
+            if (!d) return; // no run on disk
+            setRun({ result: d, target: startBrief });
+            if (d.assets?.length) setAssetVersion((v) => v + 1);
+          })
+          .catch((err) => {
+            if (superseded()) return;
+            // See the identical guard in `setBrief`'s own `fetchPersistedRun`
+            // catch above: a typed check, never a match against the server's own
+            // message text.
+            if (isNoMembershipError(err)) {
+              setMembershipError(NO_ORGANISATION_YET_MESSAGE);
+            }
+            /* F6: could-not-ask is not absence — restore nothing, claim nothing. */
+          });
+      });
+    },
+    [adoptJob],
+  );
+
+  // On first load, restore the campaign the user last opened (DEFAULT if none) and
+  // hydrate that campaign's own persisted run — so a reload after a previous session
+  // brings back the right campaign and its creatives, not DEFAULT with an empty grid.
+  // D37: this is the last-opened convenience at work, never an address — the editor
   // loads whichever brief its route names, and follows with setBrief after it lands.
-  // The brief lives in localStorage (the report alone can't reconstruct messages/colours/logos).
+  //
+  // PT-5e (D173, D180): the pointer is on the SERVER now, not in `localStorage`, so
+  // restoring means asking for it. A pointer hands the whole restore to
+  // `openPageCampaign` — the same path a `?campaign=` page takes (PT-5c3): resolve
+  // the campaign, take the listing's own brief for it (or the placeholder a
+  // versionless campaign gets, PT-5b2), then fetch the run. One implementation, so
+  // the shell and a page can never restore a campaign two different ways. A user
+  // with no pointer keeps today's start-from-DEFAULT behaviour, run discovery
+  // included; a read that FAILED restores nothing at all (F6: could-not-ask is
+  // never answered by claiming a campaign nobody named).
   useEffect(() => {
     let active = true;
     mountedRef.current = true; // StrictMode re-runs this effect; the ref must recover
@@ -1297,86 +1358,24 @@ export function RunProvider({ children }: { children: ReactNode }) {
       mountedRef.current = false;
       pollAbort.current?.abort(); // unmount: no poller may outlive the provider
     };
-    // Something has already decided which brief is active — the blank route releasing
-    // the campaign, most importantly. `cf:brief` is a *last-opened* pointer, not an
-    // application (D37), so restoring it here would put a released brief back on the
-    // shell and let Generate spend image-generation credits on it.
+    // Something has already decided which campaign is active — the blank route
+    // releasing it, most importantly. The last-opened pointer is a convenience,
+    // not an application (D37), so restoring it here would put a released campaign
+    // back on the shell and let Generate spend image-generation credits on it.
     if (briefDecidedRef.current) return cleanup;
-    let startBrief = DEFAULT_BRIEF;
-    try {
-      const parsed: unknown = JSON.parse(localStorage.getItem(BRIEF_KEY) ?? "null");
-      if (isStoredBrief(parsed)) {
-        startBrief = parsed;
-      }
-    } catch {
-      /* unreadable/malformed storage — start from DEFAULT_BRIEF */
-    }
-    if (startBrief !== DEFAULT_BRIEF) {
-      briefIdRef.current = startBrief.id;
-      setBriefState(startBrief);
-    }
-    // Captured before any network call: a run that actually starts for this brief
-    // (adoptJob's own beginRun — from a job discovered below, or from the user
-    // pressing Generate while discovery is still in flight) moves this, so a
-    // persisted-run read that resolves afterward is refused rather than
-    // overwriting fresher (or in-flight) state with whatever was on disk before it.
-    const owned = runSeq.current;
-    // Ask which is true for the starting brief — including the un-restored
-    // DEFAULT_BRIEF, which Generate runs exactly like any other campaign (nothing
-    // gates it on `briefApplied`): a job holds it (adopt and poll) or none does, in
-    // which case any persisted report is already final. Job lookup goes FIRST, not
-    // the persisted report: see setBrief's comment on the write-before-complete
-    // ordering in `generate.post.ts` that makes this race-free (coderabbit "Discover
-    // jobs for the default brief after reload", and the same "Close the gap…" finding
-    // this mirrors from setBrief).
-    void fetchRunningJob(startBrief.id).then((jobId) => {
-      // `runSeq.current !== owned` also catches a run that started (this tab's own
-      // Generate, or another discovery) while this lookup was still in flight — see
-      // setBrief's identical guard (greptile "Stale lookup replaces newer run").
-      if (
-        !active ||
-        briefDecidedRef.current ||
-        briefIdRef.current !== startBrief.id ||
-        runSeq.current !== owned
-      )
-        return;
-      if (jobId) {
-        void adoptJob(startBrief, jobId, { adopted: true });
-        return;
-      }
-      void fetchPersistedRun(startBrief.id)
-        .then((d) => {
-          if (
-            !active ||
-            briefDecidedRef.current ||
-            briefIdRef.current !== startBrief.id ||
-            runSeq.current !== owned
-          )
-            return;
-          // A successful read is proof of membership for this brief — heals a stale
-          // 403 from an earlier, since-resolved failure (F6: "a later successful
-          // fetch heals it"), whether or not this brief happens to have a run on disk.
-          setMembershipError(null);
-          if (!d) return; // no run on disk
-          setRun({ result: d, target: startBrief });
-          if (d.assets?.length) setAssetVersion((v) => v + 1);
-        })
-        .catch((err) => {
-          if (
-            !active ||
-            briefDecidedRef.current ||
-            briefIdRef.current !== startBrief.id ||
-            runSeq.current !== owned
-          )
-            return;
-          // See the identical guard in `setBrief`'s own `fetchPersistedRun` catch above:
-          // a typed check, never a match against the server's own message text.
-          if (isNoMembershipError(err)) {
-            setMembershipError(NO_ORGANISATION_YET_MESSAGE);
-          }
-          /* F6: could-not-ask is not absence — restore nothing, claim nothing. */
-        });
-    });
+    void fetchLastOpened()
+      .then((campaignId) => {
+        if (!active || briefDecidedRef.current) return;
+        if (campaignId !== null) {
+          openPageCampaign(campaignId);
+          return;
+        }
+        restoreDefaultBrief(active);
+      })
+      .catch(() => {
+        /* F6: could-not-ask is not absence — restore nothing, claim nothing. A
+           later successful open (a page's `?campaign=`, a pick, a save) heals it. */
+      });
     return cleanup;
   }, []);
 
@@ -1860,14 +1859,84 @@ export function useRun(): RunContextValue {
  * The URL is the single source of truth for which campaign a shell page shows
  * (the same rule D37 gives the editor's route), so the page — which remounts on
  * every navigation, where the persistent provider does not — is what reads it.
- * A page with no `?campaign=` hands `null` through: the provider keeps today's
- * behaviour until PT-5e moves the bare pages behind the last-opened pointer.
  * Read in an effect, never at render: these pages server-render too, and there
  * is no `window` to read a query string from.
+ *
+ * PT-5e: a page with no `?campaign=` no longer keeps the pre-lane behaviour —
+ * it follows the per-user last-opened pointer, which is what makes a bare
+ * `/grid`, `/export`, `/runs` or `/compliance` land on the campaign the user
+ * last had. See {@link useLastOpenedRedirect} for the redirect itself and for
+ * what happens when there is no pointer.
  */
 export function usePageCampaignParam(): void {
   const { openPageCampaign } = useRun();
+  const pathname = usePathname();
+  useLastOpenedRedirect((campaignId) => campaignPageRoute(pathname, campaignId));
   useEffect(() => {
     openPageCampaign(new URLSearchParams(window.location.search).get("campaign"));
   }, [openPageCampaign]);
+}
+
+/**
+ * A shell page's own address with the campaign attached, D180: the campaign id
+ * rides the QUERY, never the path — `/grid` is the grid for every campaign, and
+ * `grid?campaign=<id>` is shareable (D168's per-org ids, the reason a uuid
+ * belongs in a link). Exported so a caller with a pathname already in hand does
+ * not rebuild the string.
+ */
+function campaignPageRoute(pathname: string, campaignId: string): string {
+  return `${pathname}?campaign=${encodeURIComponent(campaignId)}`;
+}
+
+/**
+ * PT-5e (D173, D180) — a BARE url follows the server's last-opened pointer.
+ *
+ * With a pointer, `to(campaignId)` is where the visitor goes; the page that
+ * renders there restores the campaign through its own `?campaign=` (the shell
+ * pages) or its own route (the editor), so this hook only decides the
+ * destination. With no pointer — a first visit, a user who has opened nothing,
+ * or one whose pointer names a campaign that has since been deleted or become
+ * hidden, all of which the server answers identically (D166) — there is nothing
+ * to restore, so the visitor is sent to the grid and offered the picker, which is
+ * where a campaign is chosen from.
+ *
+ * The pointer is a convenience, never an address (D37): a read that FAILS sends
+ * the visitor nowhere, because could-not-ask is not "there is nothing"
+ * (D83/F6) and a redirect on a failed read would move someone off a page they
+ * can already see.
+ */
+export function useLastOpenedRedirect(to: (campaignId: string) => string): void {
+  const router = useRouter();
+  const { openBriefPicker } = useRun();
+  // `to` is built by the caller, usually inline, so it is a fresh function every
+  // render. Held in a ref rather than an effect dependency: depending on it
+  // would re-run the lookup on every render, and a redirect that re-runs itself
+  // is a redirect loop.
+  const toRef = useRef(to);
+  toRef.current = to;
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("campaign") !== null) return;
+    let cancelled = false;
+    void fetchLastOpened()
+      .then((campaignId) => {
+        if (cancelled) return;
+        if (campaignId !== null) {
+          router.replace(toRef.current(campaignId));
+          return;
+        }
+        openBriefPicker();
+        // Only navigate if it goes anywhere: the grid IS the fallback, so a bare
+        // `/grid` stays where it is. A self-replace would re-run this effect,
+        // which would fetch the pointer again and replace again, forever.
+        if (`${window.location.pathname}${window.location.search}` !== "/grid") {
+          router.replace("/grid");
+        }
+      })
+      .catch(() => {
+        /* F6: could-not-ask is not absence — send the visitor nowhere. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [openBriefPicker, router]);
 }

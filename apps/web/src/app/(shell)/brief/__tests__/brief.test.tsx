@@ -2,12 +2,14 @@ import { describe, test, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import {
   ShellProviders,
-  renderWithRun,
-  nextMock,
-  storedTemplate,
-  mockPipelineApi,
   json,
+  mockPipelineApi,
+  nextMock,
+  renderWithRun,
+  seedOpenedCampaign,
+  storedTemplate,
 } from "@/__tests__/helpers";
+import { useRun } from "@/lib/run-context";
 import { CreateCampaignProvider, useCreateCampaign } from "@/lib/create-campaign-context";
 import BriefIndexPage from "../page";
 import BriefIdPage from "../[id]/page";
@@ -27,38 +29,56 @@ beforeEach(() => {
   localStorage.setItem("cf:brief-picked", "1");
 });
 
-describe("the bare /brief route (D37)", () => {
-  test("redirects to the brief last opened", async () => {
-    localStorage.setItem("cf:brief", JSON.stringify(storedBrief("camp")));
+/**
+ * D37, PT-5e (D173, D180) — the bare `/brief` route follows the SERVER's
+ * per-user last-opened pointer. One test per row item: with a pointer it hands
+ * the visitor to that campaign's own route; with none — first visit, or a
+ * pointer whose campaign has since been deleted or become hidden, which the
+ * server answers identically (D166) — it falls back to the grid and the picker.
+ */
+describe("the bare /brief route (D37, PT-5e)", () => {
+  test("redirects to the campaign the user last opened", async () => {
+    seedOpenedCampaign(storedBrief("camp"));
     renderWithRun(<BriefIndexPage />);
     await vi.waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief/camp"));
   });
 
-  test("redirects to the grid when no last-opened brief is recorded", async () => {
+  test("redirects to the grid when there is no pointer", async () => {
     renderWithRun(<BriefIndexPage />);
     await vi.waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/grid"));
   });
 
-  test("redirects to the grid when the record is unreadable", async () => {
-    localStorage.setItem("cf:brief", "{ not json");
-    renderWithRun(<BriefIndexPage />);
-    await vi.waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/grid"));
+  test("opens the picker when there is no pointer to follow", async () => {
+    // The picker itself lives in the shell layout, so this asserts the state the
+    // shell would render it from — "fall back to /grid WITH the picker" is one
+    // behaviour, and the grid half is the test above.
+    const Probe = () => <span data-testid="picker">{String(useRun().briefPickerOpen)}</span>;
+    renderWithRun(
+      <>
+        <BriefIndexPage />
+        <Probe />
+      </>,
+    );
+    await vi.waitFor(() => expect(screen.getByTestId("picker").textContent).toBe("true"));
   });
 
-  test("redirects to the grid when the record is not a brief", async () => {
-    localStorage.setItem("cf:brief", JSON.stringify(["not", "a", "brief"]));
+  // F6: could-not-ask is not "there is nothing". A failed pointer read must not
+  // move the visitor off a page they can already see.
+  test("a failed pointer read navigates nowhere", async () => {
+    mockPipelineApi({ result: () => Promise.reject(new Error("down")) });
     renderWithRun(<BriefIndexPage />);
-    await vi.waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/grid"));
-  });
-
-  test("redirects to the grid when the last-opened id is malformed", async () => {
-    localStorage.setItem("cf:brief", JSON.stringify(storedBrief("Not Safe")));
-    renderWithRun(<BriefIndexPage />);
-    await vi.waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/grid"));
+    await vi.waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([url]) => String(url).includes("/campaigns/last-opened")),
+      ).toBe(true),
+    );
+    expect(nextMock().router.replace).not.toHaveBeenCalled();
   });
 
   test("never renders an editor itself", () => {
-    localStorage.setItem("cf:brief", JSON.stringify(storedBrief("camp")));
+    seedOpenedCampaign(storedBrief("camp"));
     renderWithRun(<BriefIndexPage />);
     expect(screen.queryByLabelText("Campaign Name")).toBeNull();
   });

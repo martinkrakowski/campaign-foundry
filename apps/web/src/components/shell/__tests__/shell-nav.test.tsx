@@ -471,17 +471,18 @@ describe("guarded navigation when the editor is dirty", () => {
     await user.click(within(dialog).getByRole("button", { name: "Leave" }));
     expect(onNavigate).toHaveBeenCalled();
     // D37: Edit names the active brief's own route — bare "/brief" redirected a
-    // fresh profile (no cf:brief) straight back to the grid, a silent loop.
+    // fresh profile (no last-opened pointer) straight back to the grid, a loop.
     expect(nextMock().router.push).toHaveBeenCalledWith("/brief/seed");
   });
 
-  test("the Edit link names the active brief's route, never the bare redirector", () => {
+  test("the Edit link names the active brief's route, never the bare redirector", async () => {
     seedPersistedRun([makeAsset()]);
     renderDirty(createElement(SidebarContent, { onNavigate: vi.fn() }));
-    // Bare "/brief" redirects by cf:brief, which a fresh profile lacks — the link
-    // looped to the grid. The brief's own route always answers (M3 covers unknowns).
-    // Exact, not a pattern: /brief/undefined would have matched the loose regex.
-    expect(screen.getByText("Edit").getAttribute("href")).toBe("/brief/seed");
+    // Bare "/brief" redirects by the last-opened pointer, which a fresh profile
+    // lacks — the link looped to the grid. The brief's own route always answers
+    // (M3 covers unknowns). The shell holds the restored campaign only once the
+    // server read lands (PT-5e), so the link is asserted after it does.
+    await waitFor(() => expect(screen.getByText("Edit").getAttribute("href")).toBe("/brief/seed"));
   });
 
   test("a released shell (blank brief) sends Edit to /brief/new, never the redirector", async () => {
