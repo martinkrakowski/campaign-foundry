@@ -1028,6 +1028,16 @@ export const createCampaignBlocked =
  */
 export const createCampaignFailed = "Could not create the campaign.";
 /**
+ * `create.draftCheckFailed` — fix round (bots): W3's own draft lookup
+ * (`fetchLatestServerDraft`) failed outright (a network error, a 5xx), not
+ * merely "no draft". Minting anyway would silently bypass the resume
+ * prompt this dialog exists to raise, so Create refuses instead — the same
+ * "stay open, say so, nothing published" shape `createCampaignBlocked` and
+ * `createCampaignFailed` already take.
+ */
+export const createDraftCheckFailed =
+  "Could not check for an unfinished draft. Try Create campaign again.";
+/**
  * W3 (F19) — the two-way the create dialog asks before a seed overwrites an
  * abandoned draft. Its own question inside its own dialog, never the navigation
  * guard's: the guard speaks about the editor the user is leaving, this one about

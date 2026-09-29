@@ -3045,6 +3045,25 @@ export function isDirtySinceSave(state: EditorState): boolean {
   return !valuesEqual(toBrief(state), state.source.savedSnapshot);
 }
 
+/**
+ * Fix round (bots) — the navigation guard's own predicate (`!isPristine(state)
+ * && isDirtySinceSave(state)`), promoted here so the draft-autosave effect
+ * shares it instead of testing `isPristine` alone. `isPristine`'s baseline
+ * for a `"file"` source is a BLANK editor (see its own doc comment — only a
+ * `"new"` source carries a seeded baseline), so an untouched, freshly loaded,
+ * named campaign is never pristine by that measure alone: a real qodo-review
+ * finding confirmed opening any nonblank campaign and never touching it
+ * still armed the autosave PUT after one debounce window. `isDirtySinceSave`
+ * is what actually answers "has this changed since it was loaded or last
+ * saved" for a `"file"` source (its baseline IS the loaded/saved snapshot);
+ * for a `"new"` source it is unconditionally `true` (there is no save to be
+ * dirty since), so `!isPristine` alone still gates that case correctly —
+ * this only widens the check for the case `isPristine` gets wrong.
+ */
+export function hasUnsavedWork(state: EditorState): boolean {
+  return !isPristine(state) && isDirtySinceSave(state);
+}
+
 export function isDirtySinceApply(state: EditorState): boolean {
   if (!state.appliedSnapshot) return true;
   return !valuesEqual(toBrief(state), state.appliedSnapshot);
@@ -3235,29 +3254,62 @@ export async function deleteServerDraft(id: string): Promise<void> {
   }
 }
 
+/** Which campaign a caller's own latest draft belongs to — `campaignId` is
+ *  whatever `campaignMeta` answered server-side (a Postgres uuid or the fs
+ *  slug, D178/D179), `slug` is always the human slug: on Postgres they
+ *  differ, on fs they are the same string twice. Fix round (bots) — a
+ *  caller comparing only against `campaignId` misses a currently-open
+ *  campaign reached by its slug route, since Postgres editor routes are
+ *  reached both ways (`/brief/<uuid>` and `/brief/<slug>`, #613). */
+export interface LatestServerDraft {
+  readonly campaignId: string;
+  readonly slug: string;
+}
+
 /**
  * W3's resume (item 5): the caller's own latest draft across every campaign
- * in scope, or `null` when there is none or the request fails. Read-only —
- * nothing is written, cleared or purged.
+ * in scope. Read-only — nothing is written, cleared or purged.
+ *
+ * Fix round (bots) — distinguishes "no draft" from "could not ask": a
+ * caller that read `null` for both could silently mint a campaign, or open
+ * the blank create flow, on a network hiccup that had nothing to do with
+ * whether a draft exists. `{ ok: true, latest: null }` means the lookup
+ * genuinely answered "none"; `{ ok: false }` means it never got an answer
+ * at all — a caller like `CreateCampaignDialog` that would otherwise MINT
+ * on `ok:false` must refuse instead (see its own `handleCreate`).
  */
-export async function fetchLatestServerDraft(): Promise<{ campaignId: string } | null> {
+export async function fetchLatestServerDraft(): Promise<
+  { readonly ok: true; readonly latest: LatestServerDraft | null } | { readonly ok: false }
+> {
   let res: Response;
   try {
     res = await fetch(`${API}/campaigns/briefs/draft`);
   } catch {
-    return null;
+    return { ok: false };
   }
-  if (!res.ok) return null;
+  if (!res.ok) return { ok: false };
   let body: unknown;
   try {
     body = await res.json();
   } catch {
-    return null;
+    return { ok: false };
   }
+  // `ok: false` is reserved for a genuine communication failure (network
+  // error, a non-2xx status, a body that is not valid JSON at all) — the
+  // ONLY thing a caller like `CreateCampaignDialog` needs to treat
+  // differently from "no draft" (it refuses to mint rather than silently
+  // treating "could not ask" as "asked, and there is none"). A 200 whose
+  // body does not carry a recognizable `latest` shape is not that: this
+  // server never produces one, so reading it as "no draft" rather than a
+  // hard failure is the same lenient, best-effort stance every other parse
+  // in this file already takes (see `fetchServerDraft`'s own doc comment).
   const latest = (body as { latest?: unknown } | null)?.latest;
-  if (typeof latest !== "object" || latest === null) return null;
-  const campaignId = (latest as { campaignId?: unknown }).campaignId;
-  return typeof campaignId === "string" ? { campaignId } : null;
+  if (typeof latest !== "object" || latest === null) return { ok: true, latest: null };
+  const { campaignId, slug } = latest as { campaignId?: unknown; slug?: unknown };
+  if (typeof campaignId !== "string" || typeof slug !== "string") {
+    return { ok: true, latest: null };
+  }
+  return { ok: true, latest: { campaignId, slug } };
 }
 
 /**

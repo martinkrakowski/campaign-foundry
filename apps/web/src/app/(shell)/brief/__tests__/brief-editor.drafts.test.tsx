@@ -69,6 +69,15 @@ function draftRoutes(opts: {
    * landing, which a same-tick `Promise.resolve` never leaves.
    */
   deferGetFor?: string;
+  /**
+   * Fix round (bots) — hold every draft PUT for this campaign id open until
+   * `releasePut()` is called (FIFO — each call releases the oldest still
+   * held), instead of answering inline: exercising "a second PUT is never
+   * DISPATCHED before the first settles" (the write-chain fix) and "an
+   * in-flight PUT completing after Revert's own DELETE" both need a real
+   * gap between a PUT going out and its answer landing.
+   */
+  deferPutFor?: string;
 }) {
   const store = new Map<string, { state: unknown; baseRevision: string | null }>();
   const calls: { url: string; method: string; body?: Record<string, unknown> }[] = [];
@@ -79,6 +88,12 @@ function draftRoutes(opts: {
         releaseGet = resolve;
       })
     : undefined;
+  const pendingPuts: {
+    id: string;
+    state: unknown;
+    baseRevision: string | null;
+    release: (r: Response) => void;
+  }[] = [];
   vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
     const u = String(url);
     const method = (init?.method ?? "GET").toUpperCase();
@@ -107,6 +122,11 @@ function draftRoutes(opts: {
       if (method === "PUT") {
         const state = parsed?.state;
         const baseRevision = typeof parsed?.baseRevision === "string" ? parsed.baseRevision : null;
+        if (opts.deferPutFor === id) {
+          return new Promise<Response>((resolve) => {
+            pendingPuts.push({ id, state, baseRevision, release: resolve });
+          });
+        }
         store.set(id, { state, baseRevision });
         return Promise.resolve(json({ draft: { state, baseRevision, updatedAt: "t" } }));
       }
@@ -147,6 +167,17 @@ function draftRoutes(opts: {
       const id = opts.deferGetFor!;
       const rec = store.get(id);
       releaseGet?.(json({ draft: rec ? { ...rec, updatedAt: "t" } : null }));
+    },
+    /** How many deferred PUTs are currently held, unreleased. */
+    pendingPutCount: () => pendingPuts.length,
+    /** Release the OLDEST still-held PUT, performing its store write now
+     *  (simulating the server only actually committing once this "request"
+     *  is allowed to complete) and answering with its own content. */
+    releasePut: () => {
+      const next = pendingPuts.shift();
+      if (!next) throw new Error("releasePut: nothing is held");
+      store.set(next.id, { state: next.state, baseRevision: next.baseRevision });
+      next.release(json({ draft: { ...next, updatedAt: "t" } }));
     },
   };
 }
@@ -371,11 +402,23 @@ describe("a reload after a Save whose DELETE failed (PT-5d item 4)", () => {
     // The real sequence, not a stand-in for it: a draft exists (as autosave
     // would have left one, seeded directly here); Save lands and bumps the
     // campaign to "r2"; its own post-Save DELETE is forced to fail, so the
-    // draft — still carrying the PRE-save "r1" — survives in the store. A
-    // reload (a fresh mount at the same route) must not resurrect it: "r1"
-    // no longer matches the campaign's now-current revision, so the restore
+    // draft — still carrying its own "r1" — survives in the store. A reload
+    // (a fresh mount at the same route) must not resurrect it: "r1" no
+    // longer matches the campaign's now-current revision, so the restore
     // effect skips it and the freshly reloaded, published brief shows.
-    let revision = "r1";
+    //
+    // The campaign's OWN starting revision is "r0", never "r1" — the
+    // seeded draft's own baseRevision — on purpose: matching them would let
+    // the FIRST mount's restore effect legitimately fire (its baseRevision
+    // check has nothing to do with the Save/DELETE race this test is about)
+    // and put the draft's content on screen before Save is even clicked,
+    // contaminating what gets saved and turning `draftDivergedRef` genuinely
+    // true — which races the deliberate post-Save DELETE below with a
+    // SECOND, autosave-effect-driven delete that has nothing to fail
+    // against. Mismatched from the start, restore never fires on either
+    // mount, and the only DELETE in play is the deliberate one this test
+    // means to force.
+    let revision = "r0";
     const routed = draftRoutes({
       list: () => json({ briefs: [entry("camp", revision)] }),
       put: (_url, body) => {
@@ -440,5 +483,140 @@ describe("a reload after a Save whose DELETE failed (PT-5d item 4)", () => {
 
     expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi");
     expect(screen.queryByDisplayValue("Stale pre-save draft")).toBeNull();
+  });
+});
+
+describe("draft write ordering and flush (fix round, bots)", () => {
+  test("a second autosave PUT is never dispatched before the first one settles (Qodo — closes an out-of-order overwrite)", async () => {
+    const routed = draftRoutes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      deferPutFor: "camp",
+    });
+    renderWithRun(<Editor id="camp" />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const headline = screen.getByLabelText("Headline") as HTMLInputElement;
+      act(() => {
+        fireEvent.change(headline, { target: { value: "Edit one" } });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+        await Promise.resolve();
+      });
+      expect(routed.pendingPutCount()).toBe(1);
+
+      act(() => {
+        fireEvent.change(headline, { target: { value: "Edit two" } });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+        await Promise.resolve();
+      });
+      // The SECOND edit's own timer has fired — its `putServerDraft` call is
+      // enqueued onto the write chain, but must not have been DISPATCHED
+      // (no fetch sent) while the first is still held. Without the chain,
+      // this would already be 2.
+      expect(routed.pendingPutCount()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // Releasing the first lets the chain move on to the second.
+    routed.releasePut();
+    await waitFor(() => expect(routed.pendingPutCount()).toBe(1));
+    routed.releasePut();
+    await waitFor(() => {
+      const stored = routed.stored("camp");
+      expect((stored?.state as { campaignMessage?: string } | undefined)?.campaignMessage).toBe(
+        "Edit two",
+      );
+    });
+  });
+
+  test("an edit inside the debounce window is still sent when the route unmounts before the timer fires (CodeRabbit + Qodo)", async () => {
+    const routed = draftRoutes({ list: () => json({ briefs: [entry("camp", "r1")] }) });
+    const view = renderWithRun(<Editor id="camp" />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const headline = screen.getByLabelText("Headline") as HTMLInputElement;
+      act(() => {
+        fireEvent.change(headline, { target: { value: "Almost lost" } });
+      });
+      // Well short of the 1 s window — the timer has not fired.
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      expect(routed.calls.some((c) => c.method === "PUT" && c.url.endsWith("/draft"))).toBe(false);
+      // The route unmounts before the debounce would otherwise have flushed
+      // it — the old behaviour just cancelled the timer and lost the edit.
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await waitFor(() => expect(routed.has("camp")).toBe(true));
+    expect(
+      (routed.stored("camp")?.state as { campaignMessage?: string } | undefined)?.campaignMessage,
+    ).toBe("Almost lost");
+  });
+
+  test("a PUT already in flight when Revert's DELETE fires does not resurrect the discarded draft (Qodo)", async () => {
+    const user = userEvent.setup();
+    const routed = draftRoutes({
+      meta: () =>
+        json({ campaignId: "fresh", slug: "fresh", name: null, type: null, hasVersion: false }),
+      deferPutFor: "fresh",
+    });
+    renderWithRun(<Editor id="fresh" />);
+    await waitFor(() => expect(screen.getByText("fresh")).toBeTruthy());
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      act(() => {
+        fireEvent.change(screen.getByLabelText("Target Audience"), { target: { value: "x" } });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+        await Promise.resolve();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    // The autosave PUT is in flight, held — nothing written yet.
+    await waitFor(() => expect(routed.pendingPutCount()).toBe(1));
+    expect(routed.has("fresh")).toBe(false);
+
+    // Revert fires while that PUT is still held. Its own DELETE is enqueued
+    // onto the SAME write chain as the PUT, strictly AFTER it (program
+    // order) — so it cannot even be DISPATCHED yet, only once the PUT ahead
+    // of it in the chain has settled. This is the mechanism itself: without
+    // it, DELETE would fire immediately, and the held PUT completing
+    // afterward would resurrect the draft Revert just discarded.
+    await user.click(screen.getByText("⋯"));
+    await user.click(screen.getByText(messages.editorRevert));
+    const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    await user.click(within(prompt).getByRole("button", { name: messages.confirmDialogDiscard }));
+    expect(
+      routed.calls.some((c) => c.method === "DELETE" && c.url === `${API}/campaigns/fresh/draft`),
+    ).toBe(false);
+
+    // Now the held PUT is allowed to complete — the chain moves on to the
+    // enqueued DELETE, which runs after it and wins: the draft ends up
+    // gone, never resurrected with the discarded content.
+    routed.releasePut();
+    await waitFor(() =>
+      expect(
+        routed.calls.some((c) => c.method === "DELETE" && c.url === `${API}/campaigns/fresh/draft`),
+      ).toBe(true),
+    );
+    await waitFor(() => expect(routed.has("fresh")).toBe(false));
   });
 });

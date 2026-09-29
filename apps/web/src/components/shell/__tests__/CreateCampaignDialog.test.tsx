@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
+import { useEffect } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
@@ -7,6 +8,7 @@ import {
   DEFAULT_CAMPAIGN_TYPE,
 } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { CreateCampaignProvider, useCreateCampaign } from "@/lib/create-campaign-context";
+import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { campaignRoute } from "@/lib/campaign-route";
 import { BriefsApiError } from "@/lib/briefs-api";
 import { ShellProviders, nextMock, mockPipelineApi, json } from "@/__tests__/helpers";
@@ -380,7 +382,7 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     mockPipelineApi({
       result: (u) =>
         u.includes("/campaigns/briefs/draft")
-          ? json({ latest: { campaignId: DRAFT_CAMPAIGN_ID } })
+          ? json({ latest: { campaignId: DRAFT_CAMPAIGN_ID, slug: DRAFT_CAMPAIGN_ID } })
           : json({}),
     });
   };
@@ -601,6 +603,135 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
 
     releaseLatest(json({ latest: null }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+  });
+
+  // Fix round (bots) — CodeRabbit (Major) + Qodo (High), same premise, real:
+  // closing the dialog while the draft check is still pending did not stop
+  // a subsequent no-draft answer from minting a campaign with the name and
+  // type captured when Create was pressed.
+  test("closing the dialog while the draft check is pending stops the subsequent no-draft answer from minting", async () => {
+    const user = userEvent.setup();
+    let releaseLatest!: (r: Response) => void;
+    const held = new Promise<Response>((resolve) => {
+      releaseLatest = resolve;
+    });
+    mockPipelineApi({
+      result: (u) => (u.includes("/campaigns/briefs/draft") ? held : json({})),
+    });
+    const create = vi.spyOn(createCampaignLib, "createCampaign");
+    renderDialog();
+    await openDialog(user);
+    await fillValid(user);
+    await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
+
+    // The draft check is still pending — close via the discard guard (a
+    // typed name means the first Cancel only raises it).
+    await user.click(screen.getByRole("button", { name: messages.confirmCancel }));
+    await user.click(screen.getByRole("button", { name: messages.discardGuardDiscardClose }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.createCampaignTitle })).toBeNull(),
+    );
+
+    // The check finally answers "no draft" — the old code would mint here.
+    releaseLatest(json({ latest: null }));
+    // Give the resolved promise's own `.then` chain a turn.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(create).not.toHaveBeenCalled();
+    // Nor does a stale answer reopen the resume prompt on a dialog that is
+    // no longer there to show it.
+    expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
+  });
+
+  // Fix round (bots) — CodeRabbit (Minor), real: `handleResume` used to call
+  // `router.push` directly, bypassing the shared dirty-editor guard every
+  // other navigation in the shell goes through.
+  test("Resume asks before leaving a dirty OTHER editor, through the same guard every other navigation uses", async () => {
+    stashAbandonedDraft();
+    const user = userEvent.setup();
+    const DirtyMarker = () => {
+      const { setDirty } = useEditorDirty();
+      useEffect(() => {
+        setDirty(true);
+      }, [setDirty]);
+      return null;
+    };
+    render(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <DirtyMarker />
+          <Harness />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+    const prompt = await raiseTwoWay(user);
+    await user.click(within(prompt).getByRole("button", { name: messages.resumeDraftResume }));
+
+    // The dirty-editor confirm dialog is up — the resume navigation did NOT
+    // happen immediately (the old `router.push` would have gone straight
+    // through).
+    expect(nextMock().router.push).not.toHaveBeenCalled();
+    const confirmDialog = await screen.findByRole("dialog", { name: "Unsaved edits" });
+    await user.click(within(confirmDialog).getByRole("button", { name: "Leave" }));
+    await waitFor(() =>
+      expect(nextMock().router.push).toHaveBeenCalledWith(campaignRoute(DRAFT_CAMPAIGN_ID)),
+    );
+  });
+
+  // Fix round (bots) — Qodo (Medium), real: on Postgres `latest.campaignId`
+  // is the draft's own uuid, but the currently open editor route may have
+  // been reached by its SLUG (#613) — comparing only against `campaignId`
+  // never suppresses the prompt for a campaign the operator is already
+  // looking at, reached that way.
+  test("the scope term also matches a currently open SLUG route, not only a uuid one", async () => {
+    mockPipelineApi({
+      result: (u) =>
+        u.includes("/campaigns/briefs/draft")
+          ? json({ latest: { campaignId: "uuid-1", slug: "same-campaign" } })
+          : json({}),
+    });
+    nextMock().nav.pathname = campaignRoute("same-campaign");
+    const create = vi
+      .spyOn(createCampaignLib, "createCampaign")
+      .mockResolvedValue({ campaignId: "c1" });
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await fillValid(user);
+    await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
+
+    // No prompt: the draft's own campaign, reached by slug, is the one
+    // already open — Create proceeds straight to the mint.
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
+  });
+
+  // Fix round (bots) — CodeRabbit (Major), real: `fetchLatestServerDraft`
+  // returned `null` for both "no draft" and "the lookup itself failed", so
+  // a failed check silently minted a campaign, bypassing the resume prompt
+  // this dialog exists to raise.
+  test("a failed draft-check lookup refuses to mint, rather than treating it as no draft", async () => {
+    mockPipelineApi({
+      result: (u) => (u.includes("/campaigns/briefs/draft") ? json({}, 500) : json({})),
+    });
+    const create = vi.spyOn(createCampaignLib, "createCampaign");
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+    await fillValid(user);
+    await user.click(screen.getByRole("button", { name: messages.createCampaignConfirm }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe(messages.createDraftCheckFailed),
+    );
+    expect(create).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: messages.resumeDraftTitle })).toBeNull();
+    // The dialog stayed open with the typed answers still there for a retry.
+    expect((screen.getByLabelText(messages.campaignNameLabel) as HTMLInputElement).value).toBe(
+      "Summer Spark",
+    );
   });
 });
 

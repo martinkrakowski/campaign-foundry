@@ -1836,20 +1836,29 @@ describe("server draft persistence (PT-5d, D173, D177)", () => {
   });
 
   test("fetchLatestServerDraft answers the caller's own latest draft, or null", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ latest: { campaignId: "camp-9" } }));
-    expect(await fetchLatestServerDraft()).toEqual({ campaignId: "camp-9" });
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({ latest: { campaignId: "camp-9", slug: "camp-9" } }),
+    );
+    expect(await fetchLatestServerDraft()).toEqual({
+      ok: true,
+      latest: { campaignId: "camp-9", slug: "camp-9" },
+    });
     expect(fetch).toHaveBeenCalledWith("/api/pipeline/campaigns/briefs/draft");
 
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ latest: null }));
-    expect(await fetchLatestServerDraft()).toBeNull();
+    expect(await fetchLatestServerDraft()).toEqual({ ok: true, latest: null });
   });
 
-  test("fetchLatestServerDraft answers null for a non-ok response, a network failure, or a malformed body", async () => {
+  // Fix round (bots) — CodeRabbit: a failed lookup must read as a DISTINCT
+  // outcome from a genuine "no draft", so a caller (`CreateCampaignDialog`)
+  // can refuse to mint rather than silently treating "could not ask" as
+  // "asked, and there is none".
+  test("fetchLatestServerDraft answers { ok: false } for a non-ok response, a network failure, or a body that is not valid JSON — never conflated with a genuine no-draft answer", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ latest: null }, false));
-    expect(await fetchLatestServerDraft()).toBeNull();
+    expect(await fetchLatestServerDraft()).toEqual({ ok: false });
 
     vi.mocked(fetch).mockRejectedValueOnce(new Error("network down"));
-    expect(await fetchLatestServerDraft()).toBeNull();
+    expect(await fetchLatestServerDraft()).toEqual({ ok: false });
 
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
@@ -1857,14 +1866,24 @@ describe("server draft persistence (PT-5d, D173, D177)", () => {
         throw new Error("bad json");
       },
     } as unknown as Response);
-    expect(await fetchLatestServerDraft()).toBeNull();
+    expect(await fetchLatestServerDraft()).toEqual({ ok: false });
+  });
 
+  // `ok: false` is reserved for the genuinely could-not-ask cases above — a
+  // 200 whose JSON body just does not carry a recognizable `latest` shape
+  // (this server never produces one) reads as "no draft" rather than a hard
+  // failure, the same lenient stance `fetchServerDraft` already takes.
+  test("fetchLatestServerDraft reads a 200 with no recognizable latest shape as no draft, not a failure", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(null));
-    expect(await fetchLatestServerDraft()).toBeNull();
+    expect(await fetchLatestServerDraft()).toEqual({ ok: true, latest: null });
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ latest: "nope" }));
-    expect(await fetchLatestServerDraft()).toBeNull();
+    expect(await fetchLatestServerDraft()).toEqual({ ok: true, latest: null });
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ latest: {} }));
-    expect(await fetchLatestServerDraft()).toBeNull();
+    expect(await fetchLatestServerDraft()).toEqual({ ok: true, latest: null });
+    // A `latest` object missing `slug` (an older server or a partial mock)
+    // is just as unrecognizable as one missing `campaignId` — both required.
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ latest: { campaignId: "camp-9" } }));
+    expect(await fetchLatestServerDraft()).toEqual({ ok: true, latest: null });
   });
 });
 

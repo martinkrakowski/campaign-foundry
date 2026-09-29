@@ -25,7 +25,8 @@ import {
 import { createCampaign } from "@/lib/create-campaign";
 import { campaignRoute } from "@/lib/campaign-route";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
-import { fetchLatestServerDraft } from "@/components/campaign/editor-state";
+import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
+import { fetchLatestServerDraft, type LatestServerDraft } from "@/components/campaign/editor-state";
 import { unknownErrorMessage } from "@/lib/briefs-api";
 import {
   formatDisplayName,
@@ -156,6 +157,7 @@ function typeTileDescription(type: CampaignType): string {
 export function CreateCampaignDialog() {
   const { createDialogOpen, closeCreateDialog } = useCreateCampaign();
   const router = useRouter();
+  const { guardedPush } = useGuardedNavigation();
   const pathname = usePathname();
   const [name, setName] = useState("");
   const [type, setType] = useState<CampaignType>(DEFAULT_CAMPAIGN_TYPE);
@@ -173,6 +175,13 @@ export function CreateCampaignDialog() {
   // provided the node is still connected; the name input is the stable fallback.
   const guardReturnFocusRef = useRef<HTMLElement | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  // Fix round (bots) — bumped by every close gesture; `handleCreate` captures
+  // it before its own `await fetchLatestServerDraft()` and refuses to act on
+  // a stale answer (setting the resume prompt, or minting) once it no longer
+  // matches. A close gesture during that await — Cancel, Escape, the guard's
+  // Discard and close — must not let the pending check go on to mint a
+  // campaign, or raise a prompt, for a dialog the operator already closed.
+  const createSessionRef = useRef(0);
 
   /** Where a cleared answer takes its notice down. */
   const clearRefusal = () => {
@@ -185,6 +194,7 @@ export function CreateCampaignDialog() {
 
   /** A cancelled or completed create leaves nothing behind — the typed fields included. */
   const closeAndReset = () => {
+    createSessionRef.current += 1;
     closeCreateDialog();
     setName("");
     setType(DEFAULT_CAMPAIGN_TYPE);
@@ -292,7 +302,7 @@ export function CreateCampaignDialog() {
   // PT-5d item 5 — which campaign `handleCreate`'s own draft check found, so
   // `handleResume` (pressed after the prompt renders) knows where to go
   // without asking the server again.
-  const latestDraftRef = useRef<{ campaignId: string } | null>(null);
+  const latestDraftRef = useRef<LatestServerDraft | null>(null);
   // Guards the same double-activation window `createInFlightRef` guards for
   // `runCreate` — `handleCreate` now awaits a fetch before it ever reaches
   // that ref, so a second press inside that window needs its own latch.
@@ -309,18 +319,39 @@ export function CreateCampaignDialog() {
     setNameInvalid(false);
     if (checkingDraftRef.current) return;
     checkingDraftRef.current = true;
+    // Fix round (bots) — captured before the await: a close gesture (Cancel,
+    // Escape, the guard's Discard and close) during the lookup below bumps
+    // `createSessionRef` via `closeAndReset`, and this check refuses to set
+    // the resume prompt or mint a campaign for a session that already ended.
+    // Real, reviewer-confirmed: without it, Discard-and-close during this
+    // await did not stop a subsequent no-draft answer from minting a
+    // campaign with the name and type captured when Create was pressed.
+    const session = createSessionRef.current;
     try {
       // W3 (F19) — before minting a brand-new campaign, ask about the
       // abandoned draft it would leave stranded (PT-5d item 5: the caller's
       // own latest server draft, across every campaign). The scope term:
       // skip the prompt when that draft's OWN campaign is the one already
-      // open (`pathname === campaignRoute(latest.campaignId)`) — asking
-      // about the draft the operator is already looking at would be the D67
-      // double prompt this dialog does not own (the navigation guard's own
-      // question, for the same draft).
-      const latest = await fetchLatestServerDraft();
+      // open — asking about the draft the operator is already looking at
+      // would be the D67 double prompt this dialog does not own (the
+      // navigation guard's own question, for the same draft). Compared
+      // against both `campaignId` and `slug` (fix round, bots): on Postgres
+      // they differ, and the currently open route may have been reached by
+      // either (#613), so a uuid-only compare misses a slug-reached route
+      // naming the very campaign the draft belongs to.
+      const result = await fetchLatestServerDraft();
+      if (createSessionRef.current !== session) return;
+      if (!result.ok) {
+        setRefusal(messages.createDraftCheckFailed);
+        return;
+      }
+      const latest = result.latest;
       latestDraftRef.current = latest;
-      if (latest !== null && pathname !== campaignRoute(latest.campaignId)) {
+      if (
+        latest !== null &&
+        pathname !== campaignRoute(latest.campaignId) &&
+        pathname !== campaignRoute(latest.slug)
+      ) {
         setResumePrompt(true);
         return;
       }
@@ -335,11 +366,15 @@ export function CreateCampaignDialog() {
    *  rather than opening `/brief/new` again to re-ask the same question.
    *  Only ever pressed from the resume prompt this ref's own non-null value
    *  raised (`handleCreate`), and nothing in between resets it — the
-   *  non-null assertion documents that, rather than a dead `if` branch. */
+   *  non-null assertion documents that, rather than a dead `if` branch.
+   *  `guardedPush`, not a raw `router.push` (fix round, bots): the dialog can
+   *  be opened over a dirty OTHER campaign's editor (a global "New campaign"
+   *  entry point), and every other navigation in the shell already asks
+   *  before leaving unsaved work — this was the one exception. */
   const handleResume = () => {
     const latest = latestDraftRef.current!;
     closeAndReset();
-    router.push(campaignRoute(latest.campaignId));
+    guardedPush(campaignRoute(latest.campaignId));
   };
 
   const cancelResumePrompt = () => setResumePrompt(false);

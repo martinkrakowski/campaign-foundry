@@ -111,7 +111,9 @@ describe("/brief/new — resume or create (PT-5c1, PT-5d, W3)", () => {
   test("resumes a caller's latest server draft by navigating to its campaign, never opening the dialog (W3)", async () => {
     mockPipelineApi({
       result: (u) =>
-        isLatestDraftUrl(u) ? json({ latest: { campaignId: "resumed-1" } }) : json({}),
+        isLatestDraftUrl(u)
+          ? json({ latest: { campaignId: "resumed-1", slug: "resumed-1" } })
+          : json({}),
     });
     renderNewBriefPage();
     await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief/resumed-1"));
@@ -132,8 +134,21 @@ describe("/brief/new — resume or create (PT-5c1, PT-5d, W3)", () => {
     const view = renderNewBriefPage();
     await waitFor(() => expect(resolveLatest).not.toBeNull());
     view.unmount();
-    resolveLatest!(json({ latest: { campaignId: "too-late" } }));
+    resolveLatest!(json({ latest: { campaignId: "too-late", slug: "too-late" } }));
     await Promise.resolve();
     expect(nextMock().router.replace).not.toHaveBeenCalled();
+  });
+
+  // Fix round (bots) — CodeRabbit: a failed lookup must not be silently
+  // treated as "no draft" without at least documenting the choice this route
+  // makes about it. `fetchLatestServerDraft` now distinguishes the two
+  // (`editor-state.ts`); this route deliberately still falls through to the
+  // create dialog either way (see its own doc comment for why that is safe
+  // here, unlike `CreateCampaignDialog`'s stricter refusal).
+  test("a failed latest-draft lookup falls through to the create dialog, same as no draft", async () => {
+    mockPipelineApi({ result: (u) => (isLatestDraftUrl(u) ? json({}, 500) : json({})) });
+    renderNewBriefPage();
+    await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/grid"));
+    expect(screen.getByTestId("dialog-open").textContent).toBe("true");
   });
 });

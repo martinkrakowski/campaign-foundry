@@ -23,6 +23,17 @@ import { useCreateCampaign } from "@/lib/create-campaign-context";
  * the enumerated flow requires. The check runs in an effect, not the initial
  * render, so the fetch never runs during SSR and the first client render
  * matches the server's.
+ *
+ * Fix round (bots) — a failed lookup (`{ ok: false }`) falls through to the
+ * SAME no-draft path as a genuine "none": blocking this route's one job
+ * (landing somewhere) on a background check that failed would be worse than
+ * the degraded case (offering a fresh create instead of a resume), and
+ * nothing here risks data loss either way — the draft itself, if one exists,
+ * is untouched on the server and still findable the next time this page (or
+ * the create dialog) asks. `CreateCampaignDialog`'s OWN failure handling is
+ * stricter (it refuses rather than minting) because ITS failure mode is
+ * different: minting silently on a failed check there could orphan a real
+ * draft behind a brand-new campaign, which landing here again cannot do.
  */
 export default function NewBriefPage() {
   const router = useRouter();
@@ -31,10 +42,10 @@ export default function NewBriefPage() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const latest = await fetchLatestServerDraft();
+      const result = await fetchLatestServerDraft();
       if (cancelled) return;
-      if (latest !== null) {
-        router.replace(campaignRoute(latest.campaignId));
+      if (result.ok && result.latest !== null) {
+        router.replace(campaignRoute(result.latest.campaignId));
         return;
       }
       openCreateDialog();

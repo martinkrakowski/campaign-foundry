@@ -1390,14 +1390,17 @@ describe("BriefPage — data flow", () => {
       expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi"),
     );
 
-    // L1: the reverted state is not pristine (it differs from the initial blank
-    // editor), so autosave refills the draft — with the REVERTED content, never
-    // the discarded edit. (The old code purged here and autosave immediately
-    // rewrote it: a no-op fight that this assertion pins.)
-    await waitFor(() => {
-      const draft = calls.drafts.stored("camp");
-      expect((draft?.state as { campaignMessage?: string })?.campaignMessage).toBe("Hi");
-    });
+    // L1, fix round (bots) — a Revert on a "file" source lands back on its OWN
+    // saved/loaded baseline, which is genuinely nothing-unsaved (`hasUnsavedWork`,
+    // `editor-state.ts`): autosave DELETEs the draft rather than refilling it, the
+    // same "return to pristine purges it" shape an undo back to a clean editor
+    // already takes. This was NOT always true here: `isPristine` alone (the bug a
+    // real Qodo review finding named) read a loaded, file-backed campaign as
+    // never pristine regardless of edits, so this assertion used to pin the OLD,
+    // wrong behaviour — a draft "refilled" with the reverted content, discarded
+    // edit gone but a phantom recovery draft left behind anyway. Never the
+    // discarded edit either way.
+    await waitFor(() => expect(calls.drafts.has("camp")).toBe(false));
   });
 
   test("a Revert of a never-saved draft on a routeless mount touches no server draft (L1, new source)", async () => {
@@ -5390,7 +5393,7 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
       // campaign's draft the operator is not looking at right now", the one
       // shape the dialog's own scope term (skip only when the LATEST draft's
       // own campaign is already open) does not suppress.
-      draft: { latest: () => json({ latest: { campaignId: "elsewhere-1" } }) },
+      draft: { latest: () => json({ latest: { campaignId: "elsewhere-1", slug: "elsewhere-1" } }) },
     });
     const user = userEvent.setup();
     renderWithRun(

@@ -36,6 +36,7 @@ import {
   isDirtySinceSave,
   isDirtySinceApply,
   isPristine,
+  hasUnsavedWork,
   isValidationFresh,
   valuesEqual,
   fetchServerDraft,
@@ -783,6 +784,20 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * refusal already takes a few effects up (`~928-937`); here it is a
    * reference check, since restore only ever needs to know whether ANYTHING
    * changed since, not what.
+   *
+   * Fix round (bots) — Qodo, real: a mismatched draft answered by THIS
+   * route's own restore fetch is left untouched here (silently skipped, as
+   * before) — the finding it named ("stale drafts keep hijacking resume
+   * forever") is about the LATEST-draft LOOKUP (`GET
+   * /campaigns/briefs/draft`) repeatedly re-offering an unrestorable draft
+   * for resume, never about what a direct visit to this campaign's own
+   * route sees (silently skipping and showing the published brief instead
+   * is already correct there — nothing to clean up on this path alone).
+   * That lookup route now self-cleans the stale candidates IT walks past,
+   * which is where the "forever" came from; deleting one here too, on a
+   * route that already shows the right content either way, would only add
+   * a second, redundant delete racing the deliberate ones below with
+   * nothing left for it to fix.
    */
   useEffect(() => {
     if (routeId === undefined || !routeAlreadyResolved) return;
@@ -1105,7 +1120,9 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // every unnamed draft as dirty by definition — which would make the guard prompt
     // "unsaved changes" on a pristine form, e.g. when the user picks a brief from the
     // blank route. A pristine editor has nothing to lose, so it never prompts.
-    const next = !isPristine(state) && isDirtySinceSave(state);
+    // `hasUnsavedWork` (`editor-state.ts`) is this exact compound condition, factored
+    // out so the autosave effect below shares it instead of testing `isPristine` alone.
+    const next = hasUnsavedWork(state);
     if (lastPublishedDirtyRef.current !== next) {
       lastPublishedDirtyRef.current = next;
       setDirty(next);
@@ -1143,25 +1160,104 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       draftPutTimerRef.current = null;
     }
   };
+  /**
+   * Fix round (bots) — every PUT/DELETE against this campaign's draft runs
+   * through this chain, one at a time: a call does not even DISPATCH until
+   * the previous one has settled. The same shape `FsBriefStore`/
+   * `PgBriefStore`'s own `withBriefLock` already uses server-side, mirrored
+   * client-side for the one thing that cannot reach — network arrival order.
+   * Closes two real findings: an older edit's PUT completing after a newer
+   * edit's own PUT (Qodo — without this, whichever response lands last
+   * wins, regardless of which edit was actually newer), and a PUT already in
+   * flight when Revert's own DELETE fires finishing afterward and
+   * resurrecting the just-discarded draft (the other half of the same
+   * finding — a stale PUT racing a SAVE's own DELETE was already closed by
+   * the grok round's revision compare-and-swap, which a same-revision
+   * Revert has no stale baseline to lean on).
+   */
+  const draftWriteChainRef = useRef<Promise<void>>(Promise.resolve());
+  const enqueueDraftWrite = (write: () => Promise<void>): void => {
+    draftWriteChainRef.current = draftWriteChainRef.current.then(write, write);
+  };
+  /**
+   * Fix round (bots) — the debounced PUT this effect is about to arm, kept
+   * alongside the timer so a route change or unmount can still SEND it
+   * (the effect below) instead of only cancelling it — a real finding
+   * (CodeRabbit, Qodo): a trailing debounce that only ever cancels never
+   * flushes, so an edit made in the last second before navigating away was
+   * never sent at all. The old localStorage path wrote synchronously and
+   * never had this gap. Cleared once its payload is actually sent — by the
+   * timer firing normally, by the flush effect below, or by a deliberate
+   * discard (`discardPendingDraft`) claiming it first.
+   */
+  const pendingDraftRef = useRef<{
+    readonly routeId: string;
+    readonly state: EditorState;
+    readonly baseRevision: string | null;
+  } | null>(null);
+  /** Save, Save as… and Revert's own shared "this draft is superseded, not
+   *  merely paused" cleanup — cancels the pending timer AND discards its
+   *  payload (so the flush effect below has nothing stale to resurrect),
+   *  then enqueues the DELETE onto the same write chain as every PUT, so it
+   *  can never be overtaken by one already in flight. */
+  const discardPendingDraft = (id: string) => {
+    clearPendingDraftSave();
+    pendingDraftRef.current = null;
+    enqueueDraftWrite(() => deleteServerDraft(id));
+  };
   useEffect(() => {
     if (routeId === undefined) return;
     // A named route is an unattached "new" draft until its lookup lands — skip
     // until the route has resolved (`markSeeded` changes `state`, and so
     // `routeAlreadyResolved`, so this effect runs again once it does).
-    if (!isPristine(state) && !routeAlreadyResolved) return;
-    if (!isPristine(state)) {
+    // `hasUnsavedWork`, not `isPristine` alone (fix round, bots — a real
+    // Qodo finding): `isPristine`'s baseline for a `"file"` source is a
+    // BLANK editor, so an untouched, freshly loaded, named campaign was
+    // never pristine by that measure and armed a phantom PUT after every
+    // load, with nothing actually unsaved. `hasUnsavedWork` (`editor-state.ts`)
+    // is the same compound check the dirty-flag effect above already used.
+    if (!hasUnsavedWork(state) && !routeAlreadyResolved) return;
+    if (hasUnsavedWork(state)) {
       draftDivergedRef.current = true;
       const baseRevision = state.source.kind === "file" ? (state.source.revision ?? null) : null;
+      pendingDraftRef.current = { routeId, state, baseRevision };
       draftPutTimerRef.current = setTimeout(() => {
         draftPutTimerRef.current = null;
-        void putServerDraft(routeId, state, baseRevision);
+        pendingDraftRef.current = null;
+        enqueueDraftWrite(() => putServerDraft(routeId, state, baseRevision));
       }, DRAFT_AUTOSAVE_DEBOUNCE_MS);
     } else if (draftDivergedRef.current) {
       draftDivergedRef.current = false;
-      void deleteServerDraft(routeId);
+      pendingDraftRef.current = null;
+      enqueueDraftWrite(() => deleteServerDraft(routeId));
     }
     return clearPendingDraftSave;
   }, [state, routeId, routeAlreadyResolved]);
+
+  /**
+   * Fix round (bots) — flush, not cancel. Declared after the autosave effect
+   * above so React runs its cleanup AFTER that effect's own cleanup on the
+   * same commit (cleanups run in declaration order): a route change or an
+   * unmount runs both, and by the time this one runs, the effect above has
+   * already cancelled the pending TIMER (via `clearPendingDraftSave`, its
+   * own cleanup) without sending it — but has left `pendingDraftRef` alone
+   * (only a fired timer, this flush, or a deliberate discard clears it), so
+   * it is still there to send here. Keyed on `[routeId]` alone — not
+   * `state` — so an ordinary keystroke (which changes `state` but not
+   * `routeId`) never runs this cleanup at all, only a genuine route change
+   * or unmount does.
+   */
+  useEffect(() => {
+    return () => {
+      const pending = pendingDraftRef.current;
+      if (pending && pending.routeId === routeId) {
+        pendingDraftRef.current = null;
+        enqueueDraftWrite(() =>
+          putServerDraft(pending.routeId, pending.state, pending.baseRevision),
+        );
+      }
+    };
+  }, [routeId]);
 
   // The projection, exactly once: `toBrief(state)` is what Save sends, and the D35
   // handoff, the rail's YAML view and `draftDiffers` all read this one object rather
@@ -2134,9 +2230,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // PUT FIRST, or one armed just before this Save could resurrect it right
       // after the DELETE lands (best-effort either way: a failed DELETE just
       // leaves a now-stale draft, whose `baseRevision` the next restore's
-      // compare will already reject).
-      clearPendingDraftSave();
-      void deleteServerDraft(stored.brief.id);
+      // compare will already reject). `discardPendingDraft`, not a bare
+      // `deleteServerDraft` (fix round, bots): the DELETE now shares the
+      // write chain every PUT does, so a PUT already in flight when Save
+      // lands cannot complete after this DELETE and resurrect it.
+      discardPendingDraft(stored.brief.id);
       await loadBriefs();
       // D37: the URL is the source of truth for which brief is open. A first save
       // turned "new" into a named brief, so the route must stop calling it new —
@@ -2262,10 +2360,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // PT-5d item 4: the SOURCE campaign's own draft (`sourceRouteId`,
       // captured above before the mint) is abandoned once its content has
       // been copied elsewhere — cancel any pending PUT first, same race as
-      // handleSave's. `/brief/new` with no campaign open (`sourceRouteId`
-      // undefined) never had a server draft to begin with.
+      // handleSave's (and the same write-chain fix, fix round bots).
+      // `/brief/new` with no campaign open (`sourceRouteId` undefined) never
+      // had a server draft to begin with, so there is nothing to enqueue —
+      // but the pending-timer cancel still runs unconditionally, exactly as
+      // before.
       clearPendingDraftSave();
-      if (sourceRouteId !== undefined) void deleteServerDraft(sourceRouteId);
+      pendingDraftRef.current = null;
+      if (sourceRouteId !== undefined) enqueueDraftWrite(() => deleteServerDraft(sourceRouteId));
       savedAsMintRef.current = null;
       setSaveAsName(null);
       // msczJ — the write above has already succeeded: the copy is safely
@@ -2417,8 +2519,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // promptly. `deleteServerDraft` is a no-op past-tense on the server if
       // the effect's own DELETE already landed.
       if (state.source.kind === "new" && routeId !== undefined) {
-        clearPendingDraftSave();
-        void deleteServerDraft(routeId);
+        discardPendingDraft(routeId);
       }
       dispatch({ type: "discard" });
       // L1.1: Revert resets touched/attempted
