@@ -119,7 +119,8 @@
         "-t",
         "a draft stored before mount is still offered for restore on mount"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by PT-5d (server drafts): the localStorage autosave/purge this anchored (saveDraftToStorage / purgeDraftFromStorage / draftDivergedRef branching on isPristine) is gone — drafts now PUT/DELETE to a per-(campaign,user) server store, and the restore-vs-purge shape this mutation exploited no longer exists in that form. The gap it caught (purge-on-every-pristine-render eating a matching draft before restore could read it) is now covered structurally: the restore effect reads the server draft directly and only the divergence-tracked autosave effect ever deletes it (BriefEditor.tsx, PT-5d autosave/restore effects), plus brief-editor.test.tsx/brief-editor.drafts.test.tsx exercise both the restore-then-still-pristine and undo-to-pristine-purges-draft paths against the new code."
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
@@ -136,7 +137,8 @@
         "-t",
         "undoing back to pristine purges the autosaved draft"
       ],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by PT-5d (server drafts): same localStorage-era code as #6 (saveDraftToStorage / purgeDraftFromStorage), replaced by the server-side draft PUT/DELETE effects. The \"drop the return-to-pristine purge\" finding no longer applies to the current shape — the autosave effect's else-branch (delete on return to pristine, gated on draftDivergedRef) is exercised by brief-editor.drafts.test.tsx (\"undoing back to pristine purges the autosaved draft\") and the mount-restore case by brief-editor.test.tsx (\"a draft stored before mount is still offered for restore on mount\")."
     },
     {
       "file": "apps/web/src/components/campaign/editor-history.ts",
