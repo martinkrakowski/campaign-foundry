@@ -15,6 +15,8 @@ import { PgReportStore } from "./pg-report-store.js";
 import { FsOutputStore } from "./fs-output-store.js";
 import { FsDecisionStore } from "./fs-decision-store.js";
 import { PgDecisionStore } from "./pg-decision-store.js";
+import { FsDraftStore } from "./fs-draft-store.js";
+import { PgDraftStore } from "./pg-draft-store.js";
 import { FsUsageStore } from "./fs-usage-store.js";
 import { PgUsageStore } from "./pg-usage-store.js";
 import { FsProviderKeyStore } from "./fs-provider-key-store.js";
@@ -27,6 +29,7 @@ import type { JobStorePort } from "./job-store.port.js";
 import type { ReportStorePort } from "./report-store.port.js";
 import type { OutputStorePort } from "./output-store.port.js";
 import type { DecisionStorePort } from "./decision-store.port.js";
+import type { DraftStorePort } from "./draft-store.port.js";
 import type { UsageStorePort } from "./usage-store.port.js";
 import type { ProviderKeyPort } from "./provider-key.port.js";
 
@@ -38,6 +41,7 @@ export * from "./job-store.port.js";
 export * from "./report-store.port.js";
 export * from "./output-store.port.js";
 export * from "./decision-store.port.js";
+export * from "./draft-store.port.js";
 export * from "./usage-store.port.js";
 export * from "./provider-key.port.js";
 export * from "./run-delivery.port.js";
@@ -54,6 +58,8 @@ export * from "./pg-report-store.js";
 export * from "./fs-output-store.js";
 export * from "./fs-decision-store.js";
 export * from "./pg-decision-store.js";
+export * from "./fs-draft-store.js";
+export * from "./pg-draft-store.js";
 export * from "./fs-usage-store.js";
 export * from "./pg-usage-store.js";
 export * from "./fs-provider-key-store.js";
@@ -197,6 +203,19 @@ const decisions = new Registry<DecisionStorePort>(
       : new FsDecisionStore(key),
 );
 
+// With STORE_BACKEND=postgres (PT-5d), one store per org over the process's
+// database; otherwise one per briefs directory, on files — the same root the
+// `briefs` registry above resolves, since a draft lives inside its campaign's
+// own reserved directory (`briefs/<slug>/drafts/<userId>.json`).
+const drafts = new Registry<DraftStorePort>(
+  (t) =>
+    storeBackend() === "postgres"
+      ? PG + scopeTenant(t).orgId
+      : join(scopeRoots(t).projectRoot, "briefs"),
+  (key) =>
+    key.startsWith(PG) ? new PgDraftStore(database(), key.slice(PG.length)) : new FsDraftStore(key),
+);
+
 // Usage rows every org shares (PT-7a): unlike decisions, the adapter is not
 // scoped to one org (its methods take `orgId` per call), so the whole
 // registry is one store per backend, not per tenant root.
@@ -255,6 +274,10 @@ export const resetOutputStore = (): void => outputs.reset();
 export const getDecisionStore = (scope: StorageScope): DecisionStorePort => decisions.get(scope);
 export const setDecisionStore = (store: DecisionStorePort): void => decisions.set(store);
 export const resetDecisionStore = (): void => decisions.reset();
+
+export const getDraftStore = (scope: StorageScope): DraftStorePort => drafts.get(scope);
+export const setDraftStore = (store: DraftStorePort): void => drafts.set(store);
+export const resetDraftStore = (): void => drafts.reset();
 
 export const getUsageStore = (scope: StorageScope): UsageStorePort => usage.get(scope);
 export const setUsageStore = (store: UsageStorePort): void => usage.set(store);
