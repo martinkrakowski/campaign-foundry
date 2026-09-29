@@ -4,7 +4,11 @@
 # `test:cov` and `verify-manifests` — and its liveness is what makes a crashed
 # holder self-healing instead of an orphan someone releases by hand.
 #
-#   gate-lock.sh acquire <lane>   take the lock; exit 75 means BUSY
+#   gate-lock.sh run <lane> -- <command…>
+#                                  hold the lock around one command — what a
+#                                  lane uses; the holder is `run` itself
+#   gate-lock.sh acquire <lane>   take the lock; exit 75 means BUSY. Needs a
+#                                  caller pid in CF_GATE_CALLER_PID
 #   gate-lock.sh release <lane>   drop it — only the lock's own owner and pid may
 #   gate-lock.sh verify <lane>    exit 0 only while the lock still names this holder
 #   gate-lock.sh status           print who holds it and whether they look alive
@@ -16,15 +20,21 @@
 #   pid      the CALLER's pid (the shell that runs the locked steps)
 #   started  epoch second of acquisition
 #   beat     epoch second of the last heartbeat
-# The pid is the caller's, not this script's: `sh gate-lock.sh acquire` is a
-# child that exits the moment acquire returns, and a lock naming a pid that is
-# already gone would be reclaimed instantly and never block anyone. gate.sh
-# passes its own pid in CF_GATE_CALLER_PID; a direct invocation falls back to
-# this process, which makes such a lock trivially reclaimable — direct use is
-# for poking at the lock, not for holding it through a real gate. Release and
-# heartbeat honour the same variable: they act only when the lock still names
-# that owner and pid, so a holder whose lock was reclaimed can neither delete
-# the replacement nor keep refreshing its beat.
+# The pid is the HOLDER's, and a holder only holds while it is alive: a lock
+# whose recorded pid is gone is reclaimed by the next acquire, so the pid has
+# to name a process that outlives the work. It is therefore never guessed.
+# `yarn gate` passes its own (gate.sh sets CF_GATE_CALLER_PID) and `run` records
+# its own $$, because `run` IS the holder — the one shell that stays alive for
+# exactly as long as the command it is holding the lock for. A bare `acquire`
+# with no CF_GATE_CALLER_PID can only record this short-lived script, whose pid
+# is dead before the caller runs a step, so that call is REFUSED (exit 2,
+# naming `run`): the w06 brief template recommended exactly that call, and it
+# produced locks that could be reclaimed the moment they were taken (M3). It is
+# refused while the lock is held too — "busy" is not an answer to a call that
+# cannot name a real holder. Release, verify and heartbeat read the same pid:
+# they act only when the lock still names that owner and pid, so a holder whose
+# lock was reclaimed can neither delete the replacement nor keep refreshing its
+# beat.
 #
 # acquire judges a held lock in this order, and says so on stdout before it
 # reclaims:
@@ -37,7 +47,9 @@
 #
 # Exit 75 means BUSY, and this script defines that contract: the holder named
 # in the lock is alive and its beat is fresh. Sleep and retry; do not remove
-# the lock by hand while its holder may still be running.
+# the lock by hand while its holder may still be running. A COMMAND that exits
+# 75 is not busy — the busy line above is on stderr and only a holder's own
+# refusal prints it, so that line is what tells the two apart.
 #
 # POSIX sh (not zsh): GitHub Linux runners do not ship zsh, and any test that
 # spawns zsh fails in CI. For the same reason there is no $PPID (dash does not
@@ -54,6 +66,11 @@
 # more clever than rename.
 set -u
 
+# This script's own directory, resolved once. `run` re-invokes it — heartbeat,
+# verify, release — from a background subshell, and a command that changes
+# directory must not be able to take those invocations with it.
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
 LOCK="${TMPDIR:-/tmp}/cf-gate.lock"
 BUSY=75
 
@@ -65,13 +82,15 @@ case "$STALE_SECONDS" in
     ;;
 esac
 
-# The pid recorded in the lock: the caller's when it says so (gate.sh does),
-# otherwise this process — which is gone as soon as this script returns, and
-# therefore always reclaimable.
+# The pid recorded in the lock: the caller's when it says so (gate.sh does,
+# and run sets the variable to its own $$ for the sub-commands below), otherwise
+# this process. Only acquire can WRITE a lock, and it refuses to do so without
+# a caller pid — so the fallback here can only ever be read by release, verify
+# and heartbeat, where a pid that matches nobody is a refusal, not a hazard.
 recorded_pid="${CF_GATE_CALLER_PID:-$$}"
 
 usage() {
-  printf '%s\n' "usage: $0 acquire <lane> | release <lane> | verify <lane> | status | heartbeat" >&2
+  printf '%s\n' "usage: $0 run <lane> -- <command...> | acquire <lane> | release <lane> | verify <lane> | status | heartbeat" >&2
   exit 2
 }
 
@@ -186,6 +205,22 @@ busy_exit() {
   exit $BUSY
 }
 
+# acquire WRITES a lock, so it needs a pid that will still be alive while the
+# work it protects runs. With no CF_GATE_CALLER_PID the only pid on offer is
+# this script's own, and that process is gone before the caller has run a step:
+# the lock is reclaimable at once, the caller is told it succeeded, and the
+# second lane to arrive takes the name (M3 — this call is what the w06 brief
+# template recommended, and it is how one lane reclaimed another's lock
+# mid-run). Refusing is the only honest answer, and the message names the
+# subcommand that does the job instead.
+require_caller_pid() {
+  if [ -n "${CF_GATE_CALLER_PID:-}" ]; then
+    return 0
+  fi
+  printf '%s\n' "gate-lock: acquire without CF_GATE_CALLER_PID is refused — the only pid it could record is this script's own, which exits before the lock does, so the lock is reclaimable the moment it is taken. Lock a command instead: $0 run <lane> -- <command>" >&2
+  exit 2
+}
+
 acquire() {
   lane=$1
   pass=0
@@ -232,6 +267,124 @@ acquire() {
     fi
     take_stale "$owner" "${pid:-}" "${beat:-}" "$pass"
   done
+}
+
+# Hand a signal to the command and leave through the EXIT trap, which is what
+# releases the lock. Forwarding is the whole reason the command is a BACKGROUND
+# job: a trap on a foreground child does not run until that child exits (dash
+# defers it for the full `sleep 30`, measured on this repo's runners' shell),
+# so a `run` waiting on a foreground command would keep its lock for as long as
+# the command refused to stop — the opposite of what the signal asked for.
+# Exiting 130/143 (not the command's own status) is what keeps the two apart
+# for a caller: the command is gone, and the lock is on its way out too.
+forward_signal() {
+  if [ -n "$cmd_pid" ]; then
+    kill -"$1" "$cmd_pid" 2>/dev/null
+  fi
+  exit "$2"
+}
+
+# The one exit path for `run`, on the command's status, on a signal and on a
+# failed acquire alike. The lock is released only when it still names this pid,
+# so a replacement is never deleted — but a lock that could NOT be released is
+# reported and makes the run non-zero: a command that finished against a lock
+# nobody can prove was dropped is not a run that succeeded.
+run_cleanup() {
+  status=$?
+  trap - INT TERM EXIT
+  if [ "$lock_held" -eq 1 ]; then
+    if [ -n "$run_hb_pid" ]; then
+      # Kill the heartbeat loop and reap it, so nothing outlives `run` by even
+      # a moment. Its stdio was detached when it started, so the `sleep` it is
+      # in the middle of holds nothing open when the subshell is orphaned.
+      kill "$run_hb_pid" 2>/dev/null
+      wait "$run_hb_pid" 2>/dev/null
+      run_hb_pid=""
+    fi
+    lock_held=0
+    if ! release "$lane"; then
+      lock_lost=1
+    fi
+    if [ "$lock_lost" -eq 1 ]; then
+      printf '%s\n' "gate-lock: FAILED to release the lock — it may still be held at $LOCK, or another holder has it now" >&2
+      if [ "$status" -eq 0 ]; then
+        status=1
+      fi
+    fi
+  fi
+  exit "$status"
+}
+
+# Hold the lock around one command, as the command's own holder. Everything a
+# gate needs to be correct about concurrency, in one call: the lock is taken
+# before the command starts, a heartbeat keeps it fresh while the command runs,
+# the command's own exit code is this one's, and INT/TERM stop both.
+#
+# There is no capture: the command inherits this script's stdout and stderr
+# unchanged, because a gate that buffered a failing test run would report it
+# late and the exit code would be the only thing that arrived. It is invoked as
+# "$@", never eval, so quoting survives and a `--` inside the command is just
+# one of its arguments. Backgrounded, so its stdin is /dev/null; the commands
+# this wraps (a test run, a mutate replay, a manifest verification) read none.
+run_locked() {
+  lane=$1
+  shift
+  [ $# -ge 1 ] || usage
+  # Everything from the FIRST `--` on is the command. A run with no `--` at
+  # all, or with nothing after it, is a usage error rather than a guess.
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do
+    shift
+  done
+  [ $# -ge 1 ] || usage
+  shift
+  [ $# -ge 1 ] || usage
+  HB_SECONDS="${CF_GATE_HEARTBEAT_SECONDS:-60}"
+  case "$HB_SECONDS" in
+    ''|*[!0-9]*)
+      printf '%s\n' "gate-lock: CF_GATE_HEARTBEAT_SECONDS must be a number of seconds: $HB_SECONDS" >&2
+      exit 2
+      ;;
+  esac
+  # This process, whatever CF_GATE_CALLER_PID says: an inherited pid belongs to
+  # whatever launched this script, and that is free to exit while the command
+  # runs. Traps go on BEFORE the acquire, so the window between holding a lock
+  # and being ready to release it is not a signal-shaped hole.
+  recorded_pid=$$
+  run_hb_pid=""
+  cmd_pid=""
+  lock_held=0
+  lock_lost=0
+  trap run_cleanup EXIT
+  trap 'forward_signal INT 130' INT
+  trap 'forward_signal TERM 143' TERM
+  acquire "$lane"
+  # A busy acquire exits here, before the command exists at all.
+  lock_held=1
+  (
+    trap - INT TERM EXIT
+    while :; do
+      sleep "$HB_SECONDS"
+      # Ownership-checked on the lock side: the heartbeat refreshes only a lock
+      # that still names this pid ($$ is this shell's even inside the subshell),
+      # so a lock reclaimed under us is never refreshed on its way past, and
+      # the loop dies rather than keeping someone else's lock alive.
+      CF_GATE_CALLER_PID=$$ sh "$HERE/gate-lock.sh" heartbeat >/dev/null 2>&1 || exit 1
+    done
+  ) >/dev/null 2>&1 &
+  run_hb_pid=$!
+  printf '%s\n' "gate-lock: heartbeat pid $run_hb_pid (every ${HB_SECONDS}s while $lane runs)"
+  "$@" &
+  cmd_pid=$!
+  wait "$cmd_pid"
+  status=$?
+  cmd_pid=""
+  # Still ours? A lock that is gone or someone else's means the command ran
+  # unprotected, which release alone would not say: with the lock simply
+  # deleted, release reports "nothing to release" and exits 0.
+  if ! verify "$lane"; then
+    lock_lost=1
+  fi
+  exit "$status"
 }
 
 # Release the lock — but only the caller's own. After a reclaim, a stale
@@ -325,8 +478,17 @@ heartbeat() {
 }
 
 case "${1:-}" in
+  run)
+    [ $# -ge 2 ] || usage
+    run_lane=$2
+    shift 2
+    # Everything after the lane is the command, arguments and all; run_locked
+    # finds the `--` that separates them.
+    run_locked "$run_lane" "$@"
+    ;;
   acquire)
     [ $# -ge 2 ] || usage
+    require_caller_pid
     acquire "$2"
     ;;
   release)
