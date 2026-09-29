@@ -1808,9 +1808,9 @@ describe("server draft persistence (PT-5d, D173, D177)", () => {
     expect(await fetchServerDraft("camp")).toBeNull();
   });
 
-  test("putServerDraft PUTs the state and base revision, and never throws on failure", async () => {
+  test("putServerDraft PUTs the state and base revision, and answers whether the write landed (D185)", async () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse({ draft: null }));
-    await putServerDraft("camp", base(), "rev-1");
+    expect(await putServerDraft("camp", base(), "rev-1")).toBe(true);
     expect(fetch).toHaveBeenCalledWith(
       "/api/pipeline/campaigns/camp/draft",
       expect.objectContaining({
@@ -1819,8 +1819,15 @@ describe("server draft persistence (PT-5d, D173, D177)", () => {
       }),
     );
 
+    // A dropped write is not a detail the caller may swallow: the operator's
+    // edits are on screen and nowhere else, so the shell's leave guard has to
+    // be able to see it. Both ways a PUT fails are `false` — the request
+    // throwing and the server answering non-OK, which today are the same
+    // silence, since `fetch` resolves happily for a 500.
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ error: "boom" }, false));
+    expect(await putServerDraft("camp", base(), null)).toBe(false);
     vi.mocked(fetch).mockRejectedValueOnce(new Error("network down"));
-    await expect(putServerDraft("camp", base(), null)).resolves.toBeUndefined();
+    expect(await putServerDraft("camp", base(), null)).toBe(false);
   });
 
   test("deleteServerDraft DELETEs, and never throws on failure", async () => {

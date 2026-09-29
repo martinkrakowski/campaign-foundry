@@ -5,6 +5,7 @@ import {
   parseLastExit,
   planReviewFacts,
   planReviewFlag,
+  riskFlag,
 } from "../derive.js";
 import { laneState } from "../lane-state.js";
 import type { LaneObservation, WaveEvent } from "../types.js";
@@ -420,5 +421,54 @@ describe("the plan-review flag (FU-plan-review-gate)", () => {
     expect(planReviewFacts([started, dispatch("pt-5a")], "pt-5a")).toEqual({
       dispatchedAt: "2026-09-28T11:00:00Z",
     });
+  });
+});
+
+describe("the risk flag (D184's pre-PR-review gate)", () => {
+  const openPr: LaneObservation["pr"] = { number: 42, state: "open", checks: "pending" };
+  const mergedPr: LaneObservation["pr"] = { number: 42, state: "merged", checks: "pass" };
+
+  test("a normal-risk row never flags, whatever the PR state", () => {
+    expect(riskFlag({ tier: "normal" }, openPr)).toBeUndefined();
+  });
+
+  test("a high-risk row whose gate would already pass (no refusal) does not flag", () => {
+    expect(riskFlag({ tier: "high" }, openPr)).toBeUndefined();
+  });
+
+  test("a high-risk row with a refusal, but a CLOSED PR, does not flag — the flag is only for an open PR", () => {
+    expect(
+      riskFlag({ tier: "high", refusal: "no stage=review event=settled" }, mergedPr),
+    ).toBeUndefined();
+  });
+
+  test("a high-risk row with a refusal and no PR at all does not flag", () => {
+    expect(
+      riskFlag({ tier: "high", refusal: "no stage=review event=settled" }, undefined),
+    ).toBeUndefined();
+  });
+
+  test("a high-risk row with a refusal and an OPEN PR flags, in the gate's own words", () => {
+    expect(riskFlag({ tier: "high", refusal: "no stage=review event=settled" }, openPr)).toBe(
+      "high-risk PR open without pre-PR review",
+    );
+  });
+
+  test("no risk observation at all (the collector never asked) never flags", () => {
+    expect(riskFlag(undefined, openPr)).toBeUndefined();
+  });
+
+  test("deriveLane wires obs.risk and obs.pr through to derived.risk", () => {
+    const derived = deriveLane({
+      alive: false,
+      pr: openPr,
+      risk: { tier: "high", refusal: "no stage=review event=settled" },
+    });
+    expect(derived.risk).toBe("high-risk PR open without pre-PR review");
+  });
+
+  test("deriveLane carries no risk field when the gate would pass", () => {
+    const derived = deriveLane({ alive: false, pr: openPr, risk: { tier: "high" } });
+    expect(derived.risk).toBeUndefined();
   });
 });
