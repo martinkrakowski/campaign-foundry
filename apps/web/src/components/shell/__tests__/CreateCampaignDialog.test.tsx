@@ -441,13 +441,9 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     expect(screen.queryAllByRole("dialog", { name: messages.resumeDraftTitle })).toHaveLength(0);
   });
 
-  test("two activations of Start over create once — the in-flight disable holds the second", async () => {
+  test("two activations of Start over create once — the in-flight ref holds the second", async () => {
     stashAbandonedDraft();
     const user = userEvent.setup();
-    // Hold the seam so the second press lands while `creating` is still true.
-    // `setCreating(true)` runs in this click handler, so React flushes the
-    // disabled re-render before the next click; a same-frame pair is the
-    // overwrite-latch case, not this one.
     let release!: (value: { campaignId: string }) => void;
     const held = new Promise<{ campaignId: string }>((resolve) => {
       release = resolve;
@@ -457,8 +453,17 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     renderDialog();
     const prompt = await raiseTwoWay(user);
     const startOver = within(prompt).getByRole("button", { name: messages.resumeDraftStartOver });
-    await user.click(startOver);
-    await user.click(startOver);
+    // Two activations before React's own `disabled` re-render can land — both
+    // dispatched inside ONE `act`, so the first click's `setCreating(true)`
+    // does not flush (and disable the real DOM button) between them. That is
+    // what actually exercises `createInFlightRef`'s own early return: two
+    // separate `await user.click` calls would let the first click's re-render
+    // disable the button before the second ever reached the handler, same
+    // gap Save as's own in-flight ref test (brief-editor.test.tsx) closes.
+    act(() => {
+      fireEvent.click(startOver);
+      fireEvent.click(startOver);
+    });
 
     expect(create).toHaveBeenCalledTimes(1);
     release({ campaignId: "c1" });
@@ -589,6 +594,10 @@ describe("the abandoned-draft two-way (W3 / F19)", () => {
     // concurrent flow.
     await user.click(confirm);
     await user.click(confirm);
+    const draftChecks = vi
+      .mocked(fetch)
+      .mock.calls.filter((c) => String(c[0]).includes("/campaigns/briefs/draft"));
+    expect(draftChecks).toHaveLength(1);
 
     releaseLatest(json({ latest: null }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));

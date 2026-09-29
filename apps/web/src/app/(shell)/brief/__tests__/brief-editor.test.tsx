@@ -5927,9 +5927,16 @@ describe("VE1 — undo and redo in the editor", () => {
     // `null`, and the probe's own dispatch is what moves it, so a draft this
     // exactly-equal to what's on screen after that probe lands must carry
     // the SAME value, or `valuesEqual` would (correctly) call it different.
+    // `appliedSnapshot` needs the same treatment: `fromBrief` defaults it to
+    // `null`, but the route's own auto-`apply` (BriefEditor's load effect)
+    // sets it to the loaded brief's saved snapshot the moment the mount
+    // resolves — confirmed by diffing the mounted state against a seed that
+    // left it `null`, which desynced the two and forced a spurious restore.
+    const loaded = fromBrief(brief("camp") as never, { file: "camp.yaml", revision: "r1" });
     const pristine = {
-      ...fromBrief(brief("camp") as never, { file: "camp.yaml", revision: "r1" }),
+      ...loaded,
       capabilities: { motion: true },
+      appliedSnapshot: loaded.source.kind === "file" ? loaded.source.savedSnapshot : null,
     };
     calls.drafts.seed("camp", pristine, "r1");
     renderWithRun(<Editor id="camp" />);
