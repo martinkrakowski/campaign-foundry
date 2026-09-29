@@ -1516,6 +1516,46 @@ describe("POST /campaigns/briefs onto a grandfathered reserved slug (D181 fix ro
       await harness.cleanup();
     }
   });
+
+  // D181 fix round 2 (qodo, HIGH/Security): the route-level companion to
+  // pg-brief-store.test.ts's "replaceBrief preserves an existing versionless
+  // row's team" — a team-scoped, RESERVED, versionless campaign's first Save
+  // via ?replace=1 with no teamId in the body must keep its team, not reset
+  // it to org-wide.
+  test("a grandfathered reserved campaign's first Save via ?replace=1 with no teamId keeps its team", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await harness.db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+        ["t1", "Team One", "local"],
+      );
+      await harness.db.query(
+        `insert into campaign (org_id, slug, team_id, name, type) values ($1, $2, $3, $4, $5)`,
+        ["local", "templates", "t1", null, null],
+      );
+
+      const createBrief = mountTenantRoute(briefsPostHandler, {
+        method: "POST",
+        path: "/campaigns/briefs",
+        tenant: LOCAL_TENANT,
+      });
+      const res = await createBrief(
+        new Request("http://x/campaigns/briefs?replace=1", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(sampleBrief("templates")),
+        }),
+      );
+      expect(res.status).toBe(201);
+
+      const { rows } = await harness.db.query<{ team_id: string | null }>(
+        `select team_id from campaign where org_id = 'local' and slug = 'templates'`,
+      );
+      expect(rows[0]!.team_id).toBe("t1");
+    } finally {
+      await harness.cleanup();
+    }
+  });
 });
 
 function sampleBrief(id: string): CampaignBrief {

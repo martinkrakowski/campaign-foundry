@@ -569,19 +569,29 @@ export class PgBriefStore implements BriefStorePort {
 
   /**
    * `replaceBrief`'s own ENOENT-falls-to-create shape carries the team the
-   * route already authorized (D166 item 3) down either path. `rewriteBrief`'s
-   * "`options.teamId` undefined leaves it as it is" keeps an already-assigned
-   * team in place for the common existing-campaign case — a replace-save with
-   * no `teamId` in the request must not reset it to org-wide. Only when there
-   * is no existing row to leave alone (ENOENT, a fresh slug) does `undefined`
-   * become `createBrief`'s `null` default.
+   * route already authorized (D166 item 3) down either path. `undefined`
+   * (the caller passed no `teamId`) is forwarded to `createBrief` UNCHANGED
+   * — never coerced to `null` here. `createBriefInternal` already makes the
+   * right call either way: `undefined` leaves an EXISTING (grandfathered)
+   * row's team exactly as it is, the same "leave it alone" rule
+   * `rewriteBrief` follows; only its own fresh-insert branch defaults a
+   * missing `teamId` to `null` (org-wide), because that row has no team yet
+   * to preserve.
+   *
+   * D181 fix round 2 (qodo, HIGH/Security): this used to coerce `undefined`
+   * to `null` itself, so a first Save via `?replace=1` with no `teamId` on
+   * an existing team-scoped row (a grandfathered reserved slug is what
+   * exposed it, but it was reachable for any slug whose first Save used
+   * `?replace=1`) reset that row's team to org-wide — `createBriefInternal`'s
+   * own `teamId !== undefined` guard on the existing-row branch was defeated
+   * before it ever saw the caller's real intent.
    */
   async replaceBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
     try {
       return await this.rewriteBrief(brief, options);
     } catch (error) {
       if (isErrno(error, "ENOENT")) {
-        return this.createBrief(brief, { teamId: options?.teamId ?? null });
+        return this.createBrief(brief, { teamId: options?.teamId });
       }
       throw error;
     }

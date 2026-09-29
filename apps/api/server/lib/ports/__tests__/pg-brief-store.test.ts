@@ -929,6 +929,31 @@ describe("Team scope on Postgres (D166, PT-2c)", () => {
     expect(rows[0]!.team_id).toBeNull();
   });
 
+  // D181 fix round 2 (qodo, HIGH/Security): replaceBrief's ENOENT-falls-to-create
+  // branch used to coerce a caller's omitted teamId to null before calling
+  // createBrief, clearing an EXISTING row's team on its first Save via
+  // ?replace=1 — the same versionless-row grandfather shape HX1's reserved-id
+  // fix exposed for the first time, but the underlying defect was general
+  // (any slug whose first Save happens to use replace=1, teamed or not,
+  // reserved or not).
+  test("replaceBrief preserves an existing versionless row's team when its first Save passes no teamId", async () => {
+    // A blank POST /campaigns create: a row with a team (seedTeams's "t1")
+    // and no version yet.
+    await db.query("insert into campaign (org_id, slug, team_id) values ($1, $2, $3)", [
+      "local",
+      "test-camp",
+      "t1",
+    ]);
+    const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+    const member = new PgBriefStore(db, "local", "u2", [], ["t1"]);
+    const stranger = new PgBriefStore(db, "local", "u3", [], []);
+
+    await owner.replaceBrief(minimalBrief);
+
+    expect(await stranger.campaignVisibility("test-camp")).toBe("hidden");
+    expect((await member.findBriefById("test-camp"))?.brief.id).toBe("test-camp");
+  });
+
   test("replaceBrief propagates a non-ENOENT error such as ECONFLICT instead of falling to create", async () => {
     const owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
     await owner.createBrief(brief("camp"));
