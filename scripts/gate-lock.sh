@@ -400,6 +400,15 @@ run_locked() {
       exit 2
       ;;
   esac
+  # A number, but not an interval. `sleep 0` returns immediately, so a zero here
+  # is not a fast heartbeat — it is no sleep at all: a loop forking a shell per
+  # iteration to write a beat carrying the same second-resolution value over
+  # and over. Measured over three seconds of one run, 619 events in the lock
+  # directory at 0 against 6 at the intended one-second tick.
+  if [ "$HB_SECONDS" -lt 1 ]; then
+    printf '%s\n' "gate-lock: CF_GATE_HEARTBEAT_SECONDS must be at least one second: $HB_SECONDS" >&2
+    exit 2
+  fi
   # This process, whatever CF_GATE_CALLER_PID says: an inherited pid belongs to
   # whatever launched this script, and that is free to exit while the command
   # runs. Traps go on BEFORE the acquire, so the window between holding a lock
@@ -579,11 +588,21 @@ heartbeat() {
   # `status` both read this file, and an empty beat reads as stale
   # (beat_is_stale), so a reader that caught the moment between the truncation
   # and the write would judge a live, heartbeating holder's lock reclaimable
-  # and take it. Write the new value beside the old one and rename: within one
-  # directory that is the same atomic rename the lock's own creation uses, and
-  # the previous beat stays readable right up to it. Measured on this host: a
-  # reader looping on the file saw an empty value 10 times in 7 seconds.
-  beat_new="$LOCK/beat.new.$$"
+  # and take it. Write the new value beside the old one and rename: that is the
+  # same atomic rename the lock's own creation uses, and the previous beat stays
+  # readable right up to it. Measured on this host: a reader looping on the file
+  # saw an empty value 10 times in 7 seconds.
+  #
+  # The new value is staged BESIDE THE LOCK, not inside it. A `run` was observed
+  # failing with "release failed — could not remove … Directory not empty" while
+  # its own heartbeat was refreshing, and the entry that was in the directory at
+  # that moment was the one this function had just staged there. Whether the
+  # interleaving is a narrow one or not, the fix does not argue about it: the
+  # lock directory is written once, by try_create, and read-only from then on,
+  # so there is nothing in it for a removal to race. Same filesystem by
+  # construction — the lock is itself ${TMPDIR:-/tmp}/cf-gate.lock, so a file in
+  # ${TMPDIR:-/tmp} renames onto it.
+  beat_new="${TMPDIR:-/tmp}/cf-gate.beatnew.$$"
   if ! printf '%s\n' "$(date +%s)" > "$beat_new" 2>/dev/null; then
     printf '%s\n' "gate-lock: heartbeat — cannot write $LOCK/beat" >&2
     return 1

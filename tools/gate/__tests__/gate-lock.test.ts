@@ -986,6 +986,23 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     expect(existsSync(lockDir(dir))).toBe(false);
   }, 15_000);
 
+  test("a zero heartbeat interval is refused: a spin is not a heartbeat", () => {
+    const dir = scratch();
+    // `sleep 0` returns at once, so a zero interval is not a fast heartbeat —
+    // it is no sleep at all: a loop forking a shell per iteration to write a
+    // beat with the same second-resolution value. Measured over three seconds
+    // of a run, 619 events in the lock directory at 0 against 6 at the intended
+    // one-second tick.
+    const result = runLockIn(dir, ["run", "lane-a", "--", "true"], {
+      CF_GATE_HEARTBEAT_SECONDS: "0",
+    });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("CF_GATE_HEARTBEAT_SECONDS");
+    expect(result.stderr).toContain("at least one second");
+    // Refused before the acquire, on the same grounds as a non-numeric one.
+    expect(existsSync(lockDir(dir))).toBe(false);
+  });
+
   test("a non-numeric heartbeat interval is refused before the lock is taken", () => {
     const dir = scratch();
     const result = runLockIn(dir, ["run", "lane-a", "--", "true"], {
