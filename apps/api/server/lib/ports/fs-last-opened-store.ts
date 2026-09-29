@@ -38,7 +38,10 @@ interface PointerFile {
  * paths: a write throws `SYMLINK_WRITE_ERROR` (the route maps it to 400, like
  * every other brief write) and a read answers "no pointer" (`undefined`), the
  * fail-closed shape `FsBriefStore.readCampaignMeta` gives a symlinked campaign
- * directory.
+ * directory. A pointer file whose CONTENT cannot be read — corrupt, truncated or
+ * not the shape this store writes — answers "no pointer" the same way, for the
+ * same reason: the pointer is a convenience, and a user whose pointer file is
+ * unreadable still deserves the picker rather than a 500 on every page.
  *
  * A pointer to a campaign that no longer exists is NOT cleaned up here (this
  * adapter holds no list of campaigns, and the FK cascade that does it on
@@ -112,7 +115,23 @@ export class FsLastOpenedStore implements LastOpenedStorePort {
     // the directory check above, and a read, so this answers "no pointer"
     // rather than throwing.
     if (!st.isFile()) return undefined;
-    const parsed = JSON.parse(await readFile(filePath, "utf8")) as PointerFile;
+    // Unreadable CONTENT fails closed like every other unreadable shape above.
+    // The write path is atomic, so the app cannot itself leave a truncated
+    // file, but the port's contract is "a pointer, or nothing" and a corrupt or
+    // hand-edited one used to throw — which the route turns into a 500, so
+    // every bare url failed for that user until someone deleted the file by
+    // hand. Both fields are type-checked because the file is untrusted input:
+    // `campaignId` is what the route resolves, and a number there would reach
+    // `campaignMeta` as one (fix round, coderabbit PRRT_kwDOSzP1zc6nENjE).
+    let parsed: Partial<PointerFile> | null;
+    try {
+      parsed = JSON.parse(await readFile(filePath, "utf8")) as Partial<PointerFile> | null;
+    } catch {
+      return undefined;
+    }
+    if (typeof parsed?.campaignId !== "string" || typeof parsed.updatedAt !== "string") {
+      return undefined;
+    }
     return { campaignId: parsed.campaignId, updatedAt: parsed.updatedAt };
   }
 

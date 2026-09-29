@@ -256,6 +256,41 @@ describe("FsLastOpenedStore (PT-5e, D173, D180)", () => {
     await expect(store.read("u1")).resolves.toBeUndefined();
   });
 
+  // Fix round (coderabbit PRRT_kwDOSzP1zc6nENjE). The write path is atomic, so
+  // the app cannot itself leave a truncated file — but the port's contract is
+  // "a pointer, or nothing", and every other unreadable shape here already
+  // answers `undefined` (a symlink, a non-regular file). A corrupt or
+  // hand-edited file threw instead, and the throw became a 500 from
+  // `GET /campaigns/last-opened`, so every bare url failed for that user until
+  // someone deleted the file by hand. Fail closed, as the class doc says.
+  describe("an unreadable pointer file", () => {
+    beforeEach(async () => {
+      // Creates the directory the fixtures below file into.
+      await store.write("seed", "seed");
+    });
+
+    test.each([
+      ["truncated JSON", '{"campaignId": "camp"'],
+      ["not JSON at all", "not json"],
+      ["an empty file", ""],
+      ["a JSON null", "null"],
+      ["a non-string campaignId", JSON.stringify({ campaignId: 42, updatedAt: "t" })],
+      ["a missing campaignId", JSON.stringify({ updatedAt: "t" })],
+    ])("%s reads as no pointer", async (_label, contents) => {
+      writeFileSync(join(dir, "u1.json"), contents);
+      await expect(store.read("u1")).resolves.toBeUndefined();
+    });
+
+    test("a read-only read leaves the file alone — the store never repairs it itself", async () => {
+      // The pointer is advisory; a user with a corrupt one still gets the
+      // picker, and the next write from any path replaces the file whole.
+      writeFileSync(join(dir, "u1.json"), "{");
+      await expect(store.read("u1")).resolves.toBeUndefined();
+      expect(readFileSync(join(dir, "u1.json"), "utf8")).toBe("{");
+      await expect(store.write("camp", "u1")).resolves.toMatchObject({ campaignId: "camp" });
+    });
+  });
+
   test("dirUnsafe rethrows a non-ENOENT lstat failure unchanged", async () => {
     fsHook.lstat = async () => {
       const err = new Error("EACCES") as NodeJS.ErrnoException;
