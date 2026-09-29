@@ -557,7 +557,7 @@ export function isStoredBrief(value: unknown): value is CampaignBrief {
  * The brief the shell starts with. The HITL surface (the /brief view) edits a
  * copy of this; `execute()` sends whatever the current brief is.
  */
-const DEFAULT_BRIEF: CampaignBrief = {
+export const DEFAULT_BRIEF: CampaignBrief = {
   schemaVersion: BRIEF_SCHEMA_VERSION,
   template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
   id: "summer-hydration-2026",
@@ -1019,6 +1019,16 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // keeps keying on the brief (whose id is the slug, both backends — D179).
   const setBrief = useCallback(
     (next: CampaignBrief, page?: { fetchId: string; slug: string }) => {
+      // A deliberate commit made WITHOUT a page (the picker's select, the editor's
+      // Save, a template pin) supersedes any `openPageCampaign` resolution still in
+      // flight for this shell — the same way a newer page-campaign open supersedes
+      // an older one. Without this, a slow `getCampaign`/`listBriefs` from a page the
+      // user has since left can land after this commit and overwrite the brief (or
+      // run) just chosen with the abandoned page's own (qodo "Old campaigns overwrite
+      // editor changes"). A commit that itself came FROM `openPageCampaign` (`page`
+      // is set) must not bump this — it is that resolution completing, not a newer
+      // one superseding it.
+      if (!page) pageCampaignSeq.current += 1;
       briefIdRef.current = next.id;
       briefDecidedRef.current = true;
       setBriefState(next);
@@ -1154,7 +1164,16 @@ export function RunProvider({ children }: { children: ReactNode }) {
    */
   const openPageCampaign = useCallback(
     (ref: string | null) => {
-      if (ref === null) return; // (4) a page with no ?campaign= keeps today's behaviour
+      if (ref === null) {
+        // (4) a page with no ?campaign= keeps today's behaviour — but it still
+        // releases any resolution still in flight for the page just left, exactly
+        // like a deliberate `setBrief` commit does (qodo "Old campaigns overwrite
+        // editor changes"): otherwise that resolution's `pageCampaignSuperseded`
+        // check would still pass and it could commit its (now abandoned) campaign
+        // over whatever this bare page goes on to show.
+        pageCampaignSeq.current += 1;
+        return;
+      }
       const owned = (pageCampaignSeq.current += 1);
       void getCampaign(ref)
         .then(async (meta) => {
@@ -1162,42 +1181,59 @@ export function RunProvider({ children }: { children: ReactNode }) {
           if (meta === null) {
             // A hidden and an unknown id show the same empty state (PT-2d's rule,
             // read here as "none"): whatever the shell held is not this page's
-            // campaign, so the run, its decisions and everything result-scoped go.
+            // campaign, so the run, its decisions, its brief and everything
+            // result-scoped go — coderabbit/PR-Agent "Clear the brief in the empty
+            // state": leaving the old brief committed keeps `briefApplied` true, so
+            // Header keeps building tab links from the abandoned campaign's slug
+            // and (PR #621) Grid's Generate/Render preview stay enabled on a
+            // campaign this page no longer shows.
             clearRunState();
+            briefIdRef.current = DEFAULT_BRIEF.id;
+            setBriefState(DEFAULT_BRIEF);
             setError(null);
             setMembershipError(null);
             return;
           }
-          // The campaign's brief: the last-opened copy when it names this campaign
-          // (its id is the slug, both backends — D179), else the listing's.
+          // The campaign's brief: the listing's own copy (PT-5a). Never the
+          // browser-wide `cf:brief` cache by a bare id match — slugs are unique
+          // per organisation, not globally (`pg-brief-store.ts`'s `resolveCampaign`,
+          // `where org_id = $1 and slug = $2`), so a same-slug campaign in a
+          // DIFFERENT organisation could satisfy `parsed.id === meta.slug` by
+          // coincidence and hand this page another org's brief content next to
+          // this org's run (qodo "Organization switches reuse another brief").
+          // The listing is scoped to the caller's own session, so it carries no
+          // such risk.
           let target: CampaignBrief | null = null;
           try {
-            const parsed: unknown = JSON.parse(localStorage.getItem(BRIEF_KEY) ?? "null");
-            if (isStoredBrief(parsed) && parsed.id === meta.slug) target = parsed;
+            const entries = await listBriefs();
+            if (pageCampaignSuperseded(owned)) return;
+            target =
+              entries.find(
+                (entry) => entry.campaignId === meta.campaignId || entry.brief.id === meta.slug,
+              )?.brief ?? null;
           } catch {
-            /* storage unavailable — the listing decides */
-          }
-          if (target === null) {
-            try {
-              const entries = await listBriefs();
-              if (pageCampaignSuperseded(owned)) return;
-              target =
-                entries.find(
-                  (entry) => entry.campaignId === meta.campaignId || entry.brief.id === meta.slug,
-                )?.brief ?? null;
-            } catch {
-              /* a failed listing is not "no brief" (F6) — the placeholder still names the campaign */
-            }
+            /* the listing failed — handled below */
           }
           if (pageCampaignSuperseded(owned)) return;
-          // No stored brief anywhere: a versionless campaign (PT-5b2) — the same
-          // blank the editor's route seeds (`blankBrief()`, named by the slug),
-          // so the page's run (keyed by the slug) still loads. Its Generate is
-          // the API's own invalid-brief refusal, exactly as an unsaved draft's
-          // is. Inlined rather than imported because run-context sits in every
-          // web test's setup graph (vitest.setup → helpers → RunProvider), and
-          // an editor-state edge here would pre-instantiate modules other
-          // tests' `vi.mock` factories must intercept (HL5c's assembler memo).
+          // A versioned campaign (`meta.hasVersion`) the listing could not name —
+          // down, or (a create/list race) simply missing it — is F6's "could not
+          // ask", never "no brief": commit nothing and leave the shell as it was.
+          // The placeholder below is blank; committing it here would overwrite the
+          // campaign's real, already-saved content on screen, and `setBrief`
+          // persists whatever it commits to `cf:brief` — so a transient listing
+          // failure would silently and durably blank this campaign's cached brief
+          // until the editor happened to save over it again (qodo "A listing
+          // outage blanks a saved campaign brief").
+          if (target === null && meta.hasVersion) return;
+          // No stored brief anywhere, and none can exist: a versionless campaign
+          // (PT-5b2) — the same blank the editor's route seeds (`blankBrief()`,
+          // named by the slug), so the page's run (keyed by the slug) still loads.
+          // Its Generate is the API's own invalid-brief refusal, exactly as an
+          // unsaved draft's is. Inlined rather than imported because run-context
+          // sits in every web test's setup graph (vitest.setup → helpers →
+          // RunProvider), and an editor-state edge here would pre-instantiate
+          // modules other tests' `vi.mock` factories must intercept (HL5c's
+          // assembler memo).
           const brief = target ?? {
             schemaVersion: BRIEF_SCHEMA_VERSION,
             template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
