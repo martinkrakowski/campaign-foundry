@@ -18,6 +18,16 @@ describe("defaultLogDir", () => {
     expect(defaultLogDir("w06", { HOME: "/Users/op" }, NONE)).toBe("/Users/op/.waves/wave-w06");
   });
 
+  test("an exported but empty HOME falls back to /tmp, matching ${HOME:-/tmp} (Qodo thread 1)", () => {
+    expect(defaultLogDir("w06", { HOME: "" }, NONE)).toBe("/tmp/.waves/wave-w06");
+  });
+
+  test("an exported but empty WAVE_LOG_ROOT falls back to HOME/.waves, matching ${VAR:-word}", () => {
+    expect(defaultLogDir("w06", { HOME: "/h", WAVE_LOG_ROOT: "" }, NONE)).toBe(
+      "/h/.waves/wave-w06",
+    );
+  });
+
   test("WAVE_LOG_ROOT overrides HOME entirely", () => {
     expect(defaultLogDir("w06", { HOME: "/Users/op", WAVE_LOG_ROOT: "/srv/waves" }, NONE)).toBe(
       "/srv/waves/wave-w06",

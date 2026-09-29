@@ -18,7 +18,11 @@ export interface LogDirEnv {
  *
  * Only once `$LOGDIR` is unset or empty does the search run: `root` is
  * `$WAVE_LOG_ROOT`, or `$HOME/.waves` (`/tmp/.waves` when `$HOME` is unset —
- * `${HOME:-/tmp}/.waves`). Then, in order: `<root>/wave-<wave>`,
+ * `${HOME:-/tmp}/.waves`). Both checks are POSIX `${VAR:-word}` semantics —
+ * unset OR EMPTY substitutes the fallback, not `??`'s unset-or-null-only
+ * rule — so an exported `HOME=""` or `WAVE_LOG_ROOT=""` falls back exactly
+ * as wave-event.sh does, rather than routing the gate at `//.waves/...` or
+ * a directory the event writer never used. Then, in order: `<root>/wave-<wave>`,
  * `<root>/wave<wave>`, `<root>/<wave>` (only when `wave` already starts with
  * `wave`), then the same three under `/tmp` — the FIRST that exists wins.
  * When none exists, the default is `<root>/<wave>` when `wave` starts with
@@ -38,8 +42,14 @@ export function defaultLogDir(
     return env.LOGDIR;
   }
 
-  const defaultRoot = `${env.HOME ?? "/tmp"}/.waves`;
-  const root = env.WAVE_LOG_ROOT ?? defaultRoot;
+  // `??` alone triggers only on unset (null/undefined); POSIX `${VAR:-word}`
+  // triggers on unset OR empty. An exported HOME="" or WAVE_LOG_ROOT="" must
+  // fall back the same way, or the gate looks in a different directory from
+  // the one wave-event.sh actually wrote to.
+  const home = env.HOME !== undefined && env.HOME !== "" ? env.HOME : "/tmp";
+  const defaultRoot = `${home}/.waves`;
+  const root =
+    env.WAVE_LOG_ROOT !== undefined && env.WAVE_LOG_ROOT !== "" ? env.WAVE_LOG_ROOT : defaultRoot;
   const startsWithWave = wave.startsWith("wave");
 
   const candidates = [
