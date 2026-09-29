@@ -3,7 +3,13 @@ import { existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { TenantContext } from "../../../lib/tenant.js";
 import { SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
-import { getBriefStore, getLastOpenedStore } from "../../../lib/ports/index.js";
+import {
+  getBriefStore,
+  getLastOpenedStore,
+  resetLastOpenedStore,
+  setLastOpenedStore,
+  type LastOpenedStorePort,
+} from "../../../lib/ports/index.js";
 import createHandler from "../index.post.js";
 import campaignGetHandler from "../[id].get.js";
 import lastOpenedGetHandler from "../last-opened.get.js";
@@ -486,6 +492,36 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
         // A campaign that wanted this exact name could not have it.
         const clash = await api.create({ name: "Last Opened", type: "social-post" });
         expect(((await clash.json()) as { slug: string }).slug).not.toBe("last-opened");
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    test("a store failure that is not the symlink refusal is not disguised as a 400", async () => {
+      const harness = await setup();
+      try {
+        const { slug } = await mintCampaign(mount(), "Store Explodes");
+        // A real store fault (a dead database, a full disk) is not the
+        // symlink refusal, and the route must not dress it as one: only that
+        // one refusal is a 400, and everything else keeps propagating.
+        const boom = new Error("the database is on fire");
+        expect(boom.message).not.toBe(SYMLINK_WRITE_ERROR);
+        setLastOpenedStore({
+          read: async () => undefined,
+          write: async () => {
+            throw boom;
+          },
+        } as LastOpenedStorePort);
+        try {
+          // h3 turns a thrown handler error into a 500; what matters is that it
+          // is NOT the symlink refusal's 400, which would tell the client its
+          // campaign was malformed when the store is what failed.
+          const res = await mount().put({ campaignId: slug });
+          expect(res.status).toBe(500);
+          expect(await res.json()).not.toEqual({ error: SYMLINK_WRITE_ERROR });
+        } finally {
+          resetLastOpenedStore();
+        }
       } finally {
         await harness.cleanup();
       }

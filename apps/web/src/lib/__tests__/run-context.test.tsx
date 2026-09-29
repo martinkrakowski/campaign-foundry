@@ -1332,6 +1332,117 @@ describe("RunProvider — brief picker & persistence", () => {
     expect(pointer.campaignId).toBe("theirs");
   });
 
+  // The no-pointer half of the restore (PT-5e). `DEFAULT_BRIEF` is a real
+  // campaign to Generate — nothing gates it on `briefApplied` — so its run is
+  // discovered exactly like any other campaign's, and the shell adopts it.
+  test("a user with no pointer restores the default brief's own persisted run", async () => {
+    mockPipelineApi({
+      report: {
+        halted: false,
+        assets: [asset({ productId: "p1" })],
+        log: { entries: [], campaignId: DEFAULT_BRIEF.id },
+      },
+    });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
+  });
+
+  test("a campaign opened while the default-brief job lookup is in flight wins", async () => {
+    // The mount's discovery is guarded, not trusted: a campaign the user opens
+    // while it is still asking about the default one supersedes it, and its
+    // late answer must not start a poller for the campaign just left behind.
+    // One pending answer PER job lookup — the mount's and the commit's own both
+    // go out, and resolving the wrong one would answer a different campaign.
+    const pending = new Map<string, (r: Response) => void>();
+    mockPipelineApi({
+      result: (url) => {
+        if (!url.includes("/campaigns/jobs")) return Promise.resolve(json(EMPTY_REPORT));
+        return new Promise<Response>((resolve) => pending.set(url, resolve));
+      },
+    });
+    const mountLookup = `${API}/campaigns/jobs?campaignId=${DEFAULT_BRIEF.id}`;
+    const { result } = setup();
+    await waitFor(() => expect(pending.has(mountLookup)).toBe(true));
+    act(() => {
+      result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        id: "opened-in-the-meantime",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "m",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      } as never);
+    });
+    // The mount's own late answer, naming a job for the campaign left behind.
+    pending.get(mountLookup)!(json({ jobId: "job-for-the-campaign-left-behind" }));
+    // A macrotask, so the whole lookup chain settles before the answer is
+    // judged — a single microtask leaves the parse half of it in flight.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.brief.id).toBe("opened-in-the-meantime");
+    expect(result.current.loading).toBe(false);
+  });
+
+  test("a failed default-brief read that lands after a campaign was opened commits nothing", async () => {
+    // The read failed AND it is stale: F6 says a read that cannot be trusted
+    // claims nothing, so neither a run nor a membership notice may come from
+    // it. (A failure that is NOT stale still names the denial — setBrief's own
+    // catch covers that, and is asserted above.)
+    let rejectResult: ((reason: unknown) => void) | undefined;
+    mockPipelineApi({
+      result: (url) =>
+        url.includes("/campaigns/result")
+          ? new Promise<Response>((_resolve, reject) => {
+              rejectResult = reject;
+            })
+          : json(EMPTY_REPORT),
+    });
+    const { result } = setup();
+    await waitFor(() => expect(rejectResult).toBeTypeOf("function"));
+    act(() => {
+      result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        id: "opened-in-the-meantime",
+        targetRegion: "DE",
+        targetAudience: "a",
+        campaignMessage: "m",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      } as never);
+    });
+    rejectResult!(new Error("down"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.brief.id).toBe("opened-in-the-meantime");
+    expect(result.current.assets).toEqual([]);
+    expect(result.current.membershipError).toBeNull();
+  });
+
+  test("a pointer answer that is not a campaign object reads as no pointer", async () => {
+    // The lenient parse, in the shell's own terms: this server never answers
+    // that way, so reading it as "no pointer" is the same best-effort stance
+    // every other untrusted field here already takes — never a hard failure
+    // over a page the user is only trying to load.
+    vi.mocked(globalThis.fetch).mockImplementation((url) =>
+      String(url).includes("/campaigns/last-opened")
+        ? Promise.resolve(json("not a pointer"))
+        : Promise.resolve(json(EMPTY_REPORT)),
+    );
+    const { result } = setup();
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([url]) => String(url).includes("/campaigns/last-opened")),
+      ).toBe(true),
+    );
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
+  });
+
   test("setBrief loads the target brief's own persisted run", async () => {
     mockPipelineApi({
       result: (url) =>

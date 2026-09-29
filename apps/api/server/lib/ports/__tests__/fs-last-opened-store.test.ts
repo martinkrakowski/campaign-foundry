@@ -21,6 +21,8 @@ const fsHook = vi.hoisted(() => ({
   realLstat: undefined as ((path: string, options?: unknown) => Promise<unknown>) | undefined,
   rename: undefined as ((from: string, to: string) => Promise<unknown>) | undefined,
   realRename: undefined as ((from: string, to: string) => Promise<unknown>) | undefined,
+  unlink: undefined as ((path: string) => Promise<unknown>) | undefined,
+  realUnlink: undefined as ((path: string) => Promise<unknown>) | undefined,
   writeFile: undefined as
     | ((path: string, data: unknown, enc: unknown) => Promise<unknown>)
     | undefined,
@@ -36,6 +38,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     options?: unknown,
   ) => Promise<unknown>;
   fsHook.realRename = actual.rename as unknown as (from: string, to: string) => Promise<unknown>;
+  fsHook.realUnlink = actual.unlink as unknown as (path: string) => Promise<unknown>;
   fsHook.realWriteFile = actual.writeFile as unknown as (
     path: string,
     data: unknown,
@@ -47,6 +50,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       fsHook.lstat ? fsHook.lstat(path) : fsHook.realLstat!(path, options),
     rename: (from: string, to: string) =>
       fsHook.rename ? fsHook.rename(from, to) : fsHook.realRename!(from, to),
+    unlink: (path: string) => (fsHook.unlink ? fsHook.unlink(path) : fsHook.realUnlink!(path)),
     writeFile: (path: string, data: unknown, enc: unknown) =>
       fsHook.writeFile ? fsHook.writeFile(path, data, enc) : fsHook.realWriteFile!(path, data, enc),
   };
@@ -70,6 +74,7 @@ describe("FsLastOpenedStore (PT-5e, D173, D180)", () => {
   afterEach(() => {
     fsHook.lstat = undefined;
     fsHook.rename = undefined;
+    fsHook.unlink = undefined;
     fsHook.writeFile = undefined;
     rmSync(root, { recursive: true, force: true });
   });
@@ -130,6 +135,20 @@ describe("FsLastOpenedStore (PT-5e, D173, D180)", () => {
       expect(seenWriteFileTargets[0]).not.toBe(target);
       expect(seenWriteFileTargets[0]).toMatch(/\.tmp$/);
       expect(seenRenameTargets).toEqual([target]);
+    });
+
+    test("a failed rename whose cleanup also fails still reports the rename", async () => {
+      // The temp file is swept best-effort: if the sweep fails too (the rename
+      // already moved or removed it, a full disk, a permission change), the
+      // write's OWN failure is what the caller must hear — not the clean-up's.
+      await store.write("original", "u1");
+      fsHook.rename = async () => {
+        throw new Error("disk full");
+      };
+      fsHook.unlink = async () => {
+        throw new Error("EACCES");
+      };
+      await expect(store.write("new", "u1")).rejects.toThrow("disk full");
     });
 
     test("a failed rename leaves the previous pointer untouched and cleans up the temp file", async () => {

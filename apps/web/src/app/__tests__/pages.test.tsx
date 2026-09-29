@@ -442,19 +442,23 @@ describe("the bare shell urls follow the last-opened pointer (PT-5e)", () => {
   test("unmounting before the pointer answers navigates nowhere", async () => {
     nextMock().nav.pathname = "/export";
     window.history.replaceState(null, "", "/export");
-    let resolvePointer: ((r: Response) => void) | null = null;
+    // Two callers read the pointer on this page — the shell's own restore and
+    // the page's redirect — and each gets its own pending answer, so all of
+    // them are held and released together.
+    const resolvers: ((r: Response) => void)[] = [];
     vi.mocked(globalThis.fetch).mockImplementation((url) =>
       String(url).includes("/campaigns/last-opened")
-        ? new Promise<Response>((resolve) => {
-            resolvePointer = resolve;
-          })
+        ? new Promise<Response>((resolve) => resolvers.push(resolve))
         : Promise.resolve(json(EMPTY_REPORT)),
     );
     const view = renderWithRun(<ExportPage />);
-    await waitFor(() => expect(resolvePointer).not.toBeNull());
+    await waitFor(() => expect(resolvers.length).toBeGreaterThan(0));
     view.unmount();
-    resolvePointer!(json({ campaignId: UUID }));
-    await Promise.resolve();
+    for (const resolve of resolvers) resolve(json({ campaignId: UUID }));
+    // A macrotask, not a microtask: the redirect is guarded by the effect's
+    // own cleanup flag, so the answer has to be delivered and observed AFTER
+    // the unmount for the guard to be exercised at all.
+    await new Promise((r) => setTimeout(r, 0));
     expect(nextMock().router.replace).not.toHaveBeenCalled();
   });
 });
