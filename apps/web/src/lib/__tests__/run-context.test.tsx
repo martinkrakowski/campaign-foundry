@@ -4239,6 +4239,68 @@ describe("RunProvider — the page's ?campaign= (PT-5c3, D180)", () => {
     expect(result.current.assets).toHaveLength(1);
   });
 
+  test("a failed listing that lands on a superseded resolution commits nothing", async () => {
+    const UUID_A = "018f6d2a-0000-7b4a-8d21-3f9e2a5b6c7d";
+    let listingCalls = 0;
+    let rejectAListing!: () => void;
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/result")) {
+          return url.includes(`campaignId=${UUID}`)
+            ? json({
+                halted: false,
+                assets: [asset({ productId: "beta" })],
+                log: { entries: [], campaignId: SLUG },
+              })
+            : json(EMPTY_REPORT);
+        }
+        if (url.includes("/campaigns/briefs")) {
+          listingCalls += 1;
+          if (listingCalls === 1) {
+            return new Promise<Response>(
+              (_, rej) => (rejectAListing = () => rej(new Error("down"))),
+            );
+          }
+          return json({ briefs: [] });
+        }
+        if (url === `${API}/campaigns/${UUID_A}`) {
+          return json({
+            campaignId: UUID_A,
+            slug: "stale-campaign",
+            name: "Stale",
+            type: "social-post",
+            hasVersion: true,
+          });
+        }
+        if (url === `${API}/campaigns/${UUID}`) {
+          return json({
+            campaignId: UUID,
+            slug: SLUG,
+            name: "Autumn Launch",
+            type: "social-post",
+            hasVersion: true,
+          });
+        }
+        return json({ error: "Not found" }, 404);
+      },
+    });
+    const { result } = setup();
+    act(() => result.current.openPageCampaign(UUID_A));
+    await waitFor(() => expect(rejectAListing).toBeTypeOf("function")); // A's listing is held
+    act(() => result.current.openPageCampaign(UUID));
+    await waitFor(() => expect(result.current.brief.id).toBe(SLUG));
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    await act(async () => {
+      rejectAListing();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // A's failed listing landed on a superseded resolution: it names nothing —
+    // no membership error, and B's campaign stays exactly as it committed.
+    expect(result.current.membershipError).toBeNull();
+    expect(result.current.brief.id).toBe(SLUG);
+    expect(result.current.assets).toHaveLength(1);
+  });
+
   test("a listing that lands after unmount commits nothing", async () => {
     let releaseListing!: () => void;
     const fetchSpy = vi.spyOn(globalThis, "fetch");
