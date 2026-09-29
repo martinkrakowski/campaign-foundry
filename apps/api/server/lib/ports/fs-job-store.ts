@@ -159,9 +159,9 @@ export class FsJobStore implements JobStorePort {
   }
 
   /**
-   * If the entry is a running job whose createdAt is older than the run
-   * deadline plus the grace period, rewrite it as failed with the stale
-   * running message, set settledAt to now, and schedule expireLater.
+   * If the entry is a running job whose startedAt (or createdAt as fallback)
+   * is older than the run deadline plus the grace period, rewrite it as failed
+   * with the stale running message, set settledAt to now, and schedule expireLater.
    * Returns the (possibly rewritten) entry, or undefined if the entry was
    * deleted (e.g., a settled job past its TTL).
    * Must be called under withJobLock for the job id.
@@ -170,7 +170,10 @@ export class FsJobStore implements JobStorePort {
     if (entry.job.status !== "running") return entry;
     const now = Date.now();
     const threshold = JOB_TTL_MS + STALE_GRACE_MS;
-    if (now - entry.createdAt < threshold) return entry;
+    // Use startedAt if present (job was transitioned from queued), fall back to createdAt
+    // for rows written before this change.
+    const startTime = entry.startedAt ?? entry.createdAt;
+    if (now - startTime < threshold) return entry;
     // Stale running job: rewrite as failed
     const updated: StoredJob = {
       ...entry,
@@ -295,11 +298,13 @@ export class FsJobStore implements JobStorePort {
       return this.withJobLock("__capacity__", async () => {
         await this.evictToFit();
         const id = customId ?? crypto.randomUUID();
+        const now = Date.now();
         const entry: StoredJob = {
           id,
           campaignId,
           job: { status: "running", done: 0, total: 0, log: null },
-          createdAt: Date.now(),
+          createdAt: now,
+          startedAt: now,
           seq: ++globalJobSeq,
         };
         await this.writeJobEntry(entry);
@@ -349,6 +354,7 @@ export class FsJobStore implements JobStorePort {
           ...entry.job,
           status: "running",
         },
+        startedAt: Date.now(),
       };
       await this.writeJobEntry(updated);
       return true;

@@ -48,6 +48,7 @@ export interface StoredJob {
   readonly createdAt: number;
   readonly seq: number;
   readonly settledAt?: number;
+  readonly startedAt?: number;
 }
 
 /**

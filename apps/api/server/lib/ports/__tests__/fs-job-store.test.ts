@@ -675,12 +675,16 @@ describe("FsJobStore", () => {
       const id = await store.createJob("campaign-stale");
       expect(await store.getRunningJobId("campaign-stale")).toBe(id);
 
-      // Backdate its createdAt to be older than RUN_DEADLINE_MS + STALE_GRACE_MS
+      // Backdate both createdAt and startedAt to be older than RUN_DEADLINE_MS + STALE_GRACE_MS
       // RUN_DEADLINE_MS === JOB_TTL_MS (10 minutes), STALE_GRACE_MS = 60 seconds
       const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
       writeFileSync(
         store.jobPath(id),
-        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        JSON.stringify({
+          ...raw,
+          createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+          startedAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+        }),
         "utf8",
       );
       // Clear cache so the stale read goes to disk
@@ -712,7 +716,11 @@ describe("FsJobStore", () => {
       const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
       writeFileSync(
         store.jobPath(id),
-        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        JSON.stringify({
+          ...raw,
+          createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+          startedAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+        }),
         "utf8",
       );
       (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
@@ -741,7 +749,11 @@ describe("FsJobStore", () => {
       const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
       writeFileSync(
         store.jobPath(id),
-        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        JSON.stringify({
+          ...raw,
+          createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+          startedAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+        }),
         "utf8",
       );
       (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
@@ -777,7 +789,11 @@ describe("FsJobStore", () => {
       const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
       writeFileSync(
         store.jobPath(id),
-        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS - 1) }),
+        JSON.stringify({
+          ...raw,
+          createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS - 1),
+          startedAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS - 1),
+        }),
         "utf8",
       );
       (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
@@ -794,16 +810,22 @@ describe("FsJobStore", () => {
     }
   });
 
-  test("in-process runs are not tracked; reaping relies on threshold alone", async () => {
-    // FsJobStore does not track in-process runs (no map/set of active job ids).
-    // runJob in lib/jobs.ts uses an AbortController and deadline timer but does
-    // not register the job id in any global registry accessible to FsJobStore.
-    // Therefore, a running job whose createdAt is past the threshold will be
-    // reaped even if this process is the one that started it.
-    // This test documents the current behavior — if in-process tracking is added
-    // in the future, this test should be updated to verify that tracked runs
-    // are never reaped regardless of age.
-    expect(true).toBe(true);
+  test("a running job younger than the stale threshold survives a read by a fresh store instance", async () => {
+    vi.useFakeTimers();
+    try {
+      // Create a running job and advance time to just under the threshold
+      const id = await store.createJob("camp-young");
+      vi.advanceTimersByTime(JOB_TTL_MS + STALE_GRACE_MS - 1);
+
+      // A fresh store instance should read it as still running (not reaped)
+      const freshStore = new FsJobStore(dir);
+      const stored = await freshStore.getStoredJob(id);
+      expect(stored?.job.status).toBe("running");
+      expect(stored?.job.error).toBeUndefined();
+      expect(stored?.settledAt).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("two concurrent reads of a stale running job rewrite it once (idempotent)", async () => {
@@ -814,7 +836,11 @@ describe("FsJobStore", () => {
       const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
       writeFileSync(
         store.jobPath(id),
-        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        JSON.stringify({
+          ...raw,
+          createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+          startedAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+        }),
         "utf8",
       );
       (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
@@ -848,7 +874,11 @@ describe("FsJobStore", () => {
       const raw = JSON.parse(readFileSync(store.jobPath(staleId), "utf8")) as StoredJob;
       writeFileSync(
         store.jobPath(staleId),
-        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        JSON.stringify({
+          ...raw,
+          createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+          startedAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+        }),
         "utf8",
       );
       (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
@@ -898,7 +928,11 @@ describe("FsJobStore", () => {
       const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
       writeFileSync(
         store.jobPath(id),
-        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        JSON.stringify({
+          ...raw,
+          createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+          startedAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+        }),
         "utf8",
       );
       (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
@@ -925,7 +959,11 @@ describe("FsJobStore", () => {
       const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
       writeFileSync(
         store.jobPath(id),
-        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        JSON.stringify({
+          ...raw,
+          createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+          startedAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+        }),
         "utf8",
       );
       (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
@@ -950,7 +988,11 @@ describe("FsJobStore", () => {
       const raw = JSON.parse(readFileSync(store.jobPath(id), "utf8")) as StoredJob;
       writeFileSync(
         store.jobPath(id),
-        JSON.stringify({ ...raw, createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000) }),
+        JSON.stringify({
+          ...raw,
+          createdAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+          startedAt: Date.now() - (JOB_TTL_MS + STALE_GRACE_MS + 1000),
+        }),
         "utf8",
       );
       (store as unknown as { memoryCache: Map<string, unknown> }).memoryCache.clear();
@@ -996,6 +1038,8 @@ describe("FsJobStore", () => {
   });
 
   test("progressJob on non-existent job is a no-op", async () => {
-    await expect(store.progressJob("00000000-0000-0000-0000-000000000000", 5, 10)).resolves.toBeUndefined();
+    await expect(
+      store.progressJob("00000000-0000-0000-0000-000000000000", 5, 10),
+    ).resolves.toBeUndefined();
   });
 });
