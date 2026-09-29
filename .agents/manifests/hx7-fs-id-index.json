@@ -40,7 +40,7 @@
       "file": "apps/api/server/lib/ports/fs-brief-store.ts",
       "before": "    if (cached !== undefined && (await this.isIndexedFileLive(cached))) return cached;\n    return (await this.rebuildIdIndex()).get(id);",
       "after": "    if (cached !== undefined && (await this.isIndexedFileLive(cached))) return cached;\n    return this.idIndex.get(id);",
-      "because": "dropping the scan-on-miss turns a positive-only cache into an authoritative one: a miss is answered from the map instead of the disk, so a brief another FsBriefStore — or another process, or an operator — put in this root is invisible to this instance for the life of the process. The same edit also drops the guarantee that a caller answers from the scan it waited for rather than from whichever rebuild won the assignment race, which the suite's two interleaved-rebuild lookups pin; the test replayed here covers the first half. The test warms one instance's index and then asks a SECOND FsBriefStore over the same root, which is exactly that case",
+      "because": "dropping the scan-on-miss turns a positive-only cache into an authoritative one: a miss is answered from the map instead of the disk, so a brief another FsBriefStore — or another process, or an operator — put in this root is invisible to this instance for the life of the process. The test warms one instance's index and then asks a SECOND FsBriefStore over the same root, which is exactly that case. The other half of what this line owes — answering from the scan it waited for rather than from whichever rebuild won the assignment race — is the next mutation, which keeps the scan and changes only what the caller reads",
       "command": [
         "yarn",
         "vitest",
@@ -50,6 +50,23 @@
         "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
         "-t",
         "a second store over the same root sees a campaign the first one created"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    return (await this.rebuildIdIndex()).get(id);",
+      "after": "    await this.rebuildIdIndex();\n    return this.idIndex.get(id);",
+      "because": "a lookup answers from the scan it waited for, not from the field. The scan still runs here, so the mutation is invisible to any test about a miss being found at all; what it changes is WHICH map the caller reads. Publishing is an assignment, so a rebuild that scanned an OLDER view of the root can land after one that scanned a newer one, and a caller reading the field back gets whichever won that race rather than the scan it performed. The test gates two rebuilds and releases them in the order that puts the newer scan's publish first, so the newer lookup's read lands after the older one's publish and answers undefined for an id its own scan had just found",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a lookup answers from the scan it waited for"
       ],
       "verdict": "caught"
     },
@@ -157,8 +174,8 @@
     },
     {
       "file": "apps/api/server/lib/ports/fs-brief-store.ts",
-      "before": "    if (target !== undefined && target.declaredId !== undefined && target.declaredId !== brief.id) {",
-      "after": "    if (target !== undefined && target.declaredId === undefined) {",
+      "before": "    const misdeclares = (t: WritableTarget) => t.declaredId !== undefined && t.declaredId !== brief.id;",
+      "after": "    const misdeclares = (t: WritableTarget) => t.declaredId === undefined;",
       "because": "the write path's half of the residual a stat cannot see. patchBriefYaml patches the WHOLE target, id included, so a cached hit for `moved` against a file that now declares `stolen` rewrites another campaign's file as `moved` — a cross-campaign clobber the read path already refuses, and one the rename-based replace makes permanent. Dropping the comparison against the id the caller asked for leaves only the unparseable arm, so a disagreement is never re-derived. The test rewrites a brief whose id another writer moved, and expects ENOENT with the other campaign's bytes byte for byte intact",
       "command": [
         "yarn",
@@ -169,6 +186,23 @@
         "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
         "-t",
         "a rewrite refuses a file that no longer declares the id"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    const id = (data as { id?: unknown } | null | undefined)?.id;\n    return typeof id === \"string\" ? id : undefined;",
+      "after": "    void data;\n    return parseBriefText(filePath, raw).id;",
+      "because": "the declared id is read at the DOCUMENT level, and going back to parseBriefText's is the clobber this round closed. parseBrief validates SHAPE, so a file that is YAML-valid but schema-invalid and declares another campaign — `id: stolen` beside `products: not-an-array` — declares no id through it, the same answer as bytes that declare none at all, and the write below patches the first as the second. patchBriefYaml refuses only zero or many documents, parse errors and a non-map top level, so it setsIn([\"id\"], \"moved\") straight over a real campaign's id, and R4.2's carve-out rewrites a .json brief whole with no refusal to fall back on. The tests put the suite's own bad.yaml shape under a different id and expect ENOENT with the other campaign's bytes byte for byte intact; the two arms that must keep patching — the same id, and an id that is not a string — are what says the fix is a document-level read and not a refusal",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "re-derives off a schema-broken"
       ],
       "verdict": "caught"
     }
