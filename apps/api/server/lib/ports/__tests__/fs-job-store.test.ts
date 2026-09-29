@@ -311,6 +311,58 @@ describe("FsJobStore", () => {
     vi.useRealTimers();
   });
 
+  test("acquireJob reusing a settled id cancels the earlier entry's pending retention timer", async () => {
+    // Unlike the test above, the SECOND run here never settles before the
+    // first entry's timer would fire — acquireJob itself, not a second
+    // settle, is what has to clear it. This is the gap expireLater's own
+    // reuse-clearing (triggered only by settling) does not cover: a caller
+    // retries a failed campaign with the same custom id, and the earlier
+    // failure's retention timer is still pending.
+    vi.useFakeTimers();
+    try {
+      await store.createJob("camp-a", "reused-after-settle");
+      await store.failJob("reused-after-settle", "boom");
+
+      // Before the first entry's JOB_TTL_MS retention timer fires, the id is
+      // reused for a fresh run.
+      vi.advanceTimersByTime(JOB_TTL_MS - 1000);
+      const claim = await store.acquireJob("camp-a", "reused-after-settle");
+      expect(claim).toEqual({ acquired: true, jobId: "reused-after-settle" });
+
+      // The FIRST entry's retention timer, left uncancelled, would fire here
+      // and delete the second, still-running entry out from under it.
+      vi.advanceTimersByTime(2000);
+
+      const stored = await store.getStoredJob("reused-after-settle");
+      expect(stored).toBeDefined();
+      expect(stored?.job.status).toBe("running");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("enqueueJob reusing a settled id cancels the earlier entry's pending retention timer", async () => {
+    vi.useFakeTimers();
+    try {
+      await store.createJob("camp-a", "reused-queue-after-settle");
+      await store.completeJob("reused-queue-after-settle", payload());
+
+      vi.advanceTimersByTime(JOB_TTL_MS - 1000);
+      const claim = await store.enqueueJob("camp-a", "reused-queue-after-settle");
+      expect(claim).toEqual({ acquired: true, jobId: "reused-queue-after-settle" });
+
+      // The completed entry's retention timer, left uncancelled, would fire
+      // here and delete the reused (now queued) entry.
+      vi.advanceTimersByTime(2000);
+
+      const stored = await store.getStoredJob("reused-queue-after-settle");
+      expect(stored).toBeDefined();
+      expect(stored?.job.status).toBe("queued");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("expireLater catches deleteJob rejection without unhandled rejection", async () => {
     vi.useFakeTimers();
     const id = await store.createJob("camp");

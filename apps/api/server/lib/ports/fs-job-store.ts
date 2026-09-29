@@ -152,6 +152,26 @@ export class FsJobStore implements JobStorePort {
     this.timers.set(id, timer);
   }
 
+  /**
+   * Cancel a pending settle-retention timer for `id`, if one exists.
+   *
+   * `expireLater` only clears an EARLIER retention timer when a job settles
+   * again under the same id — it is never called at acquire time. So an id
+   * settled once (including by the stale-running reaper) and then reused by
+   * `acquireJob`/`enqueueJob` before its retention timer fires carries that
+   * timer forward: at JOB_TTL_MS past the FIRST settlement, `deleteJob(id)`
+   * fires regardless of what now lives at that id, unlinking the reused
+   * entry's file out from under a run that may still be going. Call this
+   * before writing a fresh entry for a (possibly reused) id.
+   */
+  private cancelPendingRetention(id: string): void {
+    const existing = this.timers.get(id);
+    if (existing) {
+      clearTimeout(existing);
+      this.timers.delete(id);
+    }
+  }
+
   private expireQueuedLater(id: string): void {
     const existing = this.queuedTimers.get(id);
     if (existing) clearTimeout(existing);
@@ -376,6 +396,7 @@ export class FsJobStore implements JobStorePort {
       return this.withJobLock("__capacity__", async () => {
         await this.evictToFit();
         const id = customId ?? crypto.randomUUID();
+        this.cancelPendingRetention(id);
         const now = Date.now();
         const entry: StoredJob = {
           id,
@@ -403,6 +424,7 @@ export class FsJobStore implements JobStorePort {
       return this.withJobLock("__capacity__", async () => {
         await this.evictToFit();
         const id = customId ?? crypto.randomUUID();
+        this.cancelPendingRetention(id);
         const entry: StoredJob = {
           id,
           campaignId,
