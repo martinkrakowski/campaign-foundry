@@ -5,12 +5,13 @@ fail with a misleading error rather than "no such model".
 
 ## Current seats
 
-**2026-09-28.**
+**2026-09-29.**
 
-- **Implementers:** Sonnet 5 (subagent) is the reserve while the agy quota is exhausted (it resets
-  around 2026-09-30); `agy gemini-3.8-flash-high` when its quota is back; `opencode
-  openrouter/z-ai/glm-5.3-flash --variant max`, probed 2026-09-28 (trivial dispatch passed in 33 s
-  for $0.002), for bounded lanes.
+- **Implementers:**
+  - `opencode openrouter/z-ai/glm-5.3-flash --variant max` is the paid default (graded below).
+  - `agy gemini-3.8-flash-high` is available again (its quota reset 2026-09-29; on trial on HX5).
+  - Sonnet 5 (subagent) takes high-risk lanes and fix rounds.
+  - `space-bunny-alpha` is a trial seat only.
 - **Reviewer (grok):** `grok-4.7` only. **Never `grok-4.7-build-fast`**, which consumes 2× the
   tokens (owner, 2026-09-28). Adopted 2026-09-28 for three jobs:
   - independent plan review of lane rows before dispatch (first run: the PT-5c2–PT-5e rows);
@@ -30,6 +31,19 @@ fail with a misleading error rather than "no such model".
   jobs only.
 - **The headless-opencode rule:** `< /dev/null`, or `opencode run` waits on stdin and never reaches
   the model.
+
+### Graded record, waves w05 and w06 (2026-09-27 – 2026-09-29)
+
+Graded on derived evidence (commits, PR, gate, mutation, threads), never on a seat's own report.
+
+| Seat | Lanes | Result |
+|---|---|---|
+| `openrouter/z-ai/glm-5.3-flash --variant max` | #618, PT-5c3 (#620), HX3 (#625) and its fix round | **Paid default.** Every lane shipped; about $0.6–2.2 per lane. HX3's fix round fixed 6 real lock races with pause-hook tests. One slip: it appended to `session-log.md` because Template A asked for it (now fixed). |
+| `openrouter/stealth/space-bunny-alpha` | PT-5e (#623) and its fix round, HX6 (#626) | **Trial only: no name, no price, one provider, and prompts may be retained.** Both lanes shipped on the first attempt, and its fix round found a real symlink path escape and three vacuous tests. PT-5e slips: it held the lock across retries, piped `test:cov`, and ran one `git stash -u`. HX6 was clean. Token volume is very high (about 144M per lane, mostly cache). |
+| `openrouter/nvidia/nemotron-3-ultra-550b-a55b` (paid) | #619, PT-5c3 | **Retired.** #619's implementation was good but skipped the lock; PT-5c3 claimed success with 0 commits ($3.30). |
+| `inception/mercury-2.5` | #619's fix round | **Retired.** It rebased main's commits into the PR and pushed, orphaned the gate lock, and fixed 1 of 5. |
+| Sonnet 5 (subagent) | PT-5c2, PT-5d, every high-risk fix round, HX1, HX4 | **Reserve and high-risk seat.** Reliable; it takes the grok pre-PR review's findings well. |
+| `grok-4.7` (read-only review) | plan reviews (w05, w06), pre-PR reviews (PT-5c2, PT-5d) | **Found real bugs every time** (1 and 3 respectively) for about $0.7–1.6 per review. The w06 plan review took 3 rounds ($2.28) and caught 21 findings, including a blocker in the orchestrator's own text. |
 
 ## History (superseded)
 
