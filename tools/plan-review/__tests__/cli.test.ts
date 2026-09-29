@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runCli, errorText } from "../cli.js";
-import { asHashRecord, PLAN_REVIEW_LANE, rowHash } from "../lib/rows.js";
+import { asHashRecord, PLAN_REVIEW_LANE, rowHash, rowRisk } from "../lib/rows.js";
 
 const dirs: string[] = [];
 const tempDir = (): string => {
@@ -84,6 +84,7 @@ describe("runCli hashes", () => {
       JSON.stringify({
         rows: { "PT-5a": rowHash(plan, "PT-5a") },
         decisions: { D177: rowHash(plan, "D177") },
+        risk: { "PT-5a": "normal" },
       }),
     ]);
   });
@@ -93,7 +94,28 @@ describe("runCli hashes", () => {
     const planPath = writePlan(dir, `${plan}\n| **DECISION** | Not a decision row. |`);
     const log: string[] = [];
     await runCli({ ...io(log), argv: ["hashes", planPath, "DECISION"] });
-    expect(JSON.parse(log[0])).toEqual({ rows: { DECISION: expect.any(String) }, decisions: {} });
+    expect(JSON.parse(log[0])).toEqual({
+      rows: { DECISION: expect.any(String) },
+      decisions: {},
+      risk: { DECISION: "normal" },
+    });
+  });
+
+  test("a row whose second cell is a bolded high reports risk high, alongside its hash", async () => {
+    const dir = tempDir();
+    const risky = [
+      "| Lane | Risk | Delivers |",
+      "|---|---|---|",
+      "| **HX1** | **high** | Split the reserved list. |",
+    ].join("\n");
+    const planPath = writePlan(dir, risky);
+    const log: string[] = [];
+    await runCli({ ...io(log), argv: ["hashes", planPath, "HX1"] });
+    expect(JSON.parse(log[0])).toEqual({
+      rows: { HX1: rowHash(risky, "HX1") },
+      decisions: {},
+      risk: { HX1: "high" },
+    });
   });
 
   test("no plan argument prints usage and exits 2", async () => {
@@ -150,6 +172,26 @@ describe("runCli check", () => {
       argv: ["check", planPath, "--logdir", logdir, "--wave", "W", "PT-5a"],
     });
     expect(code).toBe(0);
+  });
+
+  test("check reports the row's risk once the plan is read, per D184", async () => {
+    const dir = tempDir();
+    const planPath = writePlan(dir);
+    const logdir = writeLog(join(dir, "waves"), [
+      reviewLine("W", {
+        plan: planPath,
+        reviewer: "plan-review-seat",
+        rows: { "PT-5a": rowHash(plan, "PT-5a") },
+        verdict: "clear",
+      }),
+    ]);
+    const log: string[] = [];
+    const code = await runCli({
+      ...io(log),
+      argv: ["check", planPath, "--logdir", logdir, "--wave", "W", "PT-5a"],
+    });
+    expect(code).toBe(0);
+    expect(log).toContain(`risk: ${rowRisk(plan, "PT-5a")}`);
   });
 
   test("exit 1 names the rows and decisions that changed since the review", async () => {

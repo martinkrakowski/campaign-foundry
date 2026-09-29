@@ -1,5 +1,5 @@
 import { readEvents } from "../wave-status/lib/events.js";
-import { asHashRecord, rowHash } from "./lib/rows.js";
+import { asHashRecord, rowHash, rowRisk } from "./lib/rows.js";
 import { governingPlanReview } from "./lib/review.js";
 import { relative, resolve } from "node:path";
 import type { WaveEvent } from "../wave-status/lib/types.js";
@@ -67,12 +67,18 @@ async function hashes(args: readonly string[], io: PlanReviewIo): Promise<number
   const markdown = await io.readFile(plan);
   const rows: Record<string, string> = {};
   const decisions: Record<string, string> = {};
+  const risk: Record<string, string> = {};
   for (const id of ids) {
     const hash = rowHash(markdown, id);
-    if (isDecisionId(id)) decisions[id] = hash;
-    else rows[id] = hash;
+    if (isDecisionId(id)) {
+      decisions[id] = hash;
+    } else {
+      rows[id] = hash;
+      // Decision rows carry no risk tier — D184's risk column is a lane property.
+      risk[id] = rowRisk(markdown, id);
+    }
   }
-  io.log(JSON.stringify({ rows, decisions }));
+  io.log(JSON.stringify({ rows, decisions, risk }));
   return 0;
 }
 
@@ -229,6 +235,16 @@ async function check(args: readonly string[], io: PlanReviewIo): Promise<number>
   } catch (error: unknown) {
     io.logError(`could not read ${plan}: ${errorText(error)}`);
     return 2;
+  }
+
+  // Report the row's risk tier once the plan is in hand, whatever the diff
+  // below finds — a caller wants the tier alongside the verdict, not only on
+  // a clean pass. A row that vanished since the review has no tier to give;
+  // rowDiff below already says why in its own words.
+  try {
+    io.log(`risk: ${rowRisk(markdown, laneId)}`);
+  } catch {
+    // no unambiguous row — silent here, loud in the diff below.
   }
 
   const decisionsDetail = review.event.detail?.decisions;

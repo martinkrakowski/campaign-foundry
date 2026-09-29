@@ -31,6 +31,30 @@ export function rowHash(markdown: string, id: string): string {
   return createHash("sha256").update(normalised, "utf8").digest("hex");
 }
 
+/** A plan row's risk tier (D184): `high`, or `normal` for everything else. */
+export type Risk = "high" | "normal";
+
+/**
+ * A row's risk tier, read from its SECOND cell: `**high**` marks it high;
+ * anything else — the literal word `normal`, or a table with no Risk column
+ * at all, whose second cell holds the "Delivers" prose instead, as in the
+ * platform plan — reads as `normal`. The match is exact: the plan's own
+ * convention bolds every tier word the same way it bolds every lane id
+ * (`| **<id>** | **high** | …`), so an unbolded `high` is not the marker
+ * either, and defaults to `normal` rather than being guessed at.
+ */
+export function rowRisk(markdown: string, id: string): Risk {
+  const prefix = rowPrefix(id);
+  const matches = markdown.split("\n").filter((line) => prefix.test(line));
+  if (matches.length !== 1) {
+    throw new Error(`expected exactly one plan row for ${id}, found ${matches.length}`);
+  }
+  const line = matches[0];
+  const consumed = prefix.exec(line)?.[0] ?? "";
+  const secondCell = line.slice(consumed.length).split("|", 1)[0]?.trim() ?? "";
+  return secondCell === "**high**" ? "high" : "normal";
+}
+
 /** The hash map a plan-review event's detail carries, or `undefined` for anything else. */
 export function asHashRecord(value: unknown): Record<string, string> | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
