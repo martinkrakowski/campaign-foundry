@@ -38,10 +38,9 @@ import {
   isPristine,
   isValidationFresh,
   valuesEqual,
-  getDraftKey,
-  saveDraftToStorage,
-  loadDraftFromStorage,
-  purgeDraftFromStorage,
+  fetchServerDraft,
+  putServerDraft,
+  deleteServerDraft,
   blankBrief,
   asCopyTimeline,
   timelineDurations,
@@ -210,6 +209,9 @@ const COLUMN_VIEWS: readonly ColumnView[] = ["editor", "validate"];
  * meaning anything, the way `cf:presentation` does since SG1.
  */
 const COLUMN_VIEW_KEY = "cf:editor-column-view";
+
+/** PT-5d item 4 — autosave debounce: at most one draft PUT per this window. */
+const DRAFT_AUTOSAVE_DEBOUNCE_MS = 1000;
 
 /**
  * A stored string is only a view if it is one the column can SHOW — which is no
@@ -733,42 +735,62 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * Whether the load-matching effect below has ALREADY resolved this exact
    * `routeId` — broader than `routeMatchesLoaded`, which a blank-at-route
    * campaign (PT-5c1) can never satisfy: `source.kind` stays `"new"` until its
-   * first Save (D177), so `routeLoadedId` stays undefined the whole time.
-   * Deliberately NOT used to gate the D11 recovery effect above — recovery
-   * must stay blocked for a blank-at-route campaign (a reload comes from the
-   * server, never localStorage, D177); this one only stops the effect below
-   * from re-running its `GET /campaigns/:id` on every listing refresh (a
-   * window focus, `loadBriefs()` after an unrelated Save elsewhere) and
-   * re-dispatching a fresh blank `load` over whatever the user has typed.
+   * first Save (D177), so `routeLoadedId` stays undefined the whole time. Also
+   * gates the PT-5d server-draft restore effect below: a blank-at-route,
+   * versionless campaign has no `routeMatchesLoaded` moment to key on, but it
+   * DOES have a real campaign id (and so a real server draft to restore) the
+   * moment this flips true through its own "new"-source branch. Otherwise
+   * this only stops the effect below from re-running its `GET /campaigns/:id`
+   * on every listing refresh (a window focus, `loadBriefs()` after an
+   * unrelated Save elsewhere) and re-dispatching a fresh blank `load` over
+   * whatever the user has typed.
    */
   const routeAlreadyResolved =
     routeMatchesLoaded ||
     (state.source.kind === "new" && resolvedSlug !== null && resolvedSlug.routeId === routeId);
 
-  // D11 recovery: reinstate an auto-saved draft, once per draft key and only when it
-  // actually differs from what is on screen. Keying on the draft rather than on mount
-  // matters — on a named route the draft key only becomes the brief's own once the
-  // route's brief has loaded, so an unsaved edit is only ever recoverable once the
-  // editor has settled on the brief it belongs to (H6: `/brief/new`'s key is stable,
-  // so a reload there finds its draft immediately).
-  const draftKey = getDraftKey(state);
+  /**
+   * PT-5d item 4 — restore the caller's own autosaved server draft
+   * (`GET /campaigns/:id/draft`, D173), once per route and only when it
+   * actually differs from what is on screen. Gated on `routeAlreadyResolved`
+   * rather than `routeMatchesLoaded`: a blank-at-route, versionless campaign
+   * (`source.kind` stays `"new"` until its first Save, D177) never satisfies
+   * `routeMatchesLoaded` (which requires a "file" source), but it has a real
+   * campaign id — and so a real draft to restore — the moment
+   * `routeAlreadyResolved`'s own "new"-source branch fires. The draft's own
+   * `baseRevision` must equal the campaign's CURRENT revision (`null` for a
+   * campaign with no version yet, the same shape a versionless campaign's
+   * `state.source` carries) — a stale one (a Save landed elsewhere since the
+   * draft was taken) is silently skipped, leaving the freshly loaded or
+   * seeded brief on screen rather than superseded content. Keyed on
+   * `routeId` (not on `state`, which the restore itself changes) so a
+   * listing refresh never re-fetches or re-dispatches for a route already
+   * settled.
+   */
+  const restoredDraftForRouteRef = useRef<string | null>(null);
   useEffect(() => {
-    // On a named route, wait for the route's brief: before it lands the draft key is
-    // not yet the route's, and restoring against it would seed the editor with a
-    // draft the URL says nothing about. A blank-at-route campaign (PT-5c1: `source.kind`
-    // stays "new" until its first Save) never satisfies this either, by the same
-    // logic that makes its reload come from the server, not from localStorage
-    // (`routeMatchesLoaded` requires a file source).
-    if (routeId !== undefined && !routeMatchesLoaded) return;
-    const draft = loadDraftFromStorage(state);
-    // The same `valuesEqual` the dirty checks use, not a second stringified
-    // comparison: a key-order-sensitive stringify here would restore a draft
-    // whose keys merely arrived in a different order. The helper is shape-agnostic
-    // — editor states are JSON-able, so the same canonicalisation applies.
-    if (draft && !valuesEqual(draft, state)) {
-      dispatch({ type: "restore", state: draft });
-    }
-  }, [draftKey, routeId, routeMatchesLoaded]);
+    if (routeId === undefined || !routeAlreadyResolved) return;
+    if (restoredDraftForRouteRef.current === routeId) return;
+    restoredDraftForRouteRef.current = routeId;
+    const currentRevision = state.source.kind === "file" ? (state.source.revision ?? null) : null;
+    let cancelled = false;
+    void (async () => {
+      const draft = await fetchServerDraft(routeId);
+      if (cancelled || draft === null) return;
+      if (draft.baseRevision !== currentRevision) return;
+      // The same `valuesEqual` the dirty checks use, not a second stringified
+      // comparison: a key-order-sensitive stringify here would restore a draft
+      // whose keys merely arrived in a different order. The helper is
+      // shape-agnostic — editor states are JSON-able, so the same
+      // canonicalisation applies.
+      if (!valuesEqual(draft.state, state)) {
+        dispatch({ type: "restore", state: draft.state });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [routeId, routeAlreadyResolved]);
 
   // D37 — the route drives the load, and nothing else does. `routeId` is the URL's
   // word for which brief is open, and it is the only source of truth: the editor
@@ -1081,33 +1103,48 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // only when the route actually unmounts.
   useEffect(() => () => setDirty(false), []);
 
-  // Auto-save, but only for a draft that has actually diverged from a pristine editor.
-  // Writing unconditionally would recreate the key that Save and Discard just purged.
-  // VE1 adds the return half: a draft that UNDO steps back to pristine holds nothing
-  // to recover, and a stale copy would come back on reload with no history left to
-  // undo it — so the key is purged. The flag is what distinguishes that RETURN from
-  // the START: the first render is always pristine, and the recovery effect above may
-  // still be waiting on the route's load before it reads storage. Purging there would
-  // delete the draft the reload came for; only a draft that has diverged in THIS
-  // session may purge.
+  /**
+   * PT-5d item 4 — autosave to the caller's own server draft, debounced to
+   * one PUT per 1 s window, replacing the localStorage draft (D173: "not a
+   * write per keystroke"). Same "only once diverged" gate as before
+   * (`draftDivergedRef`): a state that returns to pristine after diverging
+   * DELETEs rather than PUTs — an UNDO back to a clean editor holds nothing
+   * worth restoring later. Requires a real campaign id (`routeId`); the one
+   * case with none — `/brief/new`'s truly blank editor, with no campaign
+   * minted at all — is no longer reachable through normal navigation (W3
+   * resumes the draft's own campaign route instead, `app/(shell)/brief/new/page.tsx`),
+   * but this still degrades to a no-op rather than crashing for any caller
+   * that renders `<BriefEditor />` bare. `draftPutTimerRef` is shared with
+   * the post-Save/Save-as/Revert handlers below: each cancels a pending PUT
+   * before its own DELETE, so a debounced write armed just before one of
+   * them cannot resurrect a draft that was just told to disappear.
+   */
   const draftDivergedRef = useRef(false);
+  const draftPutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearPendingDraftSave = () => {
+    if (draftPutTimerRef.current !== null) {
+      clearTimeout(draftPutTimerRef.current);
+      draftPutTimerRef.current = null;
+    }
+  };
   useEffect(() => {
-    // A named route is an unattached "new" draft until its lookup lands, so
-    // the key is the shared `cf:draft:new`. A keystroke saved in that window
-    // overwrites the abandoned `/brief/new` draft W3 resume reads, and
-    // `markSeeded` moving the key would leave that copy behind. Skip until
-    // the route has resolved. `markSeeded` changes `state` (and
-    // `routeAlreadyResolved`), so this effect runs again and writes the kept
-    // edits under the campaign's own key. The diverged flag stays unset
-    // across the skip: the pristine purge below must not delete `cf:draft:new`
-    // either, including one this session never wrote.
-    if (!isPristine(state) && routeId !== undefined && !routeAlreadyResolved) return;
+    if (routeId === undefined) return;
+    // A named route is an unattached "new" draft until its lookup lands — skip
+    // until the route has resolved (`markSeeded` changes `state`, and so
+    // `routeAlreadyResolved`, so this effect runs again once it does).
+    if (!isPristine(state) && !routeAlreadyResolved) return;
     if (!isPristine(state)) {
       draftDivergedRef.current = true;
-      saveDraftToStorage(state);
-      return;
+      const baseRevision = state.source.kind === "file" ? (state.source.revision ?? null) : null;
+      draftPutTimerRef.current = setTimeout(() => {
+        draftPutTimerRef.current = null;
+        void putServerDraft(routeId, state, baseRevision);
+      }, DRAFT_AUTOSAVE_DEBOUNCE_MS);
+    } else if (draftDivergedRef.current) {
+      draftDivergedRef.current = false;
+      void deleteServerDraft(routeId);
     }
-    if (draftDivergedRef.current) purgeDraftFromStorage(state);
+    return clearPendingDraftSave;
   }, [state, routeId, routeAlreadyResolved]);
 
   // The projection, exactly once: `toBrief(state)` is what Save sends, and the D35
@@ -2076,7 +2113,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // D35: committing and saving are one act — the shell runs what was written.
       dispatch({ type: "apply", applied: stored.brief });
       setRunBrief(stored.brief);
-      purgeDraftFromStorage(state);
+      // PT-5d item 4: the published version is now the source of truth, so the
+      // draft this Save superseded is deleted — cancel any pending debounced
+      // PUT FIRST, or one armed just before this Save could resurrect it right
+      // after the DELETE lands (best-effort either way: a failed DELETE just
+      // leaves a now-stale draft, whose `baseRevision` the next restore's
+      // compare will already reject).
+      clearPendingDraftSave();
+      void deleteServerDraft(stored.brief.id);
       await loadBriefs();
       // D37: the URL is the source of truth for which brief is open. A first save
       // turned "new" into a named brief, so the route must stop calling it new —
@@ -2199,7 +2243,13 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // other campaign this editor opens (D37) — so nothing here needs to adopt
       // the response in place.
       await createBrief({ ...brief, id: minted.slug });
-      purgeDraftFromStorage(state);
+      // PT-5d item 4: the SOURCE campaign's own draft (`sourceRouteId`,
+      // captured above before the mint) is abandoned once its content has
+      // been copied elsewhere — cancel any pending PUT first, same race as
+      // handleSave's. `/brief/new` with no campaign open (`sourceRouteId`
+      // undefined) never had a server draft to begin with.
+      clearPendingDraftSave();
+      if (sourceRouteId !== undefined) void deleteServerDraft(sourceRouteId);
       savedAsMintRef.current = null;
       setSaveAsName(null);
       // msczJ — the write above has already succeeded: the copy is safely
@@ -2338,12 +2388,22 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    */
   const handleRevert = () => {
     requestReplace(() => {
-      // L1 — purge only when the autosave effect will not rewrite the key. A
-      // revert-to-saved is not pristine, so autosave refills the key with the reverted
-      // (== saved) state in the same tick and a purge here would be a no-op fight;
-      // a discarded NEW source mints a fresh temp id, so nothing overwrites the old
-      // key and the purge is what keeps the discarded edits from lingering forever.
-      if (state.source.kind === "new") purgeDraftFromStorage(state);
+      // PT-5d item 4 — a "file" source's revert needs nothing explicit here:
+      // it restores `savedSnapshot`, which is pristine by definition, and the
+      // autosave effect's own pristine transition DELETEs on its next run
+      // (same `routeId` throughout, unlike the old tempId-keyed localStorage
+      // draft). A "new" (seeded, versionless) source's revert is ALSO
+      // pristine afterwards and would be caught the same way — but campaign
+      // identity there is real (`routeId`), not a rotating temp id, so there
+      // is no key-orphaning hazard the old comment warned about either. This
+      // stays explicit anyway, matching the old call site one-for-one and not
+      // depending on the next render's effect to make the DELETE happen
+      // promptly. `deleteServerDraft` is a no-op past-tense on the server if
+      // the effect's own DELETE already landed.
+      if (state.source.kind === "new" && routeId !== undefined) {
+        clearPendingDraftSave();
+        void deleteServerDraft(routeId);
+      }
       dispatch({ type: "discard" });
       // L1.1: Revert resets touched/attempted
       setAttempted(false);

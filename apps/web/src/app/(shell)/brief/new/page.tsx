@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { BriefEditor } from "@/components/campaign/BriefEditor";
-import { hasRecoverableDraft } from "@/components/campaign/editor-state";
+import { fetchLatestServerDraft } from "@/components/campaign/editor-state";
+import { campaignRoute } from "@/lib/campaign-route";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 
 /**
@@ -13,33 +13,37 @@ import { useCreateCampaign } from "@/lib/create-campaign-context";
  * route that already names a minted campaign (`hasVersion: false`,
  * `BriefEditor`'s own effect for that case).
  *
- * This route's one remaining job is W3's resume: `cf:draft:new` is the one
- * stable autosave key every unnamed editor used to share (H6), and a build
- * from before this lane can still have abandoned work sitting under it. With
- * nothing to resume, this opens the create dialog and sends the visitor to
- * the grid behind it — so a blank create still mints first, the way the
- * enumerated flow requires; with a recoverable draft, it renders the editor
- * here exactly as it always did, so the draft's own D11 recovery effect
- * finds it. The check runs in an effect, not in the initial render, because
- * `localStorage` does not exist on the server and a render-time read would
- * make the first client render disagree with it (the hydration trap
- * `Disclosure` documents elsewhere in this codebase).
+ * PT-5d item 5 — this route's one remaining job is W3's resume, now server-side:
+ * `GET /campaigns/briefs/draft` answers the caller's own latest autosave draft
+ * across every campaign (D173), which always names a real, already-minted
+ * campaign — server drafts require one (`0014_draft.sql`'s FK) — so resuming
+ * is a navigation to that campaign's own route, never a bare editor mounted
+ * here. With no draft to resume, this opens the create dialog and sends the
+ * visitor to the grid behind it, so a blank create still mints first, the way
+ * the enumerated flow requires. The check runs in an effect, not the initial
+ * render, so the fetch never runs during SSR and the first client render
+ * matches the server's.
  */
 export default function NewBriefPage() {
   const router = useRouter();
   const { openCreateDialog } = useCreateCampaign();
-  const [resuming, setResuming] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (hasRecoverableDraft()) {
-      setResuming(true);
-      return;
-    }
-    setResuming(false);
-    openCreateDialog();
-    router.replace("/grid");
+    let cancelled = false;
+    void (async () => {
+      const latest = await fetchLatestServerDraft();
+      if (cancelled) return;
+      if (latest !== null) {
+        router.replace(campaignRoute(latest.campaignId));
+        return;
+      }
+      openCreateDialog();
+      router.replace("/grid");
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [openCreateDialog, router]);
 
-  if (resuming) return <BriefEditor />;
   return null;
 }

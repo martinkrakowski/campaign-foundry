@@ -1,12 +1,14 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-import { ShellProviders, renderWithRun, nextMock, storedTemplate } from "@/__tests__/helpers";
-import { CreateCampaignProvider, useCreateCampaign } from "@/lib/create-campaign-context";
 import {
-  editorReducer,
-  initialEditorState,
-  saveDraftToStorage,
-} from "@/components/campaign/editor-state";
+  ShellProviders,
+  renderWithRun,
+  nextMock,
+  storedTemplate,
+  mockPipelineApi,
+  json,
+} from "@/__tests__/helpers";
+import { CreateCampaignProvider, useCreateCampaign } from "@/lib/create-campaign-context";
 import BriefIndexPage from "../page";
 import BriefIdPage from "../[id]/page";
 import NewBriefPage from "../new/page";
@@ -72,11 +74,13 @@ describe("the /brief/{id} route (D37)", () => {
 /**
  * PT-5c1 (D177) — `/brief/new` no longer starts a blank campaign itself
  * (create always mints through `POST /campaigns` first, landing on
- * `/brief/<campaignId>`); its one remaining job is W3's resume of a draft
- * abandoned under the pre-lane `cf:draft:new` key. Every other behaviour a
- * mounted `BriefEditor` has — mode toggle, action bar, Save as… — is
- * `BriefEditor`'s own contract, exercised at `/brief/{id}` in
- * `brief-editor.test.tsx`; this route's own contract is just the branch.
+ * `/brief/<campaignId>`); its one remaining job is W3's server-side resume
+ * (PT-5d item 5): `GET /campaigns/briefs/draft` answers the caller's latest
+ * draft, and this route navigates to that campaign rather than ever mounting
+ * a bare editor itself. Every other behaviour a mounted `BriefEditor` has —
+ * mode toggle, action bar, Save as… — is `BriefEditor`'s own contract,
+ * exercised at `/brief/{id}` in `brief-editor.test.tsx`; this route's own
+ * contract is just the branch.
  */
 const Probe = () => {
   const { createDialogOpen } = useCreateCampaign();
@@ -93,35 +97,27 @@ const renderNewBriefPage = () =>
     </ShellProviders>,
   );
 
-describe("/brief/new — resume or create (PT-5c1, W3)", () => {
+const isLatestDraftUrl = (u: string) => u.includes("/campaigns/briefs/draft");
+
+describe("/brief/new — resume or create (PT-5c1, PT-5d, W3)", () => {
   test("with no recoverable draft, opens the create dialog and redirects to the grid", async () => {
+    mockPipelineApi({ result: (u) => (isLatestDraftUrl(u) ? json({ latest: null }) : json({})) });
     renderNewBriefPage();
     await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/grid"));
     expect(screen.getByTestId("dialog-open").textContent).toBe("true");
     expect(screen.queryByLabelText("Campaign Name")).toBeNull();
   });
 
-  test("a pristine stored draft is not recoverable — opens the dialog too", async () => {
-    saveDraftToStorage(initialEditorState());
+  test("resumes a caller's latest server draft by navigating to its campaign, never opening the dialog (W3)", async () => {
+    mockPipelineApi({
+      result: (u) =>
+        isLatestDraftUrl(u) ? json({ latest: { campaignId: "resumed-1" } }) : json({}),
+    });
     renderNewBriefPage();
-    await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/grid"));
-    expect(screen.getByTestId("dialog-open").textContent).toBe("true");
-  });
-
-  test("resumes an abandoned blank draft instead of opening the dialog (W3)", async () => {
-    saveDraftToStorage(
-      editorReducer(initialEditorState(), {
-        type: "patch",
-        patch: { campaignName: "Half-written" },
-      }),
-    );
-    renderNewBriefPage();
-    await waitFor(() =>
-      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(
-        "Half-written",
-      ),
-    );
-    expect(nextMock().router.replace).not.toHaveBeenCalled();
+    await waitFor(() => expect(nextMock().router.replace).toHaveBeenCalledWith("/brief/resumed-1"));
     expect(screen.getByTestId("dialog-open").textContent).toBe("false");
+    // Never a bare editor mounted here (PT-5d item 5): the destination route
+    // (`/brief/{id}`) is what loads it, exercised in brief-editor.test.tsx.
+    expect(screen.queryByLabelText("Campaign Name")).toBeNull();
   });
 });
