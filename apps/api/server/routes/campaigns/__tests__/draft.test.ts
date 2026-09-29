@@ -9,6 +9,8 @@ import {
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
 import type { TenantContext } from "../../../lib/tenant.js";
+import { getDraftStore, setDraftStore, resetDraftStore } from "../../../lib/ports/index.js";
+import type { DraftStorePort } from "../../../lib/ports/draft-store.port.js";
 import createHandler from "../index.post.js";
 import briefsPostHandler from "../briefs.post.js";
 import draftGetHandler from "../[id]/draft.get.js";
@@ -412,6 +414,52 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
         // draft at all.
         await api.deleteDraft(older.slug);
         expect(await (await api.latest()).json()).toEqual({ latest: null });
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    // Fix round (bots) — a candidate `listDraftsByRecency` named can still
+    // turn up gone by the time `readDraft` actually asks for it (a genuine
+    // race: something else deleted it in between). Skipped, same as a
+    // hidden campaign or a stale revision, continuing to the next
+    // candidate rather than treating it as fatal.
+    test("a draft listDraftsByRecency named but readDraft can no longer find (a race) is skipped, not fatal", async () => {
+      const harness = await setup();
+      try {
+        const api = mount();
+        await seedUsers(harness, [LOCAL_TENANT]);
+
+        const real = await mintCampaign(api, "Really Has A Draft");
+        await api.putDraft(real.slug, { state: { x: 1 }, baseRevision: null });
+        // A second, real, VISIBLE campaign that never had a draft written —
+        // stands in for "listed, then deleted before the read", without
+        // needing a genuinely fabricated campaign id.
+        const raced = await mintCampaign(api, "Listed Then Gone");
+
+        // A class instance's methods live on its prototype, not as own
+        // enumerable properties — `{ ...store }` would silently drop every
+        // one of them. Bind each explicitly instead.
+        const store = getDraftStore(LOCAL_TENANT);
+        const wrapped: DraftStorePort = {
+          readDraft: store.readDraft.bind(store),
+          writeDraft: store.writeDraft.bind(store),
+          writeDraftIfCurrent: store.writeDraftIfCurrent.bind(store),
+          deleteDraft: store.deleteDraft.bind(store),
+          async listDraftsByRecency(userId) {
+            const list = await store.listDraftsByRecency(userId);
+            return [{ campaignId: raced.campaignId, updatedAt: new Date().toISOString() }, ...list];
+          },
+        };
+        setDraftStore(wrapped);
+        try {
+          const latest = (await (await api.latest()).json()) as {
+            latest: { campaignId: string } | null;
+          };
+          expect(latest.latest?.campaignId).toBe(real.campaignId);
+        } finally {
+          resetDraftStore();
+        }
       } finally {
         await harness.cleanup();
       }
