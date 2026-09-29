@@ -72,6 +72,37 @@ export class FsBriefStore implements BriefStorePort {
   private readonly dir: string;
   private readonly lockChains = new Map<string, Promise<unknown>>();
 
+  /**
+   * L1: the id -> file name index, and the reason `findBriefFileById` is no
+   * longer a full-directory scan. Measured at a 199-202 ms median over 1,000
+   * campaigns (`scripts/bench-fs-id-lookup.ts`, three runs) against the row's
+   * 5 ms threshold, on the ids `resolveCampaign` / `campaignVisibility` /
+   * `campaignMeta` resolve for the assets, decisions, pools and preview-frame
+   * routes.
+   *
+   * A POSITIVE cache, and deliberately only that:
+   * - a hit is answered from here with no filesystem work at all;
+   * - a miss ALWAYS falls back to a full `listBriefs()` scan
+   *   (`rebuildIdIndex`), which republishes the whole map. A miss is never
+   *   cached, so this cannot hide a brief that another `FsBriefStore`, another
+   *   process or an operator put in this root since the last scan — the first
+   *   lookup from a second instance over the same root is exactly that case,
+   *   and it finds the campaign.
+   *
+   * It holds FILE NAMES and nothing else. A `StoredBrief`'s revision must
+   * always be hashed from the bytes on disk (`getRevision`, and
+   * `rewriteBrief`'s `expectedRevision` check), so caching a revision would
+   * turn a conditional write into an unconditional one and quietly retire
+   * `ECONFLICT`.
+   *
+   * Replaced by reference rather than mutated in place, so publishing a
+   * rebuild is one assignment: two concurrent misses each publish a complete
+   * map built from a complete scan, and whichever loses that race is still
+   * correct. An entry a concurrent rebuild drops is picked up by the next
+   * miss.
+   */
+  private idIndex: Map<string, string> = new Map();
+
   constructor(dir: string) {
     this.dir = resolve(dir);
   }
@@ -98,27 +129,67 @@ export class FsBriefStore implements BriefStorePort {
 
     const briefs: StoredBrief[] = [];
     for (const file of files) {
-      try {
-        const filePath = resolve(this.dir, file);
-        const bytes = await readFile(filePath);
-        const revision = hashBytes(bytes);
-        const brief = parseBriefText(filePath, bytes.toString("utf8"));
-        briefs.push({ campaignId: brief.id, file, brief, revision });
-      } catch (error) {
-        console.warn(`[briefs] skipped ${file}: ${errorMessage(error)}`);
-      }
+      const entry = await this.storedBrief(file);
+      if (entry) briefs.push(entry);
     }
     return briefs;
   }
 
-  async findBriefById(id: string): Promise<StoredBrief | undefined> {
-    const list = await this.listBriefs();
-    return list.find((entry) => entry.brief.id === id);
+  /**
+   * One brief file to its `StoredBrief`, or `undefined` when its bytes will
+   * not read or parse. Split out of `listBriefs` so `findBriefById` skips a
+   * malformed file exactly the way the listing does — letting the parse throw
+   * instead would turn a refusal into a failure on the one file it was asked
+   * for, which is the outcome `listBriefs`'s own warn-and-skip exists to
+   * prevent.
+   */
+  private async storedBrief(file: string): Promise<StoredBrief | undefined> {
+    try {
+      // `resolve`, not `resolveConfined`, unchanged from `listBriefs`: these
+      // names came out of this directory's own `readdir`, so none of them can
+      // escape it, and narrowing the check is not what this lane is for.
+      const filePath = resolve(this.dir, file);
+      const bytes = await readFile(filePath);
+      const brief = parseBriefText(filePath, bytes.toString("utf8"));
+      return { campaignId: brief.id, file, brief, revision: hashBytes(bytes) };
+    } catch (error) {
+      console.warn(`[briefs] skipped ${file}: ${errorMessage(error)}`);
+      return undefined;
+    }
   }
 
+  /**
+   * Republish the id index from a full `listBriefs()` scan — the miss path,
+   * and the only way the map is ever filled in bulk. First file per id wins,
+   * which is what `list.find` over the already-sorted listing answered before
+   * the index existed: two files declaring one id is a corrupt root, and the
+   * answer must not depend on whether the caller arrived warm or cold.
+   */
+  private async rebuildIdIndex(): Promise<void> {
+    const listed = await this.listBriefs();
+    const next = new Map<string, string>();
+    for (const entry of listed) {
+      if (!next.has(entry.campaignId)) next.set(entry.campaignId, entry.file);
+    }
+    this.idIndex = next;
+  }
+
+  async findBriefById(id: string): Promise<StoredBrief | undefined> {
+    const file = await this.findBriefFileById(id);
+    if (file === undefined) return undefined;
+    return this.storedBrief(file);
+  }
+
+  /**
+   * See `BriefStorePort.findBriefFileById`. One map read on a hit; a full
+   * directory scan on a miss, never a cached miss — see `idIndex` for why a
+   * miss has to keep paying for the answer.
+   */
   async findBriefFileById(id: string): Promise<string | undefined> {
-    const found = await this.findBriefById(id);
-    return found?.file;
+    const cached = this.idIndex.get(id);
+    if (cached !== undefined) return cached;
+    await this.rebuildIdIndex();
+    return this.idIndex.get(id);
   }
 
   async findBriefFile(
@@ -163,6 +234,11 @@ export class FsBriefStore implements BriefStorePort {
     const content = serializeBrief(filePath, brief);
     await writeFile(filePath, content, { encoding: "utf8", flag: "wx" });
     const revision = hashBytes(Buffer.from(content, "utf8"));
+    // Record the mapping this write just created. The index is a positive
+    // cache with a scan on every miss, so an id it has never seen would be
+    // found by the next scan anyway; recording it here is what makes the read
+    // that FOLLOWS a Save a hit instead of a full re-read of the root.
+    this.idIndex.set(brief.id, `${brief.id}.yaml`);
     return { campaignId: brief.id, file: `${brief.id}.yaml`, brief, revision };
   }
 
@@ -188,6 +264,13 @@ export class FsBriefStore implements BriefStorePort {
     if (isReservedCampaignId(slug)) {
       throw new Error(`"${slug}" is reserved; choose another campaign id.`);
     }
+    // The EEXIST decision below is made from `findBriefFileById`, so this
+    // method re-derives what the root holds before it decides. A stale entry —
+    // a brief file removed outside this store, since nothing here ever unlinks
+    // one — would otherwise refuse a slug that is genuinely free, and the
+    // refusal would be permanent. Cheap here: one reservation per campaign, on
+    // a path that is not a read.
+    this.idIndex.clear();
     // "Taken" is a file NAMED after the slug (`findBriefFile`) OR an existing
     // brief whose `id` IS the slug but lives in a differently named file
     // (`findBriefFileById`, an id-parsed lookup over `listBriefs()` — the
@@ -377,6 +460,15 @@ export class FsBriefStore implements BriefStorePort {
    * touched, so a release can never be tricked into deleting through it.
    */
   async releaseCampaign(slug: string): Promise<boolean> {
+    // The one method whose first act is a DECISION about what this root holds,
+    // so it re-derives that rather than deciding from a claim the index has not
+    // re-checked. The failure this prevents is a leak rather than a wrong
+    // answer: a brief file removed outside this store (another process, an
+    // operator's `rm` — nothing in this file ever unlinks one) leaves a stale
+    // entry, that entry makes the guard below report "holds a brief file", and
+    // the reservation is refused FOREVER, because no other method invalidates
+    // it. Once per failed create, never on a read.
+    this.idIndex.clear();
     if (await this.findBriefFileById(slug)) return false;
     if (await this.isCampaignDirUnsafe(slug)) return false;
     const dirPath = resolveConfined(this.dir, slug);
@@ -471,11 +563,26 @@ export class FsBriefStore implements BriefStorePort {
       throw error;
     }
     const revision = hashBytes(Buffer.from(content, "utf8"));
+    // The mapping is UNCHANGED by this write, and that is the point: the rename
+    // above replaces the brief's own bytes through a temp file and keeps the
+    // name, so `brief.id` still resolves to `file`. Re-asserted rather than
+    // cleared, because clearing here would send the read after every autosave
+    // PUT back to a full scan of the root — the lane would have made the
+    // editor's own hot path into the thing it set out to measure. The
+    // revision is deliberately not recorded: it is hashed from the bytes above,
+    // never from the index, so `expectedRevision` still compares live data.
+    this.idIndex.set(brief.id, file);
     return { campaignId: brief.id, file: basename(filePath), brief, revision };
   }
 
   async replaceBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
     assertNoTeam(options?.teamId);
+    // No index call of its own, and none is owed: this method's only two
+    // successful outcomes are `rewriteBrief`'s and `createBrief`'s below, and
+    // each of those re-asserts the mapping it wrote. Every other path here
+    // propagates without a write — the symlink refusal, `rewriteBrief`'s
+    // ECONFLICT, a `createBrief` EEXIST — so on those the mapping this method
+    // read is still the mapping on disk.
     const file = await this.findBriefFileById(brief.id);
     const candidate = resolveConfined(this.dir, file ?? `${brief.id}.yaml`);
     try {

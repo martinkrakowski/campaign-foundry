@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "lane": "HX7-fs-id-index",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    this.idIndex.clear();\n    if (await this.findBriefFileById(slug)) return false;",
+      "after": "    if (await this.findBriefFileById(slug)) return false;",
+      "because": "dropping the index clear makes releaseCampaign's 'holds no brief file' guard read the cache instead of the disk, so a brief file removed outside this store leaves a stale entry that refuses the release FOREVER — nothing else in the class invalidates it, and the campaign's reservation directory leaks with it. The test removes the brief file with unlinkSync (nothing in this store ever unlinks one) and then expects the release to succeed and the lookup to miss",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a release re-derives the root"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    this.idIndex.clear();\n    // \"Taken\" is a file NAMED after the slug (`findBriefFile`) OR an existing",
+      "after": "    // \"Taken\" is a file NAMED after the slug (`findBriefFile`) OR an existing",
+      "because": "the same stale entry, met by createCampaign's taken-check: with the cache answering, a slug whose brief file was removed outside this store is refused with EEXIST over a reservation that is genuinely free, and the slug is unusable for good. This is the other of the two methods whose first act is a decision about the root",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "createCampaign re-derives the root too"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    if (cached !== undefined) return cached;\n    await this.rebuildIdIndex();\n    return this.idIndex.get(id);",
+      "after": "    if (cached !== undefined) return cached;\n    return this.idIndex.get(id);",
+      "because": "dropping the scan-on-miss turns a positive-only cache into an authoritative one: a miss is answered from the map instead of the disk, so a brief another FsBriefStore — or another process, or an operator — put in this root is invisible to this instance for the life of the process. The test warms one instance's index and then asks a SECOND FsBriefStore over the same root, which is exactly that case",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a second store over the same root sees a campaign the first one created"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

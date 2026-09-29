@@ -79,7 +79,10 @@ function percentile(ascending: readonly number[], p: number): number {
 }
 
 function ms(value: number): string {
-  return value.toFixed(3).padStart(9);
+  // Four decimals: a hit served from the index is a Map read, and at three it
+  // prints as a flat 0.000 — which reads as "not measured" rather than as the
+  // sub-microsecond answer it is.
+  return value.toFixed(4).padStart(10);
 }
 
 /**
@@ -148,10 +151,12 @@ async function main(): Promise<void> {
     const hit = await measure(store, hitId, "hit", (file) => file === `${hitId}.yaml`);
     await measure(store, missId, "miss", (file) => file === undefined);
 
+    // The comparison the row turned on, reported as a measurement and not as
+    // a verdict: this script is re-run after the index exists, where "no index
+    // is needed" would be a conclusion about code that is not in front of the
+    // reader. What each branch decided at the time is in this file's header.
     console.log(
-      `  decision: hit median ${hit.median.toFixed(3)} ms vs the ${THRESHOLD_MS} ms threshold — ${
-        hit.median > THRESHOLD_MS ? "OVER, an id index is justified" : "under, no index is needed"
-      }`,
+      `  vs the row's ${THRESHOLD_MS} ms threshold: hit median ${hit.median.toFixed(4)} ms (${hit.median > THRESHOLD_MS ? "OVER" : "under"})`,
     );
   } finally {
     await rm(dir, { recursive: true, force: true });

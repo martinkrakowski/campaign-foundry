@@ -8,6 +8,7 @@ import {
   symlinkSync,
   rmSync,
   readFileSync,
+  unlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -936,6 +937,94 @@ describe("FsBriefStore", () => {
 
       const missing = await store.resolveCampaign("non-existent");
       expect(missing).toBeUndefined();
+    });
+  });
+
+  /**
+   * The id -> file index behind L1 (`scripts/bench-fs-id-lookup.ts` measured a
+   * 199-202 ms median over 1,000 campaigns, against a 5 ms threshold). The
+   * contract these pin is not "it is fast" — it is which answers the cache is
+   * allowed to give on its own, and which it must re-derive: a HIT is served
+   * from the map, a MISS is never cached, and the two methods whose FIRST act
+   * is a decision about the root (`createCampaign`'s taken-check and
+   * `releaseCampaign`'s "holds no brief file" guard) re-derive it first.
+   */
+  describe("the id index (L1)", () => {
+    test("a create is found by the very next lookup, with the index already warm", async () => {
+      // Warmed on a MISS first, which is the state a stale cache is in: without
+      // this the lookup would be answered by a scan whether or not the create
+      // recorded anything.
+      expect(await store.findBriefFileById("test-camp")).toBeUndefined();
+      await store.createBrief(minimalBrief);
+      expect(await store.findBriefFileById("test-camp")).toBe("test-camp.yaml");
+      expect(await store.findBriefById("test-camp")).toMatchObject({ file: "test-camp.yaml" });
+    });
+
+    test("a rewrite that changes nothing about the id keeps resolving to the same file", async () => {
+      await store.createBrief(minimalBrief);
+      expect(await store.findBriefFileById("test-camp")).toBe("test-camp.yaml");
+
+      const rewritten = await store.rewriteBrief({
+        ...minimalBrief,
+        campaignMessage: "Second pass",
+      });
+      expect(rewritten.file).toBe("test-camp.yaml");
+      expect(await store.findBriefFileById("test-camp")).toBe("test-camp.yaml");
+      // The hit is real data, not a cached name: the rewrite is visible through
+      // it, and the revision is hashed from the bytes rather than the index.
+      expect((await store.readBrief("test-camp")).campaignMessage).toBe("Second pass");
+      expect(await store.getRevision("test-camp")).toBe(rewritten.revision);
+    });
+
+    test("a second store over the same root sees a campaign the first one created", async () => {
+      const first = new FsBriefStore(dir);
+      await first.createCampaign("shared");
+      await first.createBrief({ ...minimalBrief, id: "shared" });
+      expect(await first.findBriefFileById("shared")).toBe("shared.yaml");
+
+      // The first instance's index is warm; this one's is empty, so this is the
+      // lookup that must fall back to a scan. A cache that answered a miss from
+      // its own map would report the campaign as absent — the index hiding
+      // another writer's brief is the failure the scan-on-miss exists to stop.
+      const second = new FsBriefStore(dir);
+      expect(await second.findBriefFileById("shared")).toBe("shared.yaml");
+      expect(await second.findBriefById("shared")).toMatchObject({ campaignId: "shared" });
+    });
+
+    test("a release re-derives the root, so a brief file removed out of band cannot leak the reservation", async () => {
+      await store.createCampaign("gone");
+      await store.createBrief({ ...minimalBrief, id: "gone" });
+      expect(await store.findBriefFileById("gone")).toBe("gone.yaml");
+
+      // Nothing in this store ever unlinks a brief file, so this is the only way
+      // the index can go stale — another process, or an operator's `rm`. From
+      // here it is wrong in the one direction a positive cache can be: a HIT for
+      // something that is gone.
+      unlinkSync(join(dir, "gone.yaml"));
+
+      expect(await store.releaseCampaign("gone")).toBe(true);
+      expect(existsSync(join(dir, "gone"))).toBe(false);
+      expect(await store.findBriefFileById("gone")).toBeUndefined();
+    });
+
+    test("createCampaign re-derives the root too, so a slug whose brief file was removed is reservable again", async () => {
+      await store.createBrief({ ...minimalBrief, id: "reusable" });
+      expect(await store.findBriefFileById("reusable")).toBe("reusable.yaml");
+      unlinkSync(join(dir, "reusable.yaml"));
+
+      // The same stale entry, met by the other decision this store makes from
+      // the index. Answered from the map, this throws EEXIST over a slug that
+      // is free, and the slug stays unusable for good.
+      await expect(store.createCampaign("reusable")).resolves.toEqual({
+        campaignId: "reusable",
+        slug: "reusable",
+      });
+    });
+
+    test("two files declaring one id resolve to the first by name, warm or cold alike", async () => {
+      writeFileSync(join(dir, "a-dup.yaml"), campYaml.replace("id: camp", "id: dup"));
+      writeFileSync(join(dir, "b-dup.yaml"), campYaml.replace("id: camp", "id: dup"));
+      expect(await store.findBriefFileById("dup")).toBe("a-dup.yaml");
     });
   });
 });
