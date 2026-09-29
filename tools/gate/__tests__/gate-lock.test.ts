@@ -616,7 +616,12 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
           "--",
           "sh",
           "-c",
-          `printf '%s\\n' "$$" > "${commandPidFile}"; exec sleep 30`,
+          // The sleep's own stdio is dropped so that a signal this wrapper
+          // FORWARDED closes the pipe with it. A sleep that survives holds
+          // `run`'s stdout open, and the test's result would then arrive when
+          // the sleep did — half a minute later, as a timeout naming the wrong
+          // thing, instead of as the command that outlived its wrapper.
+          `printf '%s\\n' "$$" > "${commandPidFile}"; exec sleep 30 >/dev/null 2>&1`,
         ],
         { CF_GATE_HEARTBEAT_SECONDS: "1" },
         shell,
