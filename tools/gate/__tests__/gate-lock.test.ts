@@ -618,7 +618,14 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
       ],
       { CF_GATE_HEARTBEAT_SECONDS: "1" },
     );
-    expect(result.status).toBe(0);
+    // stderr is part of the assertion, not decoration: a run whose beat moved
+    // has nothing to report, so anything on stderr here is the reason the beat
+    // did not — the lock-lost message, a failed release — and it belongs in
+    // the failure a reader has to diagnose.
+    expect({ status: result.status, stderr: result.stderr }).toEqual({
+      status: 0,
+      stderr: "",
+    });
     expect(result.stdout).toContain("heartbeat pid");
   }, 20_000);
 
@@ -810,6 +817,48 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     expect(result.stderr).toContain("release refused");
     expect(lockFile(dir, "owner").trim()).toBe("lane-c");
   });
+
+  test("a command that takes the lock away is stopped, not left running without one", async () => {
+    const dir = scratch();
+    // The heartbeat refreshes only a lock that still names this run, so a lock
+    // that names someone else makes the refresh fail — and a failed refresh is
+    // how the loop learns the lock is gone, since the foreground is blocked in
+    // `wait` and cannot see it. The command must be stopped there and then: it
+    // is running against a lock this run no longer holds, and letting it
+    // finish is the failure the heartbeat exists to prevent.
+    const completed = join(dir, "completed");
+    const commandPidFile = join(dir, "command.pid");
+    const replace = [
+      'rm -rf "$TMPDIR/cf-gate.lock"',
+      'mkdir "$TMPDIR/cf-gate.lock"',
+      'printf "lane-c\\n" > "$TMPDIR/cf-gate.lock/owner"',
+      `printf "${process.pid}\\n" > "$TMPDIR/cf-gate.lock/pid"`,
+      'printf "$(date +%s)\\n" > "$TMPDIR/cf-gate.lock/started"',
+      'printf "$(date +%s)\\n" > "$TMPDIR/cf-gate.lock/beat"',
+      `printf '%s\\n' "$$" > "${commandPidFile}"`,
+      // `wait`, not a foreground sleep, so the shell answers a TERM at once
+      // instead of deferring it for the length of the sleep; the sleep's own
+      // stdio is dropped so the orphan it leaves cannot hold this test's pipe.
+      "sleep 8 >/dev/null 2>&1 & wait",
+      `touch "${completed}"`,
+    ].join("; ");
+    const result = await runLockAsyncIn(dir, ["run", "lane-a", "--", "sh", "-c", replace], {
+      CF_GATE_HEARTBEAT_SECONDS: "1",
+    });
+    expect(result.status).not.toBe(0);
+    // It says so, and says why the command ended: a 143 on its own is
+    // indistinguishable from a caller that signalled the run.
+    expect(result.stderr).toContain("the lock was lost while the command ran");
+    const commandPid = Number(readFileSync(commandPidFile, "utf8").trim());
+    // Stopped, not merely reported on: a command that reaches its own end
+    // leaves the marker it wrote on the way out.
+    expect(isAlive(commandPid)).toBe(false);
+    expect(existsSync(completed)).toBe(false);
+    // The replacement is still the replacement's: this run never deletes a
+    // lock it does not hold, however it ends.
+    expect(lockFile(dir, "owner").trim()).toBe("lane-c");
+    expect(existsSync(lockDir(dir))).toBe(true);
+  }, 20_000);
 
   test("a lock deleted under it fails the run too, though the release has nothing to remove", () => {
     const dir = scratch();

@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "scripts/gate-lock.sh",
-      "before": "    kill -TERM \"$cmd_pid\" 2>/dev/null",
-      "after": "    [ \"$1\" = INT ] && kill -TERM \"$cmd_pid\" 2>/dev/null",
-      "because": "dropping the forwarding of TERM leaves the command running when the holder is signalled: `run` exits 143, releases the lock and reports the heartbeat stopped, and the `sleep 30` it wrapped is still alive — the lock the next lane takes is a lock a live command is still running against. INT is kept, so only the TERM path is broken and the TERM test is what has to catch it",
+      "before": "  if [ -n \"$cmd_pid\" ]; then\n    kill -TERM \"$cmd_pid\" 2>/dev/null",
+      "after": "  if [ -n \"$cmd_pid\" ]; then\n    [ \"$1\" = INT ] && kill -TERM \"$cmd_pid\" 2>/dev/null",
+      "because": "dropping the forwarding of TERM leaves the command running when the holder is signalled: `run` exits 143, releases the lock and reports the heartbeat stopped, and the `sleep 30` it wrapped is still alive — the lock the next lane takes is a lock a live command is still running against. INT is kept, so only the TERM path is broken and the TERM test is what has to catch it. The anchor is the two lines of forward_signal, not the bare kill: the heartbeat watcher stops a command on the same signal, and a one-line anchor would match both",
       "command": [
         "yarn",
         "vitest",

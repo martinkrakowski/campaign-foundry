@@ -334,6 +334,9 @@ run_cleanup() {
     wait "$run_hb_pid" 2>/dev/null
     run_hb_pid=""
   fi
+  if [ -n "$HB_FAILED" ]; then
+    rm -f "$HB_FAILED" 2>/dev/null
+  fi
   held=$lock_held
   lock_held=0
   # Drop the lock whenever this run may have taken one, NOT only when it knows
@@ -406,6 +409,10 @@ run_locked() {
   cmd_pid=""
   lock_held=0
   lock_lost=0
+  # Empty until the heartbeat has a marker to write; `set -u` is on, and the
+  # cleanup below reads it on every exit, including the ones that happen before
+  # the heartbeat exists.
+  HB_FAILED=""
   trap run_cleanup EXIT
   trap 'forward_signal INT 130' INT
   trap 'forward_signal TERM 143' TERM
@@ -419,6 +426,16 @@ run_locked() {
     while [ -f "$CF_GATE_TEST_PAUSE_AFTER_ACQUIRE" ]; do sleep 1; done
   fi
   lock_held=1
+  # Where the heartbeat records that the lock went, for the foreground to find.
+  # A dead loop is a zombie its own parent's kill -0 reports as alive, so the
+  # marker is the only way the foreground learns it stopped (as in gate.sh).
+  HB_FAILED="${TMPDIR:-/tmp}/cf-gate.hbfailed.$$"
+  # The command starts BEFORE its heartbeat, which is the order that lets the
+  # loop stop it: the loop needs the command's pid, and the beat is already
+  # fresh from the acquire, so nothing is unprotected by the milliseconds this
+  # costs.
+  "$@" &
+  cmd_pid=$!
   (
     trap - INT TERM EXIT
     while :; do
@@ -427,16 +444,33 @@ run_locked() {
       # that still names this pid ($$ is this shell's even inside the subshell),
       # so a lock reclaimed under us is never refreshed on its way past, and
       # the loop dies rather than keeping someone else's lock alive.
-      CF_GATE_CALLER_PID=$$ sh "$HERE/gate-lock.sh" heartbeat >/dev/null 2>&1 || exit 1
+      if ! CF_GATE_CALLER_PID=$$ sh "$HERE/gate-lock.sh" heartbeat >/dev/null 2>&1; then
+        # A failed refresh means the lock is GONE or is someone else's — the
+        # refresh is ownership-checked, so it fails after a reclaim, never
+        # before one. Either way the command is now running with no lock behind
+        # it, and the foreground is blocked in `wait` where it cannot see any of
+        # this. So the loop stops the command itself: leaving it running is
+        # exactly what the heartbeat exists to prevent, and a stopped command
+        # plus a loud failure is a better answer than a protected-looking run
+        # that is not protected.
+        printf '%s\n' "lost" > "$HB_FAILED" 2>/dev/null
+        kill -TERM "$cmd_pid" 2>/dev/null
+        exit 1
+      fi
     done
   ) >/dev/null 2>&1 &
   run_hb_pid=$!
   printf '%s\n' "gate-lock: heartbeat pid $run_hb_pid (every ${HB_SECONDS}s while $lane runs)"
-  "$@" &
-  cmd_pid=$!
   wait "$cmd_pid"
   status=$?
   cmd_pid=""
+  # Did the loop have to stop the command? The run is already failing on the
+  # lost lock below; this says why the command ended when it did, which is not
+  # something a caller can otherwise infer from a 143.
+  if [ -f "$HB_FAILED" ]; then
+    printf '%s\n' "gate-lock: FAILED — the lock was lost while the command ran, and the command was stopped" >&2
+    lock_lost=1
+  fi
   # Still ours? A lock that is gone or someone else's means the command ran
   # unprotected, which release alone would not say: with the lock simply
   # deleted, release reports "nothing to release" and exits 0.
