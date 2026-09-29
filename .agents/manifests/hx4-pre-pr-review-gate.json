@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "HX4-pre-pr-review-gate",
+  "mutations": [
+    {
+      "file": "tools/plan-review/lib/pre-pr.ts",
+      "before": "review.event.detail?.verdict === \"changes-required\" &&",
+      "after": "review.event.detail?.verdict === \"changes-required-ignored\" &&",
+      "because": "the mutation makes prePrReviewRefusal ignore a changes-required verdict entirely, so a high-risk lane whose pre-PR review demanded changes — with no later remediation — would pass the gate silently",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/plan-review/lib/__tests__/pre-pr.test.ts",
+        "-t",
+        "changes-required with no later remediate settled: refused"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
