@@ -96,6 +96,14 @@ function declaredBriefId(filePath: string, raw: string): string | undefined {
   }
 }
 
+/** What `rewriteBrief` patches, and the comparison it makes on the way there. */
+type WritableTarget = {
+  file: string;
+  filePath: string;
+  raw: Buffer;
+  declaredId: string | undefined;
+};
+
 /**
  * Filesystem implementation of BriefStorePort.
  * Stores briefs under `<projectRoot>/briefs/*.yaml` (or .yml / .json).
@@ -156,7 +164,8 @@ export class FsBriefStore implements BriefStorePort {
    * does not appear anywhere in this file. `createBrief` is the one in-place
    * writer, and it only ever records the name a write just created. Each
    * rebuild also RETURNS the map it built so its caller answers from that scan
-   * rather than from the field — see `rebuildIdIndex`.
+   * rather than from the field, and every call site does — see
+   * `rebuildIdIndex`.
    */
   private idIndex: Map<string, string> = new Map();
 
@@ -668,12 +677,7 @@ export class FsBriefStore implements BriefStorePort {
    * bytes declare — the comparison `findBriefFileById`'s `lstat` cannot make
    * for the caller, taken here because the write needs the bytes regardless.
    */
-  private async readWritableTarget(file: string): Promise<{
-    file: string;
-    filePath: string;
-    raw: Buffer;
-    declaredId: string | undefined;
-  }> {
+  private async readWritableTarget(file: string): Promise<WritableTarget> {
     const filePath = resolveConfined(this.dir, file);
     const raw = await readFile(filePath);
     return { file, filePath, raw, declaredId: declaredBriefId(filePath, raw.toString("utf8")) };
@@ -690,7 +694,14 @@ export class FsBriefStore implements BriefStorePort {
     assertNoTeam(options?.teamId);
     const file = await this.findBriefFileById(brief.id);
     let target = file === undefined ? undefined : await this.readWritableTarget(file);
-    if (target !== undefined && target.declaredId !== undefined && target.declaredId !== brief.id) {
+    // Two answers, and the arm between them is the whole of it. Declaring no id
+    // — bytes that stopped parsing, a document that is not a mapping, an `id`
+    // that is not a string — is a file this write still owns, and `patchBriefYaml`
+    // refuses it by name (R4.1). Declaring a DIFFERENT id is another campaign's
+    // file, and `undefined` is not an answer that covers both. One predicate for
+    // the two, so the second comparison below cannot drift from the first.
+    const misdeclares = (t: WritableTarget) => t.declaredId !== undefined && t.declaredId !== brief.id;
+    if (target !== undefined && misdeclares(target)) {
       // A hit the hit's own `lstat` cannot disprove, and the one place it can
       // still do damage rather than merely answer wrongly: the file is still
       // there, still a regular file, and no longer declares the id it was
@@ -700,9 +711,20 @@ export class FsBriefStore implements BriefStorePort {
       // bytes are in hand for the write anyway, so the declared id is free to
       // compare, and a disagreement re-derives exactly as `findBriefById` does:
       // the file that declares the id, or ENOENT when none of them does.
-      await this.rebuildIdIndex();
-      const replacement = this.idIndex.get(brief.id);
+      //
+      // From the map the scan RETURNED, never from the field it published.
+      // Publishing is an assignment, so a rebuild that scanned an OLDER view of
+      // the root can land after this one; reading the field back hands the
+      // redirect whichever map won that race, which under the interleaving the
+      // suite pins can be the very name this branch exists to reject.
+      const replacement = (await this.rebuildIdIndex()).get(brief.id);
       target = replacement === undefined ? undefined : await this.readWritableTarget(replacement);
+      // The scan maps an id to a file that DECLARES it, which is why the check
+      // above was enough on paper. It is not enough here: the file the scan read
+      // is a second read away from the patch, so a writer that moves the id on
+      // in between is a clobber with the re-derivation already done. Same
+      // comparison, on the bytes this write is about to patch.
+      if (target !== undefined && misdeclares(target)) target = undefined;
     }
     if (target === undefined) {
       // Check if there is an inode (e.g. symlink) at canonical path

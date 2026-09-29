@@ -1407,6 +1407,41 @@ describe("FsBriefStore", () => {
       expect(readFileSync(join(dir, "rotten.yaml"), "utf8")).toBe(corrupt);
     });
 
+    // The redirect's own half of that comparison, and the last call site still
+    // reading the field it should have answered from. The scan maps an id to a
+    // file that DECLARES it, so on paper the check before it is enough — and
+    // the file it picked is a second read away from the patch, so a writer that
+    // moves the id on in between is overwritten exactly as if the redirect had
+    // never re-derivationed. The comparison belongs on the bytes the write is
+    // about to patch, which is the only place the gap is visible.
+    test("a rewrite refuses a replacement that stopped declaring the id while the scan ran", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      // A HIT, so the index holds the name the write must NOT target.
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      const stolen = campYaml.replace("id: camp", "id: stolen");
+      const other = campYaml.replace("id: camp", "id: other");
+      writeFileSync(join(dir, "moved.yaml"), stolen);
+      writeFileSync(join(dir, "z-moved.yaml"), campYaml.replace("id: camp", "id: moved"));
+
+      // The window, made deterministic: `z-moved.yaml` declares `moved` while
+      // the scan reads it and `other` by the time the patch reads it. Nothing
+      // in the filesystem produces that on demand — the interleaving test above
+      // is the one for the scan-on-miss side of the same race.
+      const real = store.listBriefs.bind(store);
+      vi.spyOn(store, "listBriefs").mockImplementation(async () => {
+        const listed = await real();
+        writeFileSync(join(dir, "z-moved.yaml"), other);
+        return listed;
+      });
+
+      await expect(
+        store.rewriteBrief({ ...minimalBrief, id: "moved", campaignMessage: "clobbered" }),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(readFileSync(join(dir, "z-moved.yaml"), "utf8")).toBe(other);
+      expect(readFileSync(join(dir, "moved.yaml"), "utf8")).toBe(stolen);
+    });
+
     // A root this store cannot stat is a storage failure, not an absent
     // campaign: answering EIO as "no such campaign" would turn an outage into
     // a 404 on every route that resolves a campaign first.
