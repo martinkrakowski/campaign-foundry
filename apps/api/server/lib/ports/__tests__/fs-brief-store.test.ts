@@ -870,6 +870,21 @@ describe("FsBriefStore", () => {
     },
   );
 
+  // D181 fix round 2 (Fable, Bug 2): a bare `briefs/<id>/` directory with no
+  // campaign.json and no saved version — exactly what `FsPoolStore.writePool`
+  // creates for ANY id, including a reserved one, via the inline-brief path
+  // of POST /campaigns/pools/copy — must NOT grandfather a reserved mint.
+  // `hasGenuineReservation` (unlike the plain `campaignMeta` this replaced)
+  // requires real evidence: a saved version or a readable campaign.json.
+  test("createBrief still refuses a reserved id behind only a bare directory (no campaign.json, no version)", async () => {
+    const bareDir = join(dir, "templates");
+    mkdirSync(bareDir, { recursive: true });
+    writeFileSync(join(bareDir, "pools.json"), "{}");
+    await expect(
+      store.createBrief({ ...minimalBrief, id: "templates" }),
+    ).rejects.toThrow(`"templates" is reserved; choose another campaign id.`);
+  });
+
   test.each(["cache", "jobs", "orgs", "packages"] as const)(
     "replaceBrief on a non-existent brief refuses reserved campaign id %s",
     async (id) => {
