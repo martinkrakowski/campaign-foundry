@@ -462,6 +462,40 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
           }
         });
 
+        // qodo PRRT_kwDOSzP1zc6m7iqy (High, security): `resolveCampaignRef`
+        // and `campaignTeam` are two separate reads — if the source vanishes
+        // or becomes hidden between them (a race, or another request), the
+        // second read answers `undefined`. That must never fall through to
+        // "no team" (org-wide); it must refuse, same as if the ref had never
+        // resolved at all.
+        test("teamOf's team vanishing between resolve and the team lookup (a race) answers 404, never org-wide", async () => {
+          const harness = await setup();
+          const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+          try {
+            await pgHarness.db.query(
+              `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+              ["t1", "Team One", "local"],
+            );
+            const source = await mount(t1Member).create(
+              createReq({ name: "Racing Source", teamId: "t1" }),
+            );
+            const { slug: sourceSlug } = (await source.json()) as { slug: string };
+            const spy = vi
+              .spyOn(getBriefStore(LOCAL_TENANT), "campaignTeam")
+              .mockResolvedValueOnce(undefined);
+            const res = await mount().create(createReq({ name: "Copy", teamOf: sourceSlug }));
+            expect(res.status).toBe(404);
+            expect(await res.json()).toEqual({ error: `Brief "${sourceSlug}" not found.` });
+            spy.mockRestore();
+            const { rows } = await pgHarness.db.query(
+              `select 1 from campaign where org_id = 'local' and slug = 'copy'`,
+            );
+            expect(rows).toHaveLength(0);
+          } finally {
+            await harness.cleanup();
+          }
+        });
+
         test("an unknown teamOf answers 404 and mints nothing", async () => {
           const harness = await setup();
           const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;

@@ -221,6 +221,15 @@ export default defineEventHandler(async (event) => {
         throw error;
       }
       teamOfTeamId = await store.campaignTeam(teamOfSlug);
+      if (teamOfTeamId === undefined) {
+        // The source vanished or became hidden between resolveCampaignRef
+        // and this lookup (qodo PRRT_kwDOSzP1zc6m7iqy) — refuse rather than
+        // let `undefined` fall through to `effectiveTeamId` below, which
+        // would silently mint an ORG-WIDE copy of a source the caller can
+        // no longer prove is theirs to inherit from.
+        setResponseStatus(event, 404);
+        return { error: `Brief "${teamOf}" not found.` };
+      }
     }
     const effectiveTeamId = teamId !== undefined ? teamId : teamOfTeamId;
     try {
