@@ -7,11 +7,15 @@ fail with a misleading error rather than "no such model".
 
 **2026-09-29.**
 
-- **Implementers:**
-  - `opencode openrouter/z-ai/glm-5.3-flash --variant max` is the paid default (graded below).
-  - `agy gemini-3.8-flash-high` is available again (its quota reset 2026-09-29; on trial on HX5).
-  - Sonnet 5 (subagent) takes high-risk lanes and fix rounds.
-  - `space-bunny-alpha` is a trial seat only.
+- **Implementers (owner, 2026-09-29: "Let's run space bunny as the primary implementor"):**
+  - `openrouter/stealth/space-bunny-alpha` is the PRIMARY implementer and remediates its own lanes.
+  - `openrouter/z-ai/glm-5.3-flash --variant max` is the fallback (an outage or a failed dispatch; one attempt per wave).
+  - Sonnet 5 (subagent) takes high-risk lanes and a fix round that does not converge.
+  - `agy` is NOT dependable here: its daily quota is shared with the owner's other projects, and HX5's dispatch hit `429 … resets in 31h` at its first turn.
+- **opencode runs attach to the owner's shared server:**
+  - `opencode run --attach http://127.0.0.1:4096 --dir <ABS worktree> --auto --format json -m <model> "<prompt>" < /dev/null`.
+  - The owner runs `opencode serve --port 4096` for all four of their projects. Check `curl -s -o /dev/null -w %{http_code} http://127.0.0.1:4096/doc` answers 200 first. If the server is down, ask the owner to restart it; never start one yourself.
+  - Attached runs CAN run in parallel. A 2026-09-29 probe ran two at once beside a standalone run: all exited 0, and each wrote only its own `--dir`. The old one-at-a-time rule applied only to standalone runs, each of which started its own embedded server.
 - **Reviewer (grok):** `grok-4.7` only. **Never `grok-4.7-build-fast`**, which consumes 2× the
   tokens (owner, 2026-09-28). Adopted 2026-09-28 for three jobs:
   - independent plan review of lane rows before dispatch (first run: the PT-5c2–PT-5e rows);
