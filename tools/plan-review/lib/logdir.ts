@@ -1,12 +1,22 @@
-/** The two environment variables wave-event.sh's default resolution reads. */
+/** The environment variables wave-event.sh's own resolution reads, in the order it reads them. */
 export interface LogDirEnv {
+  readonly LOGDIR?: string;
   readonly HOME?: string;
   readonly WAVE_LOG_ROOT?: string;
 }
 
 /**
- * The default log directory for a wave id, exactly as wave-event.sh:7-8 and
- * :63-83 resolve it when no `--logdir`/`<logdir>` is given: `root` is
+ * The default log directory for a wave id, exactly as wave-event.sh
+ * resolves it when no `--logdir` flag is given.
+ *
+ * wave-event.sh:41 reads `$LOGDIR` FIRST (`LOGDIR="${LOGDIR:-}"`) — before
+ * any of the candidate search below — and wave-event.sh:63 only runs that
+ * search `if [ -z "$LOGDIR" ]`. So a caller's `$LOGDIR` (an operator's
+ * standing override, or a wrapper script's own) must win outright here too,
+ * with no `exists` check at all: an env var that is set and non-empty names
+ * the directory, full stop.
+ *
+ * Only once `$LOGDIR` is unset or empty does the search run: `root` is
  * `$WAVE_LOG_ROOT`, or `$HOME/.waves` (`/tmp/.waves` when `$HOME` is unset —
  * `${HOME:-/tmp}/.waves`). Then, in order: `<root>/wave-<wave>`,
  * `<root>/wave<wave>`, `<root>/<wave>` (only when `wave` already starts with
@@ -24,6 +34,10 @@ export function defaultLogDir(
   env: LogDirEnv,
   exists: (path: string) => boolean,
 ): string {
+  if (env.LOGDIR !== undefined && env.LOGDIR !== "") {
+    return env.LOGDIR;
+  }
+
   const defaultRoot = `${env.HOME ?? "/tmp"}/.waves`;
   const root = env.WAVE_LOG_ROOT ?? defaultRoot;
   const startsWithWave = wave.startsWith("wave");

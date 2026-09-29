@@ -79,4 +79,36 @@ describe("defaultLogDir", () => {
   test("nothing exists and the wave id does not start with 'wave': default is root/wave-<wave>", () => {
     expect(defaultLogDir("w06", { HOME: "/h" }, NONE)).toBe("/h/.waves/wave-w06");
   });
+
+  test("LOGDIR wins outright — wave-event.sh:41 reads it before any candidate search", () => {
+    expect(defaultLogDir("w06", { LOGDIR: "/custom/wave-log" }, NONE)).toBe("/custom/wave-log");
+  });
+
+  test("LOGDIR wins even over WAVE_LOG_ROOT and an existing candidate", () => {
+    const exists = existsIn(["/h/.waves/wave-w06"]);
+    expect(
+      defaultLogDir(
+        "w06",
+        { LOGDIR: "/custom/wave-log", HOME: "/h", WAVE_LOG_ROOT: "/srv/waves" },
+        exists,
+      ),
+    ).toBe("/custom/wave-log");
+  });
+
+  test("LOGDIR set to the empty string is treated as unset — the candidate search still runs", () => {
+    // wave-event.sh: LOGDIR="${LOGDIR:-}" then `[ -z "$LOGDIR" ]` — POSIX
+    // ${VAR:-} substitutes on empty too, so an empty LOGDIR is unset in
+    // every way wave-event.sh can tell.
+    expect(defaultLogDir("w06", { LOGDIR: "", HOME: "/h" }, NONE)).toBe("/h/.waves/wave-w06");
+  });
+
+  test("LOGDIR never triggers an exists() call — it is not a candidate to verify", () => {
+    let called = false;
+    const exists = (): boolean => {
+      called = true;
+      return false;
+    };
+    defaultLogDir("w06", { LOGDIR: "/custom/wave-log" }, exists);
+    expect(called).toBe(false);
+  });
 });
