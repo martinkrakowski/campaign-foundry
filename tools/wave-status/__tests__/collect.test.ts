@@ -2332,7 +2332,7 @@ describe("collect — D184's pre-PR-review gate (risk)", () => {
     expect(laneRow(status, "HX1")?.derived.risk).toBeUndefined();
   });
 
-  test("a lane found in no plan counts as normal and never flags", async () => {
+  test("a lane found in no plan is silent on the status page — never flagged (BUG3: undefined, not normal)", async () => {
     const status = await laneAt(dispatchLine("R", "UNKNOWN-LANE"), ghOpenPr("unknown-lane"));
     expect(laneRow(status, "UNKNOWN-LANE")?.derived.risk).toBeUndefined();
   });
@@ -2378,6 +2378,38 @@ describe("collect — D184's pre-PR-review gate (risk)", () => {
     const status = await collect(deps, ROOT, "2026-09-28T12:00:00Z");
     expect(laneRow(status, "HX1")?.derived.risk).toBe("high-risk PR open without pre-PR review");
   });
+
+  test("docs/planning is read once per collect() call, not once per lane (NIT 3)", async () => {
+    let readdirCalls = 0;
+    let readFileCalls = 0;
+    const events = dispatchLine("R", "HX1") + dispatchLine("R", "HX4");
+    const base = fakeDeps({
+      dirs: {
+        [ROOT]: ["waveR"],
+        [`${ROOT}/waveR`]: ["events.jsonl"],
+        "docs/planning": ["plan.md"],
+      },
+      files: { [`${ROOT}/waveR/events.jsonl`]: events, "docs/planning/plan.md": RISK_PLAN },
+      gh: async () => "[]",
+    });
+    const deps: CollectDeps = {
+      ...base,
+      readdir: async (dir) => {
+        if (dir === "docs/planning") readdirCalls += 1;
+        return base.readdir(dir);
+      },
+      readFile: async (path) => {
+        if (path === "docs/planning/plan.md") readFileCalls += 1;
+        return base.readFile(path);
+      },
+    };
+    const status = await collect(deps, ROOT, "2026-09-28T12:00:00Z");
+    // Two lanes (HX1, HX4) both need risk facts from the same plan; the
+    // directory listing and the plan text must each be fetched exactly once.
+    expect(status.waves[0]?.lanes.length).toBe(2);
+    expect(readdirCalls).toBe(1);
+    expect(readFileCalls).toBe(1);
+  });
 });
 
 describe("laneWaveIn", () => {
@@ -2409,6 +2441,7 @@ describe("riskFor", () => {
     "| Lane | Risk | Delivers |",
     "|---|---|---|",
     "| **HX1** | **high** | Split the reserved list. |",
+    "| **HX4** | normal | Plan rows carry a risk tier. |",
   ].join("\n");
 
   const deps = fakeDeps({
@@ -2428,6 +2461,10 @@ describe("riskFor", () => {
   });
 
   test("a normal-risk lane never even looks at the events", async () => {
-    expect(await riskFor(deps, [], "HX9-unknown")).toEqual({ tier: "normal" });
+    expect(await riskFor(deps, [], "HX4")).toEqual({ tier: "normal" });
+  });
+
+  test("a lane no plan names (BUG3) is undefined — silence, not a normal-risk claim", async () => {
+    expect(await riskFor(deps, [], "HX9-unknown")).toBeUndefined();
   });
 });
