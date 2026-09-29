@@ -76,7 +76,7 @@ import {
   MOTION_HOST_SECTION,
 } from "@/components/campaign/ErrorStrip";
 import { ErrorPill } from "@/components/ui";
-import { useEditorDirty } from "@/lib/editor-dirty-context";
+import { useEditorDirty, useDraftWriteWriter } from "@/lib/editor-dirty-context";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { FloatingBar } from "@/components/shell/FloatingBar";
 import { SectionModeContext } from "@/components/campaign/SectionModeContext";
@@ -487,6 +487,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const router = useRouter();
   const { guardedPush, guardedAction } = useGuardedNavigation();
   const { setDirty } = useEditorDirty();
+  // D185 fix round — this editor instance's own draft-write registration. Not
+  // a pair of shell-wide flags: those are derived from every live writer, and
+  // an editor that shares them with an unmounted one is how a pending write
+  // lost its warning (and how a settled one stole somebody else's).
+  const draftWriteWriter = useDraftWriteWriter();
   const { openCreateDialog } = useCreateCampaign();
   const { setPanels, setTopPanels, setRail } = useEditorPanelPublisher();
   // VE1 — history lives in the hook, never in `EditorState` (R6): `state` is the
@@ -1129,12 +1134,46 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     }
   }, [state, setDirty]);
 
-  // The provider outlives this route, so clear the flag on unmount — otherwise every
-  // later navigation in the shell keeps prompting about a route that is long gone.
-  // Split from the effect above (X32): that effect's deps include `state`, so a bare
-  // `return () => setDirty(false)` there ran this clear on every keystroke too, not
-  // only when the route actually unmounts.
-  useEffect(() => () => setDirty(false), []);
+  /**
+   * D185 — the shell's leave guard (`EditorUnloadGuard`) warns on a dirty editor
+   * OR a draft write that is in flight OR one that failed, so both write states
+   * have to leave this component and land in the context beside `isDirty`.
+   *
+   * They used to leave as two booleans this component assigned directly, which
+   * is what made them wrong the moment a second editor existed: the provider
+   * outlives the route, so a write that settles after the navigation that
+   * unmounted this editor was writing on behalf of whichever editor came
+   * after it. `draftWriteWriter` is this instance's own registration, and the
+   * two booleans the guard reads are the shell's sum over all of them — so an
+   * unmount here can only retire what THIS editor published.
+   *
+   * Nothing is published that the operator cannot see happen: a write that
+   * never dispatched is not pending, and one that landed is not failed. The
+   * writer's counter says both, and says them without a per-render equality
+   * guard — the registry drops a no-op write of an unchanged entry itself.
+   */
+
+  // Clear the dirty flag on unmount — otherwise every later navigation in the
+  // shell keeps prompting about a route that is long gone. Split from the effect
+  // above (X32): that effect's deps include `state`, so a bare `return () =>
+  // setDirty(false)` there ran this clear on every keystroke too, not only when the
+  // route actually unmounts.
+  //
+  // `release()` is NOT the same clear. A recorded failure is the screen's to
+  // lose, and the screen is going away, so that stops being lost work here. A
+  // write still ON THE WIRE is not the screen's: closing the tab during it
+  // abandons the request, and the operator's edits go with it. So the release
+  // drops the failure and leaves the registration standing until the last
+  // queued PUT settles — including one the unmount itself FLUSHES (the effect
+  // below sends the debounced one), which takes a fresh registration out
+  // through `beginWrite` and is the honest answer: it really is still going.
+  useEffect(
+    () => () => {
+      setDirty(false);
+      draftWriteWriter.release();
+    },
+    [draftWriteWriter],
+  );
 
   /**
    * PT-5d item 4 — autosave to the caller's own server draft, debounced to
@@ -1175,9 +1214,56 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * the grok round's revision compare-and-swap, which a same-revision
    * Revert has no stale baseline to lean on).
    */
-  const draftWriteChainRef = useRef<Promise<void>>(Promise.resolve());
-  const enqueueDraftWrite = (write: () => Promise<void>): void => {
-    draftWriteChainRef.current = draftWriteChainRef.current.then(write, write);
+  const draftWriteChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  /**
+   * @param unsavedWork whether this link carries the operator's edits. Only a
+   *   PUT does: a DELETE is a decision ABOUT a draft rather than a copy of the
+   *   edits, and one pending or failed is not something a close can lose — so
+   *   it is serialized on the chain like everything else, and raises nothing
+   *   the guard would warn about. (It used to raise `pending` anyway, which
+   *   kept a clean, saved editor's guard armed until the DELETE answered.)
+   */
+  const enqueueDraftWrite = (write: () => Promise<unknown>, unsavedWork: boolean): void => {
+    /**
+     * D185 — "a write is pending" is a property of the CHAIN, so the count is
+     * raised here, at ENQUEUE, and lowered by this link alone when it settles:
+     * an earlier link settling while a later one is still waiting its turn must
+     * not report the chain idle, or a close in that window would lose the
+     * queued write without a prompt.
+     *
+     * A count, and paired per link, rather than one boolean with a "only the
+     * last write may lower it" identity check. The check was a per-editor ref
+     * guarding a shell-wide flag, so it could not do its job: after this
+     * editor's route was gone, its ref still matched its own last link while
+     * the flag belonged to whichever editor had been mounted since, and its
+     * settlement lowered THAT one. With a per-writer count each link owns its
+     * own increment, so there is no cross-editor identity left to get wrong.
+     *
+     * Not the debounce ref: `draftPutTimerRef` is nulled the moment its timer
+     * fires, which is exactly the moment the write is most at risk.
+     */
+    if (unsavedWork) draftWriteWriter.beginWrite();
+    const queued = draftWriteChainRef.current.then(write, write);
+    draftWriteChainRef.current = queued;
+    const onSettled = () => {
+      if (unsavedWork) draftWriteWriter.endWrite();
+    };
+    // Both outcomes, and the rejection is handled here rather than left to
+    // reach the ref unhandled: the chain's own `.then(write, write)` already
+    // decides that a failed write never blocks the next one.
+    void queued.then(onSettled, onSettled);
+  };
+  /**
+   * D185 — a PUT, whose answer is the editor's only evidence of whether the
+   * operator's edits reached the server. A DELETE goes through the chain
+   * directly: a failed one is not lost work (the draft simply stays on the
+   * server, and its own doc comment says why that is harmless), so it must
+   * never set a flag the guard would warn about.
+   */
+  const enqueueDraftPut = (put: () => Promise<boolean>): void => {
+    enqueueDraftWrite(async () => {
+      draftWriteWriter.setFailed(!(await put()));
+    }, true);
   };
   /**
    * Fix round (bots) — the debounced PUT this effect is about to arm, kept
@@ -1199,11 +1285,22 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    *  merely paused" cleanup — cancels the pending timer AND discards its
    *  payload (so the flush effect below has nothing stale to resurrect),
    *  then enqueues the DELETE onto the same write chain as every PUT, so it
-   *  can never be overtaken by one already in flight. */
+   *  can never be overtaken by one already in flight.
+   *
+   *  D185 fix round — this is also where a SUPERSEDE clears the failure. Both
+   *  verbs decide the draft's fate on purpose, and everything the failed write
+   *  was about to warn about stops existing when they do: Save has put those
+   *  edits in the published brief, Revert has thrown them away. Left set, it
+   *  kept the shell's unload guard armed for a clean editor with nothing to
+   *  lose, and nothing ever came along to clear it. Cleared BEFORE the DELETE
+   *  is queued, so the two agree on the order the guard sees. A PUT still in
+   *  flight is left to speak for itself: it carries edits nothing has
+   *  superseded yet, and if IT fails, that is lost work again. */
   const discardPendingDraft = (id: string) => {
     clearPendingDraftSave();
     pendingDraftRef.current = null;
-    enqueueDraftWrite(() => deleteServerDraft(id));
+    draftWriteWriter.setFailed(false);
+    enqueueDraftWrite(() => deleteServerDraft(id), false);
   };
   useEffect(() => {
     if (routeId === undefined) return;
@@ -1224,12 +1321,21 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       draftPutTimerRef.current = setTimeout(() => {
         draftPutTimerRef.current = null;
         pendingDraftRef.current = null;
-        enqueueDraftWrite(() => putServerDraft(routeId, state, baseRevision));
+        enqueueDraftPut(() => putServerDraft(routeId, state, baseRevision));
       }, DRAFT_AUTOSAVE_DEBOUNCE_MS);
     } else if (draftDivergedRef.current) {
       draftDivergedRef.current = false;
       pendingDraftRef.current = null;
-      enqueueDraftWrite(() => deleteServerDraft(routeId));
+      // The other half of the supersede that clears a failure (see
+      // `discardPendingDraft`), and the same claim from the other direction:
+      // the editor is back to what the published brief already says, so an
+      // autosave that failed on the way here is warning about edits that are
+      // no longer unsaved. Revert on a "file" source reaches the draft only
+      // through this branch — `handleRevert` has no draft of its own to
+      // discard for a source that never had a local one — so without it a
+      // deliberate Revert kept the guard armed for a clean editor.
+      draftWriteWriter.setFailed(false);
+      enqueueDraftWrite(() => deleteServerDraft(routeId), false);
     }
     return clearPendingDraftSave;
   }, [state, routeId, routeAlreadyResolved]);
@@ -1252,9 +1358,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       const pending = pendingDraftRef.current;
       if (pending && pending.routeId === routeId) {
         pendingDraftRef.current = null;
-        enqueueDraftWrite(() =>
-          putServerDraft(pending.routeId, pending.state, pending.baseRevision),
-        );
+        enqueueDraftPut(() => putServerDraft(pending.routeId, pending.state, pending.baseRevision));
       }
     };
   }, [routeId]);
@@ -2367,7 +2471,8 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // before.
       clearPendingDraftSave();
       pendingDraftRef.current = null;
-      if (sourceRouteId !== undefined) enqueueDraftWrite(() => deleteServerDraft(sourceRouteId));
+      if (sourceRouteId !== undefined)
+        enqueueDraftWrite(() => deleteServerDraft(sourceRouteId), false);
       savedAsMintRef.current = null;
       setSaveAsName(null);
       // msczJ — the write above has already succeeded: the copy is safely

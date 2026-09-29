@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "lane": "HX5-leave-guard",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/shell/EditorUnloadGuard.tsx",
+      "before": "  const armed = isDirty || hasPendingWrite || hasFailedWrite;",
+      "after": "  const armed = isDirty || hasPendingWrite;",
+      "because": "The term this whole lane exists for. A draft PUT that answered 500 leaves the operator's edits on the screen and nowhere else, and dropping the term is the plausible tidy-up -- hasFailedWrite is the newest of the three, it is false in every state except one, and a reviewer reading a green suite has no reason to keep it. The end-to-end test in brief-editor.drafts.test.tsx cannot catch this one: its editor is dirty throughout, so isDirty arms the guard on its own and the unload is prevented either way. The unit test can, because it arms the failed flag alone.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/EditorUnloadGuard.test.tsx",
+        "-t",
+        "a draft write that failed prevents the unload"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/EditorUnloadGuard.tsx",
+      "before": "  const armed = isDirty || hasPendingWrite || hasFailedWrite;",
+      "after": "  const armed = true;",
+      "because": "The bfcache half, and the reason the gate on registration exists at all: a beforeunload listener that is present makes the page ineligible for the back/forward cache in most browsers, so registering one unconditionally is behaviour nobody can see in a test of the warning and everybody pays for in restored tabs. Every leave-guard assertion still passes with it, which is the trap -- so the mutation is caught by the count of registrations while clean, and by the two release tests, which can only pass if a listener that was armed can be taken back.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/EditorUnloadGuard.test.tsx",
+        "-t",
+        "a clean editor registers no beforeunload listener at all"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "    enqueueDraftWrite(async () => {\n      draftWriteWriter.setFailed(!(await put()));\n    }, true);",
+      "after": "    enqueueDraftWrite(async () => {\n      await put();\n      draftWriteWriter.setFailed(false);\n    }, true);",
+      "because": "Reading the PUT's answer is the only evidence the editor has that the edits reached the server, and awaiting the write while ignoring what it answered is the shape the code had before D185 -- putServerDraft resolved, nothing was read, and a 500 looked exactly like a landing. The write still dispatches and the chain still settles, so every pending-write assertion stays green; only the failure is lost, which is what the 500 test asserts on.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.drafts.test.tsx",
+        "-t",
+        "a draft PUT answered 500 sets the failed flag, and a later PUT that lands clears it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/editor-dirty-context.tsx",
+      "before": "      release: () => {\n        own.failed = false;\n        publish();\n      },",
+      "after": "      release: () => {\n        own.outstanding = 0;\n        own.failed = false;\n        publish();\n      },",
+      "because": "The unmount's whole job, and the pre-fix-round behaviour written in the new mechanism's own vocabulary: an editor that goes away takes its pending count to zero with it. That is right for a failure -- the screen holding those edits is being torn down, and a flag left set keeps every later navigation in the shell warning about a route long gone -- and wrong for a write still on the wire, which is the operator's edits in flight to the only place they can be. Closing the tab during it abandons the request. The registry then drops the entry, the guard releases, and the editor that mounted after this one inherits an unguarded window it never had a write in.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.drafts.test.tsx",
+        "-t",
+        "an unmount with a PUT still in flight keeps the tab guarded until that PUT answers"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/editor-dirty-context.tsx",
+      "before": "      const map = new Map(prev);\n      map.set(writer, next);",
+      "after": "      const map = new Map<DraftWriteWriter, WriterState>();\n      map.set(writer, next);",
+      "because": "The root cause, one line: the registry keeps only the writer that spoke last, which is the shell-wide boolean this replaced, rebuilt inside the new structure. Nothing about the aggregate changes -- `some(outstanding > 0)` over a one-entry map is still an honest reading of that entry -- so the code still looks like it tracks writers per editor, and the only thing that catches it is two editors existing at once. A first editor unmounting with a write in flight, then a second editor queueing one, then the first's write answering: the first's settlement is the last writer to publish, the second's entry is gone with the rest of the map, and the shell reports idle while the second editor's PUT is queued and undispatched. The fix-round review's central finding, and the reason the flags are derived rather than assigned.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.drafts.test.tsx",
+        "-t",
+        "one editor's write settling cannot clear another editor's pending write"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "      draftWriteWriter.setFailed(false);\n      enqueueDraftWrite(() => deleteServerDraft(routeId), false);",
+      "after": "      draftWriteWriter.setFailed(false);\n      enqueueDraftWrite(() => deleteServerDraft(routeId), true);",
+      "because": "The flag the argument exists for, flipped. A DELETE is a decision ABOUT the draft rather than a copy of the operator's edits, which is why it is serialized on the same write chain as every PUT and still is not unsaved work: counting it arms the guard on an editor that has just been saved or reverted, for as long as the sweep-up takes, and the edits it was protecting are already in the published brief. The chain is what the argument must not disturb, and this leaves the chain alone -- the DELETE is still queued behind any PUT in flight -- so nothing else in the file notices.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.drafts.test.tsx",
+        "-t",
+        "a draft DELETE on the write chain is not a pending write, so a superseded editor's guard is released"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "    draftWriteWriter.setFailed(false);\n    enqueueDraftWrite(() => deleteServerDraft(id), false);",
+      "after": "    enqueueDraftWrite(() => deleteServerDraft(id), false);",
+      "because": "A deliberate supersede that forgets to clear what it superseded. The failed flag means the operator's edits are on the screen and nowhere else; Save has just put them in the published brief and Revert has just thrown them away, so there is nothing left to warn about. Left set, it is the most durable version of this bug: nothing in the component's remaining life comes along to lower it, so the guard stays armed for a clean editor until the shell is torn down.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.drafts.test.tsx",
+        "-t",
+        "a Save that supersedes a failed draft clears the failed flag"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

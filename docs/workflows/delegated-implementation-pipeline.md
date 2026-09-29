@@ -262,6 +262,12 @@ gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$
 worktree/branch cleanup → fast-forward main. Sequential because every merge changes `main`
 and invalidates the CI result of the PRs behind it.
 
+**Waiting for a merge's own CI on `main`** (e.g. before a docs push): filter on the workflow AND the
+SHA, e.g. `gh run list --branch main --workflow ci.yml --json headSha,status --jq '.[]|select(.headSha|startswith("<sha>"))'`.
+The newest run of *any* workflow is often a skipped PR-Agent `issue_comment` run, which reads as
+`completed`. Since D182 (#624) a push to `main` no longer cancels the run before it, but the
+merge still is not verified until that SHA's `ci.yml` run succeeds.
+
 After the last wave: one **session-log PR** recording what merged, the decisions taken,
 what was refuted, and what stays deferred.
 
@@ -291,8 +297,12 @@ Shared seams with lane <OTHER> (coordinate, keep each addition on its own line):
 Deliver <TASKS: numbered, each with acceptance criteria from the plan>.
 
 Rules:
-- Gates before pushing: <build> && <typecheck> && <lint> && <test with coverage> && <arch lint>;
-  commit; then <sync/check> on the committed tree.
+- The gate before pushing is `yarn gate --lane <LANE>` (D183), in the foreground. It runs CI's steps,
+  takes the gate lock only around `test:cov` and `verify-manifests`, and prints each step's real
+  exit code. Never pipe a gate step through `tail` or `grep`, which hides its exit code (a w05 lane
+  read exit 0 on every failing coverage run that way). A standalone `test:cov`, `mutate` or
+  `verify-manifests` takes the lock with `sh scripts/gate-lock.sh acquire|release <LANE>`, around
+  that one run only.
 - Tests live <WHERE>, one behaviour per test, no real clock/network/filesystem in unit tests.
 - Never hand-edit generated files; change the generator/manifest and regenerate.
 - Do not reference paths that do not exist. If the plan and the code disagree, implement the
@@ -302,7 +312,8 @@ Rules:
   them onto `main`).
 - Open a PR against main with `gh pr create` (title = commit summary; body = what/why,
   verification incl. the coverage line, and a **Deviations** section). Do NOT merge.
-- Append a session-log entry (Mode / Changes / Decisions / Left open).
+- Never edit `.agents/session-log.md`: the orchestrator writes the wave record at close. (A w06 lane
+  appended one because this line used to ask for it, and the orchestrator reverted it.)
 - Measure a file's coverage the way the gate does. Run `npx vitest run --coverage
   --coverage.reporter=json --coverage.reportsDirectory=<dir> --coverage.thresholds.lines=0
   --coverage.thresholds.branches=0 --coverage.thresholds.functions=0
@@ -355,13 +366,13 @@ sorted by severity, plus a one-paragraph verdict stating what you ran and what y
 
 ```markdown
 Mode: Implementer. Work ONLY in <WORKTREE_PATH> (branch <BRANCH>, PR #<N>).
-[If main moved: first `git fetch origin && git merge --no-edit origin/main`, resolving
-<APPEND-ONLY FILES> by keeping both sides.]
+Never merge, rebase or pull `main` into the branch: `scripts/merge-prs.sh` refreshes it at merge
+time. (A w05 remediator rebased main's commits into a PR and pushed them.)
 Read AGENTS.md and .agents/*.md first.
 
-Apply the findings below as Conventional Commits (each ending with the Co-Authored-By
-trailer), keep <COVERAGE GATE>, run <FULL GATE>, commit, <sync check>, push. Do not open a
-new PR or merge.
+Apply the findings below as Conventional Commits, with NO attribution lines. Keep
+<COVERAGE GATE>, run `yarn gate --lane <LANE>` in the foreground, commit, and push. Do not open
+a new PR or merge. Give every fix a test proven red by temporarily reverting the fix.
 
 Findings — each was verified against the code:
 1. **<Title> (bug).** <What is wrong, where, and the reproduction.> Fix: <the specific
@@ -511,7 +522,7 @@ seat. Two swaps worth knowing:
 ## 7. Adapting to another repo
 
 Replace: the gate commands (§0.2), the append-only file list (`APPEND_ONLY` in
-`scripts/merge-prs.sh`), the plan path convention, and the Co-Authored-By trailer. Everything
+`scripts/merge-prs.sh`), the plan path convention, and the attribution rule (this repo forbids trailers). Everything
 else is repo-agnostic. If the repo has no coverage gate, replace it with whatever the PR
 must not regress — the pipeline needs one objective, machine-checkable acceptance signal per
 lane, or the review stage has nothing to stand on.
