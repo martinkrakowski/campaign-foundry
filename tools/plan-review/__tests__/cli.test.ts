@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,6 +68,12 @@ const io = (log: string[] = [], errors: string[] = []) => ({
     const { readFile } = await import("node:fs/promises");
     return readFile(path, "utf8");
   },
+  readdir: async (dir: string) => {
+    const { readdir } = await import("node:fs/promises");
+    return readdir(dir);
+  },
+  exists: (path: string): boolean => existsSync(path),
+  env: {} as { readonly HOME?: string; readonly WAVE_LOG_ROOT?: string },
 });
 
 describe("runCli hashes", () => {
@@ -609,6 +615,163 @@ describe("runCli check", () => {
     ["too few positionals", ["check", "p.md", "--logdir", "d", "--wave", "W"]],
     ["flags without values", ["check", "p.md", "--wave", "W", "PT-5a"]],
     ["no --wave at all", ["check", "p.md", "--logdir", "d", "PT-5a"]],
+  ])("usage error — %s — exits 2 with usage", async (_name, argv) => {
+    const errors: string[] = [];
+    const code = await runCli({ ...io([], errors), argv });
+    expect(code).toBe(2);
+    expect(errors[0]).toContain("usage:");
+  });
+});
+
+describe("runCli pre-pr-check", () => {
+  const originalCwd = process.cwd();
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+  });
+
+  /** A temp repo root with an empty docs/planning/, made the process cwd (pre-pr-check's grep target is not injectable — this is the same trick a real invocation's own repo root gives it). */
+  const chdirTemp = (): string => {
+    const dir = tempDir();
+    mkdirSync(join(dir, "docs", "planning"), { recursive: true });
+    process.chdir(dir);
+    return dir;
+  };
+
+  const writePlanningFile = (dir: string, name: string, text: string): void => {
+    writeFileSync(join(dir, "docs", "planning", name), text);
+  };
+
+  const highPlan = [
+    "| Lane | Risk | Delivers |",
+    "|---|---|---|",
+    "| **HX1** | **high** | Split the reserved list. |",
+  ].join("\n");
+
+  const writeLogdir = (dir: string, lines: readonly string[]): string => {
+    const logdir = join(dir, "waves");
+    mkdirSync(logdir, { recursive: true });
+    writeFileSync(join(logdir, "events.jsonl"), lines.join(""));
+    return logdir;
+  };
+
+  const preprReviewLine = (verdict: string): string =>
+    `${JSON.stringify({
+      ts: "2026-09-29T10:00:00Z",
+      wave: "w06",
+      lane: "HX1",
+      stage: "review",
+      event: "settled",
+      detail: { verdict },
+    })}\n`;
+
+  const remediateLine = (): string =>
+    `${JSON.stringify({
+      ts: "2026-09-29T11:00:00Z",
+      wave: "w06",
+      lane: "HX1",
+      stage: "remediate",
+      event: "settled",
+    })}\n`;
+
+  test("a normal-risk lane passes without reading any wave log at all", async () => {
+    const dir = chdirTemp();
+    writePlanningFile(dir, "plan.md", plan); // PT-5a has no Risk column — normal
+    const code = await runCli({
+      ...io(),
+      argv: ["pre-pr-check", "PT-5a", "--wave", "w06", "--logdir", join(dir, "absent")],
+    });
+    expect(code).toBe(0);
+  });
+
+  test("a lane found in no plan counts as normal and passes", async () => {
+    const dir = chdirTemp();
+    const code = await runCli({ ...io(), argv: ["pre-pr-check", "UNKNOWN-LANE", "--wave", "w06"] });
+    expect(code).toBe(0);
+  });
+
+  test("a high-risk lane with a clear pre-PR review passes", async () => {
+    const dir = chdirTemp();
+    writePlanningFile(dir, "plan.md", highPlan);
+    const logdir = writeLogdir(dir, [preprReviewLine("clear")]);
+    const code = await runCli({
+      ...io(),
+      argv: ["pre-pr-check", "HX1", "--wave", "w06", "--logdir", logdir],
+    });
+    expect(code).toBe(0);
+  });
+
+  test("a high-risk lane with no stage=review event refuses, naming it", async () => {
+    const dir = chdirTemp();
+    writePlanningFile(dir, "plan.md", highPlan);
+    const logdir = writeLogdir(dir, []);
+    const errors: string[] = [];
+    const code = await runCli({
+      ...io([], errors),
+      argv: ["pre-pr-check", "HX1", "--wave", "w06", "--logdir", logdir],
+    });
+    expect(code).toBe(1);
+    expect(errors.join("\n")).toContain("no stage=review event=settled");
+    expect(errors.join("\n")).toContain("HX1");
+  });
+
+  test("changes-required with no later remediate settled refuses", async () => {
+    const dir = chdirTemp();
+    writePlanningFile(dir, "plan.md", highPlan);
+    const logdir = writeLogdir(dir, [preprReviewLine("changes-required")]);
+    const errors: string[] = [];
+    const code = await runCli({
+      ...io([], errors),
+      argv: ["pre-pr-check", "HX1", "--wave", "w06", "--logdir", logdir],
+    });
+    expect(code).toBe(1);
+    expect(errors.join("\n")).toContain("changes-required");
+  });
+
+  test("changes-required with a LATER remediate settled passes", async () => {
+    const dir = chdirTemp();
+    writePlanningFile(dir, "plan.md", highPlan);
+    const logdir = writeLogdir(dir, [preprReviewLine("changes-required"), remediateLine()]);
+    const code = await runCli({
+      ...io(),
+      argv: ["pre-pr-check", "HX1", "--wave", "w06", "--logdir", logdir],
+    });
+    expect(code).toBe(0);
+  });
+
+  test("an unreadable events log for a high-risk lane refuses (fail closed), not a usage error", async () => {
+    const dir = chdirTemp();
+    writePlanningFile(dir, "plan.md", highPlan);
+    const errors: string[] = [];
+    const code = await runCli({
+      ...io([], errors),
+      argv: ["pre-pr-check", "HX1", "--wave", "w06", "--logdir", join(dir, "absent")],
+    });
+    expect(code).toBe(1);
+    expect(errors.join("\n")).toContain("could not read");
+  });
+
+  test("--logdir omitted resolves exactly as wave-event.sh does, via WAVE_LOG_ROOT", async () => {
+    const dir = chdirTemp();
+    writePlanningFile(dir, "plan.md", highPlan);
+    const root = join(dir, "waveroot");
+    const logdir = join(root, "wave-w06");
+    mkdirSync(logdir, { recursive: true });
+    writeFileSync(join(logdir, "events.jsonl"), preprReviewLine("clear"));
+    const code = await runCli({
+      ...io(),
+      env: { WAVE_LOG_ROOT: root },
+      argv: ["pre-pr-check", "HX1", "--wave", "w06"],
+    });
+    expect(code).toBe(0);
+  });
+
+  test.each([
+    ["no positional lane", ["pre-pr-check", "--wave", "w06"]],
+    ["no --wave at all", ["pre-pr-check", "HX1"]],
+    ["a missing --wave value", ["pre-pr-check", "HX1", "--wave"]],
+    ["an unknown flag", ["pre-pr-check", "HX1", "--wave", "w06", "--plan", "p.md"]],
+    ["too many positionals", ["pre-pr-check", "HX1", "HX2", "--wave", "w06"]],
   ])("usage error — %s — exits 2 with usage", async (_name, argv) => {
     const errors: string[] = [];
     const code = await runCli({ ...io([], errors), argv });

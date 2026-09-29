@@ -3,12 +3,20 @@
 # merge-prs.sh — sequentially refresh, verify and squash-merge a set of PRs.
 #
 # Usage:
-#   scripts/merge-prs.sh "<pr>|<worktree-or-empty>|<branch>" ...
+#   scripts/merge-prs.sh [--logdir <dir>] "<pr>|<worktree-or-empty>|<branch>|<lane-or-empty>|<wave-or-empty>" ...
 #
 # Example:
 #   scripts/merge-prs.sh "41|../cf-wt-seeded-random|feat/seeded-random" "42||fix/typo"
+#   scripts/merge-prs.sh "43|../cf-wt-hx1|feat/reserved-ids|HX1-route-segments-reserved|w06"
 #
 # For each PR, in order:
+#   0. D184's pre-PR-review gate, ONLY when the spec names a lane: refuse the
+#      whole run before touching git or the forge at all — a refused lane
+#      costs no fetch, no push and no CI run — unless `yarn plan:review
+#      pre-pr-check <lane> --wave <wave> [--logdir <dir>]` exits 0. An empty
+#      lane field is today's behaviour exactly: no lane, no gate, no wave
+#      required. A lane given with an empty wave is a malformed spec and dies
+#      outright, since the gate cannot be asked anything without one.
 #   1. Refresh the branch from origin/<main>. Conflicts are auto-resolved ONLY for
 #      ordinary text conflicts in append-only files (see APPEND_ONLY) by keeping both
 #      sides; anything else — a different path, a modify/delete, a binary conflict, a
@@ -34,6 +42,19 @@ set -u -o pipefail
 
 REPO=$(git rev-parse --show-toplevel) || exit 1
 MAIN=${MAIN_BRANCH:-main}
+
+die() { echo "ERROR: $*" >&2; exit 1 }
+
+# A leading --logdir names the wave log directory outright, for every spec in
+# this run that carries a lane. Omitted, `pre-pr-check` resolves it itself —
+# the same resolution wave-event.sh uses — so this script never invents a
+# default of its own to drift from that one.
+LOGDIR_OVERRIDE=""
+if [[ $# -ge 1 && "$1" == "--logdir" ]]; then
+  [[ $# -ge 2 ]] || die "--logdir requires a directory"
+  LOGDIR_OVERRIDE="$2"
+  shift 2
+fi
 
 # Files where two branches legitimately append and both sides must survive.
 # Extend for your repo (a session log, a hand-maintained barrel, a changelog).
@@ -61,8 +82,6 @@ if merged == text or "<<<<<<<" in merged:
     sys.exit("keep-both resolver made no progress on " + path)
 open(path, "w").write(merged)
 '
-
-die() { echo "ERROR: $*" >&2; exit 1 }
 
 # Auto-resolve the current merge, or fail. Only ordinary text conflicts (index stages
 # 1+2+3, regular file, conflict markers present) in APPEND_ONLY paths are eligible.
@@ -106,8 +125,29 @@ refresh_here() {
 
 typeset -a WORKTREES BRANCHES
 for spec in "$@"; do
-  pr=${spec%%|*}; rest=${spec#*|}; worktree=${rest%%|*}; branch=${rest#*|}
+  # Array-split on "|", not the old ${%%|*}/${#*|} chain: that chain reused
+  # trailing text for a field a shorter spec never gave it, once a fourth and
+  # fifth field existed to fall into. An out-of-range element is a parameter
+  # not set under `set -u`, so every field defaults explicitly instead.
+  typeset -a fields
+  fields=("${(@s:|:)spec}")
+  pr="${fields[1]:-}"; worktree="${fields[2]:-}"; branch="${fields[3]:-}"
+  lane="${fields[4]:-}"; wave="${fields[5]:-}"
   WORKTREES+=("$worktree"); BRANCHES+=("$branch")
+
+  # D184's merge gate — before ANY of this PR's own work, so a refusal costs
+  # no fetch, no push and no CI run. An empty lane is today's behaviour
+  # exactly: no gate, no wave required. `pre-pr-check` itself decides risk
+  # (a `normal` row always passes) — this script never reads the plan.
+  if [[ -n "$lane" ]]; then
+    [[ -n "$wave" ]] || die "PR #$pr: a lane ($lane) was given with no wave — the pre-PR-review gate needs both"
+    typeset -a preprcheck_args
+    preprcheck_args=(pre-pr-check "$lane" --wave "$wave")
+    [[ -z "$LOGDIR_OVERRIDE" ]] || preprcheck_args+=(--logdir "$LOGDIR_OVERRIDE")
+    ( cd "$REPO" && yarn plan:review "${preprcheck_args[@]}" ) \
+      || die "PR #$pr ($lane): D184's pre-PR-review gate refused the merge — see above"
+  fi
+
   echo "=== PR #$pr ($branch)"
 
   cd "$REPO" || die "cannot cd to $REPO"

@@ -1,6 +1,9 @@
 import { readEvents } from "../wave-status/lib/events.js";
 import { asHashRecord, rowHash, rowRisk } from "./lib/rows.js";
 import { governingPlanReview } from "./lib/review.js";
+import { defaultLogDir, type LogDirEnv } from "./lib/logdir.js";
+import { discoverRisk } from "./lib/risk.js";
+import { prePrReviewRefusal } from "./lib/pre-pr.js";
 import { relative, resolve } from "node:path";
 import type { WaveEvent } from "../wave-status/lib/types.js";
 
@@ -10,7 +13,9 @@ import type { WaveEvent } from "../wave-status/lib/types.js";
  * alike — so the reviewer's report can carry those fingerprints, and `check`
  * re-runs the comparison the gate promises: a lane may be dispatched only when
  * the wave's latest `plan-review settled` event recorded a clear verdict over
- * row fingerprints that still match the plan on disk.
+ * row fingerprints that still match the plan on disk. `pre-pr-check` is D184's
+ * merge gate: a `high`-risk lane's PR does not merge without a pre-PR review
+ * settled in the wave log.
  */
 
 export interface PlanReviewIo {
@@ -18,11 +23,16 @@ export interface PlanReviewIo {
   readonly log: (text: string) => void;
   readonly logError: (text: string) => void;
   readonly readFile: (path: string) => Promise<string>;
+  readonly readdir: (dir: string) => Promise<readonly string[]>;
+  /** Whether `path` exists — the same test `defaultLogDir` reclaims a real directory with. */
+  readonly exists: (path: string) => boolean;
+  readonly env: LogDirEnv;
 }
 
 const USAGE =
   "usage: plan:review hashes <plan.md> <id>…\n" +
-  "       plan:review check <plan.md> --logdir <dir> --wave <wave> <laneId>";
+  "       plan:review check <plan.md> --logdir <dir> --wave <wave> <laneId>\n" +
+  "       plan:review pre-pr-check <laneId> --wave <wave> [--logdir <dir>]";
 
 /** The message of a thrown value, or its text — never a bare `[object Object]`. */
 export function errorText(thrown: unknown): string {
@@ -54,6 +64,7 @@ export async function runCli(io: PlanReviewIo): Promise<number> {
   const [command, ...rest] = io.argv;
   if (command === "hashes") return hashes(rest, io);
   if (command === "check") return check(rest, io);
+  if (command === "pre-pr-check") return prePrCheck(rest, io);
   io.logError(USAGE);
   return 2;
 }
@@ -273,18 +284,103 @@ async function check(args: readonly string[], io: PlanReviewIo): Promise<number>
   return 0;
 }
 
+interface PrePrCheckArgs {
+  readonly lane: string;
+  readonly wave: string;
+  readonly logdir?: string;
+}
+
+function parsePrePrCheckArgs(args: readonly string[]): PrePrCheckArgs | undefined {
+  const positionals: string[] = [];
+  const flags = new Map<string, string>();
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--logdir" || arg === "--wave") {
+      const value = args[i + 1];
+      if (value === undefined) return undefined;
+      flags.set(arg, value);
+      i += 1;
+    } else if (arg.startsWith("--")) {
+      return undefined;
+    } else {
+      positionals.push(arg);
+    }
+  }
+  const wave = flags.get("--wave");
+  if (positionals.length !== 1 || wave === undefined) return undefined;
+  return { lane: positionals[0], wave, logdir: flags.get("--logdir") };
+}
+
+/** Where `pre-pr-check` greps for a lane's row — never a caller-supplied path (D184 #2). */
+const PLANNING_DIR = "docs/planning";
+
+/**
+ * D184's merge gate, run by `merge-prs.sh` before it touches a PR at all:
+ * `pre-pr-check <laneId> --wave <wave> [--logdir <dir>]`. Exit 0 is OK (a
+ * `normal` row is never blocked — this must be true even when the wave log
+ * cannot be read at all), exit 1 is refuse (named reason on stderr), exit 2
+ * is a usage error.
+ *
+ * `--logdir` is optional: omitted, it resolves exactly as `wave-event.sh`
+ * does (`defaultLogDir`), so the two never name a different directory for
+ * the same wave. Given, it names the directory outright — the same override
+ * an operator hands `wave-event.sh` itself.
+ */
+async function prePrCheck(args: readonly string[], io: PlanReviewIo): Promise<number> {
+  const parsed = parsePrePrCheckArgs(args);
+  if (parsed === undefined) {
+    io.logError(USAGE);
+    return 2;
+  }
+  const { lane, wave, logdir: givenLogdir } = parsed;
+
+  const risk = await discoverRisk(lane, PLANNING_DIR, io);
+  if (risk === "normal") {
+    io.log(`${lane}: risk=normal — no pre-PR review required`);
+    return 0;
+  }
+
+  const logdir = givenLogdir ?? defaultLogDir(wave, io.env, io.exists);
+  const logPath = `${logdir}/events.jsonl`;
+  let eventsText: string;
+  try {
+    eventsText = await io.readFile(logPath);
+  } catch (error: unknown) {
+    // Fail closed: a high-risk lane whose log cannot be read has not been
+    // shown to hold a settled review, so this is a refusal, not a usage
+    // error — the merge is the thing that must not proceed either way.
+    io.logError(
+      `could not read ${logPath}: ${errorText(error)} — no stage=review event=settled for lane ${lane} in wave ${wave}`,
+    );
+    return 1;
+  }
+
+  const { events } = readEvents(eventsText);
+  const refusal = prePrReviewRefusal(events, wave, lane);
+  if (refusal !== undefined) {
+    io.logError(refusal);
+    return 1;
+  }
+  io.log(`${lane}: risk=high — pre-PR review settled`);
+  return 0;
+}
+
 /* The entry guard is covered, not ignored: the entry tests reset the module
    registry and re-import this file with process.argv patched, so both arms of
    each guard run under the suite like every other branch. */
 if (process.argv[1]) {
   const { pathToFileURL } = await import("node:url");
   if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-    const { readFile } = await import("node:fs/promises");
+    const { readFile, readdir } = await import("node:fs/promises");
+    const { existsSync } = await import("node:fs");
     runCli({
       argv: process.argv.slice(2),
       log: (text) => console.log(text),
       logError: (text) => console.error(text),
       readFile: (path) => readFile(path, "utf8"),
+      readdir: (dir) => readdir(dir),
+      exists: (path) => existsSync(path),
+      env: { HOME: process.env.HOME, WAVE_LOG_ROOT: process.env.WAVE_LOG_ROOT },
     })
       .then((code) => {
         process.exitCode = code;
