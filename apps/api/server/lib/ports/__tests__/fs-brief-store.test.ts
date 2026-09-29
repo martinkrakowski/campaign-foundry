@@ -531,6 +531,28 @@ describe("FsBriefStore", () => {
       await expect(store.campaignMeta("lstat-fails")).rejects.toMatchObject({ code: "EIO" });
     });
 
+    // campaignDirExists's own rethrow (PT-5c2 fix round, qodo PRRT_kwDOSzP1zc6m7irI):
+    // it runs only once isCampaignDirUnsafe and readCampaignMeta have both answered
+    // cleanly (a genuinely unreserved ref), so its own non-ENOENT lstat failure needs
+    // a second, distinct lstat call on the same never-created slug — the first (inside
+    // isCampaignDirUnsafe) must still answer ENOENT so the walk reaches this method.
+    test("rethrows a non-ENOENT lstat failure from campaignDirExists unchanged", async () => {
+      let calls = 0;
+      fsHook.lstat = async (path: string) => {
+        if (!path.endsWith("dir-exists-lstat-fails")) {
+          throw new Error(`unexpected lstat(${path}) in this test`);
+        }
+        calls += 1;
+        if (calls === 1) {
+          throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+        }
+        throw Object.assign(new Error("EIO: i/o error"), { code: "EIO" });
+      };
+      await expect(store.campaignMeta("dir-exists-lstat-fails")).rejects.toMatchObject({
+        code: "EIO",
+      });
+    });
+
     test("a versionless create answers its recorded name/type and hasVersion: false", async () => {
       await store.createCampaign("versionless", { name: "Versionless", type: "short-video" });
       expect(await store.campaignMeta("versionless")).toEqual({
