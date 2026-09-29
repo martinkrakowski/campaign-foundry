@@ -646,18 +646,34 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     const beat = join(lockDir(dir), "beat");
     let reads = 0;
     let empty = 0;
+    let missing = 0;
     const deadline = Date.now() + 5_000;
     while (Date.now() < deadline) {
       let value: string;
       try {
         value = readFileSync(beat, "utf8");
       } catch {
+        // Counted, not skipped: the beat is replaced by a rename, so it is
+        // never absent, and a read that fails is a defect this test would
+        // otherwise step over — on the way to passing on the reads that worked.
+        missing += 1;
         continue;
       }
       reads += 1;
       if (value === "") empty += 1;
+      // Yield periodically, so the child's stdout and stderr keep being drained
+      // while this loop runs. Nothing here fills a pipe today — `run` prints two
+      // lines and the heartbeat's stdio is detached — but a reader that starves
+      // the writer it is measuring is a measurement that can stop measuring.
+      if (reads % 500 === 0) await new Promise((resolve) => setImmediate(resolve));
     }
-    expect({ reads: reads > 1000, empty }).toEqual({ reads: true, empty: 0 });
+    // All three, and the sample count with them: a reader that stalled, or one
+    // whose reads were all failures, must not be able to pass.
+    expect({ reads: reads > 1000, empty, missing }).toEqual({
+      reads: true,
+      empty: 0,
+      missing: 0,
+    });
     process.kill(Number(lockFile(dir, "pid").trim()), "SIGTERM");
     const result = await done;
     expect(result.status).toBe(143);
