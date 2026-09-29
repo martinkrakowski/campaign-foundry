@@ -34,11 +34,10 @@ import {
   isDirtySinceSave,
   isDirtySinceApply,
   isPristine,
-  getDraftKey,
-  saveDraftToStorage,
-  loadDraftFromStorage,
-  hasRecoverableDraft,
-  purgeDraftFromStorage,
+  fetchServerDraft,
+  putServerDraft,
+  deleteServerDraft,
+  fetchLatestServerDraft,
   canPlan,
   normalizeDraftState,
   valuesEqual,
@@ -69,6 +68,20 @@ const reduce = (state: EditorState, ...actions: EditorAction[]): EditorState =>
   actions.reduce(editorReducer, state);
 
 const base = (): EditorState => initialEditorState();
+
+/**
+ * The pure half of what `loadDraftFromStorage` used to do (PT-5d retired the
+ * localStorage half): a JSON round trip — the same lossy trip a real PUT/GET
+ * over the wire makes — followed by `normalizeDraftState`. Every test below
+ * that used to seed `localStorage` and read `loadDraftFromStorage` back is
+ * really pinning `normalizeDraftState`'s repair behaviour over stored JSON;
+ * this is that, without the retired persistence layer in between.
+ */
+function roundTripDraft(raw: unknown): EditorState | null {
+  const parsed = JSON.parse(JSON.stringify({ state: raw })) as { state?: unknown };
+  if (typeof parsed.state !== "object" || parsed.state === null) return null;
+  return normalizeDraftState(parsed.state as Record<string, unknown>);
+}
 
 const pool = (statuses: string[]): CopyPool =>
   ({
@@ -1083,8 +1096,6 @@ describe("the creative template survives the editor (L3a, D120/D123)", () => {
 });
 
 describe("per-layer props survive the editor (L3b, D134)", () => {
-  beforeEach(() => localStorage.clear());
-
   /** The canonical template with props swapped onto one kind's layer — no editor UI authors these yet (L5). */
   const withProps = (type: CampaignType, kind: string, props: LayerProps) => {
     const canonical = templateFromCanonical(type);
@@ -1122,8 +1133,7 @@ describe("per-layer props survive the editor (L3b, D134)", () => {
       type: "short-video",
       template,
     };
-    saveDraftToStorage(state);
-    const restored = loadDraftFromStorage(state);
+    const restored = roundTripDraft(state);
     expect(restored?.template).toEqual(template);
     expect(toBrief(restored as EditorState).template).toEqual(template);
   });
@@ -1144,8 +1154,7 @@ describe("per-layer props survive the editor (L3b, D134)", () => {
         typeFloor: CREATIVE_GEOMETRY.headlineTypeFloorFraction,
       }),
     };
-    saveDraftToStorage(state);
-    const restored = loadDraftFromStorage(state);
+    const restored = roundTripDraft(state);
     const layer = restored?.template.layers.find((l) => l.kind === "animated-text");
     expect(layer?.props).toEqual({ anchor: "middle" });
   });
@@ -1157,9 +1166,8 @@ describe("per-layer props survive the editor (L3b, D134)", () => {
       type: "short-video",
       template: withProps("short-video", "logo", { width: 1.4 }),
     };
-    saveDraftToStorage(state);
-    expect(() => loadDraftFromStorage(state)).not.toThrow();
-    expect(loadDraftFromStorage(state)?.template).toEqual(templateFromCanonical("short-video"));
+    expect(() => roundTripDraft(state)).not.toThrow();
+    expect(roundTripDraft(state)?.template).toEqual(templateFromCanonical("short-video"));
   });
 });
 
@@ -1211,67 +1219,7 @@ describe("dirty tracking", () => {
   });
 });
 
-describe("draft storage", () => {
-  beforeEach(() => localStorage.clear());
-  afterEach(() => vi.unstubAllGlobals());
-
-  test("the key follows the loaded id for a file and the temp id for a new draft", () => {
-    const fresh = base();
-    expect(getDraftKey(fresh)).toBe(
-      `cf:draft:${fresh.source.kind === "new" ? fresh.source.tempId : ""}`,
-    );
-    const loaded = reduce(fresh, {
-      type: "load",
-      brief: savedBrief(),
-      entry: { file: "camp.yaml" },
-    });
-    expect(getDraftKey(loaded)).toBe("cf:draft:camp");
-  });
-
-  // PT-5c1 fix round (mscyy/mscdk) — root cause: a versionless campaign used to
-  // stay keyed on the literal `cf:draft:new` `generateTempId` always returns,
-  // colliding with every OTHER versionless campaign and with `/brief/new`
-  // itself. `markSeeded` gives it its own key.
-  test("a seeded versionless campaign's draft key is its own campaign id, never the shared cf:draft:new", () => {
-    const seeded = reduce(base(), {
-      type: "markSeeded",
-      campaignId: "seed-campaign-1",
-      slug: "seed-campaign-1",
-      campaignName: "Seed Campaign",
-      snapshot: savedBrief({ id: "seed-campaign-1" }),
-    });
-    expect(getDraftKey(seeded)).toBe("cf:draft:seed-campaign-1");
-    expect(getDraftKey(seeded)).not.toBe("cf:draft:new");
-    // A second, unrelated versionless campaign gets its OWN key — the collision
-    // mscyy names is two campaigns sharing one autosave slot.
-    const seededOther = reduce(base(), {
-      type: "markSeeded",
-      campaignId: "seed-campaign-2",
-      slug: "seed-campaign-2",
-      campaignName: "Another Seed",
-      snapshot: savedBrief({ id: "seed-campaign-2" }),
-    });
-    expect(getDraftKey(seededOther)).not.toBe(getDraftKey(seeded));
-    // `/brief/new` itself is untouched: still the shared key.
-    expect(getDraftKey(base())).toBe("cf:draft:new");
-  });
-
-  test("a saved draft round-trips and can be purged", () => {
-    const state = { ...base(), briefId: "camp" };
-    saveDraftToStorage(state);
-    expect(loadDraftFromStorage(state)?.briefId).toBe("camp");
-    purgeDraftFromStorage(state);
-    expect(loadDraftFromStorage(state)).toBeNull();
-  });
-
-  test("a corrupt or shapeless entry loads as null rather than throwing", () => {
-    const state = { ...base(), briefId: "camp" };
-    localStorage.setItem(getDraftKey(state), "{ not json");
-    expect(loadDraftFromStorage(state)).toBeNull();
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ timestamp: 1 }));
-    expect(loadDraftFromStorage(state)).toBeNull();
-  });
-
+describe("normalizeDraftState via a round trip (PT-5d)", () => {
   test("a pre-#85 draft with no ratio axis restores instead of crashing toBrief", () => {
     // The exact regression: an older build's draft.state has no `variation.ratio`
     // key at all (JSON.stringify never wrote one, because the field did not exist
@@ -1281,9 +1229,8 @@ describe("draft storage", () => {
     const legacyVariation: Record<string, unknown> = { ...state.variation };
     delete legacyVariation.ratio;
     const legacyDraft = { ...state, variation: legacyVariation };
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacyDraft, timestamp: 1 }));
 
-    const restored = loadDraftFromStorage(state);
+    const restored = roundTripDraft(legacyDraft);
     expect(restored).not.toBeNull();
     // Absent means every ratio — the same semantics toBrief already gives an
     // absent `axes.ratio` on the brief itself.
@@ -1295,9 +1242,8 @@ describe("draft storage", () => {
     const state = { ...base(), briefId: "camp", campaignMessage: "hi" };
     const legacy: Record<string, unknown> = { ...state };
     delete legacy.headlineAxisDropped;
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacy, timestamp: 1 }));
 
-    const restored = loadDraftFromStorage(state);
+    const restored = roundTripDraft(legacy);
     expect(restored?.headlineAxisDropped).toBe(false);
     // What the draft actually specified still wins over the default.
     expect(restored?.campaignMessage).toBe("hi");
@@ -1315,15 +1261,14 @@ describe("draft storage", () => {
     };
     const legacy: Record<string, unknown> = { ...state };
     delete legacy.template;
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacy, timestamp: 1 }));
 
-    const restored = loadDraftFromStorage(state);
+    const restored = roundTripDraft(legacy);
     expect(restored?.template).toEqual(templateFromCanonical("short-video"));
     // And exactly what normalizeDraftState restored is what a save re-emits.
     expect(toBrief(restored as EditorState).template).toEqual(templateFromCanonical("short-video"));
   });
 
-  test("a draft saved with a template keeps it verbatim through the real storage round-trip (L3a)", () => {
+  test("a draft saved with a template keeps it verbatim through the round trip (L3a)", () => {
     // The editor holds authored template data the save must never re-derive: a
     // stored template that differs from the draft type's canonical one survives
     // save → load → save unchanged, word for word.
@@ -1334,8 +1279,7 @@ describe("draft storage", () => {
       type: "paid-social",
       template,
     };
-    saveDraftToStorage(state);
-    const restored = loadDraftFromStorage(state);
+    const restored = roundTripDraft(state);
     expect(restored).not.toBeNull();
     expect(restored?.template).not.toEqual(templateFromCanonical("paid-social"));
     expect(restored?.template).toEqual(template);
@@ -1345,12 +1289,12 @@ describe("draft storage", () => {
   test("a corrupt stored template falls back to the canonical one, never throwing (L3a)", () => {
     // The exposure is this lane's own making: before L3a the field was optional
     // and unread, so a string, a number, `null` or a half-written object in a
-    // user's localStorage was inert; now `toBrief` serialises whatever the bare
-    // cast admitted. Every neighbour is shape-guarded — `template` must be too:
-    // anything that is not a non-null, non-array object satisfying the full
-    // five-field contract (`id` a canonical member, `version` a positive
-    // integer, `creativeType` and `unit` vocabulary members, `layers` an array)
-    // is a corrupt draft and takes the fallback silently, so a user reopening a
+    // draft was inert; now `toBrief` serialises whatever the bare cast admitted.
+    // Every neighbour is shape-guarded — `template` must be too: anything that
+    // is not a non-null, non-array object satisfying the full five-field
+    // contract (`id` a canonical member, `version` a positive integer,
+    // `creativeType` and `unit` vocabulary members, `layers` an array) is a
+    // corrupt draft and takes the fallback silently, so a user reopening a
     // damaged draft gets a working editor, not a brief the API refuses. That
     // means `{ id: "canonical-image-text", layers: [] }` is still corrupt: a
     // canonical id and an array `layers` without `version`/`creativeType`/`unit`
@@ -1361,11 +1305,6 @@ describe("draft storage", () => {
       briefId: "camp",
       type: "short-video",
     };
-    const store = (template: unknown) =>
-      localStorage.setItem(
-        getDraftKey(state),
-        JSON.stringify({ state: { ...state, template }, timestamp: 1 }),
-      );
 
     for (const corrupt of [
       "not-an-object",
@@ -1407,9 +1346,9 @@ describe("draft storage", () => {
         ],
       },
     ]) {
-      store(corrupt);
-      expect(() => loadDraftFromStorage(state)).not.toThrow();
-      expect(loadDraftFromStorage(state)?.template).toEqual(templateFromCanonical("short-video"));
+      const draft = { ...state, template: corrupt };
+      expect(() => roundTripDraft(draft)).not.toThrow();
+      expect(roundTripDraft(draft)?.template).toEqual(templateFromCanonical("short-video"));
     }
   });
 
@@ -1426,11 +1365,6 @@ describe("draft storage", () => {
       type: "social-post",
     };
     const canonical = templateFromCanonical("social-post");
-    const store = (template: unknown) =>
-      localStorage.setItem(
-        getDraftKey(state),
-        JSON.stringify({ state: { ...state, template }, timestamp: 1 }),
-      );
 
     for (const refused of [
       // Missing a required kind entirely: the five-field shape and the layer
@@ -1445,8 +1379,7 @@ describe("draft storage", () => {
         ),
       },
     ]) {
-      store(refused);
-      const restored = loadDraftFromStorage(state);
+      const restored = roundTripDraft({ ...state, template: refused });
       expect(restored).not.toBeNull();
       expect(restored?.template).toEqual(templateFromCanonical("social-post"));
     }
@@ -1473,15 +1406,16 @@ describe("draft storage", () => {
       type: "display-ad",
       template: reordered,
     };
-    saveDraftToStorage(state);
-    const restored = loadDraftFromStorage(state);
+    const restored = roundTripDraft(state);
     expect(restored?.template).toEqual(reordered);
     expect(restored?.template.layers.map((layer) => layer.id)).toEqual(
       reordered.layers.map((layer) => layer.id),
     );
     expect(toBrief(restored as EditorState).template).toEqual(reordered);
   });
+});
 
+describe("occlusion notices (D135, D136)", () => {
   test("moveLayer creates occlusion notice when moving a layer creates occlusion, and clears it when reversed (D135, D136)", () => {
     // Canonical image-text: image (0), shade (1), accent (2), static-text (3), logo (4)
     const initial = initialEditorState("brief");
@@ -1648,8 +1582,7 @@ describe("draft storage", () => {
       briefId: "camp",
       occlusionNotice: "the accent layer now sits above the headline and will mute it",
     };
-    saveDraftToStorage(state);
-    const restored = loadDraftFromStorage(state);
+    const restored = roundTripDraft(state);
     expect(restored?.occlusionNotice).toBeNull();
 
     const fromBriefState = fromBrief(toBrief(state));
@@ -1667,11 +1600,12 @@ describe("draft storage", () => {
       type: "display-ad",
       template: illegal,
     };
-    saveDraftToStorage(state);
-    const restored = loadDraftFromStorage(state);
+    const restored = roundTripDraft(state);
     expect(restored?.template).toEqual(templateFromCanonical("display-ad"));
   });
+});
 
+describe("normalizeDraftState repairs (PT-5d, cont.)", () => {
   test("normalization never overrides a key the draft actually set", () => {
     const state = { ...base(), briefId: "camp" };
     const draft = {
@@ -1679,9 +1613,7 @@ describe("draft storage", () => {
       variation: { ...state.variation, ratio: ["9:16"] },
       formats: ["motion"],
     };
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: draft, timestamp: 1 }));
-
-    const restored = loadDraftFromStorage(state);
+    const restored = roundTripDraft(draft);
     expect(restored?.variation.ratio).toEqual(["9:16"]);
     expect(restored?.formats).toEqual(["motion"]);
   });
@@ -1690,21 +1622,18 @@ describe("draft storage", () => {
     const state = { ...base(), briefId: "camp" };
     const legacy: Record<string, unknown> = { ...state };
     delete legacy.mode;
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: legacy, timestamp: 1 }));
-    expect(loadDraftFromStorage(state)?.mode).toBe("brief");
+    expect(roundTripDraft(legacy)?.mode).toBe("brief");
   });
 
   test("a variation value that is present but not an object falls back to the default shape", () => {
     const state = { ...base(), briefId: "camp" };
     const corrupt = { ...state, variation: null };
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: corrupt, timestamp: 1 }));
-    expect(loadDraftFromStorage(state)?.variation).toEqual(base().variation);
+    expect(roundTripDraft(corrupt)?.variation).toEqual(base().variation);
   });
 
-  // PT-5c1 fix round — a seeded "new" source has to round-trip through
-  // localStorage exactly like a file source's `savedSnapshot` does, or a
-  // restored draft loses the campaign identity `markSeeded` gave it and its
-  // autosave falls back onto the shared `cf:draft:new` key.
+  // PT-5c1 fix round — a seeded "new" source has to round-trip exactly like a
+  // file source's `savedSnapshot` does, or a restored draft loses the
+  // campaign identity `markSeeded` gave it.
   test("normalizeDraftState round-trips a seeded new source, canonicalised like a file source's snapshot", () => {
     // The same X16 case the file-source test below pins (a hand-authored
     // `enabled: true` spelled out on a template layer) — proves this branch
@@ -1741,17 +1670,16 @@ describe("draft storage", () => {
   });
 
   test("an unusable product entry is replaced, not dereferenced, so the draft survives", () => {
-    // Reading `.key` off a null entry throws inside loadDraftFromStorage's try/catch,
-    // which returns null — the user loses every recovered edit because one entry was junk.
+    // Reading `.key` off a null entry throws inside normalizeDraftState's own
+    // repair loop if it dereferences the raw entry — the user loses every
+    // recovered edit because one entry was junk.
     const state = { ...base(), briefId: "camp" };
     const draft = {
       ...state,
       products: [null, "not-a-product", { ...state.products[0], key: 7 }],
       nextProductKey: 8,
     };
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: draft, timestamp: 1 }));
-
-    const restored = loadDraftFromStorage(state);
+    const restored = roundTripDraft(draft);
     expect(restored).not.toBeNull();
     const products = (restored as EditorState).products;
     expect(products).toHaveLength(3);
@@ -1764,22 +1692,13 @@ describe("draft storage", () => {
 
   test("a present mode survives, and an invalid one falls back to brief instead of leaking", () => {
     const state = { ...base(), briefId: "camp" };
-    const store = (mode: unknown) =>
-      localStorage.setItem(
-        getDraftKey(state),
-        JSON.stringify({ state: { ...state, mode }, timestamp: 1 }),
-      );
     // The first cut of normalizeDraftState validated mode but then let the raw
     // spread overwrite it: a garbage string restored verbatim. Both legal values
     // must round-trip and every other value must collapse to the default.
-    store("variation");
-    expect(loadDraftFromStorage(state)?.mode).toBe("variation");
-    store("brief");
-    expect(loadDraftFromStorage(state)?.mode).toBe("brief");
-    store("totally-not-a-real-mode");
-    expect(loadDraftFromStorage(state)?.mode).toBe("brief");
-    store(null);
-    expect(loadDraftFromStorage(state)?.mode).toBe("brief");
+    expect(roundTripDraft({ ...state, mode: "variation" })?.mode).toBe("variation");
+    expect(roundTripDraft({ ...state, mode: "brief" })?.mode).toBe("brief");
+    expect(roundTripDraft({ ...state, mode: "totally-not-a-real-mode" })?.mode).toBe("brief");
+    expect(roundTripDraft({ ...state, mode: null })?.mode).toBe("brief");
   });
 
   test("a wrong-typed list is repaired, so the reducer cannot later call .filter on a string", () => {
@@ -1789,8 +1708,7 @@ describe("draft storage", () => {
       formats: "motion",
       variation: { ...state.variation, ratio: "9:16", layout: 42 },
     };
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: corrupt, timestamp: 1 }));
-    const restored = loadDraftFromStorage(state) as EditorState;
+    const restored = roundTripDraft(corrupt) as EditorState;
     expect(restored.variation.ratio).toEqual([...RATIO_OPTIONS]);
     expect(restored.variation.layout).toEqual([...LAYOUT_OPTIONS]);
     expect(restored.formats).toEqual(["static"]);
@@ -1816,8 +1734,7 @@ describe("draft storage", () => {
       // 7, not 12: the default is "12", so a coerced String(12) would pass by accident
       variation: { ...state.variation, headline: "yes", count: 7 },
     };
-    localStorage.setItem(getDraftKey(state), JSON.stringify({ state: corrupt, timestamp: 1 }));
-    const restored = loadDraftFromStorage(state) as EditorState;
+    const restored = roundTripDraft(corrupt) as EditorState;
     expect(restored.source.kind).toBe("new");
     expect(restored.products).toHaveLength(1);
     expect(restored.treatments).toEqual([]);
@@ -1830,39 +1747,115 @@ describe("draft storage", () => {
     expect(restored.campaignMessage).toBe("kept");
     // the repaired draft is a complete EditorState: every consumer of it works
     expect(() => toBrief(restored)).not.toThrow();
-    expect(() => getDraftKey(restored)).not.toThrow();
+  });
+});
+
+describe("server draft persistence (PT-5d, D173, D177)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  test("every storage helper is inert where localStorage is unavailable", () => {
-    const state = { ...base(), briefId: "camp" };
-    vi.stubGlobal("localStorage", undefined);
-    expect(() => saveDraftToStorage(state)).not.toThrow();
-    expect(loadDraftFromStorage(state)).toBeNull();
-    expect(() => purgeDraftFromStorage(state)).not.toThrow();
-    expect(hasRecoverableDraft()).toBe(false);
+  const jsonResponse = (body: unknown, ok = true): Response =>
+    ({ ok, json: async () => body }) as unknown as Response;
+
+  test("fetchServerDraft answers null when the campaign has no draft", async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ draft: null }));
+    expect(await fetchServerDraft("camp")).toBeNull();
+    expect(fetch).toHaveBeenCalledWith("/api/pipeline/campaigns/camp/draft");
   });
 
-  test("hasRecoverableDraft answers the blank route's stored draft and touches nothing", () => {
-    // No draft at all: nothing to recover.
-    expect(hasRecoverableDraft()).toBe(false);
-    // A pristine draft holds no work the seed would destroy.
-    saveDraftToStorage(base());
-    expect(hasRecoverableDraft()).toBe(false);
-    // A typed name is real work — the F19 case the create dialog asks about.
-    saveDraftToStorage(
-      reduce(base(), {
-        type: "patch",
-        patch: { campaignName: "Half-written" },
+  test("fetchServerDraft normalizes the returned state and carries the base revision", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({ draft: { state: { ...base(), briefId: "camp" }, baseRevision: "rev-1" } }),
+    );
+    const draft = await fetchServerDraft("camp");
+    expect(draft?.baseRevision).toBe("rev-1");
+    expect(draft?.state.briefId).toBe("camp");
+  });
+
+  test("fetchServerDraft answers null for a non-ok response, a network failure, bad JSON, or a malformed body", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ draft: null }, false));
+    expect(await fetchServerDraft("camp")).toBeNull();
+
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("network down"));
+    expect(await fetchServerDraft("camp")).toBeNull();
+
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => {
+        throw new Error("bad json");
+      },
+    } as unknown as Response);
+    expect(await fetchServerDraft("camp")).toBeNull();
+
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(null));
+    expect(await fetchServerDraft("camp")).toBeNull();
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ draft: "not-an-object" }));
+    expect(await fetchServerDraft("camp")).toBeNull();
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ draft: { baseRevision: "r" } }));
+    expect(await fetchServerDraft("camp")).toBeNull();
+  });
+
+  test("putServerDraft PUTs the state and base revision, and never throws on failure", async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ draft: null }));
+    await putServerDraft("camp", base(), "rev-1");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/pipeline/campaigns/camp/draft",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ state: base(), baseRevision: "rev-1" }),
       }),
     );
-    expect(hasRecoverableDraft()).toBe(true);
-    // Read-only by contract: the draft that made it answer true is still on disk.
-    expect(loadDraftFromStorage(base())?.campaignName).toBe("Half-written");
-    // And a malformed entry answers false rather than throwing.
-    localStorage.setItem("cf:draft:new", "{ not json");
-    expect(hasRecoverableDraft()).toBe(false);
-    localStorage.setItem("cf:draft:new", JSON.stringify({ timestamp: 1 }));
-    expect(hasRecoverableDraft()).toBe(false);
+
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("network down"));
+    await expect(putServerDraft("camp", base(), null)).resolves.toBeUndefined();
+  });
+
+  test("deleteServerDraft DELETEs, and never throws on failure", async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ deleted: true }));
+    await deleteServerDraft("camp");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/pipeline/campaigns/camp/draft",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("network down"));
+    await expect(deleteServerDraft("camp")).resolves.toBeUndefined();
+  });
+
+  test("fetchLatestServerDraft answers the caller's own latest draft, or null", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ latest: { campaignId: "camp-9" } }));
+    expect(await fetchLatestServerDraft()).toEqual({ campaignId: "camp-9" });
+    expect(fetch).toHaveBeenCalledWith("/api/pipeline/campaigns/briefs/draft");
+
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ latest: null }));
+    expect(await fetchLatestServerDraft()).toBeNull();
+  });
+
+  test("fetchLatestServerDraft answers null for a non-ok response, a network failure, or a malformed body", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ latest: null }, false));
+    expect(await fetchLatestServerDraft()).toBeNull();
+
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("network down"));
+    expect(await fetchLatestServerDraft()).toBeNull();
+
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => {
+        throw new Error("bad json");
+      },
+    } as unknown as Response);
+    expect(await fetchLatestServerDraft()).toBeNull();
+
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(null));
+    expect(await fetchLatestServerDraft()).toBeNull();
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ latest: "nope" }));
+    expect(await fetchLatestServerDraft()).toBeNull();
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ latest: {} }));
+    expect(await fetchLatestServerDraft()).toBeNull();
   });
 });
 
@@ -1901,16 +1894,6 @@ describe("canPlan", () => {
     expect(canPlan({ ...s, variation: { ...s.variation, seed: "12abc" } })).toBe(false);
     expect(canPlan({ ...s, variation: { ...s.variation, seed: "" } })).toBe(true);
     expect(canPlan({ ...s, variation: { ...s.variation, perProduct: "42.0" } })).toBe(false);
-  });
-});
-
-describe("the unnamed draft's key (H6/D37)", () => {
-  test("is one stable key, so a reload at /brief/new finds the draft it left", () => {
-    // The key was a per-mount temp id, which orphaned every autosaved recovery copy
-    // the moment the page reloaded. Every unnamed editor is /brief/new now, so one
-    // stable key is what makes the draft survivable.
-    expect(getDraftKey(initialEditorState())).toBe("cf:draft:new");
-    expect(getDraftKey(initialEditorState("variation"))).toBe("cf:draft:new");
   });
 });
 
