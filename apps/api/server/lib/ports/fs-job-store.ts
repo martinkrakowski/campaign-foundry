@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -16,6 +17,16 @@ import {
 export const MAX_JOBS = 50;
 /** How long a settled job stays pollable after it completes or fails. */
 export const JOB_TTL_MS = 10 * 60_000;
+/**
+ * Grace period after the run deadline before a running job is considered stale.
+ * The in-process deadline (RUN_DEADLINE_MS, which equals JOB_TTL_MS) settles the
+ * run at JOB_TTL_MS; this grace keeps a legitimately finishing run from being
+ * reaped if the process dies just as the run is completing its final writes.
+ */
+export const STALE_GRACE_MS = 60_000;
+
+/** Message written when a stale running job is reaped after a process crash. */
+export const STALE_RUNNING_MESSAGE = "Run interrupted: the server stopped before it finished.";
 
 const QUEUED_EXPIRED_MESSAGE = "Queued run expired before a worker started it.";
 
@@ -54,6 +65,32 @@ export class FsJobStore implements JobStorePort {
   /** Resolved once at construction; the composition root decides it (D167). */
   private readonly dir: string;
   private readonly lockChains = new Map<string, Promise<unknown>>();
+  /**
+   * Which lock keys the CURRENT async call chain already holds, so
+   * `withJobLock` can tell "this is a nested call from code that is already
+   * inside this key's critical section" (run inline — the queue below is
+   * strictly FIFO per key, so queuing behind ourselves would wait forever)
+   * apart from "this is a separate, genuinely concurrent caller" (queue
+   * normally). Nesting happens both inside this file (e.g. `getStoredJob`
+   * reaping under the id lock while called from `progressJob`, which already
+   * holds it) and from callers outside it that fence a read inside their own
+   * `withJobLock` section (`report.ts`, `decisions.ts` via `retireDecisions`).
+   *
+   * The value per key is a token, not a bare membership flag, because
+   * AsyncLocalStorage context propagates into every continuation `fn`
+   * starts — including a `setTimeout` callback or a fire-and-forget promise
+   * that OUTLIVES this acquisition (`expireLater`, `expireQueuedLater`). Such
+   * a callback still sees the key in its inherited context long after the
+   * lock that added it has been released and handed to someone else, so
+   * membership alone is not enough to tell "still inside the acquisition
+   * that set this" from "a stale context left over from a finished one".
+   * `token.active` is flipped to `false` in a `finally` the moment this
+   * acquisition's `fn` settles, so the fast path below only fires while the
+   * acquisition is genuinely still on the stack; a timer or detached promise
+   * that fires after release reads `active: false` (or, once a later caller
+   * takes the key, a token it does not hold at all) and queues normally.
+   */
+  private readonly lockContext = new AsyncLocalStorage<ReadonlyMap<string, { active: boolean }>>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly queuedTimers = new Map<string, NodeJS.Timeout>();
   private readonly memoryCache = new Map<string, CacheItem>();
@@ -129,6 +166,26 @@ export class FsJobStore implements JobStorePort {
     this.timers.set(id, timer);
   }
 
+  /**
+   * Cancel a pending settle-retention timer for `id`, if one exists.
+   *
+   * `expireLater` only clears an EARLIER retention timer when a job settles
+   * again under the same id — it is never called at acquire time. So an id
+   * settled once (including by the stale-running reaper) and then reused by
+   * `acquireJob`/`enqueueJob` before its retention timer fires carries that
+   * timer forward: at JOB_TTL_MS past the FIRST settlement, `deleteJob(id)`
+   * fires regardless of what now lives at that id, unlinking the reused
+   * entry's file out from under a run that may still be going. Call this
+   * before writing a fresh entry for a (possibly reused) id.
+   */
+  private cancelPendingRetention(id: string): void {
+    const existing = this.timers.get(id);
+    if (existing) {
+      clearTimeout(existing);
+      this.timers.delete(id);
+    }
+  }
+
   private expireQueuedLater(id: string): void {
     const existing = this.queuedTimers.get(id);
     if (existing) clearTimeout(existing);
@@ -146,6 +203,96 @@ export class FsJobStore implements JobStorePort {
     }, QUEUED_TTL_MS);
     timer.unref();
     this.queuedTimers.set(id, timer);
+  }
+
+  /**
+   * Cheap, read-only check: is this a running job whose startedAt (or
+   * createdAt as fallback, for rows written before that field existed) is
+   * older than the run deadline plus the grace period? A plain time
+   * comparison against whatever entry the caller has in hand (cached or
+   * freshly read) — no lock, no disk I/O — so the common case (a running
+   * job well inside its deadline, polled repeatedly while it works) never
+   * pays for either.
+   */
+  private isStaleRunning(entry: StoredJob): boolean {
+    if (entry.job.status !== "running") return false;
+    const startTime = entry.startedAt ?? entry.createdAt;
+    return Date.now() - startTime >= JOB_TTL_MS + STALE_GRACE_MS;
+  }
+
+  /**
+   * Rewrite a running entry as failed with the stale running message, set
+   * settledAt to now, and schedule expireLater. Callers must have already
+   * confirmed `isStaleRunning(entry)` on a freshly read copy — see
+   * `reapStaleRunningLocked`, the only caller.
+   */
+  private async reapStaleRunning(entry: StoredJob): Promise<StoredJob> {
+    const updated: StoredJob = {
+      ...entry,
+      job: {
+        status: "failed",
+        done: 0,
+        total: 0,
+        log: null,
+        error: STALE_RUNNING_MESSAGE,
+      },
+      settledAt: Date.now(),
+    };
+    await this.writeJobEntry(updated);
+    this.expireLater(entry.id);
+    return updated;
+  }
+
+  /**
+   * Called once `isStaleRunning` says a cached or just-read entry looks past
+   * its deadline. Takes the id's lock and RE-READS the file fresh before
+   * deciding anything: between that earlier look and this call actually
+   * running, another id-locked write on this instance (completeJob, failJob,
+   * a heartbeat) — or the very call chain that is already holding this id's
+   * lock when it reads through here — could have settled the job. Reaps only
+   * if the freshest copy on disk is STILL running and STILL stale; otherwise
+   * returns that freshest copy untouched, so a job someone else finished in
+   * the meantime is never overwritten as crashed.
+   *
+   * `withJobLock` is reentrant for a lock the current call chain already
+   * holds (see its doc), so this is safe to call whether or not the caller
+   * already holds `id`'s lock.
+   */
+  private async reapStaleRunningLocked(id: string): Promise<StoredJob | undefined> {
+    return this.withJobLock(id, async () => {
+      const fresh = await this.readEntryFromDisk(id);
+      if (fresh === undefined) return undefined;
+      if (!this.isStaleRunning(fresh)) {
+        const freshStat = await stat(this.jobPath(id));
+        this.memoryCache.set(id, { entry: fresh, mtimeMs: freshStat.mtimeMs });
+        return fresh;
+      }
+      return this.reapStaleRunning(fresh);
+    });
+  }
+
+  /**
+   * Raw disk read for `id`: undefined if the file is gone (cache is cleared
+   * to match) or unparsable (the corrupt file is deleted, same handling as
+   * the cold-read path in `getStoredJob`).
+   */
+  private async readEntryFromDisk(id: string): Promise<StoredJob | undefined> {
+    let raw: string;
+    try {
+      raw = await readFile(this.jobPath(id), "utf8");
+    } catch (error) {
+      if (isErrno(error, "ENOENT")) {
+        this.memoryCache.delete(id);
+        return undefined;
+      }
+      throw error;
+    }
+    try {
+      return JSON.parse(raw) as StoredJob;
+    } catch {
+      await this.deleteJob(id);
+      return undefined;
+    }
   }
 
   async getStoredJob(id: string): Promise<StoredJob | undefined> {
@@ -188,26 +335,18 @@ export class FsJobStore implements JobStorePort {
         this.expireLater(id);
         return updated;
       }
+      // Check for stale running job (cached). A cheap time comparison first
+      // — only when it looks stale do we pay for the lock and a fresh
+      // re-read (reapStaleRunningLocked), so a running job well inside its
+      // deadline never touches either on a normal poll.
+      if (this.isStaleRunning(cached.entry)) {
+        return this.reapStaleRunningLocked(id);
+      }
       return cached.entry;
     }
 
-    let raw: string;
-    try {
-      raw = await readFile(this.jobPath(id), "utf8");
-    } catch (error) {
-      if (isErrno(error, "ENOENT")) return undefined;
-      throw error;
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      await this.deleteJob(id);
-      return undefined;
-    }
-
-    const entry = parsed as StoredJob;
+    const entry = await this.readEntryFromDisk(id);
+    if (entry === undefined) return undefined;
     if (entry.settledAt !== undefined && Date.now() - entry.settledAt >= JOB_TTL_MS) {
       await this.deleteJob(id);
       return undefined;
@@ -227,6 +366,13 @@ export class FsJobStore implements JobStorePort {
       await this.writeJobEntry(updated);
       this.expireLater(id);
       return updated;
+    }
+    // Check for stale running job (disk read). Same cheap-check-first shape
+    // as the cached branch above; reapStaleRunningLocked re-reads the file
+    // again under the lock rather than trusting this `entry`, in case a
+    // concurrent id-locked write landed between this read and the lock.
+    if (this.isStaleRunning(entry)) {
+      return this.reapStaleRunningLocked(id);
     }
     this.memoryCache.set(id, { entry, mtimeMs: st.mtimeMs });
     return entry;
@@ -249,11 +395,14 @@ export class FsJobStore implements JobStorePort {
       return this.withJobLock("__capacity__", async () => {
         await this.evictToFit();
         const id = customId ?? crypto.randomUUID();
+        this.cancelPendingRetention(id);
+        const now = Date.now();
         const entry: StoredJob = {
           id,
           campaignId,
           job: { status: "running", done: 0, total: 0, log: null },
-          createdAt: Date.now(),
+          createdAt: now,
+          startedAt: now,
           seq: ++globalJobSeq,
         };
         await this.writeJobEntry(entry);
@@ -274,6 +423,7 @@ export class FsJobStore implements JobStorePort {
       return this.withJobLock("__capacity__", async () => {
         await this.evictToFit();
         const id = customId ?? crypto.randomUUID();
+        this.cancelPendingRetention(id);
         const entry: StoredJob = {
           id,
           campaignId,
@@ -303,6 +453,7 @@ export class FsJobStore implements JobStorePort {
           ...entry.job,
           status: "running",
         },
+        startedAt: Date.now(),
       };
       await this.writeJobEntry(updated);
       return true;
@@ -452,8 +603,35 @@ export class FsJobStore implements JobStorePort {
   }
 
   withJobLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const held = this.lockContext.getStore();
+    const inherited = held?.get(key);
+    if (inherited?.active) {
+      // Reentrant: the caller is already running inside this key's critical
+      // section (see the `lockContext` field doc). Run inline — we are
+      // already serialized against every other user of this key. A token
+      // left over from an acquisition that has since released (`active:
+      // false`) fails this check and falls through to queuing normally,
+      // which is exactly what a timer or detached promise scheduled inside
+      // that earlier acquisition must do.
+      return fn();
+    }
+    const token = { active: true };
+    const nextContext = new Map(held ?? []);
+    nextContext.set(key, token);
+    const runInContext = async () => {
+      try {
+        return await this.lockContext.run(nextContext, fn);
+      } finally {
+        // Flip before `run` (below) settles, so the next queued holder for
+        // this key — and any timer/detached promise still holding a
+        // reference to this token via an inherited context — sees `active:
+        // false` as soon as this acquisition is done, not merely once the
+        // lock-chain bookkeeping below has run.
+        token.active = false;
+      }
+    };
     const previous = this.lockChains.get(key) ?? Promise.resolve();
-    const run = previous.then(fn, fn);
+    const run = previous.then(runInContext, runInContext);
     const settled = run.then(
       () => undefined,
       () => undefined,
