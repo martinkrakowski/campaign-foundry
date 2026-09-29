@@ -133,6 +133,18 @@ describe("FsDraftStore (PT-5d, D173)", () => {
     await expect(store.writeDraft("camp", "a\0b", {}, null)).rejects.toThrow();
   });
 
+  // Fix round item 4 (grok-4.7): `../campaign` never leaves `briefs/` at
+  // all — `resolveConfined` alone would have let it through to
+  // `briefs/camp/campaign.json`, a sibling of `drafts/`, not outside it.
+  // `SAFE_ID_PATTERN` is what actually refuses this shape.
+  test("a userId of ../campaign neither creates nor modifies the campaign's own campaign.json", async () => {
+    mkdirSync(join(dir, "camp"), { recursive: true });
+    writeFileSync(join(dir, "camp", "campaign.json"), '{"name":"real"}');
+    await expect(store.writeDraft("camp", "../campaign", {}, null)).rejects.toThrow();
+    expect(readFileSync(join(dir, "camp", "campaign.json"), "utf8")).toBe('{"name":"real"}');
+    expect(existsSync(join(dir, "camp", "drafts"))).toBe(false);
+  });
+
   describe("a symlinked drafts/ directory", () => {
     test("is refused on write, leaving the outside file untouched", async () => {
       const outside = mkdtempSync(join(tmpdir(), "cf-outside-"));
@@ -248,14 +260,14 @@ describe("FsDraftStore (PT-5d, D173)", () => {
     await expect(store.readDraft("camp", "u1")).rejects.toThrow("boom");
   });
 
-  describe("latestDraft", () => {
+  describe("listDraftsByRecency", () => {
     test("rethrows a non-ENOENT readdir failure unchanged", async () => {
       const err = new Error("boom") as NodeJS.ErrnoException;
       err.code = "EIO";
       fsHook.readdir = async () => {
         throw err;
       };
-      await expect(store.latestDraft("u1")).rejects.toThrow("boom");
+      await expect(store.listDraftsByRecency("u1")).rejects.toThrow("boom");
     });
 
     test("rethrows a non-ENOENT per-entry lstat failure unchanged", async () => {
@@ -266,31 +278,31 @@ describe("FsDraftStore (PT-5d, D173)", () => {
         if (path.endsWith("u1.json")) throw err;
         return fsHook.realLstat!(path);
       };
-      await expect(store.latestDraft("u1")).rejects.toThrow("boom");
+      await expect(store.listDraftsByRecency("u1")).rejects.toThrow("boom");
     });
 
-    test("answers undefined when the briefs directory does not exist at all", async () => {
+    test("answers an empty list when the briefs directory does not exist at all", async () => {
       const emptyStore = new FsDraftStore(join(dir, "does-not-exist"));
-      await expect(emptyStore.latestDraft("u1")).resolves.toBeUndefined();
+      await expect(emptyStore.listDraftsByRecency("u1")).resolves.toEqual([]);
     });
 
-    test("answers undefined for a user with no drafts anywhere", async () => {
+    test("answers an empty list for a user with no drafts anywhere", async () => {
       await store.writeDraft("camp", "u2", { name: "Theirs" }, null);
-      await expect(store.latestDraft("u1")).resolves.toBeUndefined();
+      await expect(store.listDraftsByRecency("u1")).resolves.toEqual([]);
     });
 
     test("skips a non-directory entry sitting beside campaign directories", async () => {
       writeFileSync(join(dir, "stray.yaml"), "id: stray\n");
       await store.writeDraft("camp", "u1", { name: "Mine" }, null);
-      const latest = await store.latestDraft("u1");
-      expect(latest?.campaignId).toBe("camp");
+      const list = await store.listDraftsByRecency("u1");
+      expect(list.map((d) => d.campaignId)).toEqual(["camp"]);
     });
 
     test("skips an entry that is not a regular file even though drafts/ itself is real", async () => {
       mkdirSync(join(dir, "camp", "drafts", "u1.json"), { recursive: true });
       await store.writeDraft("other", "u1", { name: "Real" }, null);
-      const latest = await store.latestDraft("u1");
-      expect(latest?.campaignId).toBe("other");
+      const list = await store.listDraftsByRecency("u1");
+      expect(list.map((d) => d.campaignId)).toEqual(["other"]);
     });
 
     test("skips a campaign whose drafts/ directory is symlinked", async () => {
@@ -300,14 +312,14 @@ describe("FsDraftStore (PT-5d, D173)", () => {
         symlinkSync(outside, join(dir, "linked", "drafts"));
         await store.writeDraft("camp", "u1", { name: "Mine" }, null);
 
-        const latest = await store.latestDraft("u1");
-        expect(latest?.campaignId).toBe("camp");
+        const list = await store.listDraftsByRecency("u1");
+        expect(list.map((d) => d.campaignId)).toEqual(["camp"]);
       } finally {
         rmSync(outside, { recursive: true, force: true });
       }
     });
 
-    test("answers the most recently written draft across campaigns", async () => {
+    test("answers every draft, newest first, across campaigns", async () => {
       await store.writeDraft("older", "u1", { name: "Older" }, null);
       await store.writeDraft("newer", "u1", { name: "Newer" }, null);
       // Force a deterministic ordering rather than trusting two writes in the
@@ -316,11 +328,13 @@ describe("FsDraftStore (PT-5d, D173)", () => {
       utimesSync(join(dir, "older", "drafts", "u1.json"), now, new Date(now.getTime() - 60_000));
       utimesSync(join(dir, "newer", "drafts", "u1.json"), now, now);
 
-      const latest = await store.latestDraft("u1");
-      expect(latest?.campaignId).toBe("newer");
+      const list = await store.listDraftsByRecency("u1");
+      expect(list.map((d) => d.campaignId)).toEqual(["newer", "older"]);
     });
 
-    test("does not let an older draft, found after a newer one, replace it", async () => {
+    test("sorts newest-first regardless of the order readdir happens to return", async () => {
+      // "aaa-newer"/"zzz-older" sort BEFORE their timestamps do alphabetically
+      // — readdir traversal order must never leak into the answer.
       await store.writeDraft("aaa-newer", "u1", { name: "Newer" }, null);
       await store.writeDraft("zzz-older", "u1", { name: "Older" }, null);
       const now = new Date();
@@ -331,8 +345,42 @@ describe("FsDraftStore (PT-5d, D173)", () => {
         new Date(now.getTime() - 60_000),
       );
 
-      const latest = await store.latestDraft("u1");
-      expect(latest?.campaignId).toBe("aaa-newer");
+      const list = await store.listDraftsByRecency("u1");
+      expect(list.map((d) => d.campaignId)).toEqual(["aaa-newer", "zzz-older"]);
+    });
+  });
+
+  describe("writeDraftIfCurrent", () => {
+    test("writes and answers ok:true when baseRevision matches the given currentRevision", async () => {
+      const outcome = await store.writeDraftIfCurrent("camp", "u1", { name: "Mine" }, "r1", "r1");
+      expect(outcome).toEqual({
+        ok: true,
+        draft: expect.objectContaining({ state: { name: "Mine" }, baseRevision: "r1" }),
+      });
+      await expect(store.readDraft("camp", "u1")).resolves.toMatchObject({
+        state: { name: "Mine" },
+      });
+    });
+
+    test("a null baseRevision matches a null currentRevision (versionless campaign)", async () => {
+      const outcome = await store.writeDraftIfCurrent("camp", "u1", { name: "Blank" }, null, null);
+      expect(outcome.ok).toBe(true);
+    });
+
+    test("refuses without writing when baseRevision does not match currentRevision", async () => {
+      const outcome = await store.writeDraftIfCurrent("camp", "u1", { name: "Stale" }, "r1", "r2");
+      expect(outcome).toEqual({ ok: false, currentRevision: "r2" });
+      await expect(store.readDraft("camp", "u1")).resolves.toBeUndefined();
+    });
+
+    test("a userId that fails SAFE_ID_PATTERN neither creates nor modifies the campaign's own file", async () => {
+      mkdirSync(join(dir, "camp"), { recursive: true });
+      writeFileSync(join(dir, "camp", "campaign.json"), '{"name":"real"}');
+      await expect(
+        store.writeDraftIfCurrent("camp", "../campaign", { x: 1 }, null, null),
+      ).rejects.toThrow();
+      expect(existsSync(join(dir, "camp", "drafts"))).toBe(false);
+      expect(readFileSync(join(dir, "camp", "campaign.json"), "utf8")).toBe('{"name":"real"}');
     });
   });
 });

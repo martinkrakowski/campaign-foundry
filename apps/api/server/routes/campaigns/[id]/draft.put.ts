@@ -1,6 +1,6 @@
 import { errorMessage } from "@campaignfoundry/shared";
 import { assertSafeId } from "../../../lib/load-brief.js";
-import { SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
+import { SYMLINK_WRITE_ERROR, withBriefLock } from "../../../lib/brief-files.js";
 import { getBriefStore, getDraftStore } from "../../../lib/ports/index.js";
 import { requestTenant } from "../../../lib/tenant.js";
 
@@ -20,6 +20,15 @@ import { requestTenant } from "../../../lib/tenant.js";
  * Save landed (this tab or another) since the caller last read it — answers
  * 409 and leaves the stored draft untouched, rather than writing over a
  * fresher one with content computed against a stale baseline.
+ *
+ * Fix round item 2 (grok-4.7): the revision check and the write happen
+ * inside one `withBriefLock` turn — the same in-process chain a brief save's
+ * own `rewriteBrief` call runs under (`[id].put.ts`) — and
+ * `DraftStorePort.writeDraftIfCurrent` re-verifies the revision itself
+ * rather than trusting what was read here, atomically on Postgres (a
+ * `select … for update` on the campaign row, same as a brief save's own
+ * compare-and-swap). A save that commits between this route's read and its
+ * write can no longer land as a silent overwrite either way.
  */
 export default defineEventHandler(async (event) => {
   let id: string;
@@ -54,24 +63,35 @@ export default defineEventHandler(async (event) => {
     return { error: '"baseRevision" must be a string or null.' };
   }
 
-  // The campaign's own current revision — `getRevision` keys by slug (as
-  // every BriefStorePort method other than campaignMeta/resolveCampaign
-  // does), and answers undefined for a versionless campaign, the same shape
-  // `baseRevision` takes as `null`.
-  const currentRevision = (await briefs.getRevision(meta.slug)) ?? null;
-  if (baseRevision !== currentRevision) {
-    setResponseStatus(event, 409);
-    return { error: "This campaign has a newer saved version.", revision: currentRevision };
-  }
-
   try {
-    const stored = await getDraftStore(scope).writeDraft(
-      meta.campaignId,
-      scope.userId,
-      state,
-      baseRevision,
-    );
-    return { draft: stored };
+    // The read and the write happen in one `withBriefLock` turn (fix round
+    // item 2), the same chain a brief save's own `rewriteBrief` call runs
+    // under — a save landing on this process between them cannot interleave
+    // with either. `getRevision` keys by slug (as every BriefStorePort
+    // method other than campaignMeta/resolveCampaign does), and answers
+    // undefined for a versionless campaign, the same shape `baseRevision`
+    // takes as `null`. `writeDraftIfCurrent` re-verifies this itself — on
+    // Postgres, fresh and inside its own row-locked transaction, ignoring
+    // this value entirely — so the fs backend's safety and the pg
+    // backend's are each real, not a shared illusion of one.
+    const outcome = await withBriefLock(scope, meta.slug, async () => {
+      const currentRevision = (await briefs.getRevision(meta.slug)) ?? null;
+      return getDraftStore(scope).writeDraftIfCurrent(
+        meta.campaignId,
+        scope.userId,
+        state,
+        baseRevision,
+        currentRevision,
+      );
+    });
+    if (!outcome.ok) {
+      setResponseStatus(event, 409);
+      return {
+        error: "This campaign has a newer saved version.",
+        revision: outcome.currentRevision,
+      };
+    }
+    return { draft: outcome.draft };
   } catch (error) {
     if (errorMessage(error) === SYMLINK_WRITE_ERROR) {
       setResponseStatus(event, 400);

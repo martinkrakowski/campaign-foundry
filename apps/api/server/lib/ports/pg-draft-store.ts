@@ -1,5 +1,10 @@
 import type { SqlClient } from "../db/sql-client.js";
-import type { DraftStorePort, LatestDraft, StoredDraft } from "./draft-store.port.js";
+import type {
+  DraftStorePort,
+  LatestDraft,
+  StoredDraft,
+  WriteDraftOutcome,
+} from "./draft-store.port.js";
 
 /** Renders `timestamptz` as the same ISO-8601 UTC instant shape every other
  * store answers (`PgDecisionStore`'s `to_char`, `pg-decision-store.ts:54`) —
@@ -56,6 +61,53 @@ export class PgDraftStore implements DraftStorePort {
     return { state, baseRevision, updatedAt: rows[0]!.updated_at };
   }
 
+  /**
+   * `DraftStorePort.writeDraftIfCurrent` — see that doc for the shape this
+   * closes. The `for update` here is the same lock `rewriteBriefInternal`
+   * takes (`pg-brief-store.ts:500-503`) on the same row: whichever
+   * transaction — this one or a concurrent brief save's — acquires it first
+   * runs to completion before the other's own `for update` can even
+   * proceed, so the `brief_version` read below is never mid-write.
+   *
+   * The interface's `currentRevision` parameter is deliberately not part of
+   * this signature (TypeScript allows an implementation to take fewer
+   * parameters than the type it satisfies, since a caller's extra argument
+   * is simply ignored) — trusting a caller-supplied value here would reopen
+   * exactly the race this method exists to close. It exists only for the fs
+   * adapter below, which has no row to lock and so must trust a value its
+   * own caller read under `withBriefLock`.
+   */
+  async writeDraftIfCurrent(
+    campaignId: string,
+    userId: string,
+    state: unknown,
+    baseRevision: string | null,
+  ): Promise<WriteDraftOutcome> {
+    return this.db.transaction(async (tx) => {
+      await tx.query(`select id from campaign where org_id = $1 and id = $2 for update`, [
+        this.orgId,
+        campaignId,
+      ]);
+      const { rows: versions } = await tx.query<{ revision: string }>(
+        `select revision from brief_version where campaign_id = $1 order by version desc limit 1`,
+        [campaignId],
+      );
+      const currentRevision = versions[0]?.revision ?? null;
+      if (baseRevision !== currentRevision) {
+        return { ok: false, currentRevision };
+      }
+      const { rows } = await tx.query<{ updated_at: string }>(
+        `insert into draft (campaign_id, user_id, org_id, state, base_revision, updated_at)
+         values ($1, $2, $3, $4::jsonb, $5, now())
+         on conflict (campaign_id, user_id) do update
+           set state = excluded.state, base_revision = excluded.base_revision, updated_at = excluded.updated_at
+         returning ${TO_ISO} as updated_at`,
+        [campaignId, userId, this.orgId, JSON.stringify(state), baseRevision],
+      );
+      return { ok: true, draft: { state, baseRevision, updatedAt: rows[0]!.updated_at } };
+    });
+  }
+
   async deleteDraft(campaignId: string, userId: string): Promise<void> {
     await this.db.query(
       `delete from draft where org_id = $1 and campaign_id = $2 and user_id = $3`,
@@ -63,17 +115,14 @@ export class PgDraftStore implements DraftStorePort {
     );
   }
 
-  async latestDraft(userId: string): Promise<LatestDraft | undefined> {
+  async listDraftsByRecency(userId: string): Promise<readonly LatestDraft[]> {
     const { rows } = await this.db.query<{ campaign_id: string; updated_at: string }>(
       `select campaign_id, ${TO_ISO} as updated_at
          from draft
         where org_id = $1 and user_id = $2
-        order by updated_at desc
-        limit 1`,
+        order by updated_at desc`,
       [this.orgId, userId],
     );
-    const row = rows[0];
-    if (!row) return undefined;
-    return { campaignId: row.campaign_id, updatedAt: row.updated_at };
+    return rows.map((row) => ({ campaignId: row.campaign_id, updatedAt: row.updated_at }));
   }
 }

@@ -443,6 +443,64 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
           await harness.cleanup();
         }
       });
+
+      // Fix round item 1 (grok-4.7): `latestDraft`'s old `limit 1` answered
+      // whatever row sorted first by `updated_at`, with no regard for
+      // whether campaignMeta still resolves it for this caller — the
+      // migration cascades `draft` only on campaign DELETE, never on a team
+      // reassignment, so a hidden campaign's draft row survives right where
+      // `listDraftsByRecency` would otherwise still find it.
+      test("a draft on a campaign that becomes team-hidden answers { latest: null }, identical to no draft — an older visible draft is returned instead", async () => {
+        const harness = await setup();
+        const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+        try {
+          await pgHarness.db.query(
+            `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+            ["t1", "Team One", "local"],
+          );
+          const caller: TenantContext = {
+            orgId: "local",
+            userId: "caller",
+            roles: [],
+            teamIds: [],
+          };
+          await seedUsers(pgHarness, [caller]);
+          const api = mount(caller);
+
+          const { campaignId: hiddenId, slug: hiddenSlug } = await mintCampaign(
+            api,
+            "Later Hidden",
+          );
+          await api.putDraft(hiddenSlug, { state: { x: "hidden" }, baseRevision: null });
+          // Assigned to a team this caller is not part of AFTER the draft was
+          // taken — D166's own visibility rule now hides it from them, the
+          // same as if it had never resolved at all.
+          await pgHarness.db.query("update campaign set team_id = $1 where id = $2", [
+            "t1",
+            hiddenId,
+          ]);
+
+          const onlyHidden = (await (await api.latest()).json()) as { latest: unknown };
+          expect(onlyHidden).toEqual({ latest: null });
+
+          // An older draft, on a campaign that stays visible — once it
+          // exists, IT is the answer, not the newer-but-hidden one, and
+          // never a 404 either way.
+          const { campaignId: olderId, slug: olderSlug } = await mintCampaign(api, "Older Visible");
+          await api.putDraft(olderSlug, { state: { x: "older" }, baseRevision: null });
+          await pgHarness.db.query(
+            "update draft set updated_at = now() - interval '1 hour' where campaign_id = $1",
+            [olderId],
+          );
+
+          const withOlder = (await (await api.latest()).json()) as {
+            latest: { campaignId: string } | null;
+          };
+          expect(withOlder.latest?.campaignId).toBe(olderId);
+        } finally {
+          await harness.cleanup();
+        }
+      });
     }
   },
 );

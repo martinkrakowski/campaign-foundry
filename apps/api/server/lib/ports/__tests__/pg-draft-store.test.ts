@@ -1,4 +1,10 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
+import {
+  BRIEF_SCHEMA_VERSION,
+  DEFAULT_CAMPAIGN_TYPE,
+  templateFromCanonical,
+  type CampaignBrief,
+} from "@campaignfoundry/CampaignOrchestration";
 import type { SqlClient } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import { PgBriefStore } from "../pg-brief-store.js";
@@ -15,6 +21,18 @@ async function insertUser(db: SqlClient, id: string, email: string): Promise<voi
 async function mintCampaign(db: SqlClient, orgId: string, slug: string): Promise<string> {
   const { campaignId } = await new PgBriefStore(db, orgId, "local").createCampaign(slug);
   return campaignId;
+}
+
+function sampleBrief(id: string): CampaignBrief {
+  return {
+    schemaVersion: BRIEF_SCHEMA_VERSION,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+    id,
+    targetRegion: "US",
+    targetAudience: "developers",
+    campaignMessage: "Build faster",
+    products: [{ id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: "logo.png" }],
+  };
 }
 
 describe("PgDraftStore (PT-5d, D173, D177)", () => {
@@ -104,12 +122,12 @@ describe("PgDraftStore (PT-5d, D173, D177)", () => {
     await expect(acmeStore.readDraft(campaignId, "u1")).resolves.toBeUndefined();
   });
 
-  test("latestDraft answers undefined for a user with no drafts", async () => {
+  test("listDraftsByRecency answers an empty list for a user with no drafts", async () => {
     const store = new PgDraftStore(db, "local");
-    await expect(store.latestDraft("u1")).resolves.toBeUndefined();
+    await expect(store.listDraftsByRecency("u1")).resolves.toEqual([]);
   });
 
-  test("latestDraft answers the most recently written draft across campaigns", async () => {
+  test("listDraftsByRecency answers every draft, newest first, across campaigns", async () => {
     const older = await mintCampaign(db, "local", "older");
     const newer = await mintCampaign(db, "local", "newer");
     const store = new PgDraftStore(db, "local");
@@ -121,14 +139,86 @@ describe("PgDraftStore (PT-5d, D173, D177)", () => {
       [older],
     );
     await store.writeDraft(newer, "u1", { name: "Newer" }, null);
-    const latest = await store.latestDraft("u1");
-    expect(latest?.campaignId).toBe(newer);
+    const list = await store.listDraftsByRecency("u1");
+    expect(list.map((d) => d.campaignId)).toEqual([newer, older]);
   });
 
-  test("latestDraft never mixes in another user's drafts", async () => {
+  test("listDraftsByRecency never mixes in another user's drafts", async () => {
     const campaignId = await mintCampaign(db, "local", "camp");
     const store = new PgDraftStore(db, "local");
     await store.writeDraft(campaignId, "u2", { name: "Theirs" }, null);
-    await expect(store.latestDraft("u1")).resolves.toBeUndefined();
+    await expect(store.listDraftsByRecency("u1")).resolves.toEqual([]);
+  });
+
+  describe("writeDraftIfCurrent (fix round item 2, grok-4.7)", () => {
+    test("writes and answers ok:true when baseRevision matches the campaign's current revision", async () => {
+      const campaignId = await mintCampaign(db, "local", "camp");
+      const briefs = new PgBriefStore(db, "local", "local");
+      const saved = await briefs.createBrief(sampleBrief("camp"));
+      const store = new PgDraftStore(db, "local");
+
+      const outcome = await store.writeDraftIfCurrent(
+        campaignId,
+        "u1",
+        { edited: true },
+        saved.revision,
+      );
+      expect(outcome).toEqual({
+        ok: true,
+        draft: expect.objectContaining({ state: { edited: true }, baseRevision: saved.revision }),
+      });
+      await expect(store.readDraft(campaignId, "u1")).resolves.toMatchObject({
+        state: { edited: true },
+      });
+    });
+
+    test("a versionless campaign's null baseRevision matches its null current revision", async () => {
+      const campaignId = await mintCampaign(db, "local", "camp");
+      const store = new PgDraftStore(db, "local");
+      const outcome = await store.writeDraftIfCurrent(campaignId, "u1", { x: 1 }, null);
+      expect(outcome.ok).toBe(true);
+    });
+
+    test("refuses without writing when baseRevision no longer matches, and reports the current one", async () => {
+      const campaignId = await mintCampaign(db, "local", "camp");
+      const briefs = new PgBriefStore(db, "local", "local");
+      const saved = await briefs.createBrief(sampleBrief("camp"));
+      const store = new PgDraftStore(db, "local");
+
+      const outcome = await store.writeDraftIfCurrent(
+        campaignId,
+        "u1",
+        { edited: true },
+        "not-the-real-revision",
+      );
+      expect(outcome).toEqual({ ok: false, currentRevision: saved.revision });
+      await expect(store.readDraft(campaignId, "u1")).resolves.toBeUndefined();
+    });
+
+    test("refuses when the caller's own pre-check was already stale by the time this runs — the predicate is IN the write, not trusted from a caller-supplied currentRevision", async () => {
+      const campaignId = await mintCampaign(db, "local", "camp");
+      const briefs = new PgBriefStore(db, "local", "local");
+      const store = new PgDraftStore(db, "local");
+
+      // The caller's own belief: no version exists yet (what a PUT /draft
+      // route's pre-check would have read a moment before this call).
+      const staleBelief = (await briefs.getRevision("camp")) ?? null;
+      expect(staleBelief).toBeNull();
+
+      // A save commits a real version — the race window the old
+      // check-then-upsert PUT route left open, simulated here by landing it
+      // between the caller's belief and the store call that acts on it.
+      const saved = await briefs.createBrief(sampleBrief("camp"));
+
+      // The write must see the FRESH revision, not the stale null the
+      // caller observed earlier — it never even receives that stale value
+      // (this method's own signature drops the interface's
+      // `currentRevision` parameter and re-derives it inside its own
+      // locked transaction), so passing `staleBelief` here would not even
+      // typecheck as an argument this call reads.
+      const outcome = await store.writeDraftIfCurrent(campaignId, "u1", { v: 2 }, staleBelief);
+      expect(outcome).toEqual({ ok: false, currentRevision: saved.revision });
+      await expect(store.readDraft(campaignId, "u1")).resolves.toBeUndefined();
+    });
   });
 });
