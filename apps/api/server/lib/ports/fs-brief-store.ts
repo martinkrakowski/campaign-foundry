@@ -153,7 +153,15 @@ export class FsBriefStore implements BriefStorePort {
     // path can trigger for ANY id, reserved or not, with no real reservation
     // behind it — see that method's own doc comment).
     if (isReservedCampaignId(brief.id) && !(await this.hasGenuineReservation(brief.id))) {
-      throw new Error(`"${brief.id}" is reserved; choose another campaign id.`);
+      // D181 fix round 3 (Fable, client-reachable 500): `code: "ERESERVED"`
+      // lets the route map this to 400 even when it arrives through
+      // `replaceBrief`'s ENOENT-falls-to-`createBrief` path — `?replace=1`
+      // skips the route's OWN early reserved gate entirely, so a codeless
+      // `Error` here fell through every `instanceof`/`isErrno` check in the
+      // route's catch and rethrew as an uncaught 500.
+      const err = new Error(`"${brief.id}" is reserved; choose another campaign id.`);
+      (err as { code?: string }).code = "ERESERVED";
+      throw err;
     }
     const filePath = resolveConfined(this.dir, `${brief.id}.yaml`);
     try {
@@ -371,10 +379,14 @@ export class FsBriefStore implements BriefStorePort {
    * has). Grandfathering on `findBriefFileById` alone would let a reserved id
    * whose only version lives in such a file through this gate, and the write
    * that follows would create a second, canonically-named file carrying the
-   * same domain id — an ambiguous lookup. `findBriefFile` matches exactly
-   * what `createBrief` is about to write to: true here means that path is
-   * either already taken (the write EEXISTs, same as any other collision) or
-   * genuinely free.
+   * same domain id — an ambiguous lookup. `findBriefFile(ref)` is a closer
+   * match than that (it checks `ref` against `BRIEF_SOURCE_EXTS` — `.yaml`,
+   * `.yml`, `.json` — NOT only the exact `.yaml` extension `createBrief`
+   * writes), narrowing the same hole to a legacy `ref.yml`/`ref.json` with no
+   * `ref.yaml`, reachable only by a caller of this store that bypasses
+   * `briefs.post.ts`'s own route (which resolves `rewriteBrief`'s existing
+   * file by id first, so it never reaches this method for a genuinely
+   * versioned campaign, any extension).
    */
   async hasGenuineReservation(ref: string): Promise<boolean> {
     if (await this.findBriefFile(ref)) return true;

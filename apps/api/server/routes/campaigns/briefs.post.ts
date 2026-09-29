@@ -13,9 +13,12 @@ import { requestTenant } from "../../lib/tenant.js";
  *
  * Body is a brief (same validator as generate). Lookup is by `brief.id`, not
  * filename. The target campaign must already be KNOWN (PT-5c2: `POST /campaigns`
- * is the only path that mints one now) — a hidden and a missing target answer
- * the identical 404, and nothing is written for either. A known target already
- * carrying a version 409s unless `?replace=1` (repeated `replace` still counts;
+ * is the only path that mints one now) — for a NON-reserved id, a hidden and a
+ * missing target answer the identical 404, and nothing is written for either
+ * (D181 fix round 3: for a RESERVED id, both instead answer the identical 400
+ * "reserved" — see the `hasGenuineReservation`/PT-2d comment below; a 404
+ * here would leak that a hidden campaign exists under that slug). A known
+ * target already carrying a version 409s unless `?replace=1` (repeated `replace` still counts;
  * the first value wins); a KNOWN but versionless target (a blank `POST /campaigns`
  * create) accepts this write as its first Save either way. Replace rewrites that
  * same file in its own format. Creates use exclusive `wx` writes under
@@ -201,6 +204,15 @@ export default defineEventHandler(async (event) => {
     }
     if (isErrno(error, "EFORBIDDEN")) {
       setResponseStatus(event, 403);
+      return { error: errorMessage(error) };
+    }
+    // D181 fix round 3 (Fable, client-reachable 500): a reserved id can
+    // reach this catch via `replaceBrief`'s ENOENT-falls-to-`createBrief`
+    // path when `?replace=1` skipped the early gate above entirely (the
+    // gate only ever runs `!replace`) — same status and body either way,
+    // never a 500 for the same client state a plain POST answers 400.
+    if (isErrno(error, "ERESERVED")) {
+      setResponseStatus(event, 400);
       return { error: errorMessage(error) };
     }
     throw error;

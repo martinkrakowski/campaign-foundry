@@ -73,7 +73,14 @@ function assertSafeSlug(id: string): void {
 
 function assertNotReserved(id: string): void {
   if (isReservedCampaignId(id)) {
-    throw new Error(`"${id}" is reserved; choose another campaign id.`);
+    // D181 fix round 3 (Fable, client-reachable 500): `code: "ERESERVED"`
+    // lets the route map this to 400 regardless of which path reaches it —
+    // see the matching fs-brief-store.ts comment for the exact mechanism
+    // (`?replace=1` skips the route's own early gate, so this throw's own
+    // code is what the route's catch must key on).
+    const err = new Error(`"${id}" is reserved; choose another campaign id.`);
+    (err as { code?: string }).code = "ERESERVED";
+    throw err;
   }
 }
 
