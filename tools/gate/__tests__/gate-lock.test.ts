@@ -64,8 +64,9 @@ function runLockIn(
   args: string[],
   env: Record<string, string> = {},
   timeout = 15_000,
+  shell = "sh",
 ): RunResult {
-  const result = spawnSync("sh", [gateLockSh, ...args], {
+  const result = spawnSync(shell, [gateLockSh, ...args], {
     encoding: "utf8",
     env: { ...process.env, TMPDIR: dir, ...env },
     timeout,
@@ -159,6 +160,22 @@ async function waitForFile(path: string, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!existsSync(path)) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${path}`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+/**
+ * Poll until the path exists AND holds something. A file appears when it is
+ * opened, which is before anything is written into it, so a pause marker and a
+ * pid a command published are not the same wait: waiting for the marker means
+ * waiting for the file, and waiting for the pid means waiting for the value.
+ * Reading the pid out of a file that exists but is not yet written gives 0.
+ */
+async function waitForContent(path: string, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (existsSync(path) && readFileSync(path, "utf8").trim() !== "") return;
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${path} to have content`);
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
@@ -673,7 +690,7 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
       { CF_GATE_HEARTBEAT_SECONDS: "1" },
       shell,
     );
-    await waitForFile(commandPidFile);
+    await waitForContent(commandPidFile);
     const commandPid = Number(readFileSync(commandPidFile, "utf8").trim());
     expect(commandPid).toBeGreaterThan(0);
     expect(isAlive(commandPid)).toBe(true);
@@ -742,7 +759,7 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
         { CF_GATE_HEARTBEAT_SECONDS: "1" },
         shell,
       );
-      await waitForFile(join(dir, "command.pid"));
+      await waitForContent(join(dir, "command.pid"));
       const commandPid = Number(readFileSync(join(dir, "command.pid"), "utf8").trim());
       expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
       process.kill(child.pid as number, "SIGTERM");
@@ -837,26 +854,27 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
   }, 15_000);
 
   test("passes the command through quoted, and a -- inside it is just an argument", () => {
-    const dir = scratch();
-    const out = join(dir, "args");
-    // Two arguments that contain spaces must arrive as two arguments, and the
+    // Under both shells, because `"$@"` is the shell's own and the two differ:
+    // two arguments that contain spaces must arrive as two arguments, and the
     // -- that separates them must be the FIRST one only: read as a separator
     // again, the command would lose both.
-    const result = runLockIn(dir, [
-      "run",
-      "lane-a",
-      "--",
-      "sh",
-      "-c",
-      'printf "%s\\n" "$@" > "$TMPDIR/args"',
-      "args",
-      "--",
-      "a b",
-      "c d",
-    ]);
-    expect(result.status).toBe(0);
-    expect(readFileSync(out, "utf8").trim().split("\n")).toEqual(["--", "a b", "c d"]);
-  });
+    for (const shell of SIGNAL_SHELLS) {
+      const dir = scratch();
+      const out = join(dir, "args");
+      const result = runLockIn(
+        dir,
+        ["run", "lane-a", "--", "sh", "-c", 'printf "%s\\n" "$@" > "$TMPDIR/args"', "args", "--", "a b", "c d"],
+        {},
+        15_000,
+        shell,
+      );
+      expect({ shell, status: result.status }).toEqual({ shell, status: 0 });
+      expect({ shell, args: readFileSync(out, "utf8").trim().split("\n") }).toEqual({
+        shell,
+        args: ["--", "a b", "c d"],
+      });
+    }
+  }, 15_000);
 
   test("a missing -- or an empty command is a usage error, and takes no lock", () => {
     const dir = scratch();
