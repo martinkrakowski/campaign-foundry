@@ -2005,6 +2005,14 @@
           const label =
             typeof threads === "number" ? `threads:${threads}` : "threads:?";
           html += ` ${pill(threads === 0 ? "dim" : "warn", label)}`;
+          // D184's pre-PR-review gate: `derived.risk` is already the flag's
+          // own words, set by the server only for a high-risk lane whose PR
+          // is open and whose wave log holds no settled pre-PR review (or a
+          // changes-required one with no later remediation) — nothing here
+          // recomputes that verdict.
+          if (lane.derived.risk !== undefined) {
+            html += ` ${pill("bad", lane.derived.risk)}`;
+          }
         }
         return html;
       }

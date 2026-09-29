@@ -38,9 +38,9 @@
     },
     {
       "file": "apps/api/server/lib/ports/fs-output-store.ts",
-      "before": "const HIDDEN_AREAS = RESERVED_CAMPAIGN_IDS.filter((id) => id !== \"packages\");",
-      "after": "const HIDDEN_AREAS = RESERVED_CAMPAIGN_IDS.filter((id) => id !== \"packages\" && id !== \"orgs\");",
-      "because": "the local output store serves orgs/*, so another org's report is readable through GET /output (CodeRabbit on #575). Re-anchored 2026-09-27 in FU-reserved-campaign-ids: HIDDEN_AREAS derives from RESERVED_CAMPAIGN_IDS.",
+      "before": "const HIDDEN_AREAS = RESERVED_STORE_AREAS;",
+      "after": "const HIDDEN_AREAS = RESERVED_STORE_AREAS.filter((id) => id !== \"orgs\");",
+      "because": "the local output store serves orgs/*, so another org's report is readable through GET /output (CodeRabbit on #575). Re-anchored 2026-09-27 in FU-reserved-campaign-ids: HIDDEN_AREAS derives from RESERVED_CAMPAIGN_IDS. Re-anchored again 2026-09-29 in HX1-route-segments-reserved: the reserved list split into RESERVED_STORE_AREAS and RESERVED_ROUTE_SEGMENTS (D181), and HIDDEN_AREAS is now exactly RESERVED_STORE_AREAS (no filter needed — packages was the only exclusion and it was never a store area); the mutation's meaning — excluding orgs from HIDDEN_AREAS exposes another org's output — is unchanged.",
       "command": [
         "yarn",
         "vitest",

@@ -116,6 +116,14 @@ function planReviewCell(lane: LaneStatus): string {
   return lane.derived.planReview === undefined ? ABSENT : lane.derived.planReview;
 }
 
+/**
+ * D184's pre-PR-review gate flag, verbatim or absent — shown, never resolved
+ * into a lane state, exactly like `planReviewCell` above.
+ */
+function riskCell(lane: LaneStatus): string {
+  return lane.derived.risk === undefined ? ABSENT : lane.derived.risk;
+}
+
 /** The tones mirror the page: failed red, settled green, started cyan, absent dim. */
 const COLUMNS: readonly Column[] = [
   { header: "lane", cell: laneCell, paint: (_lane, text) => text },
@@ -188,6 +196,11 @@ const COLUMNS: readonly Column[] = [
     header: "plan review",
     cell: planReviewCell,
     paint: (lane, text) => withCode(lane.derived.planReview === undefined ? DIM : RED, text),
+  },
+  {
+    header: "risk",
+    cell: riskCell,
+    paint: (lane, text) => withCode(lane.derived.risk === undefined ? DIM : RED, text),
   },
 ];
 

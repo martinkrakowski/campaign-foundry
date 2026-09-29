@@ -1983,6 +1983,24 @@ describe("authoring briefs", () => {
       },
     );
 
+    // S2 (D181 fix round 2): `hasGenuineReservation` lives OUTSIDE the
+    // body-parse try/catch — a storage failure while deciding reserved-ness
+    // must surface as a 500 (an unexpected error), never get folded into
+    // this route's own 400 "reserved" response the way a body-parse error
+    // does.
+    test("POST surfaces a hasGenuineReservation storage failure with 500, not a 400", async () => {
+      const { create } = await api();
+      const { getBriefStore } = await import("../../../lib/ports/index.js");
+      const spy = vi
+        .spyOn(getBriefStore(LOCAL_TENANT), "hasGenuineReservation")
+        .mockRejectedValueOnce(Object.assign(new Error("EIO"), { code: "EIO" }));
+      const res = await create()(
+        jsonReq("http://x/campaigns/briefs", "POST", brief({ id: "cache" })),
+      );
+      expect(res.status).toBe(500);
+      spy.mockRestore();
+    });
+
     // PT-5c2: `?replace=1` skips the early (`!replace`) reserved check, so a
     // never-minted reserved id now reaches the campaignMeta gate like any
     // other unknown id — a reserved word can never be minted (`createCampaign`

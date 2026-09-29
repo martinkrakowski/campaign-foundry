@@ -69,7 +69,7 @@ describe("renderStatus", () => {
     const withPr = rows.find((line) => line.includes("T/t1"));
     const withoutPr = rows.find((line) => line.includes("T/t2"));
     expect(withPr).toContain("#12 open pass");
-    expect(withoutPr).toMatch(/T\/t2\s+unknown\s+—\s+not alive\s+—\s+—\s+—$/);
+    expect(withoutPr).toMatch(/T\/t2\s+unknown\s+—\s+not alive\s+—\s+—\s+—\s+—$/);
   });
 
   test("the seat column sits between lane and stage, and renders the seat or the honest unknown", () => {
@@ -219,7 +219,7 @@ describe("renderStatus", () => {
     expect(out).toContain("exit 0 · 98/95/97/98%");
     expect(out).toContain("exit 3");
     expect(out).toContain("· 50/60/70/80%");
-    expect(out).toMatch(/T\/t3\s+unknown\s+—\s+not alive\s+—\s+—\s+—$/m);
+    expect(out).toMatch(/T\/t3\s+unknown\s+—\s+not alive\s+—\s+—\s+—\s+—$/m);
   });
 
   test("colour is opt-in and paints the page's tones", () => {
@@ -406,12 +406,37 @@ describe("renderStatus", () => {
     expect(out).toContain("plan review");
     expect(out).toContain("dispatched on an unreviewed row");
     const rows = out.split("\n");
-    expect(rows.find((line) => line.includes("T/t1"))).toMatch(/—\s*$/);
+    // Both rows end in the (unset) risk column's —, so the plan-review flag
+    // is asserted by its own text, mid-row, rather than by where a row ends.
+    expect(rows.find((line) => line.includes("T/t1"))).not.toContain(
+      "dispatched on an unreviewed row",
+    );
     const flagged = rows.find((line) => line.includes("T/t2"));
-    expect(flagged).not.toMatch(/—\s*$/);
+    expect(flagged).toContain("dispatched on an unreviewed row");
     // The flag is a disagreement in its own words, painted red — never folded into a state.
     const colored = renderStatus(status, { color: true });
     expect(colored).toContain("\x1b[31mdispatched on an unreviewed row\x1b[0m");
+  });
+
+  test("the risk column shows D184's gate flag, or — for a lane it says nothing about", () => {
+    const status = makeStatus([
+      makeLane("t1", { alive: false }),
+      {
+        ...makeLane("t2", { alive: false }),
+        derived: { alive: false, risk: "high-risk PR open without pre-PR review" },
+      },
+    ]);
+    const out = renderStatus(status, { color: false });
+    expect(out).toContain("risk");
+    const rows = out.split("\n");
+    expect(rows.find((line) => line.includes("T/t1"))).not.toContain(
+      "high-risk PR open without pre-PR review",
+    );
+    const flagged = rows.find((line) => line.includes("T/t2"));
+    expect(flagged).toContain("high-risk PR open without pre-PR review");
+    // The flag is shown, never resolved into a state — painted red, like plan review.
+    const colored = renderStatus(status, { color: true });
+    expect(colored).toContain("\x1b[31mhigh-risk PR open without pre-PR review\x1b[0m");
   });
 });
 

@@ -101,11 +101,13 @@ describe("FsOutputStore", () => {
     });
   });
 
-  test("HIDDEN_AREAS hides cache, jobs and orgs, while packages remain served", async () => {
+  test("HIDDEN_AREAS hides exactly cache, jobs, last-opened and orgs, while packages remain served", async () => {
     mkdirSync(join(root, "cache"), { recursive: true });
     writeFileSync(join(root, "cache", "data.json"), "{}");
     mkdirSync(join(root, "jobs"), { recursive: true });
     writeFileSync(join(root, "jobs", "job.json"), "{}");
+    mkdirSync(join(root, "last-opened"), { recursive: true });
+    writeFileSync(join(root, "last-opened", "data.json"), "{}");
     mkdirSync(join(root, "orgs", "tenant"), { recursive: true });
     writeFileSync(join(root, "orgs", "tenant", "data.json"), "{}");
     mkdirSync(join(root, "packages", "camp", "instagram-feed"), { recursive: true });
@@ -120,6 +122,10 @@ describe("FsOutputStore", () => {
       found: false,
       reason: "missing",
     });
+    await expect(store.openOutput("last-opened/data.json")).resolves.toEqual({
+      found: false,
+      reason: "missing",
+    });
     await expect(store.openOutput("orgs/tenant/data.json")).resolves.toEqual({
       found: false,
       reason: "missing",
@@ -131,5 +137,20 @@ describe("FsOutputStore", () => {
       file: { name: "manifest.json" },
     });
     if (pkgLookup.found) await pkgLookup.file.close();
+  });
+
+  // HX1/D181: `packages` is reserved as a campaign id AND a route segment,
+  // yet it is not a HIDDEN_AREAS store area. That split must not widen
+  // HIDDEN_AREAS to hide every OTHER route segment too — a route-only
+  // segment (`templates`, never a store area) must stay servable, exactly
+  // as an ordinary campaign-output path would be.
+  test("a reserved ROUTE segment that is not a store area is still served output", async () => {
+    mkdirSync(join(root, "templates"), { recursive: true });
+    writeFileSync(join(root, "templates", "camp.json"), "{}");
+
+    const store = new FsOutputStore(root);
+    const lookup = await store.openOutput("templates/camp.json");
+    expect(lookup).toMatchObject({ found: true, file: { name: "camp.json" } });
+    if (lookup.found) await lookup.file.close();
   });
 });

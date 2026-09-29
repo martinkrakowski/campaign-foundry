@@ -4423,6 +4423,56 @@ describe("the status page", () => {
     }
   });
 
+  test("D184's risk flag renders as a bad-toned pill in the PR cell, for an open high-risk PR only", async () => {
+    const riskStatus: WaveStatus = {
+      generatedAt: new Date().toISOString(),
+      waves: [
+        {
+          id: "R",
+          lanes: [
+            {
+              wave: "R",
+              lane: "hx1",
+              derived: {
+                alive: false,
+                pr: { number: 43, state: "open", checks: "pending" },
+                risk: "high-risk PR open without pre-PR review",
+              },
+              disagreements: [],
+            },
+            {
+              wave: "R",
+              lane: "hx4",
+              derived: {
+                alive: false,
+                pr: { number: 44, state: "open", checks: "pass" },
+              },
+              disagreements: [],
+            },
+          ],
+        },
+      ],
+    };
+
+    const page = await loadPage(riskStatus);
+    const doc = page.window.document;
+
+    const flaggedRow = doc.querySelector('tr.lane[data-wave="R"][data-lane="hx1"] td.c-pr');
+    expect(flaggedRow).not.toBeNull();
+    expect(flaggedRow!.textContent).toContain("high-risk PR open without pre-PR review");
+    const flaggedPill = Array.from(flaggedRow!.querySelectorAll(".pill")).find(
+      (el) => el.textContent?.trim() === "high-risk PR open without pre-PR review",
+    );
+    expect(flaggedPill).toBeDefined();
+    expect(flaggedPill!.classList.contains("bad")).toBe(true);
+
+    // A lane the collector never flagged (no `derived.risk`) gets no such pill,
+    // whatever its own PR state is — the page never invents the verdict.
+    const unflaggedRow = doc.querySelector('tr.lane[data-wave="R"][data-lane="hx4"] td.c-pr');
+    expect(unflaggedRow).not.toBeNull();
+    expect(unflaggedRow!.textContent).not.toContain("high-risk PR open without pre-PR review");
+  });
+
   test("a lane with no live process and no terminal event absent beyond grace period renders as stalled, not running", async () => {
     const stalledStatus: WaveStatus = {
       generatedAt: new Date().toISOString(),

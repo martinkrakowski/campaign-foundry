@@ -147,8 +147,21 @@ export class FsBriefStore implements BriefStorePort {
 
   async createBrief(brief: CampaignBrief, options?: BriefWriteOptions): Promise<StoredBrief> {
     assertNoTeam(options?.teamId);
-    if (isReservedCampaignId(brief.id)) {
-      throw new Error(`"${brief.id}" is reserved; choose another campaign id.`);
+    // D181 fix round 2: a reserved id is refused only when there is no GENUINE
+    // evidence for it — `hasGenuineReservation`, never the plain `campaignMeta`
+    // (whose own bare-directory fallback `FsPoolStore.writePool`'s inline-brief
+    // path can trigger for ANY id, reserved or not, with no real reservation
+    // behind it — see that method's own doc comment).
+    if (isReservedCampaignId(brief.id) && !(await this.hasGenuineReservation(brief.id))) {
+      // D181 fix round 3 (Fable, client-reachable 500): `code: "ERESERVED"`
+      // lets the route map this to 400 even when it arrives through
+      // `replaceBrief`'s ENOENT-falls-to-`createBrief` path — `?replace=1`
+      // skips the route's OWN early reserved gate entirely, so a codeless
+      // `Error` here fell through every `instanceof`/`isErrno` check in the
+      // route's catch and rethrew as an uncaught 500.
+      const err = new Error(`"${brief.id}" is reserved; choose another campaign id.`);
+      (err as { code?: string }).code = "ERESERVED";
+      throw err;
     }
     const filePath = resolveConfined(this.dir, `${brief.id}.yaml`);
     try {
@@ -347,6 +360,37 @@ export class FsBriefStore implements BriefStorePort {
       return { campaignId: ref, slug: ref, name: null, type: null, hasVersion: false };
     }
     return undefined;
+  }
+
+  /**
+   * See `BriefStorePort.hasGenuineReservation` (D181 fix round 2). Real
+   * evidence is a saved version AT ITS OWN CANONICAL FILENAME
+   * (`findBriefFile`, not `findBriefFileById`) or a readable `campaign.json`
+   * (`readCampaignMeta`) — deliberately NOT `campaignMeta`'s own
+   * bare-directory fallback (`campaignDirExists`), which exists to recognise
+   * a pre-PT-5b3 reservation with no meta file, but which
+   * `FsPoolStore.writePool`'s inline-brief `mkdir` can produce for ANY id.
+   *
+   * `findBriefFile`, never the id-parsed `findBriefFileById` (qodo, D181 fix
+   * round 2): `createBrief` below writes unconditionally to `${ref}.yaml`
+   * once past this gate, with no check of its own for the id living under a
+   * DIFFERENT filename (a legacy, non-canonical one — `createCampaign`'s own
+   * dedupe already covers that case for a fresh mint, but `createBrief` never
+   * has). Grandfathering on `findBriefFileById` alone would let a reserved id
+   * whose only version lives in such a file through this gate, and the write
+   * that follows would create a second, canonically-named file carrying the
+   * same domain id — an ambiguous lookup. `findBriefFile(ref)` is a closer
+   * match than that (it checks `ref` against `BRIEF_SOURCE_EXTS` — `.yaml`,
+   * `.yml`, `.json` — NOT only the exact `.yaml` extension `createBrief`
+   * writes), narrowing the same hole to a legacy `ref.yml`/`ref.json` with no
+   * `ref.yaml`, reachable only by a caller of this store that bypasses
+   * `briefs.post.ts`'s own route (which resolves `rewriteBrief`'s existing
+   * file by id first, so it never reaches this method for a genuinely
+   * versioned campaign, any extension).
+   */
+  async hasGenuineReservation(ref: string): Promise<boolean> {
+    if (await this.findBriefFile(ref)) return true;
+    return (await this.readCampaignMeta(ref)) !== undefined;
   }
 
   /**

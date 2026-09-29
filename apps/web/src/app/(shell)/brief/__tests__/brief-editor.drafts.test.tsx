@@ -7,8 +7,10 @@ import {
   templateFromCanonical,
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
-import { renderWithRun, json } from "@/__tests__/helpers";
+import { renderWithRun, json, ShellProviders } from "@/__tests__/helpers";
 import { API } from "@/lib/run-context";
+import { useEditorDirty } from "@/lib/editor-dirty-context";
+import { EditorUnloadGuard } from "@/components/shell/EditorUnloadGuard";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
 import { fromBrief } from "@/components/campaign/editor-state";
 import * as messages from "@/components/campaign/messages";
@@ -25,6 +27,33 @@ import * as messages from "@/components/campaign/messages";
  */
 
 const Editor = ({ id }: { id?: string }) => <BriefEditor briefId={id} />;
+
+/**
+ * D185 — the two write states the shell's leave guard reads, rendered beside
+ * the editor inside the same `EditorDirtyProvider` (which `renderWithRun`
+ * mounts) so the assertion is on what the editor PUBLISHED, not on anything it
+ * holds privately.
+ */
+const WriteFlags = () => {
+  const { hasPendingWrite, hasFailedWrite } = useEditorDirty();
+  return (
+    <>
+      <span data-testid="pending-write">{String(hasPendingWrite)}</span>
+      <span data-testid="failed-write">{String(hasFailedWrite)}</span>
+    </>
+  );
+};
+
+const flag = (name: "pending-write" | "failed-write") => screen.getByTestId(name).textContent;
+
+/** `cancelable: true` is not optional here: happy-dom defaults it to false, and
+ *  on such an event `preventDefault()` does nothing, so a guard that had
+ *  registered nothing at all would satisfy the assertion. */
+const unload = (): Event => {
+  const event = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(event);
+  return event;
+};
 
 afterEach(() => {
   vi.useRealTimers();
@@ -62,6 +91,22 @@ function draftRoutes(opts: {
   /** Force the next DELETE for this campaign id to answer 500. */
   failDeleteFor?: string;
   /**
+   * Fix round (bots) — hold every draft DELETE for this campaign id open until
+   * `releaseDelete()` is called, instead of answering inline. A DELETE is the
+   * one write on the chain that carries no unsaved work, and "no unsaved work
+   * while one is on the wire" is only observable if the wire can be made to
+   * stay out: an inline DELETE settles in the same tick it is queued, so the
+   * window the leave guard has to be disarmed in is never open.
+   */
+  deferDeleteFor?: string;
+  /**
+   * D185 — force the next draft PUT for this campaign id to answer 500, once.
+   * `fetch` resolves for a 500, so this is a write that LOOKED like it landed
+   * and did not: the case the failed-write flag exists for, and the only way to
+   * put it in reach of a test.
+   */
+  failPutFor?: string;
+  /**
    * Fix round item 3 (grok-4.7) — hold the next draft GET for this campaign
    * id open until `releaseGet()` is called, instead of answering it inline:
    * exercising "a keystroke lands while the restore fetch is still in
@@ -76,24 +121,38 @@ function draftRoutes(opts: {
    * DISPATCHED before the first settles" (the write-chain fix) and "an
    * in-flight PUT completing after Revert's own DELETE" both need a real
    * gap between a PUT going out and its answer landing.
+   *
+   * Fix round (Qodo) — a LIST as well as a single id, because "one editor's
+   * settlement must not clear another editor's pending write" needs two
+   * campaigns' PUTs held open at once, and holding one would let the other
+   * answer inline and settle before the assertion could mean anything.
    */
-  deferPutFor?: string;
+  deferPutFor?: string | string[];
 }) {
   const store = new Map<string, { state: unknown; baseRevision: string | null }>();
   const calls: { url: string; method: string; body?: Record<string, unknown> }[] = [];
   let failDeleteFor = opts.failDeleteFor;
+  let failPutFor = opts.failPutFor;
   let releaseGet: ((response: Response) => void) | undefined;
   const heldGet = opts.deferGetFor
     ? new Promise<Response>((resolve) => {
         releaseGet = resolve;
       })
     : undefined;
+  const deferPutFor = new Set(
+    opts.deferPutFor === undefined
+      ? []
+      : typeof opts.deferPutFor === "string"
+        ? [opts.deferPutFor]
+        : opts.deferPutFor,
+  );
   const pendingPuts: {
     id: string;
     state: unknown;
     baseRevision: string | null;
     release: (r: Response) => void;
   }[] = [];
+  const heldDeletes: { id: string; release: (r: Response) => void }[] = [];
   vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
     const u = String(url);
     const method = (init?.method ?? "GET").toUpperCase();
@@ -120,9 +179,13 @@ function draftRoutes(opts: {
         return Promise.resolve(json({ draft: rec ? { ...rec, updatedAt: "t" } : null }));
       }
       if (method === "PUT") {
+        if (failPutFor === id) {
+          failPutFor = undefined;
+          return Promise.resolve(json({ error: "boom" }, 500));
+        }
         const state = parsed?.state;
         const baseRevision = typeof parsed?.baseRevision === "string" ? parsed.baseRevision : null;
-        if (opts.deferPutFor === id) {
+        if (deferPutFor.has(id)) {
           return new Promise<Response>((resolve) => {
             pendingPuts.push({ id, state, baseRevision, release: resolve });
           });
@@ -134,6 +197,11 @@ function draftRoutes(opts: {
         if (failDeleteFor === id) {
           failDeleteFor = undefined;
           return Promise.resolve(json({ error: "boom" }, 500));
+        }
+        if (opts.deferDeleteFor === id) {
+          return new Promise<Response>((resolve) => {
+            heldDeletes.push({ id, release: resolve });
+          });
         }
         store.delete(id);
         return Promise.resolve(json({ deleted: true }));
@@ -178,6 +246,15 @@ function draftRoutes(opts: {
       if (!next) throw new Error("releasePut: nothing is held");
       store.set(next.id, { state: next.state, baseRevision: next.baseRevision });
       next.release(json({ draft: { ...next, updatedAt: "t" } }));
+    },
+    /** How many deferred DELETEs are currently held, unreleased. */
+    pendingDeleteCount: () => heldDeletes.length,
+    /** Release the OLDEST still-held DELETE, performing its store delete now. */
+    releaseDelete: () => {
+      const next = heldDeletes.shift();
+      if (!next) throw new Error("releaseDelete: nothing is held");
+      store.delete(next.id);
+      next.release(json({ deleted: true }));
     },
   };
 }
@@ -618,5 +695,434 @@ describe("draft write ordering and flush (fix round, bots)", () => {
       ).toBe(true),
     );
     await waitFor(() => expect(routed.has("fresh")).toBe(false));
+  });
+});
+
+describe("the write flags the shell's leave guard reads (D185)", () => {
+  /** Arm the debounce for the current draft and let its timer fire. */
+  const flushDebounce = async (headline: HTMLInputElement, value: string) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      act(() => {
+        fireEvent.change(headline, { target: { value } });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+        await Promise.resolve();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  };
+
+  test("a draft PUT answered 500 sets the failed flag, and a later PUT that lands clears it", async () => {
+    const routed = draftRoutes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      failPutFor: "camp",
+    });
+    renderWithRun(
+      <>
+        <Editor id="camp" />
+        <WriteFlags />
+      </>,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+    // A freshly loaded campaign has written nothing: no write is in flight, and
+    // none has failed.
+    expect(flag("pending-write")).toBe("false");
+    expect(flag("failed-write")).toBe("false");
+
+    const headline = screen.getByLabelText("Headline") as HTMLInputElement;
+    await flushDebounce(headline, "Lost to a 500");
+
+    // The PUT was dispatched and answered 500. `fetch` RESOLVES for that — the
+    // status is the only thing saying the edits are not on the server, which is
+    // why the flag exists and why a 500 is not a "probably fine".
+    await waitFor(() => expect(flag("failed-write")).toBe("true"));
+    // Settled, not pending: the write finished, it just did not land.
+    expect(flag("pending-write")).toBe("false");
+    expect(routed.stored("camp")).toBeUndefined();
+
+    // The next edit's PUT lands, and the work is on the server again — so the
+    // failure is no longer lost work, and the flag comes back down.
+    await flushDebounce(headline, "Landed for real");
+    await waitFor(() => expect(flag("failed-write")).toBe("false"));
+    expect(routed.has("camp")).toBe(true);
+  });
+
+  test("a draft PUT still on the write chain holds the pending flag until it is answered", async () => {
+    const routed = draftRoutes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      deferPutFor: "camp",
+    });
+    renderWithRun(
+      <>
+        <Editor id="camp" />
+        <WriteFlags />
+      </>,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+
+    const headline = screen.getByLabelText("Headline") as HTMLInputElement;
+    await flushDebounce(headline, "In flight");
+
+    // The debounce timer has already fired — `draftPutTimerRef` is null again,
+    // which is exactly why the flag cannot be read off it. The write itself is
+    // dispatched and held, unanswered.
+    await waitFor(() => expect(routed.pendingPutCount()).toBe(1));
+    expect(flag("pending-write")).toBe("true");
+    expect(flag("failed-write")).toBe("false");
+
+    routed.releasePut();
+    await waitFor(() => expect(flag("pending-write")).toBe("false"));
+  });
+
+  test("the pending flag survives an earlier write settling while a later one is still queued", async () => {
+    // The chain's state, not a single write's: two edits in two debounce
+    // windows queue two PUTs, and the second is not even dispatched until the
+    // first settles. A flag lowered by the FIRST write settling would report
+    // the chain idle while the second is still on it — and a close in that
+    // window would lose the queued write without a prompt.
+    const routed = draftRoutes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      deferPutFor: "camp",
+    });
+    renderWithRun(
+      <>
+        <Editor id="camp" />
+        <WriteFlags />
+      </>,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+
+    const headline = screen.getByLabelText("Headline") as HTMLInputElement;
+    await flushDebounce(headline, "Edit one");
+    await waitFor(() => expect(routed.pendingPutCount()).toBe(1));
+    await flushDebounce(headline, "Edit two");
+    // The second PUT is queued behind the first and has not been dispatched.
+    expect(routed.pendingPutCount()).toBe(1);
+    expect(flag("pending-write")).toBe("true");
+
+    // The first settles and the second takes its place — still pending, because
+    // it is still on the chain.
+    routed.releasePut();
+    await waitFor(() => expect(routed.pendingPutCount()).toBe(1));
+    expect(flag("pending-write")).toBe("true");
+
+    routed.releasePut();
+    await waitFor(() => expect(flag("pending-write")).toBe("false"));
+    expect(
+      (routed.stored("camp")?.state as { campaignMessage?: string } | undefined)?.campaignMessage,
+    ).toBe("Edit two");
+  });
+
+  /**
+   * Fix round (Qodo) — the four cases below all came from the same mistake, the
+   * two write states being shell-wide booleans that every editor instance
+   * assigned as though it were the only writer. Each test here is written so
+   * that it fails against that shape and passes only against a per-editor
+   * registration, and each names the case its own assertion is the witness for.
+   */
+  describe("fix round (Qodo) — the write state belongs to the editor, not the shell", () => {
+    test("an unmount with a PUT still in flight keeps the tab guarded until that PUT answers", async () => {
+      // Qodo 1. Closing the tab while a dispatched PUT is unresolved abandons
+      // the request, so the operator's edits go with it — which is the whole
+      // reason the pending flag exists. An unmount that cleared it to keep the
+      // shell tidy left exactly that window unguarded, and the provider
+      // outlives the route, so nothing downstream would ever re-arm it.
+      const routed = draftRoutes({
+        list: () => json({ briefs: [entry("camp", "r1")] }),
+        deferPutFor: "camp",
+      });
+      const view = renderWithRun(
+        <>
+          <Editor id="camp" />
+          <EditorUnloadGuard />
+          <WriteFlags />
+        </>,
+      );
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+      );
+      await flushDebounce(screen.getByLabelText("Headline"), "Still on the wire");
+      await waitFor(() => expect(routed.pendingPutCount()).toBe(1));
+      expect(flag("pending-write")).toBe("true");
+
+      // Navigate away, keeping the shell's own providers mounted around the
+      // route that went: `ShellProviders` is the same component element, so
+      // `EditorDirtyProvider` — and the state its guard reads — survives the
+      // editor's unmount, which is what a route change in the real app does.
+      view.rerender(
+        <ShellProviders>
+          <EditorUnloadGuard />
+          <WriteFlags />
+        </ShellProviders>,
+      );
+      expect(flag("pending-write")).toBe("true");
+      expect(unload().defaultPrevented).toBe(true);
+
+      // The PUT answers, and only then does the writer have nothing left to
+      // represent — the registry takes the entry out, and the guard releases.
+      routed.releasePut();
+      await waitFor(() => expect(flag("pending-write")).toBe("false"));
+      expect(unload().defaultPrevented).toBe(false);
+    });
+
+    test("one editor's write settling cannot clear another editor's pending write (Qodo 2)", async () => {
+      // Qodo 2. Two instances, in that order: the first queues a PUT, is
+      // unmounted while it is still in flight, and the second queues one of
+      // its own. The first's write then answers — and with one shared boolean
+      // its settlement is what the shell would read as "idle", because the
+      // identity check that used to gate it compared the FIRST editor's
+      // private ref, which still matched its own last link. The second
+      // editor's write is queued, undispatched, and would be lost on a close
+      // with no warning at all.
+      const routed = draftRoutes({
+        list: () => json({ briefs: [entry("camp", "r1"), entry("other", "r1")] }),
+        deferPutFor: ["camp", "other"],
+      });
+      const view = renderWithRun(
+        <>
+          {/* Keyed so this is a genuine second INSTANCE, not one instance told
+              a different campaign: two writers are the thing under test. */}
+          <Editor key="first" id="camp" />
+          <WriteFlags />
+        </>,
+      );
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+      );
+      await flushDebounce(screen.getByLabelText("Headline"), "The first brief's edit");
+      await waitFor(() => expect(routed.pendingPutCount()).toBe(1));
+      expect(flag("pending-write")).toBe("true");
+
+      view.rerender(
+        <ShellProviders>
+          <Editor key="second" id="other" />
+          <WriteFlags />
+        </ShellProviders>,
+      );
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("other"),
+      );
+      await flushDebounce(screen.getByLabelText("Headline"), "The second brief's edit");
+      await waitFor(() => expect(routed.pendingPutCount()).toBe(2));
+
+      // The first editor's PUT answers. It belongs to a writer that is no
+      // longer mounted, and it has no standing to say anything about the
+      // second editor's write — which is still sitting on ITS chain.
+      routed.releasePut();
+      await waitFor(() => expect(routed.pendingPutCount()).toBe(1));
+      expect(flag("pending-write")).toBe("true");
+
+      routed.releasePut();
+      await waitFor(() => expect(flag("pending-write")).toBe("false"));
+      expect(
+        (routed.stored("other")?.state as { campaignMessage?: string } | undefined)
+          ?.campaignMessage,
+      ).toBe("The second brief's edit");
+    });
+
+    test("a draft DELETE on the write chain is not a pending write, so a superseded editor's guard is released (Qodo 3)", async () => {
+      // Qodo 3. A DELETE is a decision ABOUT the draft, not a copy of the
+      // operator's edits, and it is queued on the same chain as every PUT so
+      // it cannot be overtaken by one. Counting it as unsaved work kept the
+      // guard armed on an editor that had just been saved or reverted: the
+      // edits are in the published brief, and the DELETE pending means only
+      // that a draft nobody needs is being swept up. The DELETE is HELD here,
+      // because an inline one settles in the tick it is queued and the window
+      // would never be open to look at.
+      const user = userEvent.setup();
+      const routed = draftRoutes({
+        list: () => json({ briefs: [entry("camp", "r1")] }),
+        deferDeleteFor: "camp",
+      });
+      renderWithRun(
+        <>
+          <Editor id="camp" />
+          <EditorUnloadGuard />
+          <WriteFlags />
+        </>,
+      );
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+      );
+      await flushDebounce(screen.getByLabelText("Headline"), "Saved, then swept up");
+      await waitFor(() => expect(routed.has("camp")).toBe(true));
+      expect(flag("pending-write")).toBe("false");
+
+      // Revert back to the published brief. Its draft is discarded — the
+      // DELETE goes out on the write chain and is held there.
+      await user.click(screen.getByText("⋯"));
+      await user.click(screen.getByText(messages.editorRevert));
+      const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
+      await user.click(within(prompt).getByRole("button", { name: messages.confirmDialogDiscard }));
+      await waitFor(() => expect(routed.pendingDeleteCount()).toBe(1));
+
+      // The editor is clean, and the only thing on its chain is a DELETE: there
+      // is nothing a close can lose, so the guard must be released even though
+      // the chain is not idle.
+      expect(flag("pending-write")).toBe("false");
+      expect(flag("failed-write")).toBe("false");
+      expect(unload().defaultPrevented).toBe(false);
+
+      routed.releaseDelete();
+      await waitFor(() => expect(routed.has("camp")).toBe(false));
+      expect(flag("pending-write")).toBe("false");
+    });
+
+    test("a Save that supersedes a failed draft clears the failed flag (Qodo 4)", async () => {
+      // Qodo 4, first discard path. The failed flag means the operator's edits
+      // are on the screen and nowhere else; Save has just put them in the
+      // published brief, so there is nothing left to warn about. Left set, it
+      // kept the guard armed on a clean editor, and no later event in the
+      // component's life would ever come along to clear it.
+      const routed = draftRoutes({
+        list: () => json({ briefs: [entry("camp", "r1")] }),
+        failPutFor: "camp",
+        put: (_url, body) =>
+          json({ file: "camp.yaml", brief: { ...brief("camp"), ...body }, revision: "r2" }, 200),
+      });
+      renderWithRun(
+        <>
+          <Editor id="camp" />
+          <EditorUnloadGuard />
+          <WriteFlags />
+        </>,
+      );
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+      );
+      await flushDebounce(screen.getByLabelText("Headline"), "Never stored");
+      await waitFor(() => expect(flag("failed-write")).toBe("true"));
+      expect(unload().defaultPrevented).toBe(true);
+
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+      await waitFor(() => expect(flag("failed-write")).toBe("false"));
+      // The guard STAYS armed here, and rightly: a Save does not make the
+      // editor clean (`save`, not `load` — edits made while the request was in
+      // flight survive and stay dirty), so `isDirty` is arming it now. What
+      // the test is about is that the failure is no longer contributing.
+      expect(unload().defaultPrevented).toBe(true);
+      // And the Save really did land — the clear is the supersede doing its
+      // job, not a flag quietly forgotten.
+      await waitFor(() =>
+        expect(
+          routed.calls.some(
+            (c) => c.method === "PUT" && c.url.startsWith(`${API}/campaigns/briefs/camp`),
+          ),
+        ).toBe(true),
+      );
+    });
+
+    test("a Revert that supersedes a failed draft clears the failed flag (Qodo 4, second discard path)", async () => {
+      // Qodo 4, second discard path, and the one that reaches the draft
+      // somewhere else: Revert on a "file" source has no local draft of its
+      // own to discard, so it clears the failure on the autosave effect's own
+      // pristine transition instead. Both are the same claim — the editor is
+      // back to what the published brief already says — and a guard still
+      // armed afterwards is warning about a clean editor for the rest of the
+      // session.
+      const user = userEvent.setup();
+      const routed = draftRoutes({
+        list: () => json({ briefs: [entry("camp", "r1")] }),
+        failPutFor: "camp",
+      });
+      renderWithRun(
+        <>
+          <Editor id="camp" />
+          <EditorUnloadGuard />
+          <WriteFlags />
+        </>,
+      );
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+      );
+      await flushDebounce(screen.getByLabelText("Headline"), "Never stored");
+      await waitFor(() => expect(flag("failed-write")).toBe("true"));
+      expect(unload().defaultPrevented).toBe(true);
+
+      await user.click(screen.getByText("⋯"));
+      await user.click(screen.getByText(messages.editorRevert));
+      const prompt = await screen.findByRole("dialog", { name: "Unsaved edits" });
+      await user.click(within(prompt).getByRole("button", { name: messages.confirmDialogDiscard }));
+
+      await waitFor(() => expect(flag("failed-write")).toBe("false"));
+      expect(flag("pending-write")).toBe("false");
+      expect(unload().defaultPrevented).toBe(false);
+      await waitFor(() =>
+        expect(
+          routed.calls.some(
+            (c) => c.method === "DELETE" && c.url === `${API}/campaigns/camp/draft`,
+          ),
+        ).toBe(true),
+      );
+    });
+  });
+});
+
+describe("the leave guard over a real draft write (D185)", () => {
+  test("a draft PUT answered 500 keeps the tab guarded, and the guard releases nothing until the editor does", async () => {
+    // The two halves met: the editor's write flags and the shell's one
+    // `beforeunload` listener, with the debounce, the chain and the PUT's own
+    // status in between. What is left un-proved here — that a later PUT that
+    // lands RELEASES the listener — cannot be, because an edited editor that
+    // was never saved stays dirty on its own account, so the guard would
+    // rightly stay armed whatever the write did.
+    const routed = draftRoutes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      failPutFor: "camp",
+    });
+    renderWithRun(
+      <>
+        <Editor id="camp" />
+        <EditorUnloadGuard />
+        <WriteFlags />
+      </>,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+    const headline = screen.getByLabelText("Headline") as HTMLInputElement;
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      act(() => {
+        fireEvent.change(headline, { target: { value: "Never stored" } });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+        await Promise.resolve();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await waitFor(() => expect(flag("failed-write")).toBe("true"));
+    // The edits are on the screen and nowhere else, so closing the tab now
+    // loses them: the browser's own prompt is the only warning there is.
+    expect(unload().defaultPrevented).toBe(true);
+
+    // A later PUT lands, and the failed-write flag comes back down with it.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      act(() => {
+        fireEvent.change(headline, { target: { value: "Stored at last" } });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+        await Promise.resolve();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    await waitFor(() => expect(flag("failed-write")).toBe("false"));
+    expect(routed.has("camp")).toBe(true);
   });
 });

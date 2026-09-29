@@ -221,6 +221,15 @@ jobs:
       - name: Lint
         run: "yarn lint"
 
+      # ubuntu-latest ships no zsh at all. scripts/merge-prs.sh is zsh
+      # (D184), and its own tests (tools/merge-prs/__tests__) run only
+      # `describe.skipIf(!hasZsh())` — without this, the merge gate's only
+      # wiring test silently skips everywhere it actually matters (S3, the
+      # HX4 fix round). Every other suite in this repo is POSIX sh or
+      # TypeScript and needs nothing here.
+      - name: Install zsh (for D184's merge-prs.sh wiring tests)
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
       # run_tests = true; delete this step to skip tests in CI.
       # test:cov enforces the 100% coverage gate (vitest.config.ts thresholds).
       - name: Test

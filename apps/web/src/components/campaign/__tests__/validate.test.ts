@@ -28,6 +28,8 @@ import {
   getTotalWarningCount,
   PROHIBITED_TERMS,
   RESERVED_CAMPAIGN_IDS,
+  RESERVED_ROUTE_SEGMENTS,
+  RESERVED_STORE_AREAS,
   isReservedCampaignId,
 } from "../validate";
 import { PROHIBITED_TERMS as DOMAIN_PROHIBITED_TERMS } from "@campaignfoundry/GovernanceAndCompliance";
@@ -36,6 +38,8 @@ import { PROHIBITED_TERMS as DOMAIN_PROHIBITED_TERMS } from "@campaignfoundry/Go
 import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
 import {
   RESERVED_CAMPAIGN_IDS as PKG_RESERVED_CAMPAIGN_IDS,
+  RESERVED_ROUTE_SEGMENTS as PKG_RESERVED_ROUTE_SEGMENTS,
+  RESERVED_STORE_AREAS as PKG_RESERVED_STORE_AREAS,
   isReservedCampaignId as pkgIsReservedCampaignId,
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
@@ -289,21 +293,20 @@ describe("validateIdentity", () => {
     expect(validateIdentity(valid())).toEqual({});
   });
 
-  test("RESERVED_CAMPAIGN_IDS equals the package's list (pinned against drift)", () => {
+  test("RESERVED_STORE_AREAS, RESERVED_ROUTE_SEGMENTS and RESERVED_CAMPAIGN_IDS equal the package's lists (pinned against drift)", () => {
+    expect(RESERVED_STORE_AREAS).toEqual(PKG_RESERVED_STORE_AREAS);
+    expect(RESERVED_ROUTE_SEGMENTS).toEqual(PKG_RESERVED_ROUTE_SEGMENTS);
     expect(RESERVED_CAMPAIGN_IDS).toEqual(PKG_RESERVED_CAMPAIGN_IDS);
-    for (const id of ["cache", "jobs", "last-opened", "orgs", "packages", "other-id"]) {
+    for (const id of [...RESERVED_CAMPAIGN_IDS, "other-id"]) {
       expect(isReservedCampaignId(id)).toBe(pkgIsReservedCampaignId(id));
     }
   });
 
-  test.each(["cache", "jobs", "last-opened", "orgs", "packages"] as const)(
-    "rejects reserved campaign id %s",
-    (id) => {
-      expect(validateIdentity(valid({ briefId: id })).briefId).toBe(messages.briefIdReserved(id));
-    },
-  );
+  test.each(RESERVED_CAMPAIGN_IDS)("rejects reserved campaign id %s", (id) => {
+    expect(validateIdentity(valid({ briefId: id })).briefId).toBe(messages.briefIdReserved(id));
+  });
 
-  test.each(["cache", "jobs", "last-opened", "orgs", "packages"] as const)(
+  test.each(RESERVED_CAMPAIGN_IDS)(
     "accepts an existing campaign already named %s (only a new id is refused)",
     (id) => {
       const state = valid({
@@ -332,6 +335,55 @@ describe("validateIdentity", () => {
       },
     });
     expect(validateIdentity(state).briefId).toBe(messages.briefIdReserved("cache"));
+  });
+
+  // D181 fix round (grok-4.7 pre-PR review): a versionless campaign the editor
+  // SEEDED from the server (`BriefEditor`'s `markSeeded`, mirroring the API's
+  // own grandfather rule) is likewise an existing campaign, not a fresh mint —
+  // its own slug must not be refused as reserved on its first Save.
+  test("accepts a seeded versionless draft whose own slug is now reserved", () => {
+    const state = valid({
+      briefId: "templates",
+      source: {
+        kind: "new",
+        tempId: "new",
+        seeded: {
+          campaignId: "templates-id",
+          slug: "templates",
+          campaignName: "Templates",
+          snapshot: toBrief(valid({ briefId: "templates" })),
+        },
+      },
+    });
+    expect(validateIdentity(state).briefId).toBeUndefined();
+  });
+
+  test("still refuses a NEW (unseeded) draft typed as a reserved id", () => {
+    const state = valid({
+      briefId: "templates",
+      source: { kind: "new", tempId: "new" },
+    });
+    expect(validateIdentity(state).briefId).toBe(messages.briefIdReserved("templates"));
+  });
+
+  // The grandfather clause covers the campaign's OWN id, never a rename: a
+  // seeded draft renamed away from its seeded slug onto a DIFFERENT reserved
+  // word is a fresh collision, refused exactly like any other new id.
+  test("refuses renaming a seeded draft away from its own slug onto a different reserved id", () => {
+    const state = valid({
+      briefId: "packages",
+      source: {
+        kind: "new",
+        tempId: "new",
+        seeded: {
+          campaignId: "templates-id",
+          slug: "templates",
+          campaignName: "Templates",
+          snapshot: toBrief(valid({ briefId: "templates" })),
+        },
+      },
+    });
+    expect(validateIdentity(state).briefId).toBe(messages.briefIdReserved("packages"));
   });
 
   test.each(["cache", "jobs", "orgs", "packages"] as const)(
