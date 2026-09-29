@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "lane": "HX4-pre-pr-review-gate",
+  "mutations": [
+    {
+      "file": "tools/plan-review/lib/pre-pr.ts",
+      "before": "if (verdict === \"changes-required\") {",
+      "after": "if (verdict === \"changes-required-ignored\") {",
+      "because": "the mutation makes prePrReviewRefusal ignore a changes-required verdict entirely, so a high-risk lane whose pre-PR review demanded changes — with no later remediation — would pass the gate silently. (Re-anchored, fix round for #630: BUG1 rewrote the verdict check into a three-way branch over a local `verdict` variable, so the original `review.event.detail?.verdict === \"changes-required\" &&` text moved; the semantic edit — ignore the changes-required check — is unchanged.)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/plan-review/lib/__tests__/pre-pr.test.ts",
+        "-t",
+        "changes-required with no later remediate settled: refused"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/plan-review/lib/rows.ts",
+      "before": "return secondCell === \"**high**\" ? \"high\" : \"normal\";",
+      "after": "return secondCell === \"**HIGH**\" ? \"high\" : \"normal\";",
+      "because": "BUG2/fix round for #630: mutating rowRisk's own comparison so no real `**high**` cell ever matches makes every row read as normal, defeating D184's fail-closed union in discoverRisk before it ever runs — a new high-risk row would silently pass the gate as normal",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/plan-review/lib/__tests__/rows.test.ts",
+        "-t",
+        "a bolded \\*\\*high\\*\\* second cell is high"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/plan-review/lib/pre-pr.ts",
+      "before": "  if (verdict === undefined) {\n    return `stage=review event=settled for lane ${lane} in wave ${wave} carries no verdict recorded`;\n  }",
+      "after": "  if (verdict === undefined) {\n    return undefined;\n  }",
+      "because": "BUG1/fix round for #630: mutating the fail-closed \"no verdict\" branch back into a pass reintroduces the exact defect the fix round found — an ordinary post-PR review bot's stage=review event=settled (finding counts only, no verdict) would satisfy a high-risk lane's gate again",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/plan-review/lib/__tests__/pre-pr.test.ts",
+        "-t",
+        "a review settled with no verdict recorded at all: REFUSED — fail closed"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
