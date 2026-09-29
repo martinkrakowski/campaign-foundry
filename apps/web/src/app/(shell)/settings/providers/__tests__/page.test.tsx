@@ -624,18 +624,25 @@ describe("ProviderKeysSettingsPage — unsaved key material marks the page dirty
     vi.spyOn(providerKeysApi, "listProviderKeys").mockResolvedValue([]);
     asOwner();
 
-    const tree = (
+    // Fix round (bots, D185) — a FUNCTION, so the rerender below gets a fresh
+    // tree. It used to hand back the identical element object, which React
+    // treats as "nothing here changed" and skips; what was actually
+    // re-rendering the page was `EditorDirtyProvider` handing every consumer a
+    // new context value on every one of its own renders, which this page
+    // consumed whether or not it read. It re-reads `useActiveMember` here
+    // because it re-renders, and a fresh tree is what says so.
+    const tree = () => (
       <>
         <Header />
         <ProviderKeysSettingsPage />
       </>
     );
-    const { rerender } = renderWithRun(tree);
+    const { rerender } = renderWithRun(tree());
 
     await user.type(await screen.findByLabelText("Gemini key"), "typed-then-demoted");
 
     asMember();
-    rerender(<ShellProviders>{tree}</ShellProviders>);
+    rerender(<ShellProviders>{tree()}</ShellProviders>);
     await waitFor(() => expect(screen.queryByLabelText("Gemini key")).toBeNull());
 
     await user.click(screen.getByRole("link", { name: "Grid" }));

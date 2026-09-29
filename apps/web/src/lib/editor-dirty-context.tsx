@@ -191,15 +191,26 @@ export function EditorDirtyProvider({ children }: { children: ReactNode }) {
   // does not re-render every consumer through a fresh value object. The flags
   // are read by a `beforeunload` listener and by the nav guard, both of which
   // sit above most of the shell, so the fan-out is the whole tree.
-  const value: EditorDirtyContextValue = {
-    isDirty,
-    setDirty,
-    hasPendingWrite,
-    hasFailedWrite,
-    registerDraftWriter,
-    guardedAction,
-    guardedPush,
-  };
+  const value = useMemo(
+    (): EditorDirtyContextValue => ({
+      isDirty,
+      setDirty,
+      hasPendingWrite,
+      hasFailedWrite,
+      registerDraftWriter,
+      guardedAction,
+      guardedPush,
+    }),
+    [
+      isDirty,
+      setDirty,
+      hasPendingWrite,
+      hasFailedWrite,
+      registerDraftWriter,
+      guardedAction,
+      guardedPush,
+    ],
+  );
 
   return (
     <EditorDirtyContext.Provider value={value}>
