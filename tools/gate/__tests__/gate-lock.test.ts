@@ -884,6 +884,30 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     expect(existsSync(lockDir(dir))).toBe(false);
   });
 
+  test("a run signalled between taking the lock and recording it still gives it back", async () => {
+    const dir = scratch();
+    // The window the test hook exists for: the lock is on disk and names this
+    // run, but `run` has not yet recorded that it holds it. A signal here used
+    // to leave the lock behind with a pid that was about to die — reclaimable
+    // by the next lane, in the meantime, and never released by the only process
+    // that could.
+    const marker = join(dir, "paused-after-acquire");
+    const { child, done } = startLockIn(dir, ["run", "lane-a", "--", "sleep", "30"], {
+      CF_GATE_TEST_PAUSE_AFTER_ACQUIRE: marker,
+    });
+    await waitForFile(marker);
+    expect(lockFile(dir, "owner").trim()).toBe("lane-a");
+    expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
+    process.kill(child.pid as number, "SIGTERM");
+    rmSync(marker);
+
+    const result = await done;
+    expect(result.status).toBe(143);
+    // No command was running under it — the command is started after this
+    // window — so nothing else is holding the lock, and `run` is gone.
+    expect(existsSync(lockDir(dir))).toBe(false);
+  }, 15_000);
+
   test("a non-numeric heartbeat interval is refused before the lock is taken", () => {
     const dir = scratch();
     const result = runLockIn(dir, ["run", "lane-a", "--", "true"], {

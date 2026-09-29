@@ -326,24 +326,37 @@ forward_signal() {
 run_cleanup() {
   status=$?
   trap - INT TERM EXIT
-  if [ "$lock_held" -eq 1 ]; then
-    if [ -n "$run_hb_pid" ]; then
-      # Kill the heartbeat loop and reap it, so nothing outlives `run` by even
-      # a moment. Its stdio was detached when it started, so the `sleep` it is
-      # in the middle of holds nothing open when the subshell is orphaned.
-      kill "$run_hb_pid" 2>/dev/null
-      wait "$run_hb_pid" 2>/dev/null
-      run_hb_pid=""
-    fi
-    lock_held=0
+  if [ -n "$run_hb_pid" ]; then
+    # Kill the heartbeat loop and reap it, so nothing outlives `run` by even
+    # a moment. Its stdio was detached when it started, so the `sleep` it is
+    # in the middle of holds nothing open when the subshell is orphaned.
+    kill "$run_hb_pid" 2>/dev/null
+    wait "$run_hb_pid" 2>/dev/null
+    run_hb_pid=""
+  fi
+  held=$lock_held
+  lock_held=0
+  # Drop the lock whenever this run may have taken one, NOT only when it knows
+  # it did. A signal can land between the acquire that created the lock and the
+  # assignment that records it, and skipping the release there leaves a lock
+  # whose only possible releaser is the process that just died.
+  #
+  # `lock_held` is still 0 in two other cases, and both must leave the holder's
+  # lock alone: an acquire that was refused as busy, where the lock names
+  # someone else and belongs to a run that is still working, and a signal that
+  # arrived before any lock existed. Asking first is what keeps a busy exit
+  # from reporting "release refused" for a lock it never took — and the release
+  # itself re-checks owner and pid, so a lock reclaimed between the question
+  # and the answer is still refused rather than deleted.
+  if [ "$held" -eq 1 ] || lock_is_ours "$lane"; then
     if ! release "$lane"; then
       lock_lost=1
     fi
-    if [ "$lock_lost" -eq 1 ]; then
-      printf '%s\n' "gate-lock: FAILED to release the lock — it may still be held at $LOCK, or another holder has it now" >&2
-      if [ "$status" -eq 0 ]; then
-        status=1
-      fi
+  fi
+  if [ "$lock_lost" -eq 1 ]; then
+    printf '%s\n' "gate-lock: FAILED to release the lock — it may still be held at $LOCK, or another holder has it now" >&2
+    if [ "$status" -eq 0 ]; then
+      status=1
     fi
   fi
   exit "$status"
@@ -398,6 +411,13 @@ run_locked() {
   trap 'forward_signal TERM 143' TERM
   acquire "$lane"
   # A busy acquire exits here, before the command exists at all.
+  # Test hook (CF_GATE_TEST_PAUSE_AFTER_ACQUIRE): between the acquire that
+  # created the lock and the assignment that records it as held, so a test can
+  # signal `run` in exactly that window and prove the lock is released anyway.
+  if [ -n "${CF_GATE_TEST_PAUSE_AFTER_ACQUIRE:-}" ]; then
+    touch "$CF_GATE_TEST_PAUSE_AFTER_ACQUIRE" 2>/dev/null
+    while [ -f "$CF_GATE_TEST_PAUSE_AFTER_ACQUIRE" ]; do sleep 1; done
+  fi
   lock_held=1
   (
     trap - INT TERM EXIT
@@ -424,6 +444,18 @@ run_locked() {
     lock_lost=1
   fi
   exit "$status"
+}
+
+# Does the lock at the name still name this caller, as its lane and its pid?
+# The question `release` answers before deleting, asked on its own and quietly:
+# a caller that is tidying up after itself needs to know whether there is
+# anything of ITS OWN to drop, and asking must not print a refusal about a lock
+# that belongs to a run still going somewhere else.
+lock_is_ours() {
+  [ -d "$LOCK" ] || return 1
+  [ "$(cat "$LOCK/owner" 2>/dev/null)" = "$1" ] || return 1
+  [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$recorded_pid" ] || return 1
+  return 0
 }
 
 # Release the lock — but only the caller's own. After a reclaim, a stale
