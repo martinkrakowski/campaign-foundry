@@ -589,6 +589,41 @@ describe("FsBriefStore", () => {
         code: "EISDIR",
       });
     });
+
+    // PT-5c2 fix round (qodo PRRT_kwDOSzP1zc6m7iq6): a saved version already
+    // proves the campaign known on its own, so a corrupt campaign.json must
+    // not block generate/plan/preview/save for it — unlike the versionless
+    // case above, where campaign.json is the ONLY signal and stays fail-closed.
+    test("a saved version tolerates an unreadable campaign.json, answering null name/type", async () => {
+      await store.createCampaign("tolerant-meta", { name: "Will Be Lost", type: "display-ad" });
+      await store.createBrief({ ...minimalBrief, id: "tolerant-meta" });
+      const metaPath = join(dir, "tolerant-meta", "campaign.json");
+      rmSync(metaPath);
+      mkdirSync(metaPath); // same EISDIR-inducing trick as the rethrow test above
+      expect(await store.campaignMeta("tolerant-meta")).toEqual({
+        campaignId: "tolerant-meta",
+        slug: "tolerant-meta",
+        name: null,
+        type: null,
+        hasVersion: true,
+      });
+    });
+
+    // PT-5c2 fix round (qodo PRRT_kwDOSzP1zc6m7irI): a bare `briefs/<slug>/`
+    // reservation made before campaign.json existed (pre-PT-5b3) must still
+    // answer known — neither `createCampaign` nor `createBrief` ever runs
+    // here, only a plain `mkdirSync`, the shape a build from before PT-5b3
+    // would have left behind.
+    test("a bare pre-campaign.json reservation directory still answers known", async () => {
+      mkdirSync(join(dir, "bare-reservation"));
+      expect(await store.campaignMeta("bare-reservation")).toEqual({
+        campaignId: "bare-reservation",
+        slug: "bare-reservation",
+        name: null,
+        type: null,
+        hasVersion: false,
+      });
+    });
   });
 
   test("rewriteBrief updates existing brief and checks revision when provided", async () => {
