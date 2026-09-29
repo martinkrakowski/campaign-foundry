@@ -1124,6 +1124,16 @@ export function RunProvider({ children }: { children: ReactNode }) {
   setBriefRef.current = setBrief;
 
   /**
+   * Has a later `openPageCampaign` — or unmount — superseded the resolution that
+   * holds this token? One guard for every await in the page campaign's
+   * resolution, so a slow answer can never land on a page the user has left.
+   */
+  const pageCampaignSuperseded = useCallback(
+    (owned: number) => !mountedRef.current || pageCampaignSeq.current !== owned,
+    [],
+  );
+
+  /**
    * PT-5c3 (D180) — the campaign a shell page's `?campaign=` names. `null` is a
    * bare page: today's behaviour, unchanged until PT-5e (item 4). A ref is
    * resolved through `GET /campaigns/:id` (a uuid or a slug, PT-5b1) and
@@ -1149,7 +1159,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       const owned = (pageCampaignSeq.current += 1);
       void getCampaign(ref)
         .then(async (meta) => {
-          if (!mountedRef.current || pageCampaignSeq.current !== owned) return;
+          if (pageCampaignSuperseded(owned)) return;
           if (meta === null) {
             // A hidden and an unknown id show the same empty state (PT-2d's rule,
             // read here as "none"): whatever the shell held is not this page's
@@ -1171,7 +1181,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
           if (target === null) {
             try {
               const entries = await listBriefs();
-              if (!mountedRef.current || pageCampaignSeq.current !== owned) return;
+              if (pageCampaignSuperseded(owned)) return;
               target =
                 entries.find(
                   (entry) => entry.campaignId === meta.campaignId || entry.brief.id === meta.slug,
@@ -1180,7 +1190,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
               /* a failed listing is not "no brief" (F6) — the placeholder still names the campaign */
             }
           }
-          if (!mountedRef.current || pageCampaignSeq.current !== owned) return;
+          if (pageCampaignSuperseded(owned)) return;
           // No stored brief anywhere: a versionless campaign (PT-5b2) — the same
           // placeholder the editor's route seeds, named by the slug, so the page's
           // run (keyed by the slug) still loads. Its Generate is the API's own
@@ -1189,7 +1199,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
           setBriefRef.current(brief, { fetchId: meta.campaignId, slug: meta.slug });
         })
         .catch((err) => {
-          if (!mountedRef.current || pageCampaignSeq.current !== owned) return;
+          if (pageCampaignSuperseded(owned)) return;
           if (isNoMembershipError(err)) {
             setMembershipError(NO_ORGANISATION_YET_MESSAGE);
           }
@@ -1197,7 +1207,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
              later successful open (a tab with the param, a re-mount) heals it. */
         });
     },
-    [clearRunState],
+    [clearRunState, pageCampaignSuperseded],
   );
 
   // Derived, not stored: "applied" is a statement about the brief the shell holds, and

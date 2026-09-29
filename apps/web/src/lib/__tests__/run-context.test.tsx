@@ -4127,11 +4127,187 @@ describe("RunProvider — the page's ?campaign= (PT-5c3, D180)", () => {
   });
 
   test("a versionless campaign commits its placeholder brief and still loads the run", async () => {
-    pageCampaignApi({ hasVersion: false, briefs: [] });
+    // A listing of other campaigns decides nothing for this one: neither the
+    // campaignId nor the brief id matches, so the placeholder answers.
+    pageCampaignApi({
+      hasVersion: false,
+      briefs: [
+        {
+          file: "unrelated.yaml",
+          campaignId: "018f6d2a-1111-7b4a-8d21-3f9e2a5b6c7d",
+          brief: { ...storedBrief, id: "unrelated" },
+        },
+      ],
+    });
     const { result } = setup();
     act(() => result.current.openPageCampaign(UUID));
     await waitFor(() => expect(result.current.assets).toHaveLength(1));
     // The placeholder is named by the slug — the campaign the report keys (PT-5b2).
+    expect(result.current.brief.id).toBe(SLUG);
+  });
+
+  test("a listing entry without campaignId still answers by its brief id", async () => {
+    // An answer that predates PT-5a carries no campaignId; the brief's own id
+    // (the slug) names the campaign just the same.
+    pageCampaignApi({ briefs: [{ file: `${SLUG}.yaml`, brief: storedBrief }] });
+    const { result } = setup();
+    act(() => result.current.openPageCampaign(UUID));
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.brief.id).toBe(SLUG);
+  });
+
+  test("the last-opened brief of another campaign does not answer: the listing decides", async () => {
+    localStorage.setItem("cf:brief-picked", "1");
+    localStorage.setItem("cf:brief", JSON.stringify({ ...storedBrief, id: "winter-campaign" }));
+    pageCampaignApi({ briefs: [{ file: `${SLUG}.yaml`, brief: storedBrief, campaignId: UUID }] });
+    const { result } = setup();
+    await act(async () => {
+      result.current.openPageCampaign(UUID);
+    });
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.brief.id).toBe(SLUG);
+  });
+
+  test("storage being unavailable leaves the resolution to the listing", async () => {
+    pageCampaignApi({ briefs: [{ file: `${SLUG}.yaml`, brief: storedBrief, campaignId: UUID }] });
+    vi.spyOn(localStorage, "getItem").mockImplementation(() => {
+      throw new Error("denied");
+    });
+    const { result } = setup();
+    act(() => result.current.openPageCampaign(UUID));
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    expect(result.current.brief.id).toBe(SLUG);
+  });
+
+  test("a resolution superseded while its listing was in flight commits nothing", async () => {
+    const UUID_A = "018f6d2a-0000-7b4a-8d21-3f9e2a5b6c7d";
+    let listingCalls = 0;
+    let releaseAListing!: () => void;
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/result")) {
+          return url.includes(`campaignId=${UUID}`)
+            ? json({
+                halted: false,
+                assets: [asset({ productId: "beta" })],
+                log: { entries: [], campaignId: SLUG },
+              })
+            : json(EMPTY_REPORT);
+        }
+        if (url.includes("/campaigns/briefs")) {
+          listingCalls += 1;
+          if (listingCalls === 1) {
+            return new Promise<Response>(
+              (res) => (releaseAListing = () => res(json({ briefs: [] }))),
+            );
+          }
+          return json({ briefs: [] });
+        }
+        if (url === `${API}/campaigns/${UUID_A}`) {
+          return json({
+            campaignId: UUID_A,
+            slug: "stale-campaign",
+            name: "Stale",
+            type: "social-post",
+            hasVersion: true,
+          });
+        }
+        if (url === `${API}/campaigns/${UUID}`) {
+          return json({
+            campaignId: UUID,
+            slug: SLUG,
+            name: "Autumn Launch",
+            type: "social-post",
+            hasVersion: true,
+          });
+        }
+        return json({ error: "Not found" }, 404);
+      },
+    });
+    const { result } = setup();
+    act(() => result.current.openPageCampaign(UUID_A));
+    await waitFor(() => expect(releaseAListing).toBeTypeOf("function")); // A's listing is held
+    act(() => result.current.openPageCampaign(UUID));
+    await waitFor(() => expect(result.current.brief.id).toBe(SLUG));
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    await act(async () => {
+      releaseAListing();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // A's listing landed on a superseded resolution: B's campaign stands.
+    expect(result.current.brief.id).toBe(SLUG);
+    expect(result.current.assets).toHaveLength(1);
+  });
+
+  test("a listing that lands after unmount commits nothing", async () => {
+    let releaseListing!: () => void;
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    mockPipelineApi({
+      result: (url) => {
+        if (url === `${API}/campaigns/${UUID}`) {
+          return json({
+            campaignId: UUID,
+            slug: SLUG,
+            name: "Autumn Launch",
+            type: "social-post",
+            hasVersion: true,
+          });
+        }
+        if (url.includes("/campaigns/briefs")) {
+          return new Promise<Response>((res) => (releaseListing = () => res(json({ briefs: [] }))));
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+    const { result, unmount } = setup();
+    act(() => result.current.openPageCampaign(UUID));
+    await waitFor(() => expect(releaseListing).toBeTypeOf("function"));
+    const calls = fetchSpy.mock.calls.length;
+    unmount();
+    await act(async () => {
+      releaseListing();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // No run fetch followed the unmounted commit.
+    expect(fetchSpy.mock.calls.length).toBe(calls);
+  });
+
+  test("a failure superseded by a later open says nothing about the campaign left behind", async () => {
+    const UUID_A = "018f6d2a-0000-7b4a-8d21-3f9e2a5b6c7d";
+    let rejectA!: () => void;
+    mockPipelineApi({
+      result: (url) => {
+        if (url === `${API}/campaigns/${UUID_A}`) {
+          return new Promise<Response>((_, rej) => (rejectA = () => rej(new Error("down"))));
+        }
+        if (url.includes("/campaigns/result")) {
+          return url.includes(`campaignId=${UUID}`)
+            ? json({ halted: false, assets: [asset()], log: { entries: [], campaignId: SLUG } })
+            : json(EMPTY_REPORT);
+        }
+        if (url === `${API}/campaigns/${UUID}`) {
+          return json({
+            campaignId: UUID,
+            slug: SLUG,
+            name: "Autumn Launch",
+            type: "social-post",
+            hasVersion: true,
+          });
+        }
+        return json({ error: "Not found" }, 404);
+      },
+    });
+    const { result } = setup();
+    act(() => result.current.openPageCampaign(UUID_A));
+    await waitFor(() => expect(rejectA).toBeTypeOf("function"));
+    act(() => result.current.openPageCampaign(UUID));
+    await waitFor(() => expect(result.current.brief.id).toBe(SLUG));
+    await act(async () => {
+      rejectA();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // A's failure is not B's news: no membership error, B's campaign stands.
+    expect(result.current.membershipError).toBeNull();
     expect(result.current.brief.id).toBe(SLUG);
   });
 

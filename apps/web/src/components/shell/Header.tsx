@@ -51,7 +51,7 @@ export function Header() {
    * current-tab match below stays on the PATH: the query must never take part
    * in it, or the active tab would go dark the moment the query appeared.
    */
-  const campaignQuery = briefApplied && brief.id ? `?campaign=${encodeURIComponent(brief.id)}` : "";
+  const campaignQuery = briefApplied ? `?campaign=${encodeURIComponent(brief.id)}` : "";
 
   useEffect(() => {
     let active = true;
