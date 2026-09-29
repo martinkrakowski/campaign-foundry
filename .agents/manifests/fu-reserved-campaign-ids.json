@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/Treatment.vo.ts",
-      "before": "export const RESERVED_CAMPAIGN_IDS = [\"cache\", \"jobs\", \"last-opened\", \"orgs\", \"packages\"] as const;",
-      "after": "export const RESERVED_CAMPAIGN_IDS = [\"cache\", \"jobs\", \"last-opened\", \"orgs\"] as const;",
-      "because": "dropping packages from RESERVED_CAMPAIGN_IDS allows a campaign named packages to collide with the public packaging directory",
+      "before": "  \"package\",\n  \"packages\",",
+      "after": "  \"package\",",
+      "because": "dropping packages from RESERVED_CAMPAIGN_IDS allows a campaign named packages to collide with the public packaging directory. Re-anchored 2026-09-29 in HX1-route-segments-reserved: RESERVED_CAMPAIGN_IDS became the computed union of RESERVED_STORE_AREAS and RESERVED_ROUTE_SEGMENTS (D181), and packages lives only in the latter (it stays a served output path, unlike the other RESERVED_STORE_AREAS entries), so this is now where removing it from the array isReservedCampaignId reads shows up as a text change.",
       "command": [
         "yarn",
         "vitest",
