@@ -219,7 +219,8 @@ describe("yarn gate", () => {
     const r = runGate(["--lane", "lane-b"], {
       TMPDIR: dir,
       CF_GATE_NITRO_MANIFEST: manifest,
-      CF_GATE_NITRO_PREPARE: 'printf "export const nitroRoutes = {}\\n" > "$CF_GATE_NITRO_MANIFEST"',
+      CF_GATE_NITRO_PREPARE:
+        'printf "export const nitroRoutes = {}\\n" > "$CF_GATE_NITRO_MANIFEST"',
       ...stepsEnv([["nitro-route-scan", "gate_nitro_guard"]]),
     });
     expect(r.status).toBe(0);
