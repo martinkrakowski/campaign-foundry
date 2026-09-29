@@ -1,5 +1,13 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -350,6 +358,30 @@ describe("yarn gate", () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("lock lost before step 'verify-manifests'");
     expect(existsSync(join(dir, "cf-gate.lock"))).toBe(false);
+  }, 15_000);
+
+  test("a failed release is reported by the gate, which does not report green", () => {
+    // The last locked step makes the lock directory read-only, so the gate's
+    // release cannot remove it: the gate must report the failed release and
+    // exit non-zero, never print the tally over a lingering lock.
+    const dir = scratch();
+    const lock = join(dir, "cf-gate.lock");
+    const r = runGate(
+      ["--lane", "lane-b"],
+      {
+        TMPDIR: dir,
+        ...stepsEnv([
+          ["test:cov", "true"],
+          ["verify-manifests", 'chmod 555 "$TMPDIR/cf-gate.lock"'],
+        ]),
+      },
+      15_000,
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("FAILED to release the lock");
+    expect(existsSync(lock)).toBe(true);
+    // Let the cleanup remove the scratch dir again.
+    chmodSync(lock, 0o755);
   }, 15_000);
 
   test("a run where every step passes prints the full tally", () => {

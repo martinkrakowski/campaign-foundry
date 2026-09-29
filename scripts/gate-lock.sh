@@ -249,7 +249,13 @@ release() {
     printf '%s\n' "gate-lock: release refused — the lock at $LOCK names ${owner:-unknown} (pid ${pid:-?}), not $1 (pid $recorded_pid); it was left alone" >&2
     return 1
   fi
-  rm -rf "$LOCK"
+  # The removal's status is the release's status: a removal that failed on
+  # permissions or I/O must be reported, not announced as released — the lock
+  # would linger until a liveness reclaim picked it up.
+  if ! rm -rf "$LOCK"; then
+    printf '%s\n' "gate-lock: release failed — could not remove $LOCK" >&2
+    return 1
+  fi
   printf '%s\n' "gate-lock: released by $1 (pid $recorded_pid)"
   return 0
 }

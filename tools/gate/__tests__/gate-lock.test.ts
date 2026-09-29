@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -416,6 +417,22 @@ describe("gate-lock.sh", () => {
     const right = runLockIn(dir, ["release", "lane-b"], { CF_GATE_CALLER_PID: "434343" });
     expect(right.status).toBe(0);
     expect(existsSync(lockDir(dir))).toBe(false);
+  });
+
+  test("a release that cannot remove the lock reports failure and leaves it in place", () => {
+    // A read-only lock directory defeats rm: the removal must fail loudly,
+    // not be announced as released while the lock lingers.
+    const dir = scratch();
+    const lock = seedLock(dir, { pid: process.pid, owner: "lane-a" });
+    chmodSync(lock, 0o555);
+    const result = runLockIn(dir, ["release", "lane-a"], {
+      CF_GATE_CALLER_PID: String(process.pid),
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("release failed");
+    expect(existsSync(lock)).toBe(true);
+    // Let the cleanup remove the scratch dir again.
+    chmodSync(lock, 0o755);
   });
 
   test("an unknown subcommand exits 2 with the usage", () => {

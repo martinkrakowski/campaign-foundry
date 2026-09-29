@@ -21,7 +21,8 @@
 # held, a background heartbeat loop keeps the lock's `beat` fresh, and ONE
 # trap (the EXIT trap; INT and TERM only turn the signal into an exit that
 # falls through to it) releases the lock AND kills that loop, on failure and
-# on signal alike.
+# on signal alike. A release that fails or is refused is reported loudly, and
+# a gate whose lock could not be released does not report green.
 #
 # At every locked-step boundary the gate also verifies the lock is still its
 # own: the heartbeat loop is running (its failure marker catches the zombie a
@@ -198,6 +199,7 @@ HEARTBEAT_PID=""
 HB_FAILED="${TMPDIR:-/tmp}/cf-gate.hbfailed.$$"
 COVLOG=""
 cov_failed=0
+release_failed=0
 
 release_lock() {
   if [ "$LOCK_HELD" -eq 1 ]; then
@@ -208,11 +210,17 @@ release_lock() {
       wait "$HEARTBEAT_PID" 2>/dev/null
       HEARTBEAT_PID=""
     fi
-    # The release must carry this shell's pid: gate-lock releases only the
-    # lock that still names this owner and pid — never one that replaced it.
-    CF_GATE_CALLER_PID=$$ sh "$LOCK_SCRIPT" release "$LANE" >/dev/null 2>&1
+    rm -f "$HB_FAILED"
     LOCK_HELD=0
-    printf '%s\n' "gate: lock released, heartbeat stopped"
+    # The release's status and diagnostics are not discarded: a release that
+    # failed (or was refused — see gate-lock.sh) must be reported, never
+    # announced as released.
+    if CF_GATE_CALLER_PID=$$ sh "$LOCK_SCRIPT" release "$LANE"; then
+      printf '%s\n' "gate: lock released, heartbeat stopped"
+    else
+      release_failed=1
+      printf '%s\n' "gate: FAILED to release the lock — it may still be held at ${TMPDIR:-/tmp}/cf-gate.lock" >&2
+    fi
   fi
 }
 
@@ -358,6 +366,10 @@ while IFS="$TAB" read -r name cmd; do
   fi
   if [ "$LOCK_HELD" -eq 1 ] && [ "$step_no" -eq "$last_locked" ]; then
     release_lock
+    if [ "$release_failed" -eq 1 ]; then
+      printf '%s\n' "gate: FAILED — the lock could not be released; the gate cannot report green while it lingers" >&2
+      exit 1
+    fi
   fi
 done <<EOF
 $STEPS
