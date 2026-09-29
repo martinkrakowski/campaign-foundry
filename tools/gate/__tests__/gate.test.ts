@@ -153,6 +153,67 @@ describe("yarn gate", () => {
     expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
   });
 
+  test("a failing nitro prepare fails the guard, even with a stale manifest present", () => {
+    const dir = scratch();
+    const manifest = join(dir, "nitro-routes.d.ts");
+    // A stale manifest from an earlier prepare, sitting where the guard will
+    // look: the failure must not leave it there for the scan to bless.
+    writeFileSync(manifest, "export const nitroRoutes = { maybeStale: '__tests__/old.ts' }\n");
+    const r = runGate(["--lane", "lane-b"], {
+      TMPDIR: dir,
+      CF_GATE_NITRO_MANIFEST: manifest,
+      CF_GATE_NITRO_PREPARE: 'sh -c "exit 5"',
+      ...stepsEnv([["nitro-route-scan", "gate_nitro_guard"]]),
+    });
+    expect(r.status).toBe(5);
+    expect(r.stdout).toContain("::error::nitro prepare failed");
+    expect(r.stderr).toContain("FAILED at step 'nitro-route-scan' (exit 5)");
+    // The stale manifest was removed before preparing, and never scanned.
+    expect(existsSync(manifest)).toBe(false);
+  });
+
+  test("a passing prepare rescans the manifest it rebuilt", () => {
+    const dir = scratch();
+    const manifest = join(dir, "nitro-routes.d.ts");
+    const r = runGate(["--lane", "lane-b"], {
+      TMPDIR: dir,
+      CF_GATE_NITRO_MANIFEST: manifest,
+      CF_GATE_NITRO_PREPARE: 'printf "export const nitroRoutes = {}\\n" > "$CF_GATE_NITRO_MANIFEST"',
+      ...stepsEnv([["nitro-route-scan", "gate_nitro_guard"]]),
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("Nitro route manifest is free of test files.");
+  });
+
+  test("a rebuilt manifest naming a test file fails the scan", () => {
+    const dir = scratch();
+    const manifest = join(dir, "nitro-routes.d.ts");
+    const r = runGate(["--lane", "lane-b"], {
+      TMPDIR: dir,
+      CF_GATE_NITRO_MANIFEST: manifest,
+      CF_GATE_NITRO_PREPARE:
+        'printf "export const nitroRoutes = { x: \\"__tests__/ smuggled.ts\\" }\\n" > "$CF_GATE_NITRO_MANIFEST"',
+      ...stepsEnv([["nitro-route-scan", "gate_nitro_guard"]]),
+    });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain("::error::A test file was scanned as a Nitro route");
+    expect(r.stderr).toContain("FAILED at step 'nitro-route-scan' (exit 1)");
+  });
+
+  test("a prepare that succeeds without writing a manifest fails closed", () => {
+    const dir = scratch();
+    const manifest = join(dir, "nitro-routes.d.ts");
+    const r = runGate(["--lane", "lane-b"], {
+      TMPDIR: dir,
+      CF_GATE_NITRO_MANIFEST: manifest,
+      CF_GATE_NITRO_PREPARE: "true",
+      ...stepsEnv([["nitro-route-scan", "gate_nitro_guard"]]),
+    });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain("::error::Nitro route manifest not found");
+    expect(r.stderr).toContain("FAILED at step 'nitro-route-scan' (exit 1)");
+  });
+
   test("the gate stops at the first failing step by name, and later steps never run", () => {
     const dir = scratch();
     const marker = join(dir, "later-ran");

@@ -33,7 +33,10 @@
 # fake steps (`true`, `sh -c "exit 3"`, a step that prints `ERROR: Coverage`
 # and exits 0) instead of the real suite. The locking rules above apply to
 # injected lists unchanged: a step NAMED test:cov or verify-manifests is
-# locked, whichever command it carries.
+# locked, whichever command it carries. The nitro guard's prepare command and
+# manifest path are injectable the same way (CF_GATE_NITRO_PREPARE,
+# CF_GATE_NITRO_MANIFEST) so a test can fail preparation without touching the
+# workspace.
 #
 # POSIX sh (not zsh): GitHub Linux runners do not ship zsh. Like wave-event.sh
 # and verify-manifests.sh, this file parses under the runners' /bin/sh —
@@ -74,8 +77,20 @@ gate_check_env() {
 # as a route and crashes `yarn dev` at boot — a runtime fault the build and
 # coverage gate do not catch.
 gate_nitro_guard() {
-  MANIFEST="apps/api/.nitro/types/nitro-routes.d.ts"
-  yarn workspace @campaignfoundry/api exec nitro prepare
+  MANIFEST="${CF_GATE_NITRO_MANIFEST:-apps/api/.nitro/types/nitro-routes.d.ts}"
+  PREPARE="${CF_GATE_NITRO_PREPARE:-yarn workspace @campaignfoundry/api exec nitro prepare}"
+  # A stale manifest must never be validated: remove it BEFORE preparing, so a
+  # failed prepare cannot leave old routes behind for the scan to bless.
+  rm -f "$MANIFEST"
+  # Fail the step when preparation fails — CI's `bash -e` aborts the step on a
+  # failed prepare; the gate (set -u, no -e) must check the status itself, and
+  # it reports prepare's real status, not a generic 1.
+  eval "$PREPARE"
+  prepare_status=$?
+  if [ "$prepare_status" -ne 0 ]; then
+    echo "::error::nitro prepare failed (exit $prepare_status) — refusing to scan a route manifest that was not rebuilt"
+    return "$prepare_status"
+  fi
   # Fail closed: a missing manifest means the guard can't validate anything.
   if [ ! -f "$MANIFEST" ]; then
     echo "::error::Nitro route manifest not found at $MANIFEST"
