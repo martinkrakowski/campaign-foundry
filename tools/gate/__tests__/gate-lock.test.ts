@@ -151,8 +151,9 @@ function runLockAsyncIn(
   dir: string,
   args: string[],
   env: Record<string, string> = {},
+  shell = "sh",
 ): Promise<RunResult> {
-  return startLockIn(dir, args, env).done;
+  return startLockIn(dir, args, env, shell).done;
 }
 
 /** Poll until the path exists — the handshake for the script's test pauses. */
@@ -980,9 +981,12 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
         "sleep 8 >/dev/null 2>&1 & wait",
         `touch "${completed}"`,
       ].join("; ");
-      const result = await runLockAsyncIn(dir, ["run", "lane-a", "--", "sh", "-c", replace], {
-        CF_GATE_HEARTBEAT_SECONDS: "1",
-      });
+      const result = await runLockAsyncIn(
+        dir,
+        ["run", "lane-a", "--", "sh", "-c", replace],
+        { CF_GATE_HEARTBEAT_SECONDS: "1" },
+        shell,
+      );
       expect(result.status).not.toBe(0);
       // It says so, and says why the command ended: a 143 on its own is
       // indistinguishable from a caller that signalled the run.
@@ -998,6 +1002,66 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
       expect(existsSync(lockDir(dir))).toBe(true);
     }
   }, 40_000);
+
+  test("a release waits for a heartbeat refresh that is in flight, not past it", async () => {
+    for (const shell of SIGNAL_SHELLS) {
+      const dir = scratch();
+      // The race this closes is between the loop's `rm -rf` of the lock and an
+      // in-flight `sh gate-lock.sh heartbeat` grandchild whose `mv` lands on
+      // $LOCK/beat in the middle of it. Unforced, it is a 13-in-200 kind of
+      // thing under /bin/sh and 18-in-200 under dash — every one a false
+      // "release failed — could not remove … Directory not empty", a lock left
+      // at the name, and a non-zero exit for a command that succeeded. A test
+      // that only ran short runs would therefore be a test that fails one time
+      // in fifteen and passes the rest, which is not a test.
+      //
+      // So the window is pinned open instead. The hook holds ONE refresh
+      // between staging its beat and renaming it onto the lock — inside the
+      // grandchild, which is the only place the race lives: the old code killed
+      // this loop, went straight on to `rm -rf` the lock, and that grandchild
+      // then renamed a file into the directory being emptied.
+      const marker = join(dir, "paused-before-beat-mv");
+      const { child, done } = startLockIn(
+        dir,
+        ["run", "lane-a", "--", "sleep", "30"],
+        { CF_GATE_HEARTBEAT_SECONDS: "1", CF_GATE_TEST_PAUSE_BEFORE_BEAT_MV: marker },
+        shell,
+      );
+      await waitForLock(dir);
+      await waitForFile(marker);
+      // A refresh is now sitting in the hook with its beat staged. Signalled
+      // while it is there, the cleanup has to wait for it: that is the claim.
+      expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
+      process.kill(child.pid as number, "SIGTERM");
+
+      // Give the run long enough to have released the lock if it were going to.
+      // A run that ignores the in-flight refresh removes the lock here, and the
+      // test fails on the next line — deterministically, with no reliance on
+      // the race happening.
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      const waited = existsSync(lockDir(dir));
+
+      // Let the refresh finish and the run finish with it, either way: leaving
+      // the marker in place would strand a grandchild that keeps touching this
+      // TMPDIR after the test has moved on.
+      rmSync(marker);
+      const result = await done;
+      // The whole failure this test exists for, named as one assertion: a
+      // "Directory not empty" release failure is a false failure for a command
+      // that succeeded, and it leaves a lock behind for the next lane.
+      expect({ shell, waited, stderr: result.stderr, status: result.status }).toEqual({
+        shell,
+        waited: true,
+        stderr: "",
+        status: 143,
+      });
+      expect(result.stdout).toContain("released by lane-a");
+      expect(existsSync(lockDir(dir))).toBe(false);
+      // The loop is a child of the run and the refresh a child of the loop:
+      // nothing either of them left behind.
+      await waitForDead(heartbeatPidOf(result.stdout));
+    }
+  }, 60_000);
 
   test("a lock deleted under it fails the run too, though the release has nothing to remove", () => {
     const dir = scratch();
