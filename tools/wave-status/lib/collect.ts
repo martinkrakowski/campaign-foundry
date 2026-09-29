@@ -8,10 +8,13 @@ import { mergeStatus } from "./merge.js";
 import { readBacklog } from "./backlog.js";
 import { artifactPathFor } from "../../plan-verify/lib/artifact.js";
 import { PLAN_REVIEW_LANE, rowHash } from "../../plan-review/lib/rows.js";
+import { discoverRisk } from "../../plan-review/lib/risk.js";
+import { prePrReviewRefusal } from "../../plan-review/lib/pre-pr.js";
 import type {
   LaneObservation,
   PlanReviewObservation,
   PrChecks,
+  RiskObservation,
   WaveEvent,
   WaveStatus,
 } from "./types.js";
@@ -44,7 +47,12 @@ export interface CollectDeps {
   readonly gh: (args: readonly string[]) => Promise<string>;
   readonly git?: (args: readonly string[]) => Promise<string>;
   readonly planVerifyArtifactPath?: string;
+  /** Where D184's risk gate greps for a lane's row — defaults to `docs/planning`. */
+  readonly planningDir?: string;
 }
+
+/** Where `pre-pr-check` (and this collector) grep for a lane's row, unless overridden. */
+export const DEFAULT_PLANNING_DIR = "docs/planning";
 
 /** Wave log directories live directly under here: `~/.waves/wave*`. */
 export const WAVE_LOG_ROOT = join(homedir(), ".waves");
@@ -290,6 +298,7 @@ export async function collect(
           worktrees,
           log,
           await planReviewFor(deps, dirEvents, lane),
+          await riskFor(deps, dirEvents, lane),
         );
         rows.push({ wave, lane, reportedPr, obs });
       }
@@ -361,6 +370,42 @@ async function planReviewFor(
   }
 }
 
+/** The `wave` field carried by any of this lane's own events in `dirEvents`, or undefined. */
+function laneWaveIn(events: readonly WaveEvent[], lane: string): string | undefined {
+  for (const event of events) {
+    if (event.lane === lane) return event.wave;
+  }
+  return undefined;
+}
+
+/**
+ * D184's pre-PR-review gate facts for one lane: its risk tier (discovered by
+ * grepping `docs/planning/`, exactly as `pre-pr-check` does — the collector
+ * runs the same discovery, never a second opinion), and, for a `high` tier,
+ * whether the gate would refuse it right now.
+ *
+ * The review/remediate scan is matched on the WAVE THE LANE'S OWN EVENTS
+ * NAME — never `waveIdFromDirName(dirName)` — for the same reason
+ * `planReviewFacts` reads `dispatchWave` off the dispatch event itself: a
+ * directory's name and its events' own `wave` field can differ, and matching
+ * on the wrong one would silently never find the review this lane's events
+ * actually carry.
+ */
+async function riskFor(
+  deps: CollectDeps,
+  dirEvents: readonly WaveEvent[],
+  lane: string,
+): Promise<RiskObservation> {
+  const tier = await discoverRisk(lane, deps.planningDir ?? DEFAULT_PLANNING_DIR, deps);
+  if (tier === "normal") return { tier };
+
+  const wave = laneWaveIn(dirEvents, lane);
+  if (wave === undefined) return { tier };
+
+  const refusal = prePrReviewRefusal(dirEvents, wave, lane);
+  return refusal === undefined ? { tier } : { tier, refusal };
+}
+
 /**
  * The observation every row is built with, log attached or not: one probe,
  * one gate lookup, one assembly — so a field one lane carries cannot be
@@ -376,6 +421,7 @@ async function buildObservation(
   worktrees: readonly string[],
   log?: LaneObservation["log"],
   planReview?: PlanReviewObservation,
+  risk?: RiskObservation,
 ): Promise<Omit<LaneObservation, "pr">> {
   let alive = false;
   try {
@@ -398,6 +444,7 @@ async function buildObservation(
     ...(log !== undefined ? { log } : {}),
     ...(gateLog !== undefined ? { gateLog } : {}),
     ...(planReview !== undefined ? { planReview } : {}),
+    ...(risk !== undefined ? { risk } : {}),
     alive,
   };
 }

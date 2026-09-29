@@ -1,6 +1,12 @@
 import { asHashRecord } from "../../plan-review/lib/rows.js";
 import { governingPlanReview } from "../../plan-review/lib/review.js";
-import type { DerivedLane, LaneObservation, PlanReviewObservation, WaveEvent } from "./types.js";
+import type {
+  DerivedLane,
+  LaneObservation,
+  PlanReviewObservation,
+  RiskObservation,
+  WaveEvent,
+} from "./types.js";
 
 export function parseLastExit(tail: string): number | undefined {
   const lines = tail.split("\n");
@@ -73,11 +79,13 @@ export function deriveLane(obs: LaneObservation): DerivedLane {
       ? parsedGate
       : undefined;
   const planReview = obs.planReview === undefined ? undefined : planReviewFlag(obs.planReview);
+  const risk = riskFlag(obs.risk, obs.pr);
 
   return {
     ...(exit !== undefined ? { exit } : {}),
     ...(gate !== undefined ? { gate } : {}),
     ...(planReview !== undefined ? { planReview } : {}),
+    ...(risk !== undefined ? { risk } : {}),
     alive: obs.alive,
     ...(obs.log !== undefined ? { log: obs.log } : {}),
     ...(obs.pr !== undefined ? { pr: obs.pr } : {}),
@@ -141,4 +149,23 @@ export function planReviewFlag(obs: PlanReviewObservation): string | undefined {
   if (obs.reviewedHash === undefined) return "dispatched on an unreviewed row";
   if (obs.rowHash === undefined) return undefined;
   return obs.rowHash === obs.reviewedHash ? undefined : "dispatched on an unreviewed row";
+}
+
+/**
+ * D184's pre-PR-review gate flag, derived and never gathered: set only when
+ * the lane's row is `high` risk, its PR is currently open, AND the gate
+ * would refuse it right now (`obs.refusal` is set — the collector already
+ * asked `prePrReviewRefusal` the question, over this wave directory's own
+ * events, at collection time). A `normal` row, a closed/merged PR, or a
+ * high-risk row whose gate would already pass, are all silence: this flag
+ * exists to name exactly one thing — a PR sitting open that D184 would not
+ * yet let merge.
+ */
+export function riskFlag(
+  risk: RiskObservation | undefined,
+  pr: LaneObservation["pr"],
+): string | undefined {
+  if (risk === undefined || risk.tier !== "high") return undefined;
+  if (pr === undefined || pr.state !== "open") return undefined;
+  return risk.refusal === undefined ? undefined : "high-risk PR open without pre-PR review";
 }

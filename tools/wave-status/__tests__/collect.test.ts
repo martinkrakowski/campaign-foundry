@@ -2210,3 +2210,150 @@ describe("collect — the plan-review gate (FU-plan-review-gate)", () => {
     expect(laneRow(status, "PT-5a")?.derived.planReview).toBeUndefined();
   });
 });
+
+describe("collect — D184's pre-PR-review gate (risk)", () => {
+  const RISK_PLAN = [
+    "# The plan",
+    "",
+    "| Lane | Risk | Delivers |",
+    "|---|---|---|",
+    "| **HX1** | **high** | Split the reserved list. |",
+    "| **HX4** | normal | Plan rows carry a risk tier. |",
+  ].join("\n");
+
+  const dispatchLine = (wave: string, lane: string, ts = "2026-09-28T09:00:00Z"): string =>
+    `${JSON.stringify({ ts, wave, lane, stage: "dispatch", event: "started" })}\n`;
+
+  const reviewLine = (
+    wave: string,
+    lane: string,
+    verdict = "clear",
+    ts = "2026-09-28T10:00:00Z",
+  ): string =>
+    `${JSON.stringify({ ts, wave, lane, stage: "review", event: "settled", detail: { verdict } })}\n`;
+
+  const remediateLine = (wave: string, lane: string, ts = "2026-09-28T11:00:00Z"): string =>
+    `${JSON.stringify({ ts, wave, lane, stage: "remediate", event: "settled" })}\n`;
+
+  /** One open PR whose branch tail matches `branchTail`, with empty threads and no Build runs. */
+  const ghOpenPr =
+    (branchTail: string, number = 1): NonNullable<FakeTree["gh"]> =>
+    async (args) => {
+      if ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr") {
+        return JSON.stringify([
+          { number, state: "OPEN", headRefName: `feat/${branchTail}`, headRefOid: "oid1", repo: "m/r" },
+        ]);
+      }
+      if (args[0] === "api" && args[1] === "graphql") {
+        return JSON.stringify({
+          data: { search: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+        });
+      }
+      if (args[0] === "api") {
+        return JSON.stringify({ total_count: 0, check_runs: [] });
+      }
+      throw new Error(`unexpected gh call: ${args.join(" ")}`);
+    };
+
+  const ghMergedPr = (branchTail: string): NonNullable<FakeTree["gh"]> => async (args) => {
+    if ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr") {
+      return JSON.stringify([
+        { number: 1, state: "MERGED", headRefName: `feat/${branchTail}`, headRefOid: "oid1", repo: "m/r" },
+      ]);
+    }
+    return "[]";
+  };
+
+  const tree = (events: string, gh: NonNullable<FakeTree["gh"]>): FakeTree => ({
+    dirs: {
+      [ROOT]: ["waveR"],
+      [`${ROOT}/waveR`]: ["events.jsonl"],
+      "docs/planning": ["plan.md"],
+    },
+    files: { [`${ROOT}/waveR/events.jsonl`]: events, "docs/planning/plan.md": RISK_PLAN },
+    gh,
+  });
+
+  const laneAt = async (events: string, gh: NonNullable<FakeTree["gh"]>): Promise<WaveStatus> =>
+    collect(fakeDeps(tree(events, gh)), ROOT, "2026-09-28T12:00:00Z");
+
+  const laneRow = (status: WaveStatus, lane: string) =>
+    status.waves[0]?.lanes.find((l) => l.lane === lane);
+
+  test("a normal-risk lane never flags, even with an open PR and no review at all", async () => {
+    const status = await laneAt(dispatchLine("R", "HX4"), ghOpenPr("hx4"));
+    expect(laneRow(status, "HX4")?.derived.risk).toBeUndefined();
+  });
+
+  test("a high-risk lane with no review event and an open PR flags", async () => {
+    const status = await laneAt(dispatchLine("R", "HX1"), ghOpenPr("hx1"));
+    expect(laneRow(status, "HX1")?.derived.risk).toBe("high-risk PR open without pre-PR review");
+  });
+
+  test("a high-risk lane with a clear review and an open PR does not flag", async () => {
+    const events = dispatchLine("R", "HX1") + reviewLine("R", "HX1", "clear");
+    const status = await laneAt(events, ghOpenPr("hx1"));
+    expect(laneRow(status, "HX1")?.derived.risk).toBeUndefined();
+  });
+
+  test("changes-required with no later remediate flags", async () => {
+    const events = dispatchLine("R", "HX1") + reviewLine("R", "HX1", "changes-required");
+    const status = await laneAt(events, ghOpenPr("hx1"));
+    expect(laneRow(status, "HX1")?.derived.risk).toBe("high-risk PR open without pre-PR review");
+  });
+
+  test("changes-required with a LATER remediate settled does not flag", async () => {
+    const events =
+      dispatchLine("R", "HX1") + reviewLine("R", "HX1", "changes-required") + remediateLine("R", "HX1");
+    const status = await laneAt(events, ghOpenPr("hx1"));
+    expect(laneRow(status, "HX1")?.derived.risk).toBeUndefined();
+  });
+
+  test("a high-risk lane with no review and a MERGED PR does not flag — the flag is for an open PR only", async () => {
+    const status = await laneAt(dispatchLine("R", "HX1"), ghMergedPr("hx1"));
+    expect(laneRow(status, "HX1")?.derived.risk).toBeUndefined();
+  });
+
+  test("a lane found in no plan counts as normal and never flags", async () => {
+    const status = await laneAt(dispatchLine("R", "UNKNOWN-LANE"), ghOpenPr("unknown-lane"));
+    expect(laneRow(status, "UNKNOWN-LANE")?.derived.risk).toBeUndefined();
+  });
+
+  test("a directory whose name differs from the events' wave id still matches the review on the EVENT's wave", async () => {
+    // Mirrors the plan-review gate's own regression test: wave-event.sh can
+    // write a wave id like "wave5" to $root/wave5, whose directory name
+    // stripped of its prefix ("5") matches no event's own `wave` field. The
+    // risk gate must match on that field — never `waveIdFromDirName` — or a
+    // real settled review would silently never satisfy the gate it settled.
+    const events = dispatchLine("wave5", "HX1") + reviewLine("wave5", "HX1", "clear");
+    const status = await collect(
+      fakeDeps({
+        dirs: { [ROOT]: ["wave5"], [`${ROOT}/wave5`]: ["events.jsonl"], "docs/planning": ["plan.md"] },
+        files: { [`${ROOT}/wave5/events.jsonl`]: events, "docs/planning/plan.md": RISK_PLAN },
+        gh: ghOpenPr("hx1"),
+      }),
+      ROOT,
+      "2026-09-28T12:00:00Z",
+    );
+    const row = status.waves.find((wave) => wave.id === "5")?.lanes[0];
+    expect(row?.derived.risk).toBeUndefined();
+  });
+
+  test("planningDir is injectable, like planVerifyArtifactPath", async () => {
+    const events = dispatchLine("R", "HX1");
+    const deps: CollectDeps = {
+      ...fakeDeps({
+        dirs: {
+          [ROOT]: ["waveR"],
+          [`${ROOT}/waveR`]: ["events.jsonl"],
+          "/custom-plans": ["plan.md"],
+        },
+        files: { [`${ROOT}/waveR/events.jsonl`]: events, "/custom-plans/plan.md": RISK_PLAN },
+        gh: ghOpenPr("hx1"),
+      }),
+      planningDir: "/custom-plans",
+    };
+    const status = await collect(deps, ROOT, "2026-09-28T12:00:00Z");
+    expect(laneRow(status, "HX1")?.derived.risk).toBe("high-risk PR open without pre-PR review");
+  });
+});
