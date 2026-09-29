@@ -885,6 +885,24 @@ describe("FsBriefStore", () => {
     );
   });
 
+  // The other branch of hasGenuineReservation's own evidence check: a real
+  // saved version is evidence on its own, checked before readCampaignMeta —
+  // written directly (mirroring "stored brief with reserved id lists, reads,
+  // rewrites and replaces" below), since createBrief itself refuses to mint
+  // a reserved id with no evidence yet.
+  test("hasGenuineReservation is true for a reserved id with a real saved version", async () => {
+    writeFileSync(
+      join(dir, "templates.yaml"),
+      dumpBrief({ ...minimalBrief, id: "templates" }),
+      "utf8",
+    );
+    expect(await store.hasGenuineReservation("templates")).toBe(true);
+  });
+
+  test("hasGenuineReservation is false for an id with neither a version nor a campaign.json", async () => {
+    expect(await store.hasGenuineReservation("templates")).toBe(false);
+  });
+
   test.each(["cache", "jobs", "orgs", "packages"] as const)(
     "replaceBrief on a non-existent brief refuses reserved campaign id %s",
     async (id) => {
