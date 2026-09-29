@@ -6,6 +6,7 @@ import {
   assetCanvas,
   assetKey,
   assetLabel,
+  usePageCampaignParam,
   useRun,
   type Asset,
   type RunProgress,
@@ -101,6 +102,9 @@ function runningMessage(progress: RunProgress | null): string {
 }
 
 export default function GridPage() {
+  // D180 — this page addresses a campaign by `?campaign=<id>`; the provider
+  // resolves it (a hidden and an unknown id alike show the empty state below).
+  usePageCampaignParam();
   const {
     brief,
     assets,

@@ -39,8 +39,19 @@ export function Header() {
   // visible effect until the next run, so the header states what that run will use.
   const [notice, setNotice] = useState<string | null>(null);
   const { guardedPush, isDirty } = useGuardedNavigation();
-  const { telemetryOpen, toggleTelemetry } = useRun();
+  const { telemetryOpen, toggleTelemetry, brief, briefApplied } = useRun();
   const [capabilities, setCapabilities] = useState<HostCapabilities | null>(null);
+
+  /**
+   * PT-5c3 (D180) — the tabs carry the campaign the shell is showing, in the
+   * QUERY only: the campaign context travels between the pages and the editor
+   * (whose own committed brief the shell holds — its id is the slug, D179,
+   * which every campaign-addressed route resolves, PT-5b1). No campaign — the
+   * shell's two uncommitted states — is today's bare-tab behaviour. The
+   * current-tab match below stays on the PATH: the query must never take part
+   * in it, or the active tab would go dark the moment the query appeared.
+   */
+  const campaignQuery = briefApplied ? `?campaign=${encodeURIComponent(brief.id)}` : "";
 
   useEffect(() => {
     let active = true;
@@ -117,11 +128,13 @@ export function Header() {
       <nav className="absolute left-1/2 hidden h-full -translate-x-1/2 space-x-6 text-sm font-medium lg:flex">
         {TABS.map((tab) => {
           const active = pathname.startsWith(tab.href);
+          // The query rides the HREF only; `active` above stays on the path.
+          const linkHref = `${tab.href}${campaignQuery}`;
           return (
             <Link
               key={tab.href}
-              href={tab.href}
-              onClick={(e) => handleTabClick(e, tab.href)}
+              href={linkHref}
+              onClick={(e) => handleTabClick(e, linkHref)}
               aria-current={active ? "page" : undefined}
               className={cn(
                 "flex h-full items-center border-b-2 px-1 transition-colors",
@@ -204,6 +217,7 @@ export function Header() {
         open={menuOpen}
         onClose={closeMenu}
         tabs={TABS}
+        campaignQuery={campaignQuery}
         authControls={
           menuOpen && capabilities?.auth?.mode === "better-auth" ? (
             <BetterAuthMobileControls />

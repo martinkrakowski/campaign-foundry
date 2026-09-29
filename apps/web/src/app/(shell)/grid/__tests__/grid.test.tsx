@@ -19,6 +19,7 @@ import {
   DECISIONS_CONFLICT_MESSAGE,
   DECISIONS_UNREADABLE_MESSAGE,
   useRun,
+  API,
 } from "@/lib/run-context";
 import GridPage from "../page";
 import { typeDisplayName } from "@/components/campaign/display-names";
@@ -913,6 +914,10 @@ describe("GridPage — motion cells", () => {
  */
 const classes = (el: Element): readonly string[] => el.className.split(/\s+/);
 
+/** The page campaign's uuid and slug — two names for one campaign (D178). */
+const PAGE_UUID = "018f6d2a-9c3e-7b4a-8d21-3f9e2a5b6c7d";
+const PAGE_SLUG = "autumn-launch";
+
 describe("GridPage — control boundaries carry border-control", () => {
   test("the pager, the native filter selects, and the unselected decision arms", async () => {
     const thirty = Array.from({ length: 30 }, (_, i) =>
@@ -938,5 +943,77 @@ describe("GridPage — control boundaries carry border-control", () => {
       expect(classes(arm)).toContain("border-border-control");
       expect(classes(arm)).not.toContain("border-border");
     }
+  });
+});
+
+describe("GridPage — the page's ?campaign= (PT-5c3, D180)", () => {
+  afterEach(() => window.history.replaceState(null, "", "/grid"));
+
+  test("loads from a uuid query whose report keys the campaign's slug, and the assets render", async () => {
+    window.history.replaceState(null, "", `/grid?campaign=${PAGE_UUID}`);
+    // The page is addressed by the uuid (D178); the persisted report keys by the
+    // slug — the report's log.campaignId is a DIFFERENT string from the query.
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/result")) {
+          return url.includes(`campaignId=${PAGE_UUID}`)
+            ? json({
+                halted: false,
+                assets: [makeAsset({ backgroundSource: "imagen" })],
+                log: { entries: [], campaignId: PAGE_SLUG },
+              })
+            : json({ halted: false, assets: [], log: null });
+        }
+        if (url === `${API}/campaigns/${PAGE_UUID}`) {
+          return json({
+            campaignId: PAGE_UUID,
+            slug: PAGE_SLUG,
+            name: "Autumn Launch",
+            type: "social-post",
+            hasVersion: true,
+          });
+        }
+        if (url.includes("/campaigns/briefs")) {
+          return json({
+            briefs: [
+              {
+                file: `${PAGE_SLUG}.yaml`,
+                campaignId: PAGE_UUID,
+                brief: {
+                  id: PAGE_SLUG,
+                  template: storedTemplate,
+                  targetRegion: "DE",
+                  targetAudience: "a",
+                  campaignMessage: "m",
+                  products: [
+                    { id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" },
+                  ],
+                },
+              },
+            ],
+          });
+        }
+        return json({ error: "Not found" }, 404);
+      },
+    });
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText("alpha @ 1:1 · default")).toBeTruthy();
+  });
+
+  test("an unknown id shows the empty state", async () => {
+    window.history.replaceState(null, "", `/grid?campaign=${PAGE_UUID}`);
+    // Unknown: the meta read answers what a missing campaign answers (404).
+    mockPipelineApi({ result: () => json({ error: "Not found" }, 404) });
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText(/Start orchestrating assets/)).toBeTruthy();
+  });
+
+  test("a hidden id shows the same empty state (PT-2d: hidden reads as missing)", async () => {
+    window.history.replaceState(null, "", `/grid?campaign=${PAGE_UUID}`);
+    // Hidden by team: the API answers the same 404 the unknown id does (PT-2d),
+    // so the page cannot tell them apart — and must not try to.
+    mockPipelineApi({ result: () => json({ error: "Not found" }, 404) });
+    renderWithRun(<GridPage />);
+    expect(await screen.findByText(/Start orchestrating assets/)).toBeTruthy();
   });
 });

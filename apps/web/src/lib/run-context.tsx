@@ -18,6 +18,8 @@ import {
   type ReactNode,
 } from "react";
 import {
+  getCampaign,
+  listBriefs,
   listPackages,
   packageCampaign,
   unknownErrorMessage,
@@ -286,8 +288,16 @@ export function normalizeRunResult(result: RunResult): RunResult {
  * (a 200 whose body carries no run for this campaign) and throws when the read
  * itself failed — a rejected fetch, a non-JSON answer, a non-OK status. "Could
  * not ask" is never answered as "there is nothing".
+ *
+ * The report keys by the campaign's slug on Postgres while a page is addressed by
+ * its uuid (D178, PT-5c3), so `slug` — the one `GET /campaigns/:id` resolved for
+ * this page — names the same campaign: a report keyed by it is this page's run.
+ * A report keyed by anything else is another campaign's, and is never adopted.
  */
-export async function fetchPersistedRun(campaignId: string): Promise<RunResult | null> {
+export async function fetchPersistedRun(
+  campaignId: string,
+  slug?: string,
+): Promise<RunResult | null> {
   const res = await fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(campaignId)}`);
   if (res.status === 404) return null;
   if (!res.ok) {
@@ -297,7 +307,10 @@ export async function fetchPersistedRun(campaignId: string): Promise<RunResult |
   }
   const d = (await res.json()) as RunResult;
   // The one place persisted JSON becomes a RunResult, so the one place to narrow it.
-  if (d?.log?.campaignId === campaignId && (d.assets?.length || d.log))
+  if (
+    (d?.log?.campaignId === campaignId || (slug !== undefined && d?.log?.campaignId === slug)) &&
+    (d.assets?.length || d.log)
+  )
     return normalizeRunResult(d);
   return null;
 }
@@ -544,7 +557,7 @@ export function isStoredBrief(value: unknown): value is CampaignBrief {
  * The brief the shell starts with. The HITL surface (the /brief view) edits a
  * copy of this; `execute()` sends whatever the current brief is.
  */
-const DEFAULT_BRIEF: CampaignBrief = {
+export const DEFAULT_BRIEF: CampaignBrief = {
   schemaVersion: BRIEF_SCHEMA_VERSION,
   template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
   id: "summer-hydration-2026",
@@ -709,6 +722,15 @@ interface RunContextValue {
    */
   packageSelected: (platforms: readonly string[], include?: readonly string[]) => Promise<void>;
   loadPackages: () => Promise<void>;
+  /**
+   * PT-5c3 (D180) — the campaign a shell page's `?campaign=` names. The page hands
+   * in the ref the URL carries (a uuid on Postgres, D178) or `null` for a bare
+   * page (item 4: today's behaviour, until PT-5e). The provider resolves the ref
+   * through `GET /campaigns/:id`, commits the campaign's brief and run (the run
+   * is fetched by the page's id and adopted when its report keys the campaign's
+   * slug), and answers the one empty state for a hidden and an unknown ref alike.
+   */
+  openPageCampaign: (ref: string | null) => void;
 }
 
 const EMPTY_LOG: LogEntry[] = [];
@@ -798,6 +820,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // completed (packageSeq). A brief switch aborts whatever is still in flight.
   const packageAbort = useRef<AbortController | null>(null);
   const packageSeq = useRef(0);
+  // The page campaign's resolution token (PT-5c3): each `?campaign=` a page hands
+  // in supersedes the one before it, so a slow resolution cannot land on a page
+  // the user has already left.
+  const pageCampaignSeq = useRef(0);
   const packageSignal = (): AbortSignal => {
     packageAbort.current ??= new AbortController();
     return packageAbort.current.signal;
@@ -940,6 +966,44 @@ export function RunProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  /**
+   * Everything a switch to a different campaign throws away, shared by `setBrief`
+   * and the page campaign's empty answer (PT-5c3, D180): a late-resolving run
+   * cannot write back (the seq guard in execute/regenerateRejected), the grid
+   * is not stuck spinning, and no estimate, package or verdict outlives the
+   * campaign it belonged to.
+   */
+  const clearRunState = useCallback(() => {
+    setEstimateData(null);
+    setEstimateError(null);
+    setEstimateStatus("idle");
+    setPackages([]);
+    setPackageError(null);
+    setPackaging(false);
+    // Switching to a different campaign invalidates any in-flight run and leaves the
+    // "orchestrating" UI state, so a late-resolving run can't write back (the seq
+    // guard in execute/regenerateRejected) and the grid isn't stuck spinning.
+    runSeq.current += 1;
+    pollAbort.current?.abort();
+    packageAbort.current?.abort();
+    packageAbort.current = null;
+    setLoading(false);
+    setProgress(null);
+    setRegeneratingKeys(null);
+    // (2)/(3) Clear, then ask which is true for this brief: a job holds it (adopt and
+    // poll, exactly like the mount restore below) or none does. Job lookup goes
+    // FIRST, not the persisted report: `generate.post.ts` writes the report BEFORE
+    // it completes the job (`writeReport`, then `completeJob`), so "no running job"
+    // here can never be racing an unseen write — either a run is still in flight
+    // (adopt it) or its write already landed (the persisted-run read below sees it).
+    // Reading the report first, as this used to, opened exactly that gap: a job
+    // that settled between the two requests answered 404 to the (now second) job
+    // lookup and its just-written report was never read (qodo #1, coderabbit
+    // "Close the gap between result restoration and job lookup").
+    setRun(null);
+    setDecisions({});
+  }, []);
+
   // Loading or committing a brief swaps which run the grid should show. Only ever called
   // as a deliberate commit — the editor's Save and the picker's select — never per
   // keystroke, so this won't wipe the grid mid-edit. Behaviour:
@@ -948,8 +1012,23 @@ export function RunProvider({ children }: { children: ReactNode }) {
   //   2. Otherwise load the persisted run for this brief if one exists on disk, so
   //      previously generated creatives reappear without re-running the pipeline.
   //   3. Otherwise fall back to the empty "ready to run" state.
+  //
+  // `page` (PT-5c3, D180) names the campaign the page's own `?campaign=` resolved to:
+  // its fetches go out under the page's id (a uuid on Postgres, D178) and its
+  // persisted-run read adopts a report keyed by the page's slug, while the shell
+  // keeps keying on the brief (whose id is the slug, both backends — D179).
   const setBrief = useCallback(
-    (next: CampaignBrief) => {
+    (next: CampaignBrief, page?: { fetchId: string; slug: string }) => {
+      // A deliberate commit made WITHOUT a page (the picker's select, the editor's
+      // Save, a template pin) supersedes any `openPageCampaign` resolution still in
+      // flight for this shell — the same way a newer page-campaign open supersedes
+      // an older one. Without this, a slow `getCampaign`/`listBriefs` from a page the
+      // user has since left can land after this commit and overwrite the brief (or
+      // run) just chosen with the abandoned page's own (qodo "Old campaigns overwrite
+      // editor changes"). A commit that itself came FROM `openPageCampaign` (`page`
+      // is set) must not bump this — it is that resolution completing, not a newer
+      // one superseding it.
+      if (!page) pageCampaignSeq.current += 1;
       briefIdRef.current = next.id;
       briefDecidedRef.current = true;
       setBriefState(next);
@@ -982,7 +1061,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
           // adopting a job that is no longer the one running (greptile "Stale lookup
           // replaces newer run").
           const owned = runSeq.current;
-          void fetchRunningJob(next.id).then((jobId) => {
+          void fetchRunningJob(page ? page.fetchId : next.id).then((jobId) => {
             if (
               !mountedRef.current ||
               briefIdRef.current !== next.id ||
@@ -995,41 +1074,14 @@ export function RunProvider({ children }: { children: ReactNode }) {
         }
         return;
       }
-      setEstimateData(null);
-      setEstimateError(null);
-      setEstimateStatus("idle");
-      setPackages([]);
-      setPackageError(null);
-      setPackaging(false);
-      // Switching to a different brief invalidates any in-flight run and leaves the
-      // "orchestrating" UI state, so a late-resolving run can't write back (the seq
-      // guard in execute/regenerateRejected) and the grid isn't stuck spinning.
-      runSeq.current += 1;
+      clearRunState();
       // Captured after the bump above: a run that actually starts for this brief
       // (adoptJob's own beginRun — from a job discovered below, or from the user
       // pressing Generate while discovery is still in flight) moves this again, so
       // a persisted-run read that resolves afterward is refused rather than
       // overwriting fresher (or in-flight) state with whatever was on disk before it.
       const owned = runSeq.current;
-      pollAbort.current?.abort();
-      packageAbort.current?.abort();
-      packageAbort.current = null;
-      setLoading(false);
-      setProgress(null);
-      setRegeneratingKeys(null);
-      // (2)/(3) Clear, then ask which is true for this brief: a job holds it (adopt and
-      // poll, exactly like the mount restore below) or none does. Job lookup goes
-      // FIRST, not the persisted report: `generate.post.ts` writes the report BEFORE
-      // it completes the job (`writeReport`, then `completeJob`), so "no running job"
-      // here can never be racing an unseen write — either a run is still in flight
-      // (adopt it) or its write already landed (the persisted-run read below sees it).
-      // Reading the report first, as this used to, opened exactly that gap: a job
-      // that settled between the two requests answered 404 to the (now second) job
-      // lookup and its just-written report was never read (qodo #1, coderabbit
-      // "Close the gap between result restoration and job lookup").
-      setRun(null);
-      setDecisions({});
-      void fetchRunningJob(next.id).then((jobId) => {
+      void fetchRunningJob(page ? page.fetchId : next.id).then((jobId) => {
         // `runSeq.current !== owned` here also catches a newer run (this tab's own
         // Generate, or another discovery) that started while this lookup was still
         // in flight — without it, adopting now would abort that run's poller and
@@ -1043,7 +1095,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
           void adoptJob(next, jobId, { adopted: true });
           return;
         }
-        void fetchPersistedRun(next.id)
+        void fetchPersistedRun(page ? page.fetchId : next.id, page?.slug)
           .then((d) => {
             if (!mountedRef.current || briefIdRef.current !== next.id || runSeq.current !== owned)
               return; // superseded, or unmounted
@@ -1070,7 +1122,139 @@ export function RunProvider({ children }: { children: ReactNode }) {
           });
       });
     },
-    [adoptJob, run],
+    [adoptJob, clearRunState, run],
+  );
+
+  // The latest `setBrief`, readable from `openPageCampaign`'s stable closure (the
+  // same mirror pattern `loadingRef`/`decisionsRef` use): the page campaign's
+  // resolution is async, and committing through a stale `setBrief` closure would
+  // read a stale `run` for the keep-branch check.
+  const setBriefRef = useRef(setBrief);
+  setBriefRef.current = setBrief;
+
+  /**
+   * Has a later `openPageCampaign` — or unmount — superseded the resolution that
+   * holds this token? One guard for every await in the page campaign's
+   * resolution, so a slow answer can never land on a page the user has left.
+   */
+  const pageCampaignSuperseded = useCallback(
+    (owned: number) => !mountedRef.current || pageCampaignSeq.current !== owned,
+    [],
+  );
+
+  /**
+   * PT-5c3 (D180) — the campaign a shell page's `?campaign=` names. `null` is a
+   * bare page: today's behaviour, unchanged until PT-5e (item 4). A ref is
+   * resolved through `GET /campaigns/:id` (a uuid or a slug, PT-5b1) and
+   * committed:
+   *
+   *  - `undefined` meta (a hidden team-scoped campaign and an unknown id answer
+   *    exactly alike, PT-2d) is the one empty state — the same clearing a brief
+   *    switch does, and never an error: the URL is the only word for which
+   *    campaign the page shows.
+   *  - a resolved meta commits the campaign's brief — the last-opened copy when
+   *    it names this campaign, else the listing's (`entry.campaignId`, PT-5a),
+   *    else the placeholder a versionless campaign (PT-5b2) gets, named by the
+   *    slug — and fetches the run under the page's id, adopting a report keyed
+   *    by the campaign's slug (fetchPersistedRun's slug match).
+   *
+   * A read that fails says so (F6): a no-membership denial lands in its own
+   * state, and any other failure keeps the shell exactly as it was — could-not-ask
+   * is never answered by clearing what is on screen.
+   */
+  const openPageCampaign = useCallback(
+    (ref: string | null) => {
+      if (ref === null) {
+        // (4) a page with no ?campaign= keeps today's behaviour — but it still
+        // releases any resolution still in flight for the page just left, exactly
+        // like a deliberate `setBrief` commit does (qodo "Old campaigns overwrite
+        // editor changes"): otherwise that resolution's `pageCampaignSuperseded`
+        // check would still pass and it could commit its (now abandoned) campaign
+        // over whatever this bare page goes on to show.
+        pageCampaignSeq.current += 1;
+        return;
+      }
+      const owned = (pageCampaignSeq.current += 1);
+      void getCampaign(ref)
+        .then(async (meta) => {
+          if (pageCampaignSuperseded(owned)) return;
+          if (meta === null) {
+            // A hidden and an unknown id show the same empty state (PT-2d's rule,
+            // read here as "none"): whatever the shell held is not this page's
+            // campaign, so the run, its decisions, its brief and everything
+            // result-scoped go — coderabbit/PR-Agent "Clear the brief in the empty
+            // state": leaving the old brief committed keeps `briefApplied` true, so
+            // Header keeps building tab links from the abandoned campaign's slug
+            // and (PR #621) Grid's Generate/Render preview stay enabled on a
+            // campaign this page no longer shows.
+            clearRunState();
+            briefIdRef.current = DEFAULT_BRIEF.id;
+            setBriefState(DEFAULT_BRIEF);
+            setError(null);
+            setMembershipError(null);
+            return;
+          }
+          // The campaign's brief: the listing's own copy (PT-5a). Never the
+          // browser-wide `cf:brief` cache by a bare id match — slugs are unique
+          // per organisation, not globally (`pg-brief-store.ts`'s `resolveCampaign`,
+          // `where org_id = $1 and slug = $2`), so a same-slug campaign in a
+          // DIFFERENT organisation could satisfy `parsed.id === meta.slug` by
+          // coincidence and hand this page another org's brief content next to
+          // this org's run (qodo "Organization switches reuse another brief").
+          // The listing is scoped to the caller's own session, so it carries no
+          // such risk.
+          let target: CampaignBrief | null = null;
+          try {
+            const entries = await listBriefs();
+            if (pageCampaignSuperseded(owned)) return;
+            target =
+              entries.find(
+                (entry) => entry.campaignId === meta.campaignId || entry.brief.id === meta.slug,
+              )?.brief ?? null;
+          } catch {
+            /* the listing failed — handled below */
+          }
+          if (pageCampaignSuperseded(owned)) return;
+          // A versioned campaign (`meta.hasVersion`) the listing could not name —
+          // down, or (a create/list race) simply missing it — is F6's "could not
+          // ask", never "no brief": commit nothing and leave the shell as it was.
+          // The placeholder below is blank; committing it here would overwrite the
+          // campaign's real, already-saved content on screen, and `setBrief`
+          // persists whatever it commits to `cf:brief` — so a transient listing
+          // failure would silently and durably blank this campaign's cached brief
+          // until the editor happened to save over it again (qodo "A listing
+          // outage blanks a saved campaign brief").
+          if (target === null && meta.hasVersion) return;
+          // No stored brief anywhere, and none can exist: a versionless campaign
+          // (PT-5b2) — the same blank the editor's route seeds (`blankBrief()`,
+          // named by the slug), so the page's run (keyed by the slug) still loads.
+          // Its Generate is the API's own invalid-brief refusal, exactly as an
+          // unsaved draft's is. Inlined rather than imported because run-context
+          // sits in every web test's setup graph (vitest.setup → helpers →
+          // RunProvider), and an editor-state edge here would pre-instantiate
+          // modules other tests' `vi.mock` factories must intercept (HL5c's
+          // assembler memo).
+          const brief = target ?? {
+            schemaVersion: BRIEF_SCHEMA_VERSION,
+            template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+            id: meta.slug,
+            targetRegion: "",
+            targetAudience: "",
+            campaignMessage: "",
+            products: [],
+          };
+          setBriefRef.current(brief, { fetchId: meta.campaignId, slug: meta.slug });
+        })
+        .catch((err) => {
+          if (pageCampaignSuperseded(owned)) return;
+          if (isNoMembershipError(err)) {
+            setMembershipError(NO_ORGANISATION_YET_MESSAGE);
+          }
+          /* F6: could-not-ask is not absence — the shell keeps what it shows. A
+             later successful open (a tab with the param, a re-mount) heals it. */
+        });
+    },
+    [clearRunState, pageCampaignSuperseded],
   );
 
   // Derived, not stored: "applied" is a statement about the brief the shell holds, and
@@ -1618,6 +1802,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       packages,
       packageSelected,
       loadPackages,
+      openPageCampaign,
     }),
     [
       brief,
@@ -1656,6 +1841,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       packages,
       packageSelected,
       loadPackages,
+      openPageCampaign,
     ],
   );
 
@@ -1667,4 +1853,21 @@ export function useRun(): RunContextValue {
   const ctx = useContext(RunContext);
   if (!ctx) throw new Error("useRun must be used within a RunProvider");
   return ctx;
+}
+
+/**
+ * PT-5c3 (D180) — hand the page's `?campaign=` to the provider, once per mount.
+ * The URL is the single source of truth for which campaign a shell page shows
+ * (the same rule D37 gives the editor's route), so the page — which remounts on
+ * every navigation, where the persistent provider does not — is what reads it.
+ * A page with no `?campaign=` hands `null` through: the provider keeps today's
+ * behaviour until PT-5e moves the bare pages behind the last-opened pointer.
+ * Read in an effect, never at render: these pages server-render too, and there
+ * is no `window` to read a query string from.
+ */
+export function usePageCampaignParam(): void {
+  const { openPageCampaign } = useRun();
+  useEffect(() => {
+    openPageCampaign(new URLSearchParams(window.location.search).get("campaign"));
+  }, [openPageCampaign]);
 }

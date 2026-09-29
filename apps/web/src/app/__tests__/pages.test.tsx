@@ -1,7 +1,18 @@
-import { describe, test, expect } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
-import { renderWithRun, seedPersistedRun, makeAsset, seedDecisions } from "@/__tests__/helpers";
-import { nextMock } from "@/__tests__/helpers";
+import { describe, test, expect, afterEach } from "vitest";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import {
+  renderWithRun,
+  seedPersistedRun,
+  makeAsset,
+  seedDecisions,
+  nextMock,
+  mockPipelineApi,
+  json,
+  EMPTY_REPORT,
+} from "@/__tests__/helpers";
+import { API } from "@/lib/run-context";
+import { Header } from "@/components/shell/Header";
 import * as messages from "@/components/campaign/messages";
 import CompliancePage from "@/app/(shell)/compliance/page";
 import ExportPage from "@/app/(shell)/export/page";
@@ -214,5 +225,115 @@ describe("RunsPage", () => {
     seedPersistedRun([], { halted: true });
     renderWithRun(<RunsPage />);
     expect(await screen.findByText("halted")).toBeTruthy();
+  });
+});
+
+describe("the shell pages carry ?campaign= (PT-5c3, D180)", () => {
+  const UUID = "018f6d2a-9c3e-7b4a-8d21-3f9e2a5b6c7d";
+  const SLUG = "autumn-launch";
+
+  afterEach(() => window.history.replaceState(null, "", "/grid"));
+
+  /**
+   * The page campaign's server. The run report keys by the SLUG and is served
+   * ONLY under the uuid's query — the report's log.campaignId is a DIFFERENT
+   * string from the page's query, so a page that fetched by the slug, or that
+   * matched the report against the uuid, would show nothing.
+   */
+  const pageCampaignApi = () =>
+    mockPipelineApi({
+      result: (url) => {
+        if (url.includes("/campaigns/result")) {
+          return url.includes(`campaignId=${UUID}`)
+            ? json({ halted: false, assets: [makeAsset()], log: { entries: [], campaignId: SLUG } })
+            : json(EMPTY_REPORT);
+        }
+        if (url === `${API}/campaigns/${UUID}`) {
+          return json({
+            campaignId: UUID,
+            slug: SLUG,
+            name: "Autumn Launch",
+            type: "social-post",
+            hasVersion: true,
+          });
+        }
+        if (url.includes("/campaigns/briefs")) {
+          return json({
+            briefs: [
+              {
+                file: `${SLUG}.yaml`,
+                campaignId: UUID,
+                brief: {
+                  id: SLUG,
+                  targetRegion: "DE",
+                  targetAudience: "a",
+                  campaignMessage: "m",
+                  products: [
+                    { id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" },
+                  ],
+                },
+              },
+            ],
+          });
+        }
+        return json({ error: "Not found" }, 404);
+      },
+    });
+
+  test("compliance loads from a uuid query whose report keys the slug, and the rows render", async () => {
+    window.history.replaceState(null, "", `/compliance?campaign=${UUID}`);
+    pageCampaignApi();
+    renderWithRun(<CompliancePage />);
+    expect(await screen.findByText(/Brand-colour density/)).toBeTruthy();
+    expect(screen.getByText(messages.COMPLIANCE_GATE_LABEL.pass)).toBeTruthy();
+  });
+
+  test("export loads from a uuid query whose report keys the slug, and the renders list", async () => {
+    window.history.replaceState(null, "", `/export?campaign=${UUID}`);
+    seedDecisions({ "alpha/1:1/default": "approved" });
+    pageCampaignApi();
+    renderWithRun(<ExportPage />);
+    await waitFor(() => expect(screen.getByText(/1 of 1 creatives approved/)).toBeTruthy());
+    expect(screen.getByText("alpha/1x1.png")).toBeTruthy();
+  });
+
+  test("runs loads from a uuid query whose report keys the slug, and the summary renders", async () => {
+    window.history.replaceState(null, "", `/runs?campaign=${UUID}`);
+    pageCampaignApi();
+    renderWithRun(<RunsPage />);
+    await waitFor(() => expect(screen.getByText("complete")).toBeTruthy());
+    // The campaign the page loaded is the one the summary names.
+    expect(screen.getByText(SLUG)).toBeTruthy();
+    expect(screen.getByText("alpha @ 1:1 · default")).toBeTruthy();
+  });
+
+  test("the header tabs and the mobile menu carry the query, and the active tab is still marked", async () => {
+    nextMock().nav.pathname = "/compliance";
+    window.history.replaceState(null, "", `/compliance?campaign=${UUID}`);
+    pageCampaignApi();
+    const user = userEvent.setup();
+    renderWithRun(
+      <>
+        <Header />
+        <CompliancePage />
+      </>,
+    );
+    // The query rides the HREF only; the active match stays on the path, so the
+    // page the user is on keeps its tab even with the query present.
+    const grid = await screen.findByRole("link", { name: "Grid" });
+    await waitFor(() => expect(grid.getAttribute("href")).toBe(`/grid?campaign=${SLUG}`));
+    const compliance = screen.getByRole("link", { name: "Compliance" });
+    expect(compliance.getAttribute("href")).toBe(`/compliance?campaign=${SLUG}`);
+    expect(compliance.getAttribute("aria-current")).toBe("page");
+    expect(grid.getAttribute("aria-current")).toBeNull();
+
+    await user.click(screen.getByLabelText("Open menu"));
+    const dialog = await screen.findByRole("dialog", { name: "Menu" });
+    const mobileGrid = within(dialog).getByRole("link", { name: "Grid" });
+    expect(mobileGrid.getAttribute("href")).toBe(`/grid?campaign=${SLUG}`);
+    const mobileCompliance = within(dialog).getByRole("link", { name: "Compliance" });
+    expect(mobileCompliance.getAttribute("href")).toBe(`/compliance?campaign=${SLUG}`);
+    expect(mobileCompliance.getAttribute("aria-current")).toBe("page");
+    expect(mobileGrid.getAttribute("aria-current")).toBeNull();
   });
 });

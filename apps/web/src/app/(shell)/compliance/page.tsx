@@ -1,12 +1,14 @@
 "use client";
 
-import { assetKey, assetLabel, useRun } from "@/lib/run-context";
+import { assetKey, assetLabel, usePageCampaignParam, useRun } from "@/lib/run-context";
 import { Eyebrow, MiniChip } from "@/components/ui";
 import * as messages from "@/components/campaign/messages";
 import type { MiniChipTone } from "@campaignfoundry/ui";
 
 /** Automated compliance report — one row per generated asset. */
 export default function CompliancePage() {
+  // D180 — this page addresses a campaign by `?campaign=<id>`.
+  usePageCampaignParam();
   const { assets, hasRun } = useRun();
 
   return (
