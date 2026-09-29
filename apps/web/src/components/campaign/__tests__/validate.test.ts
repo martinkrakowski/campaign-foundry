@@ -337,6 +337,55 @@ describe("validateIdentity", () => {
     expect(validateIdentity(state).briefId).toBe(messages.briefIdReserved("cache"));
   });
 
+  // D181 fix round (grok-4.7 pre-PR review): a versionless campaign the editor
+  // SEEDED from the server (`BriefEditor`'s `markSeeded`, mirroring the API's
+  // own grandfather rule) is likewise an existing campaign, not a fresh mint —
+  // its own slug must not be refused as reserved on its first Save.
+  test("accepts a seeded versionless draft whose own slug is now reserved", () => {
+    const state = valid({
+      briefId: "templates",
+      source: {
+        kind: "new",
+        tempId: "new",
+        seeded: {
+          campaignId: "templates-id",
+          slug: "templates",
+          campaignName: "Templates",
+          snapshot: toBrief(valid({ briefId: "templates" })),
+        },
+      },
+    });
+    expect(validateIdentity(state).briefId).toBeUndefined();
+  });
+
+  test("still refuses a NEW (unseeded) draft typed as a reserved id", () => {
+    const state = valid({
+      briefId: "templates",
+      source: { kind: "new", tempId: "new" },
+    });
+    expect(validateIdentity(state).briefId).toBe(messages.briefIdReserved("templates"));
+  });
+
+  // The grandfather clause covers the campaign's OWN id, never a rename: a
+  // seeded draft renamed away from its seeded slug onto a DIFFERENT reserved
+  // word is a fresh collision, refused exactly like any other new id.
+  test("refuses renaming a seeded draft away from its own slug onto a different reserved id", () => {
+    const state = valid({
+      briefId: "packages",
+      source: {
+        kind: "new",
+        tempId: "new",
+        seeded: {
+          campaignId: "templates-id",
+          slug: "templates",
+          campaignName: "Templates",
+          snapshot: toBrief(valid({ briefId: "templates" })),
+        },
+      },
+    });
+    expect(validateIdentity(state).briefId).toBe(messages.briefIdReserved("packages"));
+  });
+
   test.each(["cache", "jobs", "orgs", "packages"] as const)(
     "accepts non-campaign ids named %s (product and treatment)",
     (id) => {

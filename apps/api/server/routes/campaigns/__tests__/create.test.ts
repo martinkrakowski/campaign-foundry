@@ -1335,6 +1335,119 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
   },
 );
 
+/**
+ * D181 fix round (grok-4.7 pre-PR review): a reserved id must be refused at
+ * Save only when NOTHING exists for it yet — an already-minted campaign
+ * (grandfathered, D181's own scope note: existing campaigns keep their id)
+ * must still complete its first Save. These tests call the raw
+ * `briefs.post.ts` handler directly (never `mount().createBrief`'s own
+ * best-effort auto-mint wrapper, which tries `createCampaign` first and
+ * would either interfere with a deliberately-missing fixture or mask the
+ * exact refusal/success this suite is pinning).
+ */
+const briefsReq = (body: unknown) =>
+  new Request("http://x/campaigns/briefs", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+describe("POST /campaigns/briefs onto a grandfathered reserved slug (D181 fix round)", () => {
+  describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
+    "$backend",
+    ({ backend }) => {
+      const setup = () => (backend === "fs" ? setupFsHarness() : setupPgHarness());
+
+      test("a pre-minted versionless `templates` campaign accepts its first Save as version 1", async () => {
+        const harness = await setup();
+        try {
+          // Mint directly through the store, bypassing `createCampaign`'s own
+          // (correct, unchanged) reserved-id refusal — simulating a campaign
+          // minted BEFORE this lane, when `templates` was not yet reserved.
+          if (backend === "fs") {
+            const fsHarness = harness as Awaited<ReturnType<typeof setupFsHarness>>;
+            mkdirSync(join(fsHarness.projectRoot, "briefs", "templates"), { recursive: true });
+          } else {
+            const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+            await pgHarness.db.query(
+              `insert into campaign (org_id, slug, team_id, name, type) values ($1, $2, $3, $4, $5)`,
+              ["local", "templates", null, null, null],
+            );
+          }
+
+          const createBrief = mountTenantRoute(briefsPostHandler, {
+            method: "POST",
+            path: "/campaigns/briefs",
+            tenant: LOCAL_TENANT,
+          });
+          const res = await createBrief(briefsReq(sampleBrief("templates")));
+          expect(res.status).toBe(201);
+          const body = (await res.json()) as { brief: { id: string } };
+          expect(body.brief.id).toBe("templates");
+
+          const meta = await getBriefStore(LOCAL_TENANT).campaignMeta("templates");
+          expect(meta?.hasVersion).toBe(true);
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
+      test("a reserved id with no campaign at all is still refused with today's status and body", async () => {
+        const harness = await setup();
+        try {
+          const createBrief = mountTenantRoute(briefsPostHandler, {
+            method: "POST",
+            path: "/campaigns/briefs",
+            tenant: LOCAL_TENANT,
+          });
+          const res = await createBrief(briefsReq(sampleBrief("templates")));
+          expect(res.status).toBe(400);
+          expect(await res.json()).toEqual({
+            error: `"templates" is reserved; choose another campaign id.`,
+          });
+        } finally {
+          await harness.cleanup();
+        }
+      });
+    },
+  );
+
+  test("a hidden (other team) pre-minted `templates` campaign answers the same 404 as missing", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await harness.db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+        ["t1", "Team One", "local"],
+      );
+      // Mint directly through the store (raw SQL), bypassing BOTH
+      // `createCampaign`'s and `createBrief`'s own reserved-id refusals —
+      // simulating a pre-lane blank `POST /campaigns` whose team is t1.
+      await harness.db.query(
+        `insert into campaign (org_id, slug, team_id, name, type) values ($1, $2, $3, $4, $5)`,
+        ["local", "templates", "t1", null, null],
+      );
+
+      const createBrief = mountTenantRoute(briefsPostHandler, {
+        method: "POST",
+        path: "/campaigns/briefs",
+        tenant: t2Member,
+      });
+      const hidden = await createBrief(briefsReq(sampleBrief("templates")));
+      expect(hidden.status).toBe(404);
+      expect(await hidden.json()).toEqual({ error: `Campaign "templates" not found` });
+
+      // Same status, same body shape as a genuinely missing (non-reserved)
+      // target — proving this is the ordinary hidden-or-missing 404 path
+      // (PT-2d), never this route's reserved-specific message.
+      const missing = await createBrief(briefsReq(sampleBrief("genuinely-missing")));
+      expect(missing.status).toBe(404);
+      expect(await missing.json()).toEqual({ error: `Campaign "genuinely-missing" not found` });
+    } finally {
+      await harness.cleanup();
+    }
+  });
+});
+
 function sampleBrief(id: string): CampaignBrief {
   return {
     schemaVersion: BRIEF_SCHEMA_VERSION,
