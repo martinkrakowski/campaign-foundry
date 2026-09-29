@@ -731,6 +731,37 @@ describe("BriefPage — data flow", () => {
     expect(mint?.body).not.toHaveProperty("teamOf");
   });
 
+  // PT-5c2 fix round (qodo PRRT_kwDOSzP1zc6m7irB): plain Save on the SAME W3
+  // resume shape — briefs.post.ts now refuses to create a campaign nothing
+  // ever minted, so the first Save of an abandoned pre-PT-5c1 draft must mint
+  // one first (POST /campaigns), the same way Save as… already does.
+  test("Save on the blank route mints the campaign first, then saves the draft into it", async () => {
+    const user = userEvent.setup();
+    saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "fresh" });
+    const calls = routes({});
+    renderWithRun(<Editor />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh"),
+    );
+    await fillValidDraft(user, "fresh");
+
+    await saveVia(user, "Save");
+
+    // D37: the URL is the source of truth — the mint's own campaignId names it.
+    await waitFor(() =>
+      expect(nextMock().router.replace).toHaveBeenCalledWith(campaignRoute("fresh")),
+    );
+
+    const posts = calls.filter((c) => c.method === "POST");
+    const mintIndex = posts.findIndex((c) => c.url === `${API}/campaigns`);
+    const saveIndex = posts.findIndex((c) => c.url === `${API}/campaigns/briefs`);
+    expect(mintIndex).toBeGreaterThanOrEqual(0);
+    expect(saveIndex).toBeGreaterThan(mintIndex);
+    expect(posts[mintIndex]?.body).toMatchObject({ name: "fresh" });
+    // The draft is saved under the MINTED slug, not the abandoned draft's own id.
+    expect(posts[saveIndex]?.body).toMatchObject({ id: "fresh" });
+  });
+
   test("Save as... keeps the copy's revision, so the next save still guards the write", async () => {
     const user = userEvent.setup();
     // D37: the route drives the load, so the listing the route reads must gain the

@@ -528,6 +528,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // second one. Cleared on success and on every dialog close/open below — it
   // exists only for "try that exact attempt again", never across sessions.
   const savedAsMintRef = useRef<{ campaignId: string; slug: string } | null>(null);
+  // PT-5c2 fix round (qodo PRRT_kwDOSzP1zc6m7irB) — the SAME "hold the mint
+  // across a failed first-save retry" shape as `savedAsMintRef`, for W3's
+  // resume: the campaign `handleSave` mints for an abandoned pre-PT-5c1
+  // draft (`routeId === undefined`, `state.source.kind === "new"`), so a
+  // retry after a step-2 failure writes into it instead of minting a second.
+  const resumeMintRef = useRef<{ campaignId: string; slug: string } | null>(null);
   // The Save-as dialog is `aria-modal` but was hand-rolled, so it had no Escape and
   // no focus containment: Cancel was the only way out, and Tab walked off into the
   // editor behind the scrim. The kit hook every other overlay uses supplies both,
@@ -2030,10 +2036,30 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // value, so the second save of any loaded brief sent a stale revision and was
       // refused with an untrue "Brief was modified by another user." — the same trap
       // loadBrief and handleSaveAs carry the revision to avoid.
+      //
+      // PT-5c2 fix round (qodo PRRT_kwDOSzP1zc6m7irB) — `routeId === undefined`
+      // is W3's resume of an abandoned pre-PT-5c1 draft (the last surface
+      // `/brief/new` still mounts a blank editor on, `new/page.tsx`'s own doc
+      // comment). Its `state.source.kind` is always `"new"`: nothing minted it
+      // through `POST /campaigns` first, so its first Save must, the same mint
+      // `handleSaveAs` already does — `briefs.post.ts` now refuses to create a
+      // campaign it never minted. `resumeMintRef` holds the mint across a
+      // step-2 (first-save) failure's retry, so it writes into the campaign
+      // already reserved instead of minting a second.
       const stored =
         state.source.kind === "file"
           ? await updateBrief(state.source.loadedId, brief, { revision: state.source.revision })
-          : await createBrief(brief);
+          : routeId === undefined
+            ? await (async () => {
+                const minted =
+                  resumeMintRef.current ??
+                  (await createCampaign({ name: state.campaignName, type: state.type }));
+                resumeMintRef.current = minted;
+                const created = await createBrief({ ...brief, id: minted.slug });
+                resumeMintRef.current = null;
+                return created;
+              })()
+            : await createBrief(brief);
       // `save` (not `load`): the snapshot and the fresh file identity/revision ride
       // the save action, so the draft the user kept typing into is NOT replaced —
       // edits made while the request was in flight survive and stay dirty. A
