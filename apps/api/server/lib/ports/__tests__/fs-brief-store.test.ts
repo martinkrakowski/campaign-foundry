@@ -1413,6 +1413,32 @@ describe("FsBriefStore", () => {
       expect(readFileSync(join(dir, "rotten.yaml"), "utf8")).toBe(corrupt);
     });
 
+    // The `.json` half of that data loss, and the half that needed this lane to
+    // become reachable: pre-index the lookup was a scan, the scan skipped a file
+    // whose bytes would not read, and the write was ENOENT with the operator's
+    // bytes left alone. A warm cached NAME reaches the whole-file rewrite
+    // instead, and R4.2's carve-out has no Document refusal of its own to stop
+    // it — so "an unparseable file refuses the write" is false here unless the
+    // write checks the bytes itself.
+    test("a rewrite refuses a cached JSON brief whose bytes stopped parsing, by name", async () => {
+      writeFileSync(
+        join(dir, "rotten.json"),
+        JSON.stringify({ ...minimalBrief, id: "rotten" }, null, 2),
+      );
+      expect(await store.findBriefFileById("rotten")).toBe("rotten.json");
+
+      const corrupt = '{"id": "rotten", products: ';
+      writeFileSync(join(dir, "rotten.json"), corrupt);
+
+      // Still a hit: the name is right and the file is still a regular file,
+      // which is the same divergence the YAML case above pins.
+      expect(await store.findBriefFileById("rotten")).toBe("rotten.json");
+      await expect(store.rewriteBrief({ ...minimalBrief, id: "rotten" })).rejects.toMatchObject({
+        code: "EBRIEFDOC",
+      });
+      expect(readFileSync(join(dir, "rotten.json"), "utf8")).toBe(corrupt);
+    });
+
     // The redirect's own half of that comparison, and the last call site still
     // reading the field it should have answered from. The scan maps an id to a
     // file that DECLARES it, so on paper the check before it is enough — and

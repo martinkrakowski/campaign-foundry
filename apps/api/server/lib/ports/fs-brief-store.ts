@@ -26,6 +26,7 @@ import {
 } from "./brief-store.port.js";
 import {
   BRIEF_SOURCE_EXTS,
+  BriefDocumentError,
   hashBytes,
   isBriefSourceName,
   isErrno,
@@ -759,6 +760,29 @@ export class FsBriefStore implements BriefStorePort {
       // Document patch here would write YAML into a `.json` file and hide the
       // brief on the next load. Never Document-patched, never fail-closed for
       // "not a YAML Document".
+      //
+      // Never fail-closed for "not a YAML Document" is not the same as never
+      // fail-closed: the bytes about to be replaced are a WHOLE-FILE dump over
+      // whatever is on disk, which is the data-loss path `BriefDocumentError`
+      // exists to close (R4.1), and the YAML arm closes it with
+      // `patchBriefYaml`. So this arm owes the same check. A cached name can
+      // outlive the file's parseability — the index is a positive cache and an
+      // operator's hand-edit or a truncated write does not go through it — and
+      // pre-index this branch was unreachable for such a file, because the
+      // lookup was a scan and the scan skipped what would not read. Without the
+      // check the index widens the blast radius: a `.json` brief damaged out of
+      // band is replaced whole, by a Save for a campaign that may not even be
+      // the one those bytes used to be.
+      //
+      // The arm above is unchanged, and this is not a contradiction of it: a
+      // `.json` file that PARSES declares whatever it declares, so a valid
+      // document whose `id` is not a string is still the caller's file to
+      // repair, and only the replacement is refused.
+      try {
+        JSON.parse(raw.toString("utf8"));
+      } catch {
+        throw new BriefDocumentError(filePath, "the file does not parse as JSON");
+      }
       content = serializeBrief(filePath, brief);
     } else {
       content = patchBriefYaml(filePath, raw.toString("utf8"), brief);

@@ -205,6 +205,23 @@
         "re-derives off a schema-broken"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "      try {\n        JSON.parse(raw.toString(\"utf8\"));\n      } catch {\n        throw new BriefDocumentError(filePath, \"the file does not parse as JSON\");\n      }",
+      "after": "      try {\n        JSON.parse(raw.toString(\"utf8\"));\n      } catch {\n        // the whole-file dump goes ahead regardless\n      }",
+      "because": "R4.2's carve-out keeps a .json brief in JSON and is never fail-closed for 'not a YAML Document' — which is not the same as never refusing, because this arm dumps the whole file over whatever is on disk. That is the data loss BriefDocumentError exists to close (R4.1), and the YAML arm closes it with patchBriefYaml. A cached name can outlive the file's parseability, and pre-index this branch was unreachable for a file whose bytes would not read: the lookup was a scan and the scan skipped it, so the write was ENOENT with the operator's bytes left alone. The index is what made the arm reachable, and with the refusal dropped it is a Save replacing a damaged file whole, for a campaign those bytes may not even have been. The test damages a .json brief the index has cached and expects EBRIEFDOC with the bytes byte for byte intact",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a rewrite refuses a cached JSON brief whose bytes stopped parsing"
+      ],
+      "verdict": "caught"
     }
   ]
 }
