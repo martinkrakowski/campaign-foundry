@@ -17,7 +17,7 @@
 # The lock is a directory at ${TMPDIR:-/tmp}/cf-gate.lock — mkdir is the
 # atomic test-and-set, there is nothing else in POSIX sh — holding four files:
 #   owner    the lane id that took it
-#   pid      the CALLER's pid (the shell that runs the locked steps)
+#   pid      the HOLDER's pid (the shell that runs the locked steps, or `run`)
 #   started  epoch second of acquisition
 #   beat     epoch second of the last heartbeat
 # The pid is the HOLDER's, and a holder only holds while it is alive: a lock
