@@ -296,9 +296,9 @@ export async function collect(
           entries,
           lane,
           worktrees,
+          await riskFor(deps, dirEvents, lane),
           log,
           await planReviewFor(deps, dirEvents, lane),
-          await riskFor(deps, dirEvents, lane),
         );
         rows.push({ wave, lane, reportedPr, obs });
       }
@@ -391,7 +391,7 @@ export function laneWaveIn(events: readonly WaveEvent[], lane: string): string |
  * on the wrong one would silently never find the review this lane's events
  * actually carry.
  */
-async function riskFor(
+export async function riskFor(
   deps: CollectDeps,
   dirEvents: readonly WaveEvent[],
   lane: string,
@@ -419,9 +419,14 @@ async function buildObservation(
   entries: readonly string[],
   lane: string,
   worktrees: readonly string[],
+  // Required, unlike the optional facts below: riskFor's return type is
+  // never optional (a normal-risk lane still yields `{ tier: "normal" }`),
+  // so every call to this function has a real value to carry — there is no
+  // "did the caller bother to ask" state for this field to represent, and
+  // no untestable "what if it's absent" branch to guard for.
+  risk: RiskObservation,
   log?: LaneObservation["log"],
   planReview?: PlanReviewObservation,
-  risk?: RiskObservation,
 ): Promise<Omit<LaneObservation, "pr">> {
   let alive = false;
   try {
@@ -444,7 +449,7 @@ async function buildObservation(
     ...(log !== undefined ? { log } : {}),
     ...(gateLog !== undefined ? { gateLog } : {}),
     ...(planReview !== undefined ? { planReview } : {}),
-    ...(risk !== undefined ? { risk } : {}),
+    risk,
     alive,
   };
 }

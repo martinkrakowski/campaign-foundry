@@ -875,9 +875,9 @@ describe("the entry guard", () => {
     }
   });
 
-  test("pre-pr-check through the real entry wires readdir, exists and env from the process", async () => {
-    // The only command that reaches those three deps — exercised here so the
-    // real entry's own wiring (not just runCli's logic) is covered.
+  test("pre-pr-check through the real entry wires readdir and env from the process (normal risk)", async () => {
+    // The only command that reaches readdir/env — exercised here so the real
+    // entry's own wiring (not just runCli's logic) is covered.
     vi.resetModules();
     const originalCwd = process.cwd();
     const dir = tempDir();
@@ -895,6 +895,43 @@ describe("the entry guard", () => {
     } finally {
       process.argv = saved;
       logSpy.mockRestore();
+      process.exitCode = undefined;
+      process.chdir(originalCwd);
+    }
+  });
+
+  test("pre-pr-check through the real entry wires exists via defaultLogDir (high risk, no --logdir)", async () => {
+    vi.resetModules();
+    const originalCwd = process.cwd();
+    const dir = tempDir();
+    mkdirSync(join(dir, "docs", "planning"), { recursive: true });
+    writeFileSync(
+      join(dir, "docs", "planning", "plan.md"),
+      ["| Lane | Risk | Delivers |", "|---|---|---|", "| **HX1** | **high** | Split. |"].join("\n"),
+    );
+    process.chdir(dir);
+    const saved = process.argv;
+    const savedHome = process.env.HOME;
+    const savedWaveLogRoot = process.env.WAVE_LOG_ROOT;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    process.argv = [saved[0] ?? "node", cliPath, "pre-pr-check", "HX1", "--wave", "w06"];
+    // An isolated HOME: defaultLogDir's `exists` calls must never see this
+    // host's real ~/.waves (an orchestrator may genuinely have one).
+    process.env.HOME = join(dir, "isolated-home");
+    delete process.env.WAVE_LOG_ROOT;
+    try {
+      await import("../cli.js");
+      // No --logdir: defaultLogDir resolves via `exists`, finds nothing under
+      // this isolated HOME, and the gate refuses for lack of a review.
+      await vi.waitFor(() => expect(process.exitCode).toBe(1));
+      expect(errorSpy).toHaveBeenCalled();
+    } finally {
+      process.argv = saved;
+      if (savedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHome;
+      if (savedWaveLogRoot === undefined) delete process.env.WAVE_LOG_ROOT;
+      else process.env.WAVE_LOG_ROOT = savedWaveLogRoot;
+      errorSpy.mockRestore();
       process.exitCode = undefined;
       process.chdir(originalCwd);
     }

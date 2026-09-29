@@ -8,6 +8,7 @@ import {
   derivePrefix,
   joinPrForLane,
   laneWaveIn,
+  riskFor,
   LEGACY_WAVE_LOG_ROOT,
   LOG_TAIL_BYTES,
   parseChecks,
@@ -2398,5 +2399,35 @@ describe("laneWaveIn", () => {
 
   test("an empty event list is undefined too", () => {
     expect(laneWaveIn([], "HX1")).toBeUndefined();
+  });
+});
+
+describe("riskFor", () => {
+  const RISK_PLAN = [
+    "# The plan",
+    "",
+    "| Lane | Risk | Delivers |",
+    "|---|---|---|",
+    "| **HX1** | **high** | Split the reserved list. |",
+  ].join("\n");
+
+  const deps = fakeDeps({
+    dirs: { "docs/planning": ["plan.md"] },
+    files: { "docs/planning/plan.md": RISK_PLAN },
+  });
+
+  test("a high-risk lane whose own events name no wave (laneWaveIn undefined) carries no refusal", async () => {
+    // collect()'s only real call site always passes events that DO name the
+    // lane (it draws `lane` from those same events), so this state never
+    // arises there — it is tested directly, the way riskFor's own contract
+    // (never guess a refusal without a wave to check it against) demands.
+    const dirEvents: readonly WaveEvent[] = [
+      { ts: "2026-09-28T10:00:00Z", wave: "R", lane: "HX4", stage: "dispatch", event: "started" },
+    ];
+    expect(await riskFor(deps, dirEvents, "HX1")).toEqual({ tier: "high" });
+  });
+
+  test("a normal-risk lane never even looks at the events", async () => {
+    expect(await riskFor(deps, [], "HX9-unknown")).toEqual({ tier: "normal" });
   });
 });
