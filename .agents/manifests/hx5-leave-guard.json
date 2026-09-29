@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "lane": "HX5-leave-guard",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/shell/EditorUnloadGuard.tsx",
+      "before": "  const armed = isDirty || hasPendingWrite || hasFailedWrite;",
+      "after": "  const armed = isDirty || hasPendingWrite;",
+      "because": "The term this whole lane exists for. A draft PUT that answered 500 leaves the operator's edits on the screen and nowhere else, and dropping the term is the plausible tidy-up -- hasFailedWrite is the newest of the three, it is false in every state except one, and a reviewer reading a green suite has no reason to keep it. The end-to-end test in brief-editor.drafts.test.tsx cannot catch this one: its editor is dirty throughout, so isDirty arms the guard on its own and the unload is prevented either way. The unit test can, because it arms the failed flag alone.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/EditorUnloadGuard.test.tsx",
+        "-t",
+        "a draft write that failed prevents the unload"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/EditorUnloadGuard.tsx",
+      "before": "  const armed = isDirty || hasPendingWrite || hasFailedWrite;",
+      "after": "  const armed = true;",
+      "because": "The bfcache half, and the reason the gate on registration exists at all: a beforeunload listener that is present makes the page ineligible for the back/forward cache in most browsers, so registering one unconditionally is behaviour nobody can see in a test of the warning and everybody pays for in restored tabs. Every leave-guard assertion still passes with it, which is the trap -- so the mutation is caught by the count of registrations while clean, and by the two release tests, which can only pass if a listener that was armed can be taken back.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/EditorUnloadGuard.test.tsx",
+        "-t",
+        "a clean editor registers no beforeunload listener at all"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "    enqueueDraftWrite(async () => {\n      publishFailedWrite(!(await put()));\n    });",
+      "after": "    enqueueDraftWrite(async () => {\n      await put();\n      publishFailedWrite(false);\n    });",
+      "because": "Reading the PUT's answer is the only evidence the editor has that the edits reached the server, and awaiting the write while ignoring what it answered is the shape the code had before D185 -- putServerDraft resolved, nothing was read, and a 500 looked exactly like a landing. The write still dispatches and the chain still settles, so every pending-write assertion stays green; only the failure is lost, which is what the 500 test asserts on.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.drafts.test.tsx",
+        "-t",
+        "a draft PUT answered 500 sets the failed flag, and a later PUT that lands clears it"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
