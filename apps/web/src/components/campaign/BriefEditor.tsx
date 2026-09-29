@@ -2120,6 +2120,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * (recorded under Deviations), the same shape `index.post.ts`'s own
    * sourced-create already guards against for ITS single request, which this
    * one is not.
+   *
+   * PT-5c2 (D177, D178): the mint carries `teamOf: routeId` — the OPEN
+   * campaign's own id, so the copy keeps its team (a blank create otherwise
+   * has no other way to carry it, and always minted org-wide until now).
+   * Omitted on `/brief/new` (no campaign open, `routeId === undefined`).
    */
   const handleSaveAs = async (rawName: string) => {
     if (refuseInvalid()) return;
@@ -2135,11 +2140,23 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     saveAsInFlightRef.current = true;
     setSaving(true);
     setPersistError(undefined);
+    // PT-5c2 (D177, D178): the OPEN campaign's own id, captured here — before
+    // the mint below replaces it with the COPY's minted slug — so `teamOf`
+    // names the source Save as… is actually copying from. `undefined` (no
+    // campaign open, `/brief/new`) omits `teamOf` entirely, matching a blank
+    // create with no team to inherit.
+    const sourceRouteId = routeId;
     try {
       // msczP — reuse a mint already held from a failed first-save retry of
       // this SAME attempt, rather than minting a second campaign for one
       // Save as….
-      const minted = savedAsMintRef.current ?? (await createCampaign({ name, type: state.type }));
+      const minted =
+        savedAsMintRef.current ??
+        (await createCampaign({
+          name,
+          type: state.type,
+          ...(sourceRouteId !== undefined ? { teamOf: sourceRouteId } : {}),
+        }));
       savedAsMintRef.current = minted;
       // The typed name is the COPY's name, and it goes out on the mint above
       // (`createCampaign({ name })`) — the server stores it, and opening the

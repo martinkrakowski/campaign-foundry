@@ -527,6 +527,11 @@ describe("BriefPage — data flow", () => {
 
     await waitFor(() => expect(calls.filter((c) => c.method === "POST").length).toBe(2));
     await waitFor(() => expect(screen.queryByLabelText("New campaign name")).toBeNull());
+
+    // PT-5c2: the mint carries the OPEN campaign's own id as `teamOf`, so the
+    // copy keeps its team.
+    const mint = calls.find((c) => c.method === "POST" && c.url === `${API}/campaigns`);
+    expect(mint?.body).toMatchObject({ teamOf: "camp" });
   });
 
   test("a failed Save as... keeps the dialog open and shows why", async () => {
@@ -702,7 +707,7 @@ describe("BriefPage — data flow", () => {
     // D178) — seed one with an id already, the shape a pre-lane build would have
     // left, and Save as... still mints a BRAND NEW campaign from the typed name.
     saveDraftToStorage({ ...initialEditorState(), briefId: "fresh", campaignName: "fresh" });
-    routes({});
+    const calls = routes({});
     renderWithRun(<Editor />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("fresh"),
@@ -719,6 +724,11 @@ describe("BriefPage — data flow", () => {
     await waitFor(() =>
       expect(nextMock().router.replace).toHaveBeenCalledWith(campaignRoute("elsewhere")),
     );
+
+    // PT-5c2: no campaign was open (routeId undefined) — the mint carries no
+    // `teamOf` at all.
+    const mint = calls.find((c) => c.method === "POST" && c.url === `${API}/campaigns`);
+    expect(mint?.body).not.toHaveProperty("teamOf");
   });
 
   test("Save as... keeps the copy's revision, so the next save still guards the write", async () => {

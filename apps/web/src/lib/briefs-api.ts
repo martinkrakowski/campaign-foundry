@@ -334,8 +334,8 @@ export async function updateBrief(
  * id off `brief.id` and routes through `campaignRoute`.
  *
  * The legacy `{ newId, overrides }` body (`duplicateBrief`, client-minted id)
- * retired with this lane (PT-5c2 removes it from the route next) — nothing
- * in the web may mint a campaign id any more (D177).
+ * retired with PT-5c2, which removed it from the route too — nothing in the
+ * web may mint a campaign id any more (D177).
  */
 export async function duplicateCampaign(id: string, name: string): Promise<BriefEntry> {
   return asBriefEntry(
@@ -352,6 +352,14 @@ export interface CreateCampaignBody {
   readonly type: CampaignType;
   /** A source campaign's id (uuid or slug): its latest version becomes version 1. */
   readonly source?: string;
+  /**
+   * A campaign id (uuid or slug) whose TEAM a blank create (no `source`)
+   * inherits (PT-5c2, D177/D178) — Save as… sends the OPEN campaign's id so
+   * the copy keeps its team, since a blank mint otherwise has no other way
+   * to carry it. Ignored when `source` is set (the source's own team already
+   * carries forward). Answers 404 if the ref resolves to nothing.
+   */
+  readonly teamOf?: string;
 }
 
 /** `POST /campaigns`'s 201 answer: the minted campaign's id and slug. */
