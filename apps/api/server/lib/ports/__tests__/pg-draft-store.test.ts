@@ -122,6 +122,24 @@ describe("PgDraftStore (PT-5d, D173, D177)", () => {
     await expect(acmeStore.readDraft(campaignId, "u1")).resolves.toBeUndefined();
   });
 
+  // Fix round (bots) — Qodo: a FK from `draft.user_id` to `"user"(id)` (no
+  // `on delete cascade`, unlike Better Auth's own tables) blocked deleting a
+  // user who had a saved draft. `user_id` is plain `text` now (matching
+  // `brief_version.actor`), so deleting the user succeeds and simply leaves
+  // the draft row pointing at an id nothing names any more — the same shape
+  // `brief_version.actor` already tolerates.
+  test("a user row can be deleted while they have a saved draft", async () => {
+    const campaignId = await mintCampaign(db, "local", "camp");
+    const store = new PgDraftStore(db, "local");
+    await store.writeDraft(campaignId, "u1", { name: "Mine" }, null);
+    await expect(db.query('delete from "user" where id = $1', ["u1"])).resolves.toBeDefined();
+    // The draft itself survives the user's own deletion (no cascade either
+    // way) — reading it back still works.
+    await expect(store.readDraft(campaignId, "u1")).resolves.toMatchObject({
+      state: { name: "Mine" },
+    });
+  });
+
   test("listDraftsByRecency answers an empty list for a user with no drafts", async () => {
     const store = new PgDraftStore(db, "local");
     await expect(store.listDraftsByRecency("u1")).resolves.toEqual([]);
@@ -195,28 +213,34 @@ describe("PgDraftStore (PT-5d, D173, D177)", () => {
       await expect(store.readDraft(campaignId, "u1")).resolves.toBeUndefined();
     });
 
-    test("refuses when the caller's own pre-check was already stale by the time this runs — the predicate is IN the write, not trusted from a caller-supplied currentRevision", async () => {
+    // Fix round (bots) — CodeRabbit, real: this test's OWN prior name and
+    // comment claimed to verify the `for update` lock's necessity, but its
+    // three steps run strictly sequentially (`getRevision`, then
+    // `createBrief`, which fully commits, THEN `writeDraftIfCurrent`) —
+    // nothing here is concurrent, so any implementation that simply reads
+    // `brief_version` fresh (lock or no lock) passes it. It genuinely
+    // exercises one thing: a caller's stale belief (read before a version
+    // existed) is never trusted — the write re-derives its own answer
+    // rather than accepting a caller-supplied one. That is worth having
+    // (it is a DIFFERENT starting state than the test above: "no version
+    // yet" versus "an existing version, now superseded"), but it is not,
+    // and was never really, a lock test — PGlite's single connection
+    // cannot express one (see `withBriefLock`'s own doc comment on the
+    // same limitation). The prior comment's claim that a 5th argument
+    // "would not even typecheck" was also simply wrong: TypeScript does
+    // not check call-site arity against a narrower implementation
+    // signature, only assignability to the wider interface type.
+    test("refuses when the campaign had no version at all when the caller last checked, and has one now", async () => {
       const campaignId = await mintCampaign(db, "local", "camp");
       const briefs = new PgBriefStore(db, "local", "local");
       const store = new PgDraftStore(db, "local");
 
-      // The caller's own belief: no version exists yet (what a PUT /draft
-      // route's pre-check would have read a moment before this call).
-      const staleBelief = (await briefs.getRevision("camp")) ?? null;
-      expect(staleBelief).toBeNull();
+      const noVersionYet = (await briefs.getRevision("camp")) ?? null;
+      expect(noVersionYet).toBeNull();
 
-      // A save commits a real version — the race window the old
-      // check-then-upsert PUT route left open, simulated here by landing it
-      // between the caller's belief and the store call that acts on it.
       const saved = await briefs.createBrief(sampleBrief("camp"));
 
-      // The write must see the FRESH revision, not the stale null the
-      // caller observed earlier — it never even receives that stale value
-      // (this method's own signature drops the interface's
-      // `currentRevision` parameter and re-derives it inside its own
-      // locked transaction), so passing `staleBelief` here would not even
-      // typecheck as an argument this call reads.
-      const outcome = await store.writeDraftIfCurrent(campaignId, "u1", { v: 2 }, staleBelief);
+      const outcome = await store.writeDraftIfCurrent(campaignId, "u1", { v: 2 }, noVersionYet);
       expect(outcome).toEqual({ ok: false, currentRevision: saved.revision });
       await expect(store.readDraft(campaignId, "u1")).resolves.toBeUndefined();
     });

@@ -1,4 +1,5 @@
-import { lstat, mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { errorMessage } from "@campaignfoundry/shared";
 import { SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
@@ -131,7 +132,24 @@ export class FsDraftStore implements DraftStorePort {
     await mkdir(resolveConfined(this.dir, campaignId, DRAFTS_DIR), { recursive: true });
     const updatedAt = new Date().toISOString();
     const body: DraftFile = { state, baseRevision, updatedAt };
-    await writeFile(filePath, JSON.stringify(body), "utf8");
+    // Fix round (bots) — a sibling temp file, then an atomic rename over the
+    // target, the same pattern `FsBriefStore.rewriteBrief` already uses (and
+    // for the same reason): `writeFile(filePath, …)` truncates the existing
+    // draft before the replacement is complete, so a `readDraft` racing this
+    // write (the editor's own PUT is debounced to roughly once a second, not
+    // serialized against its own GET) could see partial JSON and 500, and a
+    // process crash mid-write would leave the draft permanently corrupt. The
+    // temp name is per-process and random, same reasoning as the brief
+    // writer's own: a fixed name would let two overlapping writers race each
+    // other's rename.
+    const tmpPath = `${filePath}.${process.pid}-${randomBytes(4).toString("hex")}.tmp`;
+    try {
+      await writeFile(tmpPath, JSON.stringify(body), "utf8");
+      await rename(tmpPath, filePath);
+    } catch (error) {
+      await unlink(tmpPath).catch(() => undefined);
+      throw error;
+    }
     return { state, baseRevision, updatedAt };
   }
 

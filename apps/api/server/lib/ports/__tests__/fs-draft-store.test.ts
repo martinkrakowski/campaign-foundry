@@ -17,7 +17,9 @@ import { FsDraftStore } from "../fs-draft-store.js";
 // Hookable `lstat`, used by exactly the two rethrow tests below (a non-ENOENT
 // failure from `draftsDirUnsafe`'s own lstat, and from the file-level check in
 // `writeDraft`): every other test leaves the hook undefined, which falls
-// straight through to the real implementation.
+// straight through to the real implementation. `writeFile`/`rename` are
+// hooked too (fix round, bots) — the atomic-write tests below simulate a
+// rename failure and a concurrent reader.
 const fsHook = vi.hoisted(() => ({
   lstat: undefined as ((path: string) => Promise<unknown>) | undefined,
   realLstat: undefined as ((path: string, options?: unknown) => Promise<unknown>) | undefined,
@@ -25,6 +27,14 @@ const fsHook = vi.hoisted(() => ({
   realReaddir: undefined as ((path: string, options?: unknown) => Promise<unknown>) | undefined,
   unlink: undefined as ((path: string) => Promise<unknown>) | undefined,
   realUnlink: undefined as ((path: string) => Promise<unknown>) | undefined,
+  rename: undefined as ((from: string, to: string) => Promise<unknown>) | undefined,
+  realRename: undefined as ((from: string, to: string) => Promise<unknown>) | undefined,
+  writeFile: undefined as
+    | ((path: string, data: unknown, enc: unknown) => Promise<unknown>)
+    | undefined,
+  realWriteFile: undefined as
+    | ((path: string, data: unknown, enc: unknown) => Promise<unknown>)
+    | undefined,
 }));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -38,6 +48,12 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     options?: unknown,
   ) => Promise<unknown>;
   fsHook.realUnlink = actual.unlink as unknown as (path: string) => Promise<unknown>;
+  fsHook.realRename = actual.rename as unknown as (from: string, to: string) => Promise<unknown>;
+  fsHook.realWriteFile = actual.writeFile as unknown as (
+    path: string,
+    data: unknown,
+    enc: unknown,
+  ) => Promise<unknown>;
   return {
     ...actual,
     lstat: (path: string, options?: unknown) =>
@@ -45,6 +61,10 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     readdir: (path: string, options?: unknown) =>
       fsHook.readdir ? fsHook.readdir(path) : fsHook.realReaddir!(path, options),
     unlink: (path: string) => (fsHook.unlink ? fsHook.unlink(path) : fsHook.realUnlink!(path)),
+    rename: (from: string, to: string) =>
+      fsHook.rename ? fsHook.rename(from, to) : fsHook.realRename!(from, to),
+    writeFile: (path: string, data: unknown, enc: unknown) =>
+      fsHook.writeFile ? fsHook.writeFile(path, data, enc) : fsHook.realWriteFile!(path, data, enc),
   };
 });
 
@@ -61,6 +81,8 @@ describe("FsDraftStore (PT-5d, D173)", () => {
     fsHook.lstat = undefined;
     fsHook.readdir = undefined;
     fsHook.unlink = undefined;
+    fsHook.rename = undefined;
+    fsHook.writeFile = undefined;
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -98,6 +120,94 @@ describe("FsDraftStore (PT-5d, D173)", () => {
     await store.writeDraft("camp", "u1", { name: "First" }, "rev-1");
     const second = await store.writeDraft("camp", "u1", { name: "Second" }, "rev-1");
     await expect(store.readDraft("camp", "u1")).resolves.toEqual(second);
+  });
+
+  // Fix round (bots, CodeRabbit + Qodo — same premise, real): `writeDraft`
+  // used to `writeFile` straight over the target, truncating it before the
+  // replacement was complete. A crash or a concurrent read in that window
+  // could see a corrupt or partial file. `FsBriefStore.rewriteBrief` already
+  // solves this with a temp file plus an atomic rename; `writeDraft` now
+  // does the same.
+  describe("atomic write (fix round, bots)", () => {
+    test("a first write goes through a temp file, then a rename — never a direct writeFile to the target", async () => {
+      const seenWriteFileTargets: string[] = [];
+      const seenRenameTargets: string[] = [];
+      fsHook.writeFile = async (path, data, enc) => {
+        seenWriteFileTargets.push(path);
+        return fsHook.realWriteFile!(path, data, enc);
+      };
+      fsHook.rename = async (from, to) => {
+        seenRenameTargets.push(to);
+        return fsHook.realRename!(from, to);
+      };
+      await store.writeDraft("camp", "u1", { name: "Draft" }, "rev-1");
+      const target = join(dir, "camp", "drafts", "u1.json");
+      // The write landed on a sibling temp path, never the target directly —
+      // and the target only ever appears as the RENAME's own destination.
+      expect(seenWriteFileTargets).toHaveLength(1);
+      expect(seenWriteFileTargets[0]).not.toBe(target);
+      expect(seenWriteFileTargets[0]).toMatch(/\.tmp$/);
+      expect(seenRenameTargets).toEqual([target]);
+    });
+
+    test("a failed rename leaves the previous draft untouched and cleans up the temp file", async () => {
+      const first = await store.writeDraft("camp", "u1", { name: "Original" }, "rev-1");
+      const err = new Error("disk full");
+      let tmpPathSeen: string | undefined;
+      fsHook.rename = async (from) => {
+        tmpPathSeen = from;
+        throw err;
+      };
+      await expect(store.writeDraft("camp", "u1", { name: "New" }, "rev-2")).rejects.toThrow(
+        "disk full",
+      );
+      // The previous draft is exactly as it was — never truncated, never
+      // partially overwritten.
+      await expect(store.readDraft("camp", "u1")).resolves.toEqual(first);
+      // The temp file the failed rename left behind does not linger.
+      expect(tmpPathSeen).toBeDefined();
+      expect(existsSync(tmpPathSeen!)).toBe(false);
+    });
+
+    test("a failed write (before any rename is attempted) leaves the previous draft untouched", async () => {
+      const first = await store.writeDraft("camp", "u1", { name: "Original" }, "rev-1");
+      let renameCalled = false;
+      fsHook.writeFile = async () => {
+        throw new Error("ENOSPC");
+      };
+      fsHook.rename = async (from, to) => {
+        renameCalled = true;
+        return fsHook.realRename!(from, to);
+      };
+      await expect(store.writeDraft("camp", "u1", { name: "New" }, "rev-2")).rejects.toThrow(
+        "ENOSPC",
+      );
+      expect(renameCalled).toBe(false);
+      await expect(store.readDraft("camp", "u1")).resolves.toEqual(first);
+    });
+
+    test("a read racing a write never sees a partially written file — it sees the OLD content, or the NEW, never a truncated in-between", async () => {
+      const first = await store.writeDraft("camp", "u1", { name: "Original" }, "rev-1");
+      let releaseWrite!: () => void;
+      const held = new Promise<void>((resolve) => {
+        releaseWrite = resolve;
+      });
+      fsHook.writeFile = async (path, data, enc) => {
+        // The real write completes (to the TEMP path), but the rename that
+        // would make it visible at the target is held back — simulating the
+        // exact window a direct `writeFile` to the target itself used to
+        // expose.
+        await fsHook.realWriteFile!(path, data, enc);
+        await held;
+      };
+      const writePromise = store.writeDraft("camp", "u1", { name: "New" }, "rev-2");
+      // While the write is "in flight" (its rename not yet released), a read
+      // sees exactly the OLD draft — the target file was never touched.
+      await expect(store.readDraft("camp", "u1")).resolves.toEqual(first);
+      releaseWrite();
+      const written = await writePromise;
+      await expect(store.readDraft("camp", "u1")).resolves.toEqual(written);
+    });
   });
 
   test("two users' drafts on the same campaign are independent files", async () => {

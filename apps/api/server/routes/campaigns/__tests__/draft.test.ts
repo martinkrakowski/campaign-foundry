@@ -27,11 +27,15 @@ type Harness =
   | Awaited<ReturnType<typeof setupPgHarness>>;
 
 /**
- * `draft.user_id` is a genuine FK to `"user"(id)` (0014_draft.sql, unlike
- * `brief_version.actor`'s plain `text`), so a Postgres-backed draft write
- * needs a real row first — the same precondition `pg-draft-store.test.ts`
- * and `membership.test.ts` seed by hand. A no-op on the fs backend, which
- * has no such table.
+ * Fix round (bots) — `draft.user_id` is plain `text`, not a FK to
+ * `"user"(id)` (0014_draft.sql, matching `brief_version.actor`): a real FK
+ * broke every draft PUT under `AUTH_MODE=local` (`LOCAL_TENANT.userId`,
+ * `"local"`, names no `"user"` row) and blocked deleting a user with a
+ * saved draft. This seed is no longer load-bearing for that reason, but
+ * still seeds a real `"user"` row before a Postgres-backed draft write —
+ * the shape a real deployment (Better Auth) actually has, and what
+ * `pg-draft-store.test.ts` and `membership.test.ts` seed by hand for the
+ * same reason. A no-op on the fs backend, which has no such table.
  */
 async function seedUsers(harness: Harness, tenants: readonly TenantContext[]): Promise<void> {
   if (harness.backend !== "postgres") return;
@@ -366,6 +370,53 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
       }
     });
 
+    // Fix round (bots) — Qodo, real: the latest-draft lookup used to answer
+    // the newest row by `updated_at` alone, with no regard for whether its
+    // `baseRevision` still matched the campaign's current one. A save
+    // landing anywhere leaves the draft it superseded stuck at the top of
+    // that ordering forever (nothing else ever touches its `updated_at`),
+    // so this route kept re-offering an unrestorable draft for resume on
+    // every future call. It now skips a stale candidate — and deletes it,
+    // self-cleaning rather than leaving it to hijack every later lookup too
+    // — continuing to an older but still-restorable one underneath it.
+    test("a stale draft (its save superseded) is skipped and deleted, not offered forever; an older but still-current one underneath it is offered instead", async () => {
+      const harness = await setup();
+      try {
+        const api = mount();
+        await seedUsers(harness, [LOCAL_TENANT]);
+
+        // An OLDER draft, on a campaign that stays current — this is what
+        // should surface once the newer one goes stale.
+        const older = await mintCampaign(api, "Older Current");
+        await api.putDraft(older.slug, { state: { x: "older" }, baseRevision: null });
+
+        // A NEWER draft, then a save on that SAME campaign moves its
+        // revision out from under the draft.
+        const newer = await mintCampaign(api, "Newer Then Saved");
+        await api.putDraft(newer.slug, { state: { x: "newer" }, baseRevision: null });
+        await api.save(sampleBrief(newer.slug));
+
+        const withOlderUnderneath = (await (await api.latest()).json()) as {
+          latest: { campaignId: string } | null;
+        };
+        expect(withOlderUnderneath.latest?.campaignId).toBe(older.campaignId);
+
+        // Self-cleaned: the stale draft is gone, not just skipped — a
+        // second lookup (nothing else changed) does not need to re-derive
+        // "still stale" every time, and a direct GET for it answers null.
+        const staleDraft = (await (await api.getDraft(newer.slug)).json()) as { draft: unknown };
+        expect(staleDraft.draft).toBeNull();
+
+        // With the older one ALSO gone, none of the caller's drafts are
+        // restorable any more — never a 404, the same 200 empty body as no
+        // draft at all.
+        await api.deleteDraft(older.slug);
+        expect(await (await api.latest()).json()).toEqual({ latest: null });
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
     if (backend === "fs") {
       test("a symlinked drafts/ directory answers 400, mapping SYMLINK_WRITE_ERROR", async () => {
         const harness = await setup();
@@ -408,6 +459,30 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
     }
 
     if (backend === "postgres") {
+      // Fix round (bots) — Qodo, twice over: `AUTH_MODE=local` names
+      // `LOCAL_TENANT.userId = "local"`, and no migration ever seeds a
+      // `"user"` row with that id (there is no Better Auth session under
+      // local auth to seed one from). Deliberately no `seedUsers` call here
+      // — that IS the point: a real FK to `"user"(id)` would refuse this
+      // exact write with a 500, which `putServerDraft` swallows client-side,
+      // so autosave and resume would silently do nothing for the single
+      // most common local dev/ops combination this tool has always served.
+      test('a draft PUT for LOCAL_TENANT succeeds on Postgres with no matching "user" row (AUTH_MODE=local has none to seed)', async () => {
+        const harness = await setup();
+        try {
+          const api = mount(LOCAL_TENANT);
+          const { slug } = await mintCampaign(api, "Local Auth");
+          const res = await api.putDraft(slug, { state: { x: 1 }, baseRevision: null });
+          expect(res.status).toBe(200);
+          const body = (await api.getDraft(slug).then((r) => r.json())) as {
+            draft: { state: unknown };
+          };
+          expect(body.draft.state).toEqual({ x: 1 });
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
       test("a TEAM-HIDDEN campaign's draft answers 404, indistinguishable from unknown", async () => {
         const harness = await setup();
         const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;

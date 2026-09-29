@@ -22,15 +22,44 @@ import { requestTenant } from "../../../lib/tenant.js";
  * (no drafts at all, or every one of them now hidden) — the SAME 200 body,
  * never a 404, so a caller cannot tell a hidden draft existed from having
  * none.
+ *
+ * Fix round (bots) — `slug` rides along with `campaignId`: on Postgres
+ * `campaignId` is the draft row's own uuid, but the caller's OWN editor
+ * route can be reached either way (`/brief/<uuid>` or `/brief/<slug>`,
+ * #613), so a uuid-only comparison against `pathname` never matches a
+ * slug-reached route even when it names the SAME campaign — a real qodo
+ * finding, since `campaignMeta` already resolves the slug here for the
+ * visibility check, so answering it costs nothing extra.
+ *
+ * Fix round (bots) — Qodo, real: a visible candidate whose `baseRevision`
+ * no longer matches the campaign's current revision (another save landed,
+ * here or elsewhere, since the draft was taken) is not restorable —
+ * `BriefEditor`'s own restore effect already refuses it on that same
+ * mismatch. Answering it as "the latest draft" anyway is worse than
+ * answering nothing: it is stuck at the top of `listDraftsByRecency`
+ * forever (nothing else touches its `updated_at`), so `/brief/new` would
+ * keep redirecting to a campaign whose draft can never actually restore,
+ * and Create would keep offering a Resume that goes nowhere useful — for
+ * every visit, not just one. Skipped here AND deleted (self-cleaning: nothing
+ * else is guaranteed to visit that campaign's own route again to trigger the
+ * restore effect's own cleanup), continuing to the next candidate.
  */
 export default defineEventHandler(async (event) => {
   const scope = requestTenant(event);
-  const drafts = await getDraftStore(scope).listDraftsByRecency(scope.userId);
+  const draftStore = getDraftStore(scope);
+  const drafts = await draftStore.listDraftsByRecency(scope.userId);
   const briefs = getBriefStore(scope);
   for (const draft of drafts) {
-    if (await briefs.campaignMeta(draft.campaignId)) {
-      return { latest: draft };
+    const meta = await briefs.campaignMeta(draft.campaignId);
+    if (!meta) continue;
+    const stored = await draftStore.readDraft(draft.campaignId, scope.userId);
+    if (!stored) continue;
+    const currentRevision = (await briefs.getRevision(meta.slug)) ?? null;
+    if (stored.baseRevision !== currentRevision) {
+      await draftStore.deleteDraft(draft.campaignId, scope.userId);
+      continue;
     }
+    return { latest: { campaignId: draft.campaignId, slug: meta.slug } };
   }
   return { latest: null };
 });
