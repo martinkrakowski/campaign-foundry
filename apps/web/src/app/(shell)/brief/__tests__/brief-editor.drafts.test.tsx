@@ -61,10 +61,24 @@ function draftRoutes(opts: {
   put?: (url: string, body?: Record<string, unknown>) => Response;
   /** Force the next DELETE for this campaign id to answer 500. */
   failDeleteFor?: string;
+  /**
+   * Fix round item 3 (grok-4.7) — hold the next draft GET for this campaign
+   * id open until `releaseGet()` is called, instead of answering it inline:
+   * exercising "a keystroke lands while the restore fetch is still in
+   * flight" needs a real gap between the request going out and its answer
+   * landing, which a same-tick `Promise.resolve` never leaves.
+   */
+  deferGetFor?: string;
 }) {
   const store = new Map<string, { state: unknown; baseRevision: string | null }>();
   const calls: { url: string; method: string; body?: Record<string, unknown> }[] = [];
   let failDeleteFor = opts.failDeleteFor;
+  let releaseGet: ((response: Response) => void) | undefined;
+  const heldGet = opts.deferGetFor
+    ? new Promise<Response>((resolve) => {
+        releaseGet = resolve;
+      })
+    : undefined;
   vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
     const u = String(url);
     const method = (init?.method ?? "GET").toUpperCase();
@@ -86,6 +100,7 @@ function draftRoutes(opts: {
     if (draftMatch) {
       const id = draftMatch[1]!;
       if (method === "GET") {
+        if (opts.deferGetFor === id && heldGet) return heldGet;
         const rec = store.get(id);
         return Promise.resolve(json({ draft: rec ? { ...rec, updatedAt: "t" } : null }));
       }
@@ -127,6 +142,12 @@ function draftRoutes(opts: {
       store.set(id, { state, baseRevision }),
     has: (id: string) => store.has(id),
     stored: (id: string) => store.get(id),
+    /** Answer the held draft GET now, with whatever `seed` last put there. */
+    releaseGet: () => {
+      const id = opts.deferGetFor!;
+      const rec = store.get(id);
+      releaseGet?.(json({ draft: rec ? { ...rec, updatedAt: "t" } : null }));
+    },
   };
 }
 
@@ -242,6 +263,42 @@ describe("draft restore (PT-5d item 4)", () => {
     expect(draftGets()).toBe(1);
   });
 
+  test("a keystroke landing while the draft GET is still in flight survives the restore, not the other way round (fix round item 3, grok-4.7)", async () => {
+    const user = userEvent.setup();
+    const held = draftRoutes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      deferGetFor: "camp",
+    });
+    const draftState = fromBrief(brief("camp"), { file: "camp.yaml", revision: "r1" });
+    held.seed("camp", { ...draftState, campaignMessage: "Old unsaved work" }, "r1");
+    renderWithRun(<Editor id="camp" />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+    // The restore fetch is out and held — nothing has been dispatched yet.
+    expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi");
+
+    // A keystroke lands while that GET is still pending.
+    await user.clear(screen.getByLabelText("Headline"));
+    await user.type(screen.getByLabelText("Headline"), "Fresh typing");
+    await waitFor(() =>
+      expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Fresh typing"),
+    );
+
+    // Now the draft answer lands — restoring it would clobber what was just
+    // typed. It must not: the live state moved since this effect started.
+    act(() => {
+      held.releaseGet();
+    });
+    // Give the restore effect's microtask a turn to (not) dispatch.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Fresh typing");
+    expect(screen.queryByDisplayValue("Old unsaved work")).toBeNull();
+  });
+
   test("a seeded, versionless campaign's autosave PUT carries a null base_revision", async () => {
     const user = userEvent.setup();
     const calls = draftRoutes({
@@ -310,21 +367,77 @@ describe("a reload after a Save whose DELETE failed (PT-5d item 4)", () => {
     expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp");
   });
 
-  test("a reload finding a stale draft (whatever left it — a failed DELETE included) shows the published brief, not the draft", async () => {
-    // Stands in for "the DELETE failed, so the draft is still there": from the
-    // restore effect's own point of view, a draft that outlived its DELETE
-    // attempt is indistinguishable from one that outlived any other reason —
-    // its `baseRevision` ("r1") is what decides, compared against the
-    // campaign's now-current one ("r2", a Save that landed since).
-    const reloaded = draftRoutes({ list: () => json({ briefs: [entry("camp", "r2")] }) });
+  test("a reload after a Save whose DELETE failed shows the published brief, not the leftover draft (fix round item 5, grok-4.7)", async () => {
+    // The real sequence, not a stand-in for it: a draft exists (as autosave
+    // would have left one, seeded directly here); Save lands and bumps the
+    // campaign to "r2"; its own post-Save DELETE is forced to fail, so the
+    // draft — still carrying the PRE-save "r1" — survives in the store. A
+    // reload (a fresh mount at the same route) must not resurrect it: "r1"
+    // no longer matches the campaign's now-current revision, so the restore
+    // effect skips it and the freshly reloaded, published brief shows.
+    let revision = "r1";
+    const routed = draftRoutes({
+      list: () => json({ briefs: [entry("camp", revision)] }),
+      put: (_url, body) => {
+        revision = "r2";
+        return json({ file: "camp.yaml", brief: { ...brief("camp"), ...body }, revision }, 200);
+      },
+      failDeleteFor: "camp",
+    });
     const draftState = fromBrief(brief("camp"), { file: "camp.yaml", revision: "r1" });
-    reloaded.seed("camp", { ...draftState, campaignMessage: "Stale pre-save draft" }, "r1");
+    routed.seed("camp", { ...draftState, campaignMessage: "Stale pre-save draft" }, "r1");
+
+    const first = renderWithRun(<Editor id="camp" />);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+    await waitFor(() =>
+      expect(
+        routed.calls.some(
+          (c) => c.method === "PUT" && c.url.startsWith(`${API}/campaigns/briefs/camp`),
+        ),
+      ).toBe(true),
+    );
+    // The DELETE was attempted (and made to fail) — the draft is still there.
+    await waitFor(() =>
+      expect(
+        routed.calls.some((c) => c.method === "DELETE" && c.url === `${API}/campaigns/camp/draft`),
+      ).toBe(true),
+    );
+    expect(routed.has("camp")).toBe(true);
+    expect(routed.stored("camp")?.baseRevision).toBe("r1");
+
+    // The reload: a fresh mount at the same route, listing now answering the
+    // Save's own "r2".
+    const draftGetsBeforeReload = routed.calls.filter(
+      (c) => c.method === "GET" && c.url === `${API}/campaigns/camp/draft`,
+    ).length;
+    first.unmount();
     renderWithRun(<Editor id="camp" />);
     await waitFor(() =>
       expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
     );
-    // "r1" no longer matches the campaign's current revision ("r2"): the stale
-    // draft is skipped, and the published brief (Headline "Hi") shows instead.
+    // Wait for the RELOAD's own restore fetch to land — not just render — so
+    // a bug that would restore the leftover draft has actually had its
+    // chance to dispatch before the assertions below run; asserting right
+    // after the listing settles would let a would-be restore's own pending
+    // microtask slip past unnoticed, passing by accident rather than by
+    // proof (exactly the "never reloads" gap the fix round called out).
+    await waitFor(() =>
+      expect(
+        routed.calls.filter((c) => c.method === "GET" && c.url === `${API}/campaigns/camp/draft`)
+          .length,
+      ).toBeGreaterThan(draftGetsBeforeReload),
+    );
+    // One more turn for that GET's own `.then` (the restore effect's
+    // compare-and-maybe-dispatch) to actually run.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
     expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("Hi");
     expect(screen.queryByDisplayValue("Stale pre-save draft")).toBeNull();
   });

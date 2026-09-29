@@ -770,21 +770,36 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * React's own `Object.is` comparison on those two already answers "is this
    * still the route already settled", so a second, hand-rolled guard here
    * would only ever duplicate it.
+   *
+   * Fix round item 3 (grok-4.7): `state` above is a snapshot from the render
+   * that started this effect — a keystroke, or a completed Save, landing
+   * while `GET /campaigns/:id/draft` is still in flight produces a NEW state
+   * object (the reducer is pure), but `dispatch` always overwrites whatever
+   * is live when it actually runs, not that snapshot. Deciding whether to
+   * restore against the stale snapshot could clobber content typed (or
+   * saved) after this fetch began. `stateRef` is the live value, mirrored
+   * every render (msczF, `BriefEditor.tsx:507-508`) — the same "read the ref,
+   * not the closure, once an await has passed" shape the load effect's own
+   * refusal already takes a few effects up (`~928-937`); here it is a
+   * reference check, since restore only ever needs to know whether ANYTHING
+   * changed since, not what.
    */
   useEffect(() => {
     if (routeId === undefined || !routeAlreadyResolved) return;
     const currentRevision = state.source.kind === "file" ? (state.source.revision ?? null) : null;
+    const capturedState = state;
     let cancelled = false;
     void (async () => {
       const draft = await fetchServerDraft(routeId);
       if (cancelled || draft === null) return;
       if (draft.baseRevision !== currentRevision) return;
+      if (stateRef.current !== capturedState) return;
       // The same `valuesEqual` the dirty checks use, not a second stringified
       // comparison: a key-order-sensitive stringify here would restore a draft
       // whose keys merely arrived in a different order. The helper is
       // shape-agnostic — editor states are JSON-able, so the same
       // canonicalisation applies.
-      if (!valuesEqual(draft.state, state)) {
+      if (!valuesEqual(draft.state, capturedState)) {
         dispatch({ type: "restore", state: draft.state });
       }
     })();
