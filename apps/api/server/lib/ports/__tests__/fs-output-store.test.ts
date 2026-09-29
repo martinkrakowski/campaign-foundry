@@ -139,11 +139,11 @@ describe("FsOutputStore", () => {
     if (pkgLookup.found) await pkgLookup.file.close();
   });
 
-  // HX1/D181: `packages` is reserved as a campaign id AND a route segment —
-  // but it is not a HIDDEN_AREAS store area — but that split does not widen
-  // HIDDEN_AREAS to hide every OTHER route segment too. A route-only segment
-  // (`templates`, never a store area) must stay servable, exactly as an
-  // ordinary campaign-output path would be.
+  // HX1/D181: `packages` is reserved as a campaign id AND a route segment,
+  // yet it is not a HIDDEN_AREAS store area. That split must not widen
+  // HIDDEN_AREAS to hide every OTHER route segment too — a route-only
+  // segment (`templates`, never a store area) must stay servable, exactly
+  // as an ordinary campaign-output path would be.
   test("a reserved ROUTE segment that is not a store area is still served output", async () => {
     mkdirSync(join(root, "templates"), { recursive: true });
     writeFileSync(join(root, "templates", "camp.json"), "{}");
