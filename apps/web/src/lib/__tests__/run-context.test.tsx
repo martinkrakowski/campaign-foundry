@@ -5201,6 +5201,42 @@ describe("RunProvider — the page's ?campaign= (PT-5c3, D180)", () => {
     unmount();
   });
 
+  // Fix round (qodo #5). A bare page whose pointer is null opened the picker
+  // and left the shell exactly as it was, so the picker appeared OVER the
+  // previous campaign's creatives — under a url that names no campaign at all.
+  // The pointer is advisory and its write is fire-and-forget, so "the shell
+  // holds a campaign but the server has no pointer for it" is reachable (a
+  // write that did not land, or a campaign deleted/hidden elsewhere), not
+  // hypothetical.
+  test("a bare page with no pointer releases the campaign the shell was showing (qodo #5)", async () => {
+    mockPipelineApi(); // no `opened`: the server answers "no pointer"
+    localStorage.setItem("cf:brief-picked", "1");
+    window.history.replaceState(null, "", "/grid");
+    // The page hook mounts only once the shell is holding a campaign, so this
+    // is the navigation under test rather than a first visit.
+    let showPage = false;
+    const Page = () => {
+      usePageCampaignParam();
+      return null;
+    };
+    const pageWrapper = ({ children }: { children: ReactNode }) =>
+      createElement(RunProvider, null, showPage ? createElement(Page) : null, children);
+    const { result, rerender } = renderHook(() => useRun(), { wrapper: pageWrapper });
+    await act(async () => {
+      result.current.setBrief({ ...DEFAULT_BRIEF, id: "previous-campaign" });
+    });
+    expect(result.current.brief.id).toBe("previous-campaign");
+    expect(result.current.briefApplied).toBe(true);
+    showPage = true;
+    rerender();
+    await waitFor(() => expect(result.current.briefPickerOpen).toBe(true));
+    // The picker is open AND the shell let go: the bare url names no campaign,
+    // so the one it was showing is not this page's (D180).
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
+    expect(result.current.briefApplied).toBe(false);
+    expect(result.current.assets).toEqual([]);
+  });
+
   test("the page hook hands the URL's ?campaign= through, and a bare page hands null", async () => {
     const urls: string[] = [];
     mockPipelineApi({

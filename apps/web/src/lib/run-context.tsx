@@ -674,6 +674,8 @@ interface RunContextValue {
    */
   briefPickerOpen: boolean;
   openBriefPicker: () => void;
+  /** "This page's campaign is none" — see `releaseCampaign` in the provider. */
+  releaseCampaign: () => void;
   closeBriefPicker: () => void;
   /**
    * The telemetry drawer (W5.3). It is opened from the header, which is on every
@@ -1131,6 +1133,22 @@ export function RunProvider({ children }: { children: ReactNode }) {
     [adoptJob, clearRunState, enqueuePointer, run],
   );
 
+  /**
+   * "This page's campaign is none": drop the run, its decisions, its brief and
+   * everything result-scoped, back to the default brief. One implementation,
+   * shared by the two ways a page can arrive at that answer — a `?campaign=`
+   * that resolves to nothing (`openPageCampaign`) and a BARE page whose
+   * last-opened pointer is null (`useLastOpenedRedirect`, PT-5e) — so they can
+   * never leave the shell in different states.
+   */
+  const releaseCampaign = useCallback(() => {
+    clearRunState();
+    briefIdRef.current = DEFAULT_BRIEF.id;
+    setBriefState(DEFAULT_BRIEF);
+    setError(null);
+    setMembershipError(null);
+  }, [clearRunState]);
+
   // The latest `setBrief`, readable from `openPageCampaign`'s stable closure (the
   // same mirror pattern `loadingRef`/`decisionsRef` use): the page campaign's
   // resolution is async, and committing through a stale `setBrief` closure would
@@ -1193,11 +1211,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
             // Header keeps building tab links from the abandoned campaign's slug
             // and (PR #621) Grid's Generate/Render preview stay enabled on a
             // campaign this page no longer shows.
-            clearRunState();
-            briefIdRef.current = DEFAULT_BRIEF.id;
-            setBriefState(DEFAULT_BRIEF);
-            setError(null);
-            setMembershipError(null);
+            releaseCampaign();
             return;
           }
           // The campaign's brief: the listing's own copy (PT-5a). Never the
@@ -1260,7 +1274,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
              later successful open (a tab with the param, a re-mount) heals it. */
         });
     },
-    [clearRunState, pageCampaignSuperseded],
+    [pageCampaignSuperseded, releaseCampaign],
   );
 
   // Derived, not stored: "applied" is a statement about the brief the shell holds, and
@@ -1846,6 +1860,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       packageSelected,
       loadPackages,
       openPageCampaign,
+      releaseCampaign,
     }),
     [
       brief,
@@ -1885,6 +1900,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       packageSelected,
       loadPackages,
       openPageCampaign,
+      releaseCampaign,
     ],
   );
 
@@ -1951,7 +1967,7 @@ function campaignPageRoute(pathname: string, campaignId: string): string {
  */
 export function useLastOpenedRedirect(to: (campaignId: string) => string): void {
   const router = useRouter();
-  const { openBriefPicker } = useRun();
+  const { openBriefPicker, releaseCampaign } = useRun();
   // `to` is built by the caller, usually inline, so it is a fresh function every
   // render. Held in a ref rather than an effect dependency: depending on it
   // would re-run the lookup on every render, and a redirect that re-runs itself
@@ -1969,6 +1985,17 @@ export function useLastOpenedRedirect(to: (campaignId: string) => string): void 
           return;
         }
         openBriefPicker();
+        // Release whatever campaign the shell was showing (fix round, qodo #5).
+        // The bare url names no campaign and the server has no pointer to
+        // restore, so the campaign on screen is not this page's — leaving it
+        // committed put the picker on top of the previous campaign's creatives
+        // under a url that addresses none of them, and kept `briefApplied`
+        // true, so Header still built its tab links from the abandoned slug
+        // and Grid's Generate stayed enabled on it. `releaseCampaign` is the
+        // shell's own "this page's campaign is none" path, shared with a
+        // `?campaign=` that resolves to nothing so the two cannot clear
+        // differently.
+        releaseCampaign();
         // Only navigate if it goes anywhere: the grid IS the fallback, so a bare
         // `/grid` stays where it is. A self-replace would re-run this effect,
         // which would fetch the pointer again and replace again, forever.
@@ -1982,5 +2009,5 @@ export function useLastOpenedRedirect(to: (campaignId: string) => string): void 
     return () => {
       cancelled = true;
     };
-  }, [openBriefPicker, router]);
+  }, [openBriefPicker, releaseCampaign, router]);
 }

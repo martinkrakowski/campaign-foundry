@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   renderWithRun,
@@ -413,13 +413,29 @@ describe("the bare shell urls follow the last-opened pointer (PT-5e)", () => {
     window.history.replaceState(null, "", `/grid?campaign=${UUID}`);
     mockPipelineApi({ opened: { id: "other", brief: { id: "other", products: [] } } });
     renderWithRun(<GridPage />);
+    // Wait on the page's OWN open, not on a pointer read: a url that already
+    // names a campaign is not the pointer's to decide, so neither the redirect
+    // hook nor the shell's mount restore asks for one (fix round, qodo
+    // PRRT_kwDOSzP1zc6nELaK). Waiting on the pointer here would have waited
+    // for a request the fixed code must never make.
     await waitFor(() =>
       expect(
         vi
           .mocked(globalThis.fetch)
-          .mock.calls.some(([url]) => String(url).includes("/campaigns/last-opened")),
+          .mock.calls.some(([url]) => String(url).includes(`/campaigns/${UUID}`)),
       ).toBe(true),
     );
+    // A macrotask, not a microtask: the redirect is issued from a promise
+    // continuation, so the assertion has to land after one for the guard to be
+    // exercised at all (coderabbit PRRT_kwDOSzP1zc6nENjV).
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.some(([url]) => String(url).includes("/campaigns/last-opened")),
+    ).toBe(false);
     expect(nextMock().router.replace).not.toHaveBeenCalled();
   });
 
