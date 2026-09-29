@@ -100,6 +100,12 @@ export class FsBriefStore implements BriefStorePort {
    * through it — a fresh scan excludes that name, and the index must not be a
    * way around the listing's regular-file check.
    *
+   * Residual, and named: a stat sees the NAME, not what the file declares. A
+   * file whose `brief.id` was changed in place out of band is still answered
+   * by `findBriefFileById` (a parse per hit is the cost this lane exists to
+   * remove). `findBriefById` pays that parse already, so it verifies the id it
+   * parsed and repairs the mapping when they disagree.
+   *
    * It holds FILE NAMES and nothing else. A `StoredBrief`'s revision must
    * always be hashed from the bytes on disk (`getRevision`, and
    * `rewriteBrief`'s `expectedRevision` check), so caching a revision would
@@ -185,10 +191,28 @@ export class FsBriefStore implements BriefStorePort {
     this.idIndex = next;
   }
 
+  /**
+   * The brief behind `id`, and the one lookup in this file that gets to check
+   * what the bytes SAY rather than what their name is.
+   *
+   * The stat in `findBriefFileById` cannot see an id rewritten in place: a file
+   * another writer changed from `id: x` to `id: y` still exists, is still a
+   * regular file, and keeps answering the cached name — so a request for the
+   * OLD id would hand `assertOwnedCampaign` a different campaign under the id
+   * the caller asked for. Here the parse has already happened (this method has
+   * always read and parsed the file), so the declared id is free to compare, and
+   * a disagreement re-derives the mapping from the directory exactly as a miss
+   * does: the wrong name goes, and the answer is the file that declares `id`
+   * — the replacement if one exists, `undefined` if the id simply moved.
+   */
   async findBriefById(id: string): Promise<StoredBrief | undefined> {
     const file = await this.findBriefFileById(id);
     if (file === undefined) return undefined;
-    return this.storedBrief(file);
+    const entry = await this.storedBrief(file);
+    if (entry === undefined || entry.campaignId === id) return entry;
+    await this.rebuildIdIndex();
+    const replacement = this.idIndex.get(id);
+    return replacement === undefined ? undefined : this.storedBrief(replacement);
   }
 
   /**

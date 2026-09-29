@@ -1114,6 +1114,39 @@ describe("FsBriefStore", () => {
       }
     });
 
+    // The residual a `stat` cannot see, and the one lookup that can: a file
+    // whose `brief.id` was rewritten in place keeps its name and its inode, so
+    // the hit above still validates — and a request for the OLD id would
+    // otherwise be handed a different campaign's brief, with
+    // `assertOwnedCampaign` accepting it under the id the caller asked for.
+    test("a file whose id was rewritten in place is not served under the old id", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      writeFileSync(join(dir, "moved.yaml"), campYaml.replace("id: camp", "id: stolen"));
+
+      // The mapping is re-derived rather than trusted, so the id it no longer
+      // declares is gone and the one it does declare is findable — the same
+      // answer a store built a second later gives.
+      expect(await store.findBriefById("moved")).toBeUndefined();
+      expect(await store.findBriefById("stolen")).toMatchObject({ file: "moved.yaml" });
+      expect(await new FsBriefStore(dir).findBriefById("moved")).toBeUndefined();
+    });
+
+    test("an id whose file was renamed onto another campaign resolves to the file that declares it", async () => {
+      await store.createBrief({ ...minimalBrief, id: "moved" });
+      // A HIT, so the index holds `moved` when the file changes under it.
+      expect(await store.findBriefFileById("moved")).toBe("moved.yaml");
+
+      // The corrupt-root case: one name that no longer declares the id, and a
+      // second file that does. The re-derivation must land on the second file,
+      // not on the first name the stale mapping happened to hold.
+      writeFileSync(join(dir, "moved.yaml"), campYaml.replace("id: camp", "id: stolen"));
+      writeFileSync(join(dir, "z-moved.yaml"), campYaml.replace("id: camp", "id: moved"));
+
+      expect(await store.findBriefById("moved")).toMatchObject({ file: "z-moved.yaml" });
+    });
+
     // A root this store cannot stat is a storage failure, not an absent
     // campaign: answering EIO as "no such campaign" would turn an outage into
     // a 404 on every route that resolves a campaign first.

@@ -86,6 +86,40 @@
         "rethrows a non-ENOENT lstat failure from the hit's own stat"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    if (entry === undefined || entry.campaignId === id) return entry;\n    await this.rebuildIdIndex();\n    const replacement = this.idIndex.get(id);\n    return replacement === undefined ? undefined : this.storedBrief(replacement);",
+      "after": "    return entry;",
+      "because": "a stat sees the NAME, not what the file declares: a brief whose id was rewritten in place keeps its name and its inode, so the hit still validates, and findBriefById would hand assertOwnedCampaign a different campaign's brief under the id the caller asked for. The parse that method already pays for is what makes the comparison free, so a disagreement re-derives the mapping from the directory. Two tests cover both outcomes: the id is simply gone, and the id resolves to the OTHER file that declares it. (Dropping only the COMPARISON is not a mutation this tool can see — the repair left behind then runs on every lookup and answers the same, which is why the claim is the whole block)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a file whose id was rewritten in place is not served under the old id"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "    await this.rebuildIdIndex();\n    const replacement = this.idIndex.get(id);\n    return replacement === undefined ? undefined : this.storedBrief(replacement);",
+      "after": "    return undefined;",
+      "because": "the second half of that repair: a mismatch must be re-derived, not merely refused, or an id that DID move to another file would answer 'no such campaign' for a campaign that is right there. The test that pins it puts a second file declaring the id beside the one that stopped declaring it",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "an id whose file was renamed onto another campaign resolves to the file that declares it"
+      ],
+      "verdict": "caught"
     }
   ]
 }
