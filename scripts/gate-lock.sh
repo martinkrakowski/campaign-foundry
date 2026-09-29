@@ -133,13 +133,48 @@ try_create() {
   return 1
 }
 
-# Move a judged-stale lock aside and delete it. `mv` is the arbitration: two
-# concurrent reclaimers cannot both win the rename, and an acquirer that
-# recreated the name in between makes our mv fail — the loop re-inspects.
+# Move a judged-stale lock aside and delete it — but only the lock that was
+# judged. `mv` is the arbitration: two concurrent reclaimers cannot both win
+# the rename, and an acquirer that recreated the name in between makes our mv
+# fail — the loop re-inspects. The verification closes the subtler race: a
+# fresh lock that replaced the stale one between the inspection (above) and
+# this rename. After the move, the moved directory's owner, pid and beat must
+# still be the ones that were judged stale; anything else is a lock that was
+# never judged — a fresh holder's — and it is NEVER deleted: it is renamed
+# back when the name is still free, and left aside when it is not (its
+# holder's heartbeat then fails, and whoever now holds the name is
+# re-inspected by the loop).
 take_stale() {
-  if mv "$LOCK" "$LOCK.reclaim.$$" 2>/dev/null; then
-    rm -rf "$LOCK.reclaim.$$"
+  judged_owner="${1:-}"
+  judged_pid="${2:-}"
+  judged_beat="${3:-}"
+  # The pass suffix keeps a copy left aside by an earlier pass from blocking
+  # this pass's rename (a directory rename onto a non-empty name fails).
+  aside="$LOCK.reclaim.$$.${4:-x}"
+  if ! mv "$LOCK" "$aside" 2>/dev/null; then
+    return 1
   fi
+  moved_owner=$(cat "$aside/owner" 2>/dev/null)
+  moved_pid=$(cat "$aside/pid" 2>/dev/null)
+  moved_beat=$(cat "$aside/beat" 2>/dev/null)
+  if [ "$moved_owner" = "$judged_owner" ] &&
+    [ "$moved_pid" = "$judged_pid" ] &&
+    [ "$moved_beat" = "$judged_beat" ]; then
+    rm -rf "$aside"
+    return 0
+  fi
+  # Test hook (CF_GATE_TEST_PAUSE_BEFORE_RESTORE): between the move-aside and
+  # the restore attempt, for the test that takes the name in that window.
+  if [ -n "${CF_GATE_TEST_PAUSE_BEFORE_RESTORE:-}" ]; then
+    touch "$CF_GATE_TEST_PAUSE_BEFORE_RESTORE" 2>/dev/null
+    while [ -f "$CF_GATE_TEST_PAUSE_BEFORE_RESTORE" ]; do sleep 1; done
+  fi
+  if [ ! -d "$LOCK" ] && mv "$aside" "$LOCK" 2>/dev/null; then
+    printf '%s\n' "gate-lock: reclaim aborted — the renamed lock is not the one that was judged stale; restored it at $LOCK" >&2
+    return 1
+  fi
+  printf '%s\n' "gate-lock: reclaim aborted — the renamed lock is not the one that was judged stale; the name is taken, the moved copy is left at $aside and never deleted" >&2
+  return 1
 }
 
 busy_exit() {
@@ -184,7 +219,14 @@ acquire() {
     else
       printf '%s\n' "gate-lock: reclaiming — owner ${owner:-unknown} (pid ${pid:-none}) is not alive"
     fi
-    take_stale
+    # Test hook (CF_GATE_TEST_PAUSE_AFTER_INSPECT): a pause between judging
+    # the lock stale and moving it, so a test can replace the lock in that
+    # window and prove the reclaimer never deletes a lock it did not judge.
+    if [ -n "${CF_GATE_TEST_PAUSE_AFTER_INSPECT:-}" ]; then
+      touch "$CF_GATE_TEST_PAUSE_AFTER_INSPECT" 2>/dev/null
+      while [ -f "$CF_GATE_TEST_PAUSE_AFTER_INSPECT" ]; do sleep 1; done
+    fi
+    take_stale "$owner" "${pid:-}" "${beat:-}" "$pass"
   done
 }
 

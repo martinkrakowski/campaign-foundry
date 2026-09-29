@@ -201,6 +201,70 @@ describe("gate-lock.sh", () => {
     expect(tightened.stdout).toContain("reclaiming");
   });
 
+  test("a reclaimer that renamed its replacement restores it, never deletes it", async () => {
+    // The reclaim race: the reclaimer judges a stale lock, pauses (test hook),
+    // and in that window the stale holder is replaced by a fresh acquirer.
+    // The rename then moves the REPLACEMENT, which was never judged — it must
+    // be restored (the name is free) and never deleted.
+    const dir = scratch();
+    const marker = join(dir, "paused-after-inspect");
+    seedLock(dir, {
+      owner: "lane-old",
+      pid: reapedPid(),
+      beat: Math.floor(Date.now() / 1000) - 700,
+    });
+    const pending = runLockAsyncIn(dir, ["acquire", "lane-new"], {
+      CF_GATE_CALLER_PID: "424242",
+      CF_GATE_TEST_PAUSE_AFTER_INSPECT: marker,
+    });
+    await waitForFile(marker);
+    const replacement = seedLock(dir, { owner: "lane-replacement", pid: process.pid });
+    rmSync(marker);
+    const result = await pending;
+    expect(result.status).toBe(75);
+    expect(result.stderr).toContain("busy");
+    expect(result.stderr).toContain("reclaim aborted");
+    // The replacement is back at the name, byte for byte as its holder wrote it.
+    expect(lockFile(dir, "owner").trim()).toBe("lane-replacement");
+    expect(lockFile(dir, "pid").trim()).toBe(String(process.pid));
+    expect(existsSync(replacement)).toBe(true);
+    expect(readdirSync(dir).some((e) => e.startsWith("cf-gate.lock.reclaim."))).toBe(false);
+  }, 15_000);
+
+  test("a reclaimer whose replacement was moved while the name is taken leaves it aside, never deletes it", async () => {
+    const dir = scratch();
+    const markerInspect = join(dir, "paused-after-inspect");
+    const markerRestore = join(dir, "paused-before-restore");
+    seedLock(dir, {
+      owner: "lane-old",
+      pid: reapedPid(),
+      beat: Math.floor(Date.now() / 1000) - 700,
+    });
+    const pending = runLockAsyncIn(dir, ["acquire", "lane-new"], {
+      CF_GATE_CALLER_PID: "424242",
+      CF_GATE_TEST_PAUSE_AFTER_INSPECT: markerInspect,
+      CF_GATE_TEST_PAUSE_BEFORE_RESTORE: markerRestore,
+    });
+    await waitForFile(markerInspect);
+    seedLock(dir, { owner: "lane-replacement", pid: process.pid });
+    rmSync(markerInspect);
+    // The reclaimer has now moved the replacement aside and is paused again,
+    // before restoring it; the name is free. A third acquirer takes it.
+    await waitForFile(markerRestore);
+    seedLock(dir, { owner: "lane-late", pid: process.pid });
+    rmSync(markerRestore);
+    const result = await pending;
+    expect(result.status).toBe(75);
+    expect(result.stderr).toContain("never deleted");
+    // The name holds the third acquirer's lock, intact…
+    expect(lockFile(dir, "owner").trim()).toBe("lane-late");
+    // …and the moved replacement is still aside, untouched by the reclaimer.
+    expect(readdirSync(dir).filter((e) => e.startsWith("cf-gate.lock.reclaim."))).toHaveLength(1);
+    const aside = readdirSync(dir).find((entry) => entry.startsWith("cf-gate.lock.reclaim."));
+    if (!aside) throw new Error("the moved replacement was deleted rather than left aside");
+    expect(readFileSync(join(dir, aside, "owner"), "utf8").trim()).toBe("lane-replacement");
+  }, 15_000);
+
   test("a non-numeric stale threshold is refused", () => {
     const dir = scratch();
     const result = runLockIn(dir, ["acquire", "lane-b"], { CF_GATE_STALE_SECONDS: "soon" });
