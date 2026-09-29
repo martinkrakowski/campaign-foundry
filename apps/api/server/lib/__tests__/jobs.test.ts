@@ -1,6 +1,7 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
+import * as jobsModule from "../jobs.js";
 import {
   JOB_TTL_MS,
   HEARTBEAT_INTERVAL_MS,
@@ -22,6 +23,16 @@ import {
 import { JobLeaseLostError } from "../ports/pg-job-store.js";
 
 import { LOCAL_TENANT } from "../tenant.js";
+/**
+ * The subprocess test's own spawn budget, deliberately SHORTER than the 20s
+ * vitest timeout on that test (M6). A spawn killed at 15s still leaves 5s for
+ * the assertion carrying `result.error` and stderr to be reported; a spawn with
+ * no budget of its own loses that race under host load and reports only
+ * "Test timed out in 20000ms". Never raise it past the test's timeout - that
+ * reintroduces the race it exists to win.
+ */
+const SPAWN_TIMEOUT_MS = 15_000;
+
 const payload = (over: Partial<JobResult> = {}): JobResult => ({
   halted: false,
   assets: [],
@@ -376,11 +387,60 @@ describe("jobs port facade", () => {
     expect(deleteSpy.mock.calls.length).toBe(callsBefore);
   });
 
-  test("handle minted survives across separate processes", async () => {
+  test("the minted handle is read back by a NEW MODULE INSTANCE, not from memory (M6)", async () => {
+    // What "survives" actually means here is a claim about the job JSON file
+    // (`createJob` -> `FsJobStore.createJob` -> `writeJobEntry`,
+    // `fs-job-store.ts:110-123`), not about process memory: nothing about a
+    // handle is kept in the module. So the cheap, deterministic form of the
+    // claim is a SECOND module instance in this process, whose fresh
+    // `FsJobStore` has an empty `memoryCache` and can only answer by reading
+    // the file (`fs-job-store.ts:298-379`).
+    //
+    // `vi.resetModules()` is what makes the second instance real. The identity
+    // assertion is the part that keeps this honest: without the reset, the
+    // dynamic import hands back the SAME namespace object - the same
+    // `FsJobStore` instance, cache and all - and the test would be asserting
+    // the process's own memory against itself while claiming to be about disk.
+    const id = await createJob(LOCAL_TENANT, "survives");
+    vi.resetModules();
+    const fresh = await import("../jobs.js");
+    expect(fresh).not.toBe(jobsModule);
+    expect(fresh.getJob).not.toBe(jobsModule.getJob);
+    // Read through the fresh instance only. `getJob` on the static binding
+    // would be answered from the cache the writer just filled.
+    expect(await fresh.getJob(LOCAL_TENANT, id)).toEqual({
+      status: "running",
+      done: 0,
+      total: 0,
+      log: null,
+    });
+  });
+
+  test("the handle minted here survives a genuinely separate process", async () => {
+    // ONE real process boundary, kept because the in-process test above cannot
+    // cover it: this one is a different OS process, with its own module
+    // registry and its own store cache, so a handle resolved only in memory
+    // could not possibly appear.
+    //
+    // Spawned as `process.execPath` with `--import tsx` rather than
+    // `yarn tsx` (M6): yarn adds its own cold start on top of tsx's, measured
+    // here at ~0.62s against ~0.40s for the same script, and the gap widens
+    // under exactly the host load that made this test flake in w05.
+    //
+    // The spawn `timeout` is the fix's other half, and it is BELOW the test's
+    // own 20s on purpose. Without it the two deadlines race: under load
+    // vitest's fires first and the failure is "Test timed out in 20000ms" with
+    // no `result.error` and no stderr - a timeout that says nothing about why.
+    // With it, a slow spawn comes back as ETIMEDOUT/SIGTERM on a real
+    // assertion failure that carries the child's stderr, which is the
+    // diagnostic worth having. The 20s third argument stays: it is the outer
+    // backstop, and raising it would only widen the window in which a hung run
+    // is uninformative.
     const id = await createJob(LOCAL_TENANT, "survives");
     const result = spawnSync(
-      "yarn",
+      process.execPath,
       [
+        "--import",
         "tsx",
         "--input-type=module",
         "-e",
@@ -395,9 +455,13 @@ console.log(JSON.stringify(job));`,
         cwd: process.cwd(),
         env: { ...process.env, OUTPUT_DIR: process.env.OUTPUT_DIR },
         encoding: "utf8",
+        timeout: SPAWN_TIMEOUT_MS,
       },
     );
-    expect(result.status).toBe(0);
+    expect(
+      result.status,
+      `node exited ${String(result.status)} (error: ${String(result.error)}, signal: ${String(result.signal)})\nstderr: ${result.stderr}`,
+    ).toBe(0);
     const parsed = JSON.parse(result.stdout.trim());
     expect(parsed).toEqual({ status: "running", done: 0, total: 0, log: null });
   }, 20_000);
