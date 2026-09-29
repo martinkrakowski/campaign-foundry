@@ -880,9 +880,9 @@ describe("FsBriefStore", () => {
     const bareDir = join(dir, "templates");
     mkdirSync(bareDir, { recursive: true });
     writeFileSync(join(bareDir, "pools.json"), "{}");
-    await expect(
-      store.createBrief({ ...minimalBrief, id: "templates" }),
-    ).rejects.toThrow(`"templates" is reserved; choose another campaign id.`);
+    await expect(store.createBrief({ ...minimalBrief, id: "templates" })).rejects.toThrow(
+      `"templates" is reserved; choose another campaign id.`,
+    );
   });
 
   test.each(["cache", "jobs", "orgs", "packages"] as const)(

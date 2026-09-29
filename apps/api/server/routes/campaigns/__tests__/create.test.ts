@@ -1466,9 +1466,7 @@ describe("POST /campaigns/briefs onto a grandfathered reserved slug (D181 fix ro
             expect(await res.json()).toEqual({
               error: `"templates" is reserved; choose another campaign id.`,
             });
-            expect(
-              existsSync(join(fsHarness.projectRoot, "briefs", "templates.yaml")),
-            ).toBe(false);
+            expect(existsSync(join(fsHarness.projectRoot, "briefs", "templates.yaml"))).toBe(false);
           } finally {
             await harness.cleanup();
           }
