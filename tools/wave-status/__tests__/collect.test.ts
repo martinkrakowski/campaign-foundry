@@ -2361,6 +2361,19 @@ describe("collect — D184's pre-PR-review gate (risk)", () => {
     expect(row?.derived.risk).toBeUndefined();
   });
 
+  test("the SAME lane under two waves in one directory is checked against the LATEST wave, not the first (Qodo thread 4)", async () => {
+    // A reused log directory can hold the same lane twice. Review A cleared
+    // it under wave "A"; the lane was later re-dispatched under wave "B" and
+    // never reviewed there. The open PR must still flag — picking the FIRST
+    // wave ("A", cleared) would wrongly pass it.
+    const events =
+      dispatchLine("A", "HX1") +
+      reviewLine("A", "HX1", "clear") +
+      dispatchLine("B", "HX1", "2026-09-28T11:00:00Z");
+    const status = await laneAt(events, ghOpenPr("hx1"));
+    expect(laneRow(status, "HX1")?.derived.risk).toBe("high-risk PR open without pre-PR review");
+  });
+
   test("planningDir is injectable, like planVerifyArtifactPath", async () => {
     const events = dispatchLine("R", "HX1");
     const deps: CollectDeps = {
@@ -2431,6 +2444,12 @@ describe("laneWaveIn", () => {
 
   test("an empty event list is undefined too", () => {
     expect(laneWaveIn([], "HX1")).toBeUndefined();
+  });
+
+  test("the LATEST wave wins when the same lane appears under two different waves (Qodo thread 4)", () => {
+    // A reused log directory or a custom --logdir can genuinely hold the
+    // same lane under two wave ids. The first one is history.
+    expect(laneWaveIn([event("HX1", "A"), event("HX1", "B")], "HX1")).toBe("B");
   });
 });
 

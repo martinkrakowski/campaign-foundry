@@ -376,10 +376,19 @@ async function planReviewFor(
   }
 }
 
-/** The `wave` field carried by any of this lane's own events in `dirEvents`, or undefined. */
+/**
+ * The `wave` field carried by this lane's LATEST own event in `dirEvents`,
+ * in log order, or undefined. LATEST — never the first — for the same
+ * reason `planReviewFacts` reads a dispatch event's wave off the newest
+ * `dispatch started` line: every other "governing" lookup in this module
+ * walks from the end. A directory can genuinely hold the same lane under
+ * two different wave ids (a reused log directory, or a custom `--logdir`);
+ * the first-seen wave was found to pick the wrong one and pass a lane whose
+ * newer wave's review never settled (Qodo thread 4, #630).
+ */
 export function laneWaveIn(events: readonly WaveEvent[], lane: string): string | undefined {
-  for (const event of events) {
-    if (event.lane === lane) return event.wave;
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].lane === lane) return events[i].wave;
   }
   return undefined;
 }
