@@ -298,6 +298,22 @@ acquire() {
 forward_signal() {
   if [ -n "$cmd_pid" ]; then
     kill -TERM "$cmd_pid" 2>/dev/null
+    # And WAIT for it, here, before the lock goes with it. A signalled command
+    # is not a dead one: a TERM'd vitest is still tearing down, and the lock
+    # exists to stop the next lane's command from running beside it. Killing
+    # and exiting in the same breath handed the name on while the command was
+    # still writing to the tree.
+    #
+    # The wait is a real wait, with no timeout, and that is deliberate: a
+    # command that will not stop keeps the lock, which is what a lock is for.
+    # The cost is that nothing here can break the wait from outside except a
+    # signal to the command itself — bash (a macOS /bin/sh) does not re-enter
+    # this trap while it is running, so a second INT/TERM is dropped rather
+    # than re-killing, and dash re-enters and re-sends TERM to a command that
+    # is ignoring it. `kill -9` on the command, or on this pid, ends it either
+    # way; the former unwinds cleanly, the latter leaves a lock the next
+    # acquire reclaims as a dead pid.
+    wait "$cmd_pid" 2>/dev/null
   fi
   exit "$2"
 }
@@ -337,7 +353,9 @@ run_cleanup() {
 # gate needs to be correct about concurrency, in one call: the lock is taken
 # before the command starts, a heartbeat keeps it fresh while the command runs,
 # the command's own exit code is this one's, and INT is forwarded as TERM so
-# both signals stop the command.
+# both signals stop the command. The lock outlives the command in every exit —
+# including a signalled one, where the command is reaped before the name is
+# handed on.
 #
 # There is no capture: the command inherits this script's stdout and stderr
 # unchanged, because a gate that buffered a failing test run would report it

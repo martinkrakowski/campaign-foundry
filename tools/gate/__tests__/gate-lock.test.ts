@@ -675,6 +675,53 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     }
   }, 30_000);
 
+  test("a signalled run holds the lock until the command has actually stopped", async () => {
+    for (const shell of SIGNAL_SHELLS) {
+      const dir = scratch();
+      // A command that is NOT dead the moment it is signalled: it catches TERM
+      // and takes two seconds to tear down, marking the fact. A `run` that
+      // killed and exited in the same breath would have handed the lock to the
+      // next lane while this was still running — and the commands `run` wraps
+      // (a test run, a mutate replay, verify-manifests) all write to the tree.
+      const stopped = join(dir, "stopped");
+      const { child, done } = startLockIn(
+        dir,
+        [
+          "run",
+          "lane-a",
+          "--",
+          "sh",
+          "-c",
+          // `exec >/dev/null 2>&1` first: the command must not hold this test's
+          // pipe open, or the result below would arrive when the COMMAND
+          // finished rather than when `run` did, and the ordering under test
+          // would be observed from the wrong end. `wait` (not a foreground
+          // sleep) so the trap runs the moment the signal arrives, and the
+          // orphan it leaves behind — the sleep, which has outlived its own
+          // shell — is the reason the redirect is here as well.
+          `exec >/dev/null 2>&1; trap 'sleep 2; echo stopped > "${stopped}"; exit 0' TERM; printf '%s\\n' "$$" > "${join(dir, "command.pid")}"; sleep 30 >/dev/null 2>&1 & wait`,
+        ],
+        { CF_GATE_HEARTBEAT_SECONDS: "1" },
+        shell,
+      );
+      await waitForFile(join(dir, "command.pid"));
+      const commandPid = Number(readFileSync(join(dir, "command.pid"), "utf8").trim());
+      expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
+      process.kill(child.pid as number, "SIGTERM");
+
+      const result = await done;
+      expect({ shell, status: result.status }).toEqual({ shell, status: 143 });
+      // The ordering, which is the whole claim: the command had finished
+      // tearing down by the time the lock went away.
+      expect({ shell, stoppedBeforeTheLockWent: existsSync(stopped) }).toEqual({
+        shell,
+        stoppedBeforeTheLockWent: true,
+      });
+      expect(existsSync(lockDir(dir))).toBe(false);
+      expect(isAlive(commandPid)).toBe(false);
+    }
+  }, 40_000);
+
   test("exits with the command's own status, and still releases the lock", () => {
     const dir = scratch();
     // A builtin: under `&` it runs in the job's subshell, so `exit 3` is the
