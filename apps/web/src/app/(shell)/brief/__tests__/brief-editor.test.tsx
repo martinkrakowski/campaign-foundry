@@ -1260,7 +1260,28 @@ describe("BriefPage — data flow", () => {
     // one the user opened last). The pointer lives on the server now, so
     // "untouched" is exactly "this client never wrote one": not even a restore
     // of `camp` behind the release, which is the other half of the property.
+    //
+    // Let the mount effect's restore have every chance to run first (fix round,
+    // coderabbit PRRT_kwDOSzP1zc6nENjb). The wait above is on a field that is
+    // blank from the first render, so it can finish long before the read and
+    // the restore it would trigger — a write landing after this assertion went
+    // unnoticed. Every link of that chain (read, meta, listing, commit, pointer
+    // write) resolves through a promise, so a macrotask boundary drains it all.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+    });
     expect(pointerWrites(calls)).toEqual([]);
+    // The mechanism behind that, asserted directly: the blank route's release
+    // is a CHILD effect of the provider, so it has already decided the campaign
+    // by the time the provider's own mount effect runs, and the restore returns
+    // before it reads the pointer at all. Without this the test could not fail —
+    // the no-write assertion is also what a restore of `camp` would be stopped
+    // by further guards downstream, so it holds even when the read is not
+    // prevented here. Removing the early return makes this line go red.
+    expect(calls.some((c) => c.method === "GET" && c.url === `${API}/campaigns/last-opened`)).toBe(
+      false,
+    );
     // camp's own server draft is untouched too: a routeless mount (PT-5d) never
     // fetches, writes or deletes any campaign's draft — all three effects gate on
     // a defined routeId, and this one has none.
