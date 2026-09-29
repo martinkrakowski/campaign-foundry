@@ -1175,8 +1175,8 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * the grok round's revision compare-and-swap, which a same-revision
    * Revert has no stale baseline to lean on).
    */
-  const draftWriteChainRef = useRef<Promise<void>>(Promise.resolve());
-  const enqueueDraftWrite = (write: () => Promise<void>): void => {
+  const draftWriteChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const enqueueDraftWrite = (write: () => Promise<unknown>): void => {
     draftWriteChainRef.current = draftWriteChainRef.current.then(write, write);
   };
   /**
