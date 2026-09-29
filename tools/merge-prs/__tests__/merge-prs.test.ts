@@ -1,6 +1,14 @@
 import { describe, expect, test } from "vitest";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -91,7 +99,7 @@ describe.skipIf(!hasZsh())("merge-prs.sh — D184's pre-PR-review gate", () => {
   test("a refused lane dies before the script prints anything about the PR at all", () => {
     const harness = makeHarness();
     try {
-      const result = runMergePrs(harness, ['42|wt|feat/x|HX1-route-segments-reserved|w06'], {
+      const result = runMergePrs(harness, ["42|wt|feat/x|HX1-route-segments-reserved|w06"], {
         STUB_PREPR_EXIT: "1",
       });
       expect(result.status).not.toBe(0);
@@ -134,7 +142,7 @@ describe.skipIf(!hasZsh())("merge-prs.sh — D184's pre-PR-review gate", () => {
   test("a passing gate lets the script proceed to the PR's own work", () => {
     const harness = makeHarness();
     try {
-      const result = runMergePrs(harness, ['42|wt|feat/x|HX4-pre-pr-review-gate|w06'], {
+      const result = runMergePrs(harness, ["42|wt|feat/x|HX4-pre-pr-review-gate|w06"], {
         STUB_PREPR_EXIT: "0",
       });
       expect(result.stdout).toContain("=== PR #42");
@@ -148,7 +156,7 @@ describe.skipIf(!hasZsh())("merge-prs.sh — D184's pre-PR-review gate", () => {
   test("--logdir is forwarded to pre-pr-check only when the script itself was given one", () => {
     const harness = makeHarness();
     try {
-      runMergePrs(harness, ["--logdir", "/tmp/some-wave-log", '42|wt|feat/x|HX1|w06'], {
+      runMergePrs(harness, ["--logdir", "/tmp/some-wave-log", "42|wt|feat/x|HX1|w06"], {
         STUB_PREPR_EXIT: "0",
       });
       expect(marker(harness)).toContain("--logdir /tmp/some-wave-log");
@@ -160,7 +168,7 @@ describe.skipIf(!hasZsh())("merge-prs.sh — D184's pre-PR-review gate", () => {
   test("without --logdir, pre-pr-check is left to resolve its own default", () => {
     const harness = makeHarness();
     try {
-      runMergePrs(harness, ['42|wt|feat/x|HX1|w06'], { STUB_PREPR_EXIT: "0" });
+      runMergePrs(harness, ["42|wt|feat/x|HX1|w06"], { STUB_PREPR_EXIT: "0" });
       const line = marker(harness);
       expect(line).toContain("pre-pr-check HX1 --wave w06");
       expect(line).not.toContain("--logdir");

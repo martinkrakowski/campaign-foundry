@@ -19,9 +19,9 @@ describe("defaultLogDir", () => {
   });
 
   test("WAVE_LOG_ROOT overrides HOME entirely", () => {
-    expect(
-      defaultLogDir("w06", { HOME: "/Users/op", WAVE_LOG_ROOT: "/srv/waves" }, NONE),
-    ).toBe("/srv/waves/wave-w06");
+    expect(defaultLogDir("w06", { HOME: "/Users/op", WAVE_LOG_ROOT: "/srv/waves" }, NONE)).toBe(
+      "/srv/waves/wave-w06",
+    );
   });
 
   test("a wave id already starting with 'wave' defaults to root/<wave>, not root/wave-<wave>", () => {

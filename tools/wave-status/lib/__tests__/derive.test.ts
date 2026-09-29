@@ -437,7 +437,9 @@ describe("the risk flag (D184's pre-PR-review gate)", () => {
   });
 
   test("a high-risk row with a refusal, but a CLOSED PR, does not flag — the flag is only for an open PR", () => {
-    expect(riskFlag({ tier: "high", refusal: "no stage=review event=settled" }, mergedPr)).toBeUndefined();
+    expect(
+      riskFlag({ tier: "high", refusal: "no stage=review event=settled" }, mergedPr),
+    ).toBeUndefined();
   });
 
   test("a high-risk row with a refusal and no PR at all does not flag", () => {

@@ -2241,7 +2241,13 @@ describe("collect — D184's pre-PR-review gate (risk)", () => {
     async (args) => {
       if ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr") {
         return JSON.stringify([
-          { number, state: "OPEN", headRefName: `feat/${branchTail}`, headRefOid: "oid1", repo: "m/r" },
+          {
+            number,
+            state: "OPEN",
+            headRefName: `feat/${branchTail}`,
+            headRefOid: "oid1",
+            repo: "m/r",
+          },
         ]);
       }
       if (args[0] === "api" && args[1] === "graphql") {
@@ -2255,14 +2261,22 @@ describe("collect — D184's pre-PR-review gate (risk)", () => {
       throw new Error(`unexpected gh call: ${args.join(" ")}`);
     };
 
-  const ghMergedPr = (branchTail: string): NonNullable<FakeTree["gh"]> => async (args) => {
-    if ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr") {
-      return JSON.stringify([
-        { number: 1, state: "MERGED", headRefName: `feat/${branchTail}`, headRefOid: "oid1", repo: "m/r" },
-      ]);
-    }
-    return "[]";
-  };
+  const ghMergedPr =
+    (branchTail: string): NonNullable<FakeTree["gh"]> =>
+    async (args) => {
+      if ((args[0] === "api" && args[1].includes("pulls")) || args[0] === "pr") {
+        return JSON.stringify([
+          {
+            number: 1,
+            state: "MERGED",
+            headRefName: `feat/${branchTail}`,
+            headRefOid: "oid1",
+            repo: "m/r",
+          },
+        ]);
+      }
+      return "[]";
+    };
 
   const tree = (events: string, gh: NonNullable<FakeTree["gh"]>): FakeTree => ({
     dirs: {
@@ -2304,7 +2318,9 @@ describe("collect — D184's pre-PR-review gate (risk)", () => {
 
   test("changes-required with a LATER remediate settled does not flag", async () => {
     const events =
-      dispatchLine("R", "HX1") + reviewLine("R", "HX1", "changes-required") + remediateLine("R", "HX1");
+      dispatchLine("R", "HX1") +
+      reviewLine("R", "HX1", "changes-required") +
+      remediateLine("R", "HX1");
     const status = await laneAt(events, ghOpenPr("hx1"));
     expect(laneRow(status, "HX1")?.derived.risk).toBeUndefined();
   });
@@ -2328,7 +2344,11 @@ describe("collect — D184's pre-PR-review gate (risk)", () => {
     const events = dispatchLine("wave5", "HX1") + reviewLine("wave5", "HX1", "clear");
     const status = await collect(
       fakeDeps({
-        dirs: { [ROOT]: ["wave5"], [`${ROOT}/wave5`]: ["events.jsonl"], "docs/planning": ["plan.md"] },
+        dirs: {
+          [ROOT]: ["wave5"],
+          [`${ROOT}/wave5`]: ["events.jsonl"],
+          "docs/planning": ["plan.md"],
+        },
         files: { [`${ROOT}/wave5/events.jsonl`]: events, "docs/planning/plan.md": RISK_PLAN },
         gh: ghOpenPr("hx1"),
       }),
