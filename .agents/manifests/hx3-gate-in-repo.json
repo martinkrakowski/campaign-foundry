@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "HX3-gate-in-repo",
+  "mutations": [
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "    if [ -n \"$pid\" ] && pid_alive \"$pid\" && ! beat_is_stale \"$beat\"; then",
+      "after": "    if [ -n \"$pid\" ] && pid_alive \"$pid\"; then",
+      "because": "removing the stale-beat clause from acquire's busy decision lets an alive-pid orphan hold the lock forever, which is the M3 failure D183 exists to close; the stale-beat test must catch it",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "a lock whose beat is older than 10 minutes is reclaimed"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

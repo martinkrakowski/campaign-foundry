@@ -282,8 +282,10 @@ on 2026-09-17. Stagger the launches by hand, per the trap below.
 **A brief's gate must be diffed against CI before it is written down** (2026-09-08, found in
 hexagen-monaco and confirmed here). That orchestrator wrote the stated gate into two briefs, ran
 exactly it, passed — and CI went red on `typecheck:test`, a step the gate never named. The same
-hole exists here in smaller form: `ci.yml` runs `check:env` and a **Nitro route-scan guard** that
-the six-command gate does not. **Whatever CI runs and your gate does not, name in the brief as what
+hole existed here in smaller form: `ci.yml` ran `check:env` and a **Nitro route-scan guard** that
+the six-command gate did not. (Superseded 2026-09-29, D183: the repo's gate is now `yarn gate`,
+which runs both. The rule stands — diff whatever gate a brief states against `ci.yml` before
+writing it down.) **Whatever CI runs and your gate does not, name in the brief as what
 a green does not cover** — otherwise "green and 100 %" is a promise the gate cannot keep.
 
 **A repository's own documentation can be stale evidence, and two reviewers will believe it
