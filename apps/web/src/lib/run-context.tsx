@@ -32,7 +32,6 @@ import {
   NoMembershipError,
   isNoMembershipError,
 } from "./auth-errors";
-import { blankBrief } from "@/components/campaign/editor-state";
 
 export { NO_ORGANISATION_YET_MESSAGE, NoMembershipError, isNoMembershipError };
 
@@ -1192,10 +1191,22 @@ export function RunProvider({ children }: { children: ReactNode }) {
           }
           if (pageCampaignSuperseded(owned)) return;
           // No stored brief anywhere: a versionless campaign (PT-5b2) — the same
-          // placeholder the editor's route seeds, named by the slug, so the page's
-          // run (keyed by the slug) still loads. Its Generate is the API's own
-          // invalid-brief refusal, exactly as an unsaved draft's is.
-          const brief = target ?? { ...blankBrief(), id: meta.slug };
+          // blank the editor's route seeds (`blankBrief()`, named by the slug),
+          // so the page's run (keyed by the slug) still loads. Its Generate is
+          // the API's own invalid-brief refusal, exactly as an unsaved draft's
+          // is. Inlined rather than imported because run-context sits in every
+          // web test's setup graph (vitest.setup → helpers → RunProvider), and
+          // an editor-state edge here would pre-instantiate modules other
+          // tests' `vi.mock` factories must intercept (HL5c's assembler memo).
+          const brief = target ?? {
+            schemaVersion: BRIEF_SCHEMA_VERSION,
+            template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+            id: meta.slug,
+            targetRegion: "",
+            targetAudience: "",
+            campaignMessage: "",
+            products: [],
+          };
           setBriefRef.current(brief, { fetchId: meta.campaignId, slug: meta.slug });
         })
         .catch((err) => {
