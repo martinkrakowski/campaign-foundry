@@ -6639,3 +6639,49 @@ and source formatting, recorded here rather than fixed.
   - A shell-wide `beforeunload` guard.
   - Items 4 and 5: a pre-PR review gate with a `risk:` field, and a PID and heartbeat on the gate lock.
   - PT-4, PT-8 and PT-9, which wait on the B2 credentials.
+
+## 2026-09-29 — wave wave-hardening-w06 (HX0–HX7, HX3b) and the hexagen orchestration plan
+
+- **Goal:** close the machinery gaps w05 exposed (D181–D185, owner-stamped), and plan how to make the orchestrator portable.
+- **Merged:** #624 (HX2), #625 (HX3), #626 (HX6), #627 (HX0), #628 (HX5), #630 (HX4), #632 (HX1), #629 (HX7), #631 (HX3b). The SHAs and follow-ups are in the plan's shipped note.
+- **What changed in the machinery:**
+  - main CI never cancels (a per-SHA group);
+  - `yarn gate` and `gate-lock.sh run` with a PID heartbeat, INT forwarded as TERM, and an atomic beat;
+  - a fail-closed pre-PR review gate for high-risk lanes in `merge-prs.sh`, with zsh now installed in CI so its tests run;
+  - reserved route segments;
+  - a `beforeunload` guard;
+  - the fs id index;
+  - the flaky subprocess test replaced.
+- **Owner decisions:**
+  - D181–D185 stamped;
+  - **space-bunny is the primary implementer** (GLM is the fallback);
+  - **"Run everything by Fable"**;
+  - campaign-foundry is the owner's own project (the `Client-work` path is historical);
+  - the orchestrator ports to hexagen as a template plus a published package plus a consumer overlay.
+- **Reviews:**
+  - Fable reviewed every plan row, pre-PR diff and fix round.
+  - It found real bugs in nearly every round, often after grok, the bots and the implementer had called the code done. Among them:
+    - an existence leak (HX1);
+    - a reserved-id mint through a side door;
+    - a fail-open governance gate (four ways);
+    - a cross-campaign overwrite through the new cache (three narrowing cases);
+    - dash/bash signal semantics that only measurement found;
+    - a release race (up to 21/200).
+  - The plan-review gate (#618) ran three grok rounds, then Fable rounds on added rows.
+- **Seats:**
+  - **space-bunny:** shipped HX6, HX5, HX7 and HX3b, plus six fix rounds, through the shared opencode server. It improved round over round, reproducing bugs before fixing them and admitting when it had opened a path itself.
+  - **GLM:** did HX3 and its fix round. It appended to `session-log.md` because Template A asked it to; that was reverted, and the template was fixed in HX0.
+  - **Sonnet:** did HX1 and HX4.
+  - **agy:** its quota is shared with the owner's other projects, and it failed at its first turn.
+- **Process findings, and the rule each leaves:**
+  - **Parallel opencode runs worked even as standalone runs.** The old one-at-a-time rule was a stale artefact of an older opencode version. The shared `opencode serve` is still the recommended setup. Parallel lanes cut wave wall-clock time by about 35–50%, and saved about nothing per lane.
+  - **Host load of 27–46** from four concurrent projects turned many local gates red on files outside the diffs. The loaded-host rule (push, mark the local gate FAILED, CI decides) carried HX1, HX3b and HX7.
+  - **A bare `gate-lock.sh acquire` recorded a PID that exited at once,** so its lock could be reclaimed immediately. HX7's lane saw HX5 reclaim it, and #631 now refuses a bare acquire.
+  - **A partial plan-review event un-reviews every other row** (the latest event governs). Re-emit a cumulative event; a follow-up will make it per-row.
+  - **A merge-prs refresh commit can surface a flake on its push run** while the PR run on the same commit passes. Re-run once, and log the per-file timing check.
+- **hexagen-monaco:**
+  - The orchestration plan landed as hexagen PR #686, with lanes OW1–OW9 and Fable's final verdict "commit".
+  - The owner reviews and merges it.
+  - A separate Opus 5.5 orchestrator drives it, with hexagen waves logging to `~/.waves-hexagen` and its wave-status on port 4318.
+  - Wave 1 was blocked on #631, which is now merged. Pass the `run_cleanup` second-signal fix to its OW3 port.
+- **Follow-ups:** listed in the hardening plan's shipped note.

@@ -1,7 +1,7 @@
 # Wave Hardening & the w05 Follow-ups — Architecture & Development Plan
 
 **Date:** 2026-09-29
-**Status:** **r3 — grok-4.7 plan review (2026-09-29, 1 blocker, 9 fixes, 5 notes) folded into D181, D183 and every HX row. D181 – D185 STAMPED (owner, 2026-09-29: "stamp D181–D185 and start the hardening wave").** Wave `wave-hardening-w06` started 2026-09-29.
+**Status:** **r4 — WAVE w06 SHIPPED (HX0–HX7, HX3b; #624–#632). r3 — grok-4.7 plan review (2026-09-29, 1 blocker, 9 fixes, 5 notes) folded into D181, D183 and every HX row. D181 – D185 STAMPED (owner, 2026-09-29: "stamp D181–D185 and start the hardening wave").** Wave `wave-hardening-w06` started 2026-09-29.
 **Decision ids introduced:** D181 – D185
 **Lane ids introduced:** HX0 – HX7. `git grep -P '\bHX[0-9]'` over `docs/planning/` was empty before this plan; the known positive `\bPT-5c2\b` matched with the same command.
 **Relates to:**
@@ -73,7 +73,29 @@ Lanes dispatched after HX3 merges run `yarn gate`, whose lock covers only `test:
 | **HX7-fs-id-index** | normal | **L1, measure first.** A benchmark over 1,000 campaigns decides whether this lane runs:<br>- if `findBriefFileById` costs more than 5 ms per call, add an in-memory id → slug index invalidated from `createBrief`, `createCampaign`, `rewriteBrief`, `replaceBrief` and `releaseCampaign`. The port has no slug rename; the fs `rename` is the temp-file replace inside a rewrite;<br>- otherwise close L1 with the numbers. | `fs-brief-store.ts`, its tests | change the port |
 | **HX3b-lock-a-command** | normal | **M3, found in w06.** A direct `sh scripts/gate-lock.sh acquire <lane>` records the pid of the short-lived `sh` itself (`gate-lock.sh:71`, `recorded_pid="${CF_GATE_CALLER_PID:-$$}"`). That process exits immediately, so the lock is reclaimable the moment it is taken. HX7's lane saw HX5 reclaim its lock mid-run. The w06 brief template (Template A, `delegated-implementation-pipeline.md:303-305`) told lanes to use exactly that call.<br>*(grok-4.7 and Fable row reviews folded, 2026-09-29.)* Enumerated:<br>(1) `gate-lock.sh run <lane> -- <command…>`, in POSIX sh:<br>- it records its OWN `$$`, ignoring any inherited `CF_GATE_CALLER_PID`, and passes that pid into heartbeat, release and verify;<br>- it starts the command as a background job (`"$@" &`), `wait`s on it, and forwards `INT`/`TERM` to the command's pid. A trap on a FOREGROUND child is deferred until that child exits (Fable measured this with dash); `wait` returns immediately;<br>- the command inherits `run`'s stdout and stderr unchanged (no capture, no pipe). It is invoked as `"$@"`, never `eval`, so arguments pass through quoted and a nested `--` is just an argument. A builtin like `exit 3` runs in the job subshell. Under `&` its stdin is `/dev/null`, and none of the three wrapped commands read stdin. A missing `--` or an empty command is usage, exit 2;<br>- it prints `gate-lock: heartbeat pid <n>` on stdout. The heartbeat has its own `CF_GATE_HEARTBEAT_SECONDS`, validated as in `gate.sh:137-143`, and its stdio is detached (`>/dev/null 2>&1`, as in `gate.sh:249-254,270`);<br>- `INT` and `TERM` exit 130 and 143 so the EXIT trap runs, releases only a lock that still names this pid, and reaps the heartbeat;<br>- it exits with the command's status, EXCEPT that a refused or failed release after a successful command is non-zero, and leaves any replacement lock in place;<br>- on 75 (busy) the command is never started.<br>(2) A bare `acquire` without `CF_GATE_CALLER_PID` is refused with exit 2 and a message naming `run`, including while a lock is held. The `CF_GATE_STALE_SECONDS` validation stays AHEAD of that refusal. `yarn gate` keeps passing `CF_GATE_CALLER_PID`. The header comment (`gate-lock.sh:19-27`, which documents the removed fallback) and the usage line (`:74`) are updated. A command that itself exits 75 is told apart from busy by the busy line on stderr (`:185`).<br>(3) Template A replaces its bare-acquire sentence with `sh scripts/gate-lock.sh run <LANE> -- <cmd>` for `yarn test:cov`, `yarn mutate …` and `sh scripts/verify-manifests.sh`, and says that `yarn gate` and a nested `run` take the same host lock, so they must never be wrapped.<br>**Tests** (they spawn `sh`):<br>- a contending acquire with a live `CF_GATE_CALLER_PID` during `run` → 75, and the lock pid is still `run`'s;<br>- a bare acquire → 2, also while held;<br>- the old fallback test (`gate-lock.test.ts:149`) is replaced, and the live-holder, stale-beat, empty-lock and `CF_GATE_STALE_SECONDS`-override tests (`:196`, `:200`) are kept, each with a caller pid on every acquire;<br>- `CF_GATE_HEARTBEAT_SECONDS=1 run L -- sh -c 'sleep 2; test "$(cat "$TMPDIR/cf-gate.lock/beat")" -gt "$(cat "$TMPDIR/cf-gate.lock/started")"'` → exit 0;<br>- with a `sleep 30` command, `kill -TERM` on `run` → exit 143 within 15 s; the lock is gone, and the heartbeat (from its printed pid) and the `sleep` are both dead;<br>- `run L -- exit 3` → 3, and the lock is released;<br>- a command that replaces the lock → `run` exits non-zero and the replacement is still present;<br>- `run A -- sh scripts/gate-lock.sh run B -- touch "$marker"` → 75, the marker is absent and the lock is gone (bounded at 15 s). | `scripts/gate-lock.sh` (keep `:214` byte-identical, or re-anchor `.agents/manifests/hx3-gate-in-repo.json:7`), `tools/gate/__tests__/gate-lock.test.ts`, `.agents/manifests/hx3b-lock-a-command.json`, Template A in `docs/workflows/delegated-implementation-pipeline.md` | change `yarn gate`'s step list |
 
-**Shipped:** HX2 [#624](https://github.com/martinkrakowski/campaign-foundry/pull/624) (`a78edd46`). This docs commit is the D182 check: it lands while `a78edd46`'s run is in progress, and both runs must complete.
+**Wave w06 shipped 2026-09-29, every lane (each reviewed by Fable before merge):**
+- HX2 [#624](https://github.com/martinkrakowski/campaign-foundry/pull/624) (`a78edd46`). D182 verified: a docs push behind a running main run left both runs to complete.
+- HX3 [#625](https://github.com/martinkrakowski/campaign-foundry/pull/625) (`395a7656`)
+- HX6 [#626](https://github.com/martinkrakowski/campaign-foundry/pull/626) (`b15e4095`)
+- HX0 [#627](https://github.com/martinkrakowski/campaign-foundry/pull/627) (`f9b5d414`)
+- HX5 [#628](https://github.com/martinkrakowski/campaign-foundry/pull/628) (`bd149dbb`)
+- HX4 [#630](https://github.com/martinkrakowski/campaign-foundry/pull/630) (`a8594075`)
+- HX1 [#632](https://github.com/martinkrakowski/campaign-foundry/pull/632) (`205b8142`). The first PR through the D184 pre-PR gate.
+- HX7 [#629](https://github.com/martinkrakowski/campaign-foundry/pull/629) (`0026dad8`). A lookup hit dropped from about 200 ms to about 0.01 ms.
+- HX3b [#631](https://github.com/martinkrakowski/campaign-foundry/pull/631) (`e65b26af`)
+
+**Follow-ups:**
+- **Gate lock:** a second signal during `run_cleanup` (`gate-lock.sh:370`; also needed in hexagen OW3's port), and the heartbeat watcher's own death going unwatched (`gate-lock.sh` and `gate.sh`).
+- **HX4 residuals:**
+  - an unreadable plan file is skipped, not refused;
+  - a mutation of the any-plan-is-high union;
+  - the zsh install step should come before `verify-manifests` in `ci.yml`;
+  - mutation 1's `because` text;
+  - the plan-review "latest event governs every row" gap;
+  - docs for the 5-field `merge-prs` spec and `pre-pr-check`.
+- **`state/last-opened/local.json` leak:** a gate step boots the app and writes the pointer into the project root, and `/state/` is not gitignored.
+- **`capability-race.test.ts`:** flaked on #632's push run while the PR run on the same commit passed. Compare its per-file timings with main.
+- **Small ones:** HX1's test-mock reset and wording nits; HX7's redirect-recheck mutation.
 
 **Order.**
 - HX2 goes first, as an orchestrator PR.
