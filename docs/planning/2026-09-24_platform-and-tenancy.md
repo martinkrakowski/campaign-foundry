@@ -379,6 +379,32 @@ PT-5 is split along D177–D180 (owner, 2026-09-27) from a read-only map of the 
 | **PT-5d-server-drafts** | **Autosave goes to a per-user server draft (D177, D173).** **Enumerated:** (1) `0014_draft.sql`: `draft` (`campaign_id uuid` → `campaign` on delete cascade, `user_id text not null references "user"(id)`, `org_id`, `state jsonb`, `base_revision text`, `updated_at`; primary key `(campaign_id, user_id)`). `"user".id` is `text` (`0008_auth.sql:36`). The user comes from the session only, never from the body. (2) A `DraftStorePort` with Postgres and fs adapters. The fs adapter writes `briefs/<slug>/drafts/<userId>.json` through `resolveConfined`, and refuses a symlinked `drafts` directory. `FsBriefStore.releaseCampaign` treats `drafts/` as part of the reservation and removes it. (3) `GET`, `PUT` and `DELETE /campaigns/:id/draft`. A hidden and a missing campaign answer the same 404. PUT stores the editor-state blob and never calls `parseBrief`, because a draft is not a brief. A PUT whose `base_revision` is stale answers 409 and leaves the stored draft. (4) `BriefEditor` autosaves debounced: one PUT per 1 s window. It restores a draft only when its `base_revision` equals the campaign's current revision, and after a successful Save it DELETEs the draft beside `purgeDraftFromStorage`. The `brief_version` write and Run are unchanged. (5) `cf:draft:*` retires. W3's resume prompt loads the caller's latest server draft and opens that campaign. **Tests:** the debounce (two edits in one window make one PUT); restore; restore skipped on a stale `base_revision`; a reload after a Save whose DELETE failed shows the published brief; two users' drafts are independent; another org's draft and a TEAM-HIDDEN campaign's draft both answer 404; a symlinked `drafts` directory is refused; a failed blank create with a draft is released; W3 navigates to the draft's campaign, and another user does not see it. | `0014_draft` | the migration, the new port, adapters and routes, the draft slot of `lib/ports/index.ts`, `releaseCampaign` in `fs-brief-store.ts` (the `drafts/` entry), `editor-state.ts` (draft persistence), `BriefEditor.tsx` (the autosave, restore and post-Save delete effects), `CreateCampaignDialog.tsx` (resume), `app/(shell)/brief/new/page.tsx`, their tests | change the `brief_version` write or Run |
 | **PT-5e-last-opened-on-the-server** | **Last-opened moves server-side (D173, D180).** **Enumerated:** (0) Reserve `last-opened` as a campaign id in BOTH reserved lists (the package's `RESERVED_CAMPAIGN_IDS` and the web's pinned copy) BEFORE the route exists. `slugify("Last Opened")` is `last-opened`, and a static `/campaigns/last-opened` would shadow that campaign's `GET /campaigns/:id`, the only id it has on fs (D179). (1) `0015_last_opened.sql`: one row per (org, user): `org_id text not null`, `user_id text not null references "user"(id)`, `campaign_id uuid references campaign on delete cascade`, `updated_at`. The fs backend keeps the pointer in a confined per-user file outside `briefs/`. (2) `GET` and `PUT /campaigns/last-opened`. (3) Opening a campaign writes the pointer. The bare `/brief`, `/grid`, `/export`, `/runs` and `/compliance` redirect to the pointer's campaign, or to `/grid` with the picker when there is none. Restore loads the stored brief for that id: the listing item whose `campaignId` matches, or `GET /campaigns/:id` for a versionless campaign, as `BriefEditor` does. It then fetches the run. (4) A hidden campaign and a deleted one both answer "no pointer" in the same body, and both fall back to the picker. (5) `cf:brief` retires. **Tests:** creating a campaign named `Last Opened` gets a different slug; each bare URL redirects with a pointer and falls back without one; a hidden and a deleted campaign are indistinguishable; the pointer survives a reload and another device. | `0015_last_opened` | the reserved-id lists (the package and the web copy), the migration, the port slot, the routes, `brief/page.tsx`, the bare-page redirects, `run-context.tsx` (restore and persist of the last-opened campaign), their tests | touch `BriefEditor.tsx` |
 
+**Wave w05 shipped 2026-09-27 – 2026-09-29, all lanes:**
+- FU-kafka-consumer-resilience [#610](https://github.com/martinkrakowski/campaign-foundry/pull/610) (`92228ba8`)
+- FU-reserved-campaign-ids [#611](https://github.com/martinkrakowski/campaign-foundry/pull/611) (`d6d1f3d3`)
+- PT-5a [#612](https://github.com/martinkrakowski/campaign-foundry/pull/612) (`87eee565`)
+- PT-5b1 [#613](https://github.com/martinkrakowski/campaign-foundry/pull/613) (`9d3ff0ef`)
+- PT-5b2 [#614](https://github.com/martinkrakowski/campaign-foundry/pull/614) (`7eb2b786`)
+- PT-5b3 [#615](https://github.com/martinkrakowski/campaign-foundry/pull/615) (`ff62f018`)
+- PT-5c1 [#616](https://github.com/martinkrakowski/campaign-foundry/pull/616) (`3a8cc14c`)
+- FU-fs-job-lease-reaper [#619](https://github.com/martinkrakowski/campaign-foundry/pull/619) (`ac213533`)
+- PT-5c3 [#620](https://github.com/martinkrakowski/campaign-foundry/pull/620) (`0062d729`)
+- PT-5c2 [#621](https://github.com/martinkrakowski/campaign-foundry/pull/621) (`6a593f74`)
+- PT-5d [#622](https://github.com/martinkrakowski/campaign-foundry/pull/622) (`1d65ef2c`)
+- PT-5e [#623](https://github.com/martinkrakowski/campaign-foundry/pull/623) (`98ac160d`)
+
+The rows deviated from the plan in these places, each recorded in its PR:
+- **PT-5c2** gates Grid's Generate and the template library's Render preview on `briefApplied`, so the unapplied starting brief never posts. Reason: the grok-4.7 pre-PR review found that the gate would otherwise answer 404 on staging.
+- **PT-5d and PT-5e** have **no foreign key** from `user_id` to `"user"`. Under `AUTH_MODE=local` on Postgres there are no `"user"` rows, so every write would fail. `campaign_id` keeps its cascade.
+- **PT-5d's latest-draft route** is `GET /campaigns/briefs/draft`. It skips a draft whose campaign the caller can no longer see, and deletes a stale one. The draft PUT is a locked compare-and-swap on the campaign row.
+- **PT-5e retired `cf:brief`.** The fs pointer store checks every path level for a symlink.
+
+Follow-ups:
+- A shell-wide `beforeunload` guard on `EditorDirtyContext.isDirty`. The app has none, even for unsaved brief edits (declined in #622 as out of scope).
+- The gate-lock PID and heartbeat (item 5), still open.
+
+Wave record in `.agents/session-log.md`.
+
 ---
 
 ## 5. What this plan refuses

@@ -6596,3 +6596,46 @@ and source formatting, recorded here rather than fixed.
   - A gate-lock heartbeat.
   - The web message catalog (the shell pages hard-code their copy).
   - An Aiven Postgres version check (PG15+ for `on delete set null (team_id)`).
+
+## 2026-09-29 — wave platform-and-tenancy-w05 (PT-5a – PT-5e, three follow-ups, the plan-review gate)
+
+- **Goal:** split and ship PT-5 (campaign ids, server create, drafts and last-opened) along D177–D180, and trial new seats against the known-good ones.
+- **Merged, in order:** #610, #611, #612 (PT-5a), #613 (PT-5b1), #614 (PT-5b2), #615 (PT-5b3), #616 (PT-5c1), #617 (the orchestrate-wave skill as a contract plus its rationale), #618 (plan-review gate), #619 (fs job-lease reaper), #620 (PT-5c3), #621 (PT-5c2), #622 (PT-5d), #623 (PT-5e). The SHAs and deviations are in the plan's §4.5 shipped note.
+- **Owner decisions:**
+  - D177–D180 stamped. D177 was corrected to "Run posts the on-screen brief".
+  - Grok is grok-4.7 only, never build-fast.
+  - Hosted models only for lanes.
+  - Resend for staging email.
+  - New worktrees go under `ADOBE/.worktrees/`.
+- **Plan review before dispatch (#618).** `yarn plan:review check` gates each row on a `plan-review settled` event. grok-4.7 reviewed PT-5c2 – PT-5e and D177–D180 before any of them was dispatched.
+- **Pre-PR review found real bugs on high-risk lanes.** grok-4.7 ran read-only on the pushed branch.
+  - PT-5c2: 1 bug. The unapplied starting brief would have answered 404 on staging.
+  - PT-5d: 3 bugs (about $0.74): the latest draft leaked a hidden campaign; the stale-base check raced its write; restore could overwrite live typing.
+  Each was fixed with a test proven to fail without its fix, before the PR opened.
+- **Seats, graded on derived evidence:**
+  - **GLM-5.3-Flash `--variant max`:** reliable.
+    - #618, and PT-5c3 after resuming from a crash when the disk filled (ENOSPC).
+    - About $2.20 per lane.
+  - **Nemotron-3 Ultra (paid):** its #619 implementation was good, but it skipped the gate lock. On PT-5c3 it claimed success with 0 commits ($3.30).
+  - **mercury-2.5:** its fix round failed.
+    - It rebased main's commits into the PR and pushed, orphaned the gate lock, and fixed 1 of 5 findings.
+    - The branch was rebuilt from `origin/main` plus cherry-picks.
+  - **Local LM Studio (qwen3-coder 30B on the operator's Mac):** not a lane seat. It was slow, made mistakes, and pushed memory pressure into the red.
+  - **stealth/space-bunny-alpha (free, anonymous):** PT-5e, #623, first attempt.
+    - 7 commits and the PR opened itself, with a 100% gate and the mutation caught.
+    - Its own fix round handled 13 threads, including a real path escape: the fs symlink check covered only the last level. It also made three vacuous tests able to fail.
+    - Process slips: it held the lock across coverage retries, piped `test:cov` through `tail` on its first run, and used one `git stash -u`.
+    - Not a standing seat until it has a name, a price and a second provider.
+  - **Sonnet (in-house):** PT-5c2 and PT-5d, and every high-risk fix round.
+- **Process findings, and the rule each leaves:**
+  - **Headless `opencode run` needs `< /dev/null`**, or it waits on stdin and never reaches the model.
+  - **A fix-round message must repeat the absolute gate-lock path.** "Same rules as before" lost it, and the agent held the lock about 6 minutes while it searched.
+  - **The merge script's refresh merges main into the branch.** A lane reporting an "unexplained merge commit" is seeing that.
+  - **The fs job lock's reentrancy leaked through AsyncLocalStorage into timers.** A reentrant fast path must check that its acquisition is still active. vitest's fake timers do not carry the ALS store, so the test that proves it uses real timers.
+  - **A spec-level FK to `"user"` breaks `AUTH_MODE=local` on Postgres**, where there are no user rows. PT-5d found it via Qodo, and PT-5e's brief was amended before dispatch.
+  - **The operator's tar backup filled the disk mid-wave,** which killed a GLM lane and a grok review ($1.07). Budget disk with `df`, not Finder, whose figure includes purgeable Time Machine snapshots.
+- **Staging** still runs `ff62f018` (migrations through `0013`). A redeploy picks up PT-5c2 – PT-5e and migrations `0014_draft` and `0015_last_opened`.
+- **Follow-ups:**
+  - A shell-wide `beforeunload` guard.
+  - Items 4 and 5: a pre-PR review gate with a `risk:` field, and a PID and heartbeat on the gate lock.
+  - PT-4, PT-8 and PT-9, which wait on the B2 credentials.
