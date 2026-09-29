@@ -1,4 +1,4 @@
-import { describe, test, expect, vi } from "vitest";
+import { describe, test, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
@@ -10,7 +10,43 @@ import { EditorDirtyProvider } from "@/lib/editor-dirty-context";
 import { blankBrief } from "@/components/campaign/editor-state";
 import { TemplateLibrary } from "../TemplateLibrary";
 import { BrowseBriefsButton } from "../Sidebar";
-import { EMPTY_REPORT, json, mockPipelineApi } from "@/__tests__/helpers";
+import { EMPTY_REPORT, json, mockPipelineApi, storedTemplate } from "@/__tests__/helpers";
+
+/**
+ * PT-5c2: Render preview now also requires an APPLIED campaign (`briefApplied`
+ * — the shell's starting brief is refused by the API, which no longer runs a
+ * campaign it never minted), not just a product and a pinnable template. This
+ * suite's default scenario mirrors the shell's own `DEFAULT_BRIEF` shape
+ * (same products, so `hydra-bottle` stays the first product id every existing
+ * assertion expects) under a real, non-default, non-empty id.
+ */
+const appliedBrief = {
+  schemaVersion: 1,
+  template: storedTemplate,
+  id: "applied-camp",
+  targetRegion: "DE",
+  targetAudience: "Urban outdoor enthusiasts, 25-40",
+  campaignMessage: "Stay wild. Stay hydrated.",
+  products: [
+    {
+      id: "hydra-bottle",
+      name: "Hydra Bottle",
+      primaryColor: "#1473E6",
+      logoPath: "assets/inputs/hydra-logo.png",
+    },
+    {
+      id: "trail-pack",
+      name: "Trail Pack",
+      primaryColor: "#E0218A",
+      logoPath: "assets/inputs/trail-logo.png",
+    },
+  ],
+};
+
+beforeEach(() => {
+  localStorage.setItem("cf:brief-picked", "1");
+  localStorage.setItem("cf:brief", JSON.stringify(appliedBrief));
+});
 
 const imageText = (version: number): CreativeTemplate => ({
   ...CANONICAL_TEMPLATES["image-text"],
@@ -302,7 +338,26 @@ describe("the detail view (TM3)", () => {
     await user.click(screen.getByRole("button", { name: "release the campaign" }));
     const button = await openDetail(user);
     expect(button).toHaveProperty("disabled", true);
-    expect(screen.getByText(/A preview needs a campaign with a product open/)).toBeTruthy();
+    expect(
+      screen.getByText(/A preview needs an open, applied campaign with a product/),
+    ).toBeTruthy();
+    expect(previewCalls()).toHaveLength(0);
+  });
+
+  // PT-5c2: the API now refuses to render a campaign it never minted
+  // (`POST /campaigns/preview-frame` 404s), so Render preview against the
+  // shell's UNAPPLIED starting brief must stay disabled and dispatch nothing.
+  test("Render preview against the shell's starting (unapplied) brief is disabled and posts nothing", async () => {
+    localStorage.removeItem("cf:brief"); // fall through to DEFAULT_BRIEF, the shell's starting brief
+    mockLibrary({ templates: [imageText(3)] });
+    const user = userEvent.setup();
+    renderLibrary();
+    const button = await openDetail(user);
+    expect(button).toHaveProperty("disabled", true);
+    expect(
+      screen.getByText(/A preview needs an open, applied campaign with a product/),
+    ).toBeTruthy();
+    await user.click(button);
     expect(previewCalls()).toHaveLength(0);
   });
 

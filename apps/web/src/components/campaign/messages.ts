@@ -944,6 +944,12 @@ export const executeStillEstimating =
  */
 export const executeNoEstimate =
   "Couldn't work out the estimate — the run will still go, and the server will refuse it if the plan is impossible.";
+/**
+ * Execute pressed while the shell still holds its starting brief (PT-5c2: the API
+ * now refuses to run a campaign it never minted) — before any campaign is open, or
+ * after one closes. No confirm opens; there is nothing to spend credits on yet.
+ */
+export const executeNoBriefApplied = "Open or create a campaign before running the pipeline.";
 
 /* ── The header's model selector ─────────────────────────────────────────────── */
 

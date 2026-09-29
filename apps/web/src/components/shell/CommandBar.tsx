@@ -4,7 +4,11 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefOb
 import { createPortal } from "react-dom";
 import { assetKey, encodeMinutes, useRun } from "@/lib/run-context";
 import { classicAdCount } from "@/components/campaign/derive";
-import { executeNoEstimate, executeStillEstimating } from "@/components/campaign/messages";
+import {
+  executeNoBriefApplied,
+  executeNoEstimate,
+  executeStillEstimating,
+} from "@/components/campaign/messages";
 import { planCampaign, type PlanResult } from "@/lib/briefs-api";
 
 /** Match wizard PLAN_DEBOUNCE_MS without importing wizard-state. */
@@ -33,6 +37,7 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
     hasRun,
     halted,
     brief,
+    briefApplied,
     assets,
     decisions,
     setEstimate,
@@ -136,6 +141,9 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
    * The verb is never disabled for being invalid (GB-D3) — the press is how a user
    * asks what is wrong, so every state answers. The credit-spending confirm opens
    * only when a run makes sense:
+   *  - no campaign applied (PT-5c2): the shell still holds its starting brief, which
+   *    the API now refuses to run (it was never minted through `POST /campaigns`) —
+   *    say so, spend nothing;
    *  - still estimating (or the estimate hung): say so, spend nothing;
    *  - infeasible: show the planner's own reason — the server would refuse the run
    *    anyway, so a confirm here would teach the user the dialog is meaningless;
@@ -143,6 +151,10 @@ export function CommandBar({ onToggleTelemetry }: CommandBarProps) {
    *    say so, and open the confirm.
    */
   const onExecutePress = () => {
+    if (!briefApplied) {
+      setNotice({ text: executeNoBriefApplied, tone: "warning" });
+      return;
+    }
     // A classic brief is never estimated — `plan` is null there by design, so the
     // "still estimating" answer belongs to variation briefs only.
     if (isVariation && plan === null) {
