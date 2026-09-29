@@ -1,6 +1,7 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
+import * as jobsModule from "../jobs.js";
 import {
   JOB_TTL_MS,
   HEARTBEAT_INTERVAL_MS,
@@ -374,6 +375,35 @@ describe("jobs port facade", () => {
     // Give a wrongly-present delete a chance to happen before asserting its absence.
     await new Promise((r) => setTimeout(r, 20));
     expect(deleteSpy.mock.calls.length).toBe(callsBefore);
+  });
+
+  test("the minted handle is read back by a NEW MODULE INSTANCE, not from memory (M6)", async () => {
+    // What "survives" actually means here is a claim about the job JSON file
+    // (`createJob` -> `FsJobStore.createJob` -> `writeJobEntry`,
+    // `fs-job-store.ts:110-123`), not about process memory: nothing about a
+    // handle is kept in the module. So the cheap, deterministic form of the
+    // claim is a SECOND module instance in this process, whose fresh
+    // `FsJobStore` has an empty `memoryCache` and can only answer by reading
+    // the file (`fs-job-store.ts:298-379`).
+    //
+    // `vi.resetModules()` is what makes the second instance real. The identity
+    // assertion is the part that keeps this honest: without the reset, the
+    // dynamic import hands back the SAME namespace object - the same
+    // `FsJobStore` instance, cache and all - and the test would be asserting
+    // the process's own memory against itself while claiming to be about disk.
+    const id = await createJob(LOCAL_TENANT, "survives");
+    vi.resetModules();
+    const fresh = await import("../jobs.js");
+    expect(fresh).not.toBe(jobsModule);
+    expect(fresh.getJob).not.toBe(jobsModule.getJob);
+    // Read through the fresh instance only. `getJob` on the static binding
+    // would be answered from the cache the writer just filled.
+    expect(await fresh.getJob(LOCAL_TENANT, id)).toEqual({
+      status: "running",
+      done: 0,
+      total: 0,
+      log: null,
+    });
   });
 
   test("handle minted survives across separate processes", async () => {
