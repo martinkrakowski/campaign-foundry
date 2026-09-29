@@ -6,7 +6,7 @@
       "file": "packages/CampaignOrchestration/src/domain/value-objects/Treatment.vo.ts",
       "before": "  \"package\",\n  \"packages\",",
       "after": "  \"package\",",
-      "because": "dropping packages from RESERVED_CAMPAIGN_IDS allows a campaign named packages to collide with the public packaging directory. Re-anchored 2026-09-29 in HX1-route-segments-reserved: RESERVED_CAMPAIGN_IDS became the computed union of RESERVED_STORE_AREAS and RESERVED_ROUTE_SEGMENTS (D181), and packages lives only in the latter (it stays a served output path, unlike the other RESERVED_STORE_AREAS entries), so this is now where removing it from the array isReservedCampaignId reads shows up as a text change.",
+      "because": "dropping packages from RESERVED_CAMPAIGN_IDS allows a campaign named packages to collide with the public packaging directory. Re-anchored 2026-09-29 in HX1-route-segments-reserved: RESERVED_CAMPAIGN_IDS became the computed union of RESERVED_STORE_AREAS and RESERVED_ROUTE_SEGMENTS (D181), and packages lives only in the latter (it stays a served output path, unlike the other RESERVED_STORE_AREAS entries), so this is now where removing it from the array isReservedCampaignId reads shows up as a text change. Re-run 2026-09-29 in HX1's fix round 2 (Fable review): fs-brief-store.ts's createBrief now gates on hasGenuineReservation rather than campaignMeta, but this mutation's own claim is unaffected — minimalBrief carries no pre-existing evidence either way, so the anchor and verdict are unchanged; re-verified caught.",
       "command": [
         "yarn",
         "vitest",
