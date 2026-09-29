@@ -305,119 +305,127 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
         }
       });
 
-      test("a team-hidden campaign answers the same body as a deleted one", async () => {
-        const harness = await setup();
-        try {
-          if (backend !== "postgres") {
-            // fs has no teams (D166 item 5), so hiding is a Postgres-only
-            // concept; the fs backend's equivalent — a campaign whose directory
-            // is gone — is the test above.
-            return;
+      // `skipIf`, not an early `return` (fix round, qodo PRRT_kwDOSzP1zc6nELZm):
+      // fs has no teams at all — `FsBriefStore` refuses any `teamId` outright
+      // with `TeamsNotSupportedError` — so hiding is a Postgres-only concept
+      // and the fs backend's equivalent, a campaign whose directory is gone, is
+      // the test above. An early return reported these as PASSED on fs while
+      // asserting nothing, which reads as coverage of the hidden-campaign rule
+      // on a backend that cannot have one. A skip says what is true.
+      test.skipIf(backend !== "postgres")(
+        "a team-hidden campaign answers the same body as a deleted one",
+        async () => {
+          const harness = await setup();
+          try {
+            await seedHiddenTeam(harness);
+            const owner: TenantContext = {
+              orgId: "local",
+              userId: "owner",
+              roles: ["owner"],
+              teamIds: [],
+            };
+            const created = await mount(owner).create({
+              name: "Team Only",
+              type: "social-post",
+              teamId: "t1",
+            });
+            const { campaignId, slug } = (await created.json()) as {
+              campaignId: string;
+              slug: string;
+            };
+            await mount(owner).put({ campaignId: slug });
+
+            const outsider: TenantContext = {
+              orgId: "local",
+              userId: "outsider",
+              roles: [],
+              teamIds: ["t-other"],
+            };
+            const hidden = await mount(outsider).get();
+            expect(hidden.status).toBe(200);
+            expect(await hidden.json()).toEqual({ campaignId: null });
+
+            // …and the owner, who can still see it, still gets the pointer: the
+            // row is per user, not per campaign's visibility.
+            expect(
+              await mount(owner)
+                .get()
+                .then((r) => r.json()),
+            ).toEqual({ campaignId });
+          } finally {
+            await harness.cleanup();
           }
-          await seedHiddenTeam(harness);
-          const owner: TenantContext = {
-            orgId: "local",
-            userId: "owner",
-            roles: ["owner"],
-            teamIds: [],
-          };
-          const created = await mount(owner).create({
-            name: "Team Only",
-            type: "social-post",
-            teamId: "t1",
-          });
-          const { campaignId, slug } = (await created.json()) as {
-            campaignId: string;
-            slug: string;
-          };
-          await mount(owner).put({ campaignId: slug });
+        },
+      );
 
-          const outsider: TenantContext = {
-            orgId: "local",
-            userId: "outsider",
-            roles: [],
-            teamIds: ["t-other"],
-          };
-          const hidden = await mount(outsider).get();
-          expect(hidden.status).toBe(200);
-          expect(await hidden.json()).toEqual({ campaignId: null });
+      test.skipIf(backend !== "postgres")(
+        "a pointer to a campaign that became hidden falls back to the picker, never to a 404",
+        async () => {
+          const harness = await setup();
+          try {
+            await seedHiddenTeam(harness);
+            // A member of no team, not an owner: only D166's own visibility rule
+            // can hide a campaign from them, which is the point.
+            const caller: TenantContext = {
+              orgId: "local",
+              userId: "caller",
+              roles: [],
+              teamIds: [],
+            };
+            const { campaignId, slug } = await mintCampaign(mount(caller), "Later Hidden", caller);
+            await mount(caller).put({ campaignId: slug });
+            // Assigned to a team this caller is not part of AFTER they opened it
+            // — the pointer row survives (the FK cascades on delete only), and
+            // the route must still answer "no pointer".
+            const pg = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+            await pg.db.query("update campaign set team_id = $1 where id = $2", ["t1", campaignId]);
 
-          // …and the owner, who can still see it, still gets the pointer: the
-          // row is per user, not per campaign's visibility.
-          expect(
-            await mount(owner)
+            const body = (await mount(caller)
               .get()
-              .then((r) => r.json()),
-          ).toEqual({ campaignId });
-        } finally {
-          await harness.cleanup();
-        }
-      });
-
-      test("a pointer to a campaign that became hidden falls back to the picker, never to a 404", async () => {
-        const harness = await setup();
-        try {
-          if (backend !== "postgres") return;
-          await seedHiddenTeam(harness);
-          // A member of no team, not an owner: only D166's own visibility rule
-          // can hide a campaign from them, which is the point.
-          const caller: TenantContext = {
-            orgId: "local",
-            userId: "caller",
-            roles: [],
-            teamIds: [],
-          };
-          const { campaignId, slug } = await mintCampaign(mount(caller), "Later Hidden", caller);
-          await mount(caller).put({ campaignId: slug });
-          // Assigned to a team this caller is not part of AFTER they opened it
-          // — the pointer row survives (the FK cascades on delete only), and
-          // the route must still answer "no pointer".
-          const pg = harness as Awaited<ReturnType<typeof setupPgHarness>>;
-          await pg.db.query("update campaign set team_id = $1 where id = $2", ["t1", campaignId]);
-
-          const body = (await mount(caller)
-            .get()
-            .then((r) => r.json())) as { campaignId: null };
-          expect(body).toEqual({ campaignId: null });
-        } finally {
-          await harness.cleanup();
-        }
-      });
+              .then((r) => r.json())) as { campaignId: null };
+            expect(body).toEqual({ campaignId: null });
+          } finally {
+            await harness.cleanup();
+          }
+        },
+      );
     });
 
     describe("PUT refusals", () => {
-      test("a hidden campaign answers 404 and writes nothing", async () => {
-        const harness = await setup();
-        try {
-          if (backend !== "postgres") return;
-          await seedHiddenTeam(harness);
-          const owner: TenantContext = {
-            orgId: "local",
-            userId: "owner",
-            roles: ["owner"],
-            teamIds: [],
-          };
-          const created = await mount(owner).create({
-            name: "Hidden Target",
-            type: "social-post",
-            teamId: "t1",
-          });
-          const { slug } = (await created.json()) as { slug: string };
-          const outsider: TenantContext = {
-            orgId: "local",
-            userId: "outsider",
-            roles: [],
-            teamIds: ["t-other"],
-          };
+      test.skipIf(backend !== "postgres")(
+        "a hidden campaign answers 404 and writes nothing",
+        async () => {
+          const harness = await setup();
+          try {
+            await seedHiddenTeam(harness);
+            const owner: TenantContext = {
+              orgId: "local",
+              userId: "owner",
+              roles: ["owner"],
+              teamIds: [],
+            };
+            const created = await mount(owner).create({
+              name: "Hidden Target",
+              type: "social-post",
+              teamId: "t1",
+            });
+            const { slug } = (await created.json()) as { slug: string };
+            const outsider: TenantContext = {
+              orgId: "local",
+              userId: "outsider",
+              roles: [],
+              teamIds: ["t-other"],
+            };
 
-          const res = await mount(outsider).put({ campaignId: slug });
-          expect(res.status).toBe(404);
-          // Nothing was written: the refusal happens before the store is asked.
-          expect(await getLastOpenedStore(outsider).read("outsider")).toBeUndefined();
-        } finally {
-          await harness.cleanup();
-        }
-      });
+            const res = await mount(outsider).put({ campaignId: slug });
+            expect(res.status).toBe(404);
+            // Nothing was written: the refusal happens before the store is asked.
+            expect(await getLastOpenedStore(outsider).read("outsider")).toBeUndefined();
+          } finally {
+            await harness.cleanup();
+          }
+        },
+      );
 
       test("a missing campaign answers 404 with the same body as a hidden one", async () => {
         const harness = await setup();
