@@ -684,9 +684,100 @@ describe("runCli pre-pr-check", () => {
     expect(code).toBe(0);
   });
 
-  test("a lane found in no plan counts as normal and passes", async () => {
+  test("a lane found in no plan refuses — fail closed, never counted as normal", async () => {
     const dir = chdirTemp();
-    const code = await runCli({ ...io(), argv: ["pre-pr-check", "UNKNOWN-LANE", "--wave", "w06"] });
+    const errors: string[] = [];
+    const code = await runCli({
+      ...io([], errors),
+      argv: ["pre-pr-check", "UNKNOWN-LANE", "--wave", "w06"],
+    });
+    expect(code).toBe(1);
+    expect(errors.join("\n")).toContain("no plan row for lane UNKNOWN-LANE");
+    expect(errors.join("\n")).toContain("docs/planning");
+  });
+
+  test("an unreadable docs/planning refuses the same way as a lane found in no plan", async () => {
+    // rmdir the docs/planning this suite's chdirTemp() always creates, so
+    // discoverRisk's own readdir genuinely fails.
+    const dir = chdirTemp();
+    rmSync(join(dir, "docs", "planning"), { recursive: true, force: true });
+    const errors: string[] = [];
+    const code = await runCli({
+      ...io([], errors),
+      argv: ["pre-pr-check", "HX1", "--wave", "w06"],
+    });
+    expect(code).toBe(1);
+    expect(errors.join("\n")).toContain("no plan row for lane HX1");
+  });
+
+  test("a review settled with no verdict at all (the finding-count shape a review bot emits) refuses", async () => {
+    const dir = chdirTemp();
+    writePlanningFile(dir, "plan.md", highPlan);
+    const logdir = writeLogdir(dir, [
+      `${JSON.stringify({
+        ts: "2026-09-29T10:00:00Z",
+        wave: "w06",
+        lane: "HX1",
+        stage: "review",
+        event: "settled",
+        detail: { bug: 1, suggestion: 2, nit: 0 },
+      })}\n`,
+    ]);
+    const errors: string[] = [];
+    const code = await runCli({
+      ...io([], errors),
+      argv: ["pre-pr-check", "HX1", "--wave", "w06", "--logdir", logdir],
+    });
+    expect(code).toBe(1);
+    expect(errors.join("\n")).toContain("no verdict recorded");
+  });
+
+  test("a review settled with an unrecognised verdict refuses, naming it", async () => {
+    const dir = chdirTemp();
+    writePlanningFile(dir, "plan.md", highPlan);
+    const logdir = writeLogdir(dir, [preprReviewLine("approved")]);
+    const errors: string[] = [];
+    const code = await runCli({
+      ...io([], errors),
+      argv: ["pre-pr-check", "HX1", "--wave", "w06", "--logdir", logdir],
+    });
+    expect(code).toBe(1);
+    expect(errors.join("\n")).toContain("unrecognised verdict");
+    expect(errors.join("\n")).toContain("approved");
+  });
+
+  test("a torn line after the governing review refuses — the log's own word is unknown (S1)", async () => {
+    const dir = chdirTemp();
+    writePlanningFile(dir, "plan.md", highPlan);
+    const logdir = join(dir, "waves");
+    mkdirSync(logdir, { recursive: true });
+    writeFileSync(
+      join(logdir, "events.jsonl"),
+      `${preprReviewLine("clear")}{"ts":"2026-09-29T10:00:01Z","wave":"w06"`,
+    );
+    const errors: string[] = [];
+    const code = await runCli({
+      ...io([], errors),
+      argv: ["pre-pr-check", "HX1", "--wave", "w06", "--logdir", logdir],
+    });
+    expect(code).toBe(1);
+    expect(errors.join("\n")).toContain("unreadable line(s) 2");
+    expect(errors.join("\n")).toContain("the log tail cannot be read");
+  });
+
+  test("a torn line BEFORE the governing review does not block — the review supersedes it (S1)", async () => {
+    const dir = chdirTemp();
+    writePlanningFile(dir, "plan.md", highPlan);
+    const logdir = join(dir, "waves");
+    mkdirSync(logdir, { recursive: true });
+    writeFileSync(
+      join(logdir, "events.jsonl"),
+      `{"ts":"2026-09-29T09:00:00Z","wave":"w06"\n${preprReviewLine("clear")}`,
+    );
+    const code = await runCli({
+      ...io(),
+      argv: ["pre-pr-check", "HX1", "--wave", "w06", "--logdir", logdir],
+    });
     expect(code).toBe(0);
   });
 
@@ -877,15 +968,23 @@ describe("the entry guard", () => {
 
   test("pre-pr-check through the real entry wires readdir and env from the process (normal risk)", async () => {
     // The only command that reaches readdir/env — exercised here so the real
-    // entry's own wiring (not just runCli's logic) is covered.
+    // entry's own wiring (not just runCli's logic) is covered. A real,
+    // unambiguous "normal" row (not an unknown lane, which now refuses —
+    // BUG3) exercises the readFile side of discoverRisk too.
     vi.resetModules();
     const originalCwd = process.cwd();
     const dir = tempDir();
     mkdirSync(join(dir, "docs", "planning"), { recursive: true });
+    writeFileSync(
+      join(dir, "docs", "planning", "plan.md"),
+      ["| Lane | Risk | Delivers |", "|---|---|---|", "| **SOME-LANE** | normal | Text. |"].join(
+        "\n",
+      ),
+    );
     process.chdir(dir);
     const saved = process.argv;
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    process.argv = [saved[0] ?? "node", cliPath, "pre-pr-check", "UNKNOWN-LANE", "--wave", "w06"];
+    process.argv = [saved[0] ?? "node", cliPath, "pre-pr-check", "SOME-LANE", "--wave", "w06"];
     try {
       await import("../cli.js");
       await vi.waitFor(() =>
@@ -913,12 +1012,14 @@ describe("the entry guard", () => {
     const saved = process.argv;
     const savedHome = process.env.HOME;
     const savedWaveLogRoot = process.env.WAVE_LOG_ROOT;
+    const savedLogdir = process.env.LOGDIR;
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     process.argv = [saved[0] ?? "node", cliPath, "pre-pr-check", "HX1", "--wave", "w06"];
     // An isolated HOME: defaultLogDir's `exists` calls must never see this
     // host's real ~/.waves (an orchestrator may genuinely have one).
     process.env.HOME = join(dir, "isolated-home");
     delete process.env.WAVE_LOG_ROOT;
+    delete process.env.LOGDIR;
     try {
       await import("../cli.js");
       // No --logdir: defaultLogDir resolves via `exists`, finds nothing under
@@ -931,7 +1032,55 @@ describe("the entry guard", () => {
       else process.env.HOME = savedHome;
       if (savedWaveLogRoot === undefined) delete process.env.WAVE_LOG_ROOT;
       else process.env.WAVE_LOG_ROOT = savedWaveLogRoot;
+      if (savedLogdir === undefined) delete process.env.LOGDIR;
+      else process.env.LOGDIR = savedLogdir;
       errorSpy.mockRestore();
+      process.exitCode = undefined;
+      process.chdir(originalCwd);
+    }
+  });
+
+  test("pre-pr-check through the real entry wires LOGDIR from the process (BUG4)", async () => {
+    vi.resetModules();
+    const originalCwd = process.cwd();
+    const dir = tempDir();
+    mkdirSync(join(dir, "docs", "planning"), { recursive: true });
+    writeFileSync(
+      join(dir, "docs", "planning", "plan.md"),
+      ["| Lane | Risk | Delivers |", "|---|---|---|", "| **HX1** | **high** | Split. |"].join("\n"),
+    );
+    const logdir = join(dir, "custom-logdir");
+    mkdirSync(logdir, { recursive: true });
+    writeFileSync(
+      join(logdir, "events.jsonl"),
+      `${JSON.stringify({
+        ts: "2026-09-29T10:00:00Z",
+        wave: "w06",
+        lane: "HX1",
+        stage: "review",
+        event: "settled",
+        detail: { verdict: "clear" },
+      })}\n`,
+    );
+    process.chdir(dir);
+    const saved = process.argv;
+    const savedLogdir = process.env.LOGDIR;
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    process.argv = [saved[0] ?? "node", cliPath, "pre-pr-check", "HX1", "--wave", "w06"];
+    // No --logdir flag: only $LOGDIR (never a candidate search under
+    // isolated-home) can make this resolve to the real events we wrote.
+    process.env.LOGDIR = logdir;
+    try {
+      await import("../cli.js");
+      await vi.waitFor(() =>
+        expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("risk=high")),
+      );
+      expect(process.exitCode).toBe(0);
+    } finally {
+      process.argv = saved;
+      if (savedLogdir === undefined) delete process.env.LOGDIR;
+      else process.env.LOGDIR = savedLogdir;
+      logSpy.mockRestore();
       process.exitCode = undefined;
       process.chdir(originalCwd);
     }

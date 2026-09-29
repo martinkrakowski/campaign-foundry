@@ -3,7 +3,7 @@ import { asHashRecord, rowHash, rowRisk } from "./lib/rows.js";
 import { governingPlanReview } from "./lib/review.js";
 import { defaultLogDir, type LogDirEnv } from "./lib/logdir.js";
 import { discoverRisk } from "./lib/risk.js";
-import { prePrReviewRefusal } from "./lib/pre-pr.js";
+import { latestStageSettled, prePrReviewRefusal } from "./lib/pre-pr.js";
 import { relative, resolve } from "node:path";
 import type { WaveEvent } from "../wave-status/lib/types.js";
 
@@ -335,6 +335,13 @@ async function prePrCheck(args: readonly string[], io: PlanReviewIo): Promise<nu
   const { lane, wave, logdir: givenLogdir } = parsed;
 
   const risk = await discoverRisk(lane, PLANNING_DIR, io);
+  // Fail closed: a lane no plan names, or a docs/planning that could not be
+  // read at all, is refused — never waved through as "normal". A misspelt
+  // lane id must not disarm this gate.
+  if (risk === undefined) {
+    io.logError(`no plan row for lane ${lane} under ${PLANNING_DIR}`);
+    return 1;
+  }
   if (risk === "normal") {
     io.log(`${lane}: risk=normal — no pre-PR review required`);
     return 0;
@@ -355,8 +362,25 @@ async function prePrCheck(args: readonly string[], io: PlanReviewIo): Promise<nu
     return 1;
   }
 
-  const { events } = readEvents(eventsText);
-  const refusal = prePrReviewRefusal(events, wave, lane);
+  // The same torn-tail fail-closed rule `check` applies (readLog, relative
+  // to the governing event's own line): a line the reader cannot accept that
+  // is newer than the review this gate is about to trust means the log's own
+  // word is unknown — the review found may already be superseded by a line
+  // that never parsed.
+  const log = readLog(eventsText);
+  const review = latestStageSettled(log.events, wave, lane, "review");
+  if (review !== undefined) {
+    const tornAfter = log.unreadable.filter((line) => line > log.lineOf[review.index]);
+    if (tornAfter.length > 0) {
+      io.logError(
+        `${logPath} has unreadable line(s) ${tornAfter.map((line) => line + 1).join(", ")} after the ` +
+          `latest stage=review event for lane ${lane} — the log tail cannot be read`,
+      );
+      return 1;
+    }
+  }
+
+  const refusal = prePrReviewRefusal(log.events, wave, lane);
   if (refusal !== undefined) {
     io.logError(refusal);
     return 1;
@@ -380,7 +404,11 @@ if (process.argv[1]) {
       readFile: (path) => readFile(path, "utf8"),
       readdir: (dir) => readdir(dir),
       exists: (path) => existsSync(path),
-      env: { HOME: process.env.HOME, WAVE_LOG_ROOT: process.env.WAVE_LOG_ROOT },
+      env: {
+        LOGDIR: process.env.LOGDIR,
+        HOME: process.env.HOME,
+        WAVE_LOG_ROOT: process.env.WAVE_LOG_ROOT,
+      },
     })
       .then((code) => {
         process.exitCode = code;
