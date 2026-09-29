@@ -123,9 +123,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "    } else if (draftDivergedRef.current) {\n      draftDivergedRef.current = false;\n      void deleteServerDraft(routeId);\n    }",
+      "before": "    } else if (draftDivergedRef.current) {\n      draftDivergedRef.current = false;\n      pendingDraftRef.current = null;\n      enqueueDraftWrite(() => deleteServerDraft(routeId));\n    }",
       "after": "    }",
-      "because": "Drop the return-to-pristine purge (the finding as reported): the autosave effect still never removes a stored draft, so an undone brief comes back after reload — with undo one keystroke away, returning to exactly pristine is easy, and the stale draft arrives with no history left to undo it. Re-anchored for PT-5d: `deleteServerDraft` replaces `purgeDraftFromStorage`, but the branch this mutation deletes is the same one.",
+      "because": "Drop the return-to-pristine purge (the finding as reported): the autosave effect still never removes a stored draft, so an undone brief comes back after reload — with undo one keystroke away, returning to exactly pristine is easy, and the stale draft arrives with no history left to undo it. Re-anchored for PT-5d, then again for the bot fix round: `deleteServerDraft` replaces `purgeDraftFromStorage`, and the write now goes through `enqueueDraftWrite` (the client-side write chain) instead of a bare call, but the branch this mutation deletes — the return-to-pristine cleanup itself — is the same one.",
       "command": [
         "yarn",
         "vitest",
