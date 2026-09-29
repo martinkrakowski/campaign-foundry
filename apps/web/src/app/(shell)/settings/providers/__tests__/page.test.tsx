@@ -748,6 +748,11 @@ describe("ProviderKeysSettingsPage — unsaved key material marks the page dirty
     vi.spyOn(editorDirtyContext, "useEditorDirty").mockImplementation(() => ({
       isDirty: false,
       setDirty: activeSetDirty,
+      // D185 — the draft write states, which this page neither reads nor writes.
+      hasPendingWrite: false,
+      setPendingWrite: vi.fn(),
+      hasFailedWrite: false,
+      setFailedWrite: vi.fn(),
       guardedAction: vi.fn(() => true),
       guardedPush: vi.fn(() => true),
     }));

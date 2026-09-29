@@ -486,7 +486,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const { setBrief: setRunBrief, execute } = useRun();
   const router = useRouter();
   const { guardedPush, guardedAction } = useGuardedNavigation();
-  const { setDirty } = useEditorDirty();
+  const { setDirty, setPendingWrite, setFailedWrite } = useEditorDirty();
   const { openCreateDialog } = useCreateCampaign();
   const { setPanels, setTopPanels, setRail } = useEditorPanelPublisher();
   // VE1 — history lives in the hook, never in `EditorState` (R6): `state` is the
@@ -1129,12 +1129,51 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     }
   }, [state, setDirty]);
 
+  /**
+   * D185 — the shell's leave guard (`EditorUnloadGuard`) warns on a dirty editor
+   * OR a draft write that is in flight OR one that failed, so both write states
+   * have to leave this component and land in the context beside `isDirty`. The
+   * publisher mirrors the dirty one above for the same reason, and the same way:
+   * the chain settles on every write, whether or not either boolean moved, and
+   * each `setDirty` here is a commit for every subscriber of that context.
+   *
+   * Nothing is published that the operator cannot see happen: a write that never
+   * dispatched is not pending, and one that landed is not failed.
+   */
+  const lastPublishedWriteRef = useRef<{ pending: boolean; failed: boolean }>({
+    pending: false,
+    failed: false,
+  });
+  const publishPendingWrite = (pending: boolean) => {
+    if (lastPublishedWriteRef.current.pending === pending) return;
+    lastPublishedWriteRef.current = { ...lastPublishedWriteRef.current, pending };
+    setPendingWrite(pending);
+  };
+  /** A later PUT that lands clears an earlier failure — the work is on the
+   *  server again, so there is nothing left to warn about. */
+  const publishFailedWrite = (failed: boolean) => {
+    if (lastPublishedWriteRef.current.failed === failed) return;
+    lastPublishedWriteRef.current = { ...lastPublishedWriteRef.current, failed };
+    setFailedWrite(failed);
+  };
+
   // The provider outlives this route, so clear the flag on unmount — otherwise every
-  // later navigation in the shell keeps prompting about a route that is long gone.
-  // Split from the effect above (X32): that effect's deps include `state`, so a bare
-  // `return () => setDirty(false)` there ran this clear on every keystroke too, not
-  // only when the route actually unmounts.
-  useEffect(() => () => setDirty(false), []);
+  // later navigation in the shell keeps prompting about a route that is long gone,
+  // and every shell route would keep warning before unloading over a draft write
+  // belonging to an editor that is no longer mounted. Split from the effect above
+  // (X32): that effect's deps include `state`, so a bare `return () =>
+  // setDirty(false)` there ran this clear on every keystroke too, not only when the
+  // route actually unmounts. A write the unmount itself FLUSHES (the effect below
+  // sends the debounced one) re-raises `pendingWrite` after this clear, which is
+  // the honest answer: that write really is still on its way to the server.
+  useEffect(
+    () => () => {
+      setDirty(false);
+      publishPendingWrite(false);
+      publishFailedWrite(false);
+    },
+    [],
+  );
 
   /**
    * PT-5d item 4 — autosave to the caller's own server draft, debounced to
@@ -1177,7 +1216,40 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    */
   const draftWriteChainRef = useRef<Promise<unknown>>(Promise.resolve());
   const enqueueDraftWrite = (write: () => Promise<unknown>): void => {
-    draftWriteChainRef.current = draftWriteChainRef.current.then(write, write);
+    /**
+     * D185 — "a write is pending" is a property of the CHAIN, so the flag is
+     * raised here and lowered only by the LAST write queued: an earlier one
+     * settling while a later one is still waiting its turn must not report the
+     * chain idle, or a close in that window would lose the queued write without
+     * a prompt. The identity check is what says "the chain is mine" — the ref
+     * moves on with every enqueue, so a settled link that is no longer the
+     * current one is somebody else's problem.
+     *
+     * Not the debounce ref: `draftPutTimerRef` is nulled the moment its timer
+     * fires, which is exactly the moment the write is most at risk.
+     */
+    publishPendingWrite(true);
+    const queued = draftWriteChainRef.current.then(write, write);
+    draftWriteChainRef.current = queued;
+    const onSettled = () => {
+      if (draftWriteChainRef.current === queued) publishPendingWrite(false);
+    };
+    // Both outcomes, and the rejection is handled here rather than left to
+    // reach the ref unhandled: the chain's own `.then(write, write)` already
+    // decides that a failed write never blocks the next one.
+    void queued.then(onSettled, onSettled);
+  };
+  /**
+   * D185 — a PUT, whose answer is the editor's only evidence of whether the
+   * operator's edits reached the server. A DELETE goes through the chain
+   * directly: a failed one is not lost work (the draft simply stays on the
+   * server, and its own doc comment says why that is harmless), so it must
+   * never set a flag the guard would warn about.
+   */
+  const enqueueDraftPut = (put: () => Promise<boolean>): void => {
+    enqueueDraftWrite(async () => {
+      publishFailedWrite(!(await put()));
+    });
   };
   /**
    * Fix round (bots) — the debounced PUT this effect is about to arm, kept
@@ -1224,7 +1296,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       draftPutTimerRef.current = setTimeout(() => {
         draftPutTimerRef.current = null;
         pendingDraftRef.current = null;
-        enqueueDraftWrite(() => putServerDraft(routeId, state, baseRevision));
+        enqueueDraftPut(() => putServerDraft(routeId, state, baseRevision));
       }, DRAFT_AUTOSAVE_DEBOUNCE_MS);
     } else if (draftDivergedRef.current) {
       draftDivergedRef.current = false;
@@ -1252,9 +1324,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       const pending = pendingDraftRef.current;
       if (pending && pending.routeId === routeId) {
         pendingDraftRef.current = null;
-        enqueueDraftWrite(() =>
-          putServerDraft(pending.routeId, pending.state, pending.baseRevision),
-        );
+        enqueueDraftPut(() => putServerDraft(pending.routeId, pending.state, pending.baseRevision));
       }
     };
   }, [routeId]);

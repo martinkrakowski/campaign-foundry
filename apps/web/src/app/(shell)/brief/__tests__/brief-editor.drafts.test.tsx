@@ -9,6 +9,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { renderWithRun, json } from "@/__tests__/helpers";
 import { API } from "@/lib/run-context";
+import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
 import { fromBrief } from "@/components/campaign/editor-state";
 import * as messages from "@/components/campaign/messages";
@@ -25,6 +26,24 @@ import * as messages from "@/components/campaign/messages";
  */
 
 const Editor = ({ id }: { id?: string }) => <BriefEditor briefId={id} />;
+
+/**
+ * D185 — the two write states the shell's leave guard reads, rendered beside
+ * the editor inside the same `EditorDirtyProvider` (which `renderWithRun`
+ * mounts) so the assertion is on what the editor PUBLISHED, not on anything it
+ * holds privately.
+ */
+const WriteFlags = () => {
+  const { hasPendingWrite, hasFailedWrite } = useEditorDirty();
+  return (
+    <>
+      <span data-testid="pending-write">{String(hasPendingWrite)}</span>
+      <span data-testid="failed-write">{String(hasFailedWrite)}</span>
+    </>
+  );
+};
+
+const flag = (name: "pending-write" | "failed-write") => screen.getByTestId(name).textContent;
 
 afterEach(() => {
   vi.useRealTimers();
@@ -62,6 +81,13 @@ function draftRoutes(opts: {
   /** Force the next DELETE for this campaign id to answer 500. */
   failDeleteFor?: string;
   /**
+   * D185 — force the next draft PUT for this campaign id to answer 500, once.
+   * `fetch` resolves for a 500, so this is a write that LOOKED like it landed
+   * and did not: the case the failed-write flag exists for, and the only way to
+   * put it in reach of a test.
+   */
+  failPutFor?: string;
+  /**
    * Fix round item 3 (grok-4.7) — hold the next draft GET for this campaign
    * id open until `releaseGet()` is called, instead of answering it inline:
    * exercising "a keystroke lands while the restore fetch is still in
@@ -82,6 +108,7 @@ function draftRoutes(opts: {
   const store = new Map<string, { state: unknown; baseRevision: string | null }>();
   const calls: { url: string; method: string; body?: Record<string, unknown> }[] = [];
   let failDeleteFor = opts.failDeleteFor;
+  let failPutFor = opts.failPutFor;
   let releaseGet: ((response: Response) => void) | undefined;
   const heldGet = opts.deferGetFor
     ? new Promise<Response>((resolve) => {
@@ -120,6 +147,10 @@ function draftRoutes(opts: {
         return Promise.resolve(json({ draft: rec ? { ...rec, updatedAt: "t" } : null }));
       }
       if (method === "PUT") {
+        if (failPutFor === id) {
+          failPutFor = undefined;
+          return Promise.resolve(json({ error: "boom" }, 500));
+        }
         const state = parsed?.state;
         const baseRevision = typeof parsed?.baseRevision === "string" ? parsed.baseRevision : null;
         if (opts.deferPutFor === id) {
@@ -618,5 +649,130 @@ describe("draft write ordering and flush (fix round, bots)", () => {
       ).toBe(true),
     );
     await waitFor(() => expect(routed.has("fresh")).toBe(false));
+  });
+});
+
+describe("the write flags the shell's leave guard reads (D185)", () => {
+  /** Arm the debounce for the current draft and let its timer fire. */
+  const flushDebounce = async (headline: HTMLInputElement, value: string) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      act(() => {
+        fireEvent.change(headline, { target: { value } });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+        await Promise.resolve();
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  };
+
+  test("a draft PUT answered 500 sets the failed flag, and a later PUT that lands clears it", async () => {
+    const routed = draftRoutes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      failPutFor: "camp",
+    });
+    renderWithRun(
+      <>
+        <Editor id="camp" />
+        <WriteFlags />
+      </>,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+    // A freshly loaded campaign has written nothing: no write is in flight, and
+    // none has failed.
+    expect(flag("pending-write")).toBe("false");
+    expect(flag("failed-write")).toBe("false");
+
+    const headline = screen.getByLabelText("Headline") as HTMLInputElement;
+    await flushDebounce(headline, "Lost to a 500");
+
+    // The PUT was dispatched and answered 500. `fetch` RESOLVES for that — the
+    // status is the only thing saying the edits are not on the server, which is
+    // why the flag exists and why a 500 is not a "probably fine".
+    await waitFor(() => expect(flag("failed-write")).toBe("true"));
+    // Settled, not pending: the write finished, it just did not land.
+    expect(flag("pending-write")).toBe("false");
+    expect(routed.stored("camp")).toBeUndefined();
+
+    // The next edit's PUT lands, and the work is on the server again — so the
+    // failure is no longer lost work, and the flag comes back down.
+    await flushDebounce(headline, "Landed for real");
+    await waitFor(() => expect(flag("failed-write")).toBe("false"));
+    expect(routed.has("camp")).toBe(true);
+  });
+
+  test("a draft PUT still on the write chain holds the pending flag until it is answered", async () => {
+    const routed = draftRoutes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      deferPutFor: "camp",
+    });
+    renderWithRun(
+      <>
+        <Editor id="camp" />
+        <WriteFlags />
+      </>,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+
+    const headline = screen.getByLabelText("Headline") as HTMLInputElement;
+    await flushDebounce(headline, "In flight");
+
+    // The debounce timer has already fired — `draftPutTimerRef` is null again,
+    // which is exactly why the flag cannot be read off it. The write itself is
+    // dispatched and held, unanswered.
+    await waitFor(() => expect(routed.pendingPutCount()).toBe(1));
+    expect(flag("pending-write")).toBe("true");
+    expect(flag("failed-write")).toBe("false");
+
+    routed.releasePut();
+    await waitFor(() => expect(flag("pending-write")).toBe("false"));
+  });
+
+  test("the pending flag survives an earlier write settling while a later one is still queued", async () => {
+    // The chain's state, not a single write's: two edits in two debounce
+    // windows queue two PUTs, and the second is not even dispatched until the
+    // first settles. A flag lowered by the FIRST write settling would report
+    // the chain idle while the second is still on it — and a close in that
+    // window would lose the queued write without a prompt.
+    const routed = draftRoutes({
+      list: () => json({ briefs: [entry("camp", "r1")] }),
+      deferPutFor: "camp",
+    });
+    renderWithRun(
+      <>
+        <Editor id="camp" />
+        <WriteFlags />
+      </>,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+    );
+
+    const headline = screen.getByLabelText("Headline") as HTMLInputElement;
+    await flushDebounce(headline, "Edit one");
+    await waitFor(() => expect(routed.pendingPutCount()).toBe(1));
+    await flushDebounce(headline, "Edit two");
+    // The second PUT is queued behind the first and has not been dispatched.
+    expect(routed.pendingPutCount()).toBe(1);
+    expect(flag("pending-write")).toBe("true");
+
+    // The first settles and the second takes its place — still pending, because
+    // it is still on the chain.
+    routed.releasePut();
+    await waitFor(() => expect(routed.pendingPutCount()).toBe(1));
+    expect(flag("pending-write")).toBe("true");
+
+    routed.releasePut();
+    await waitFor(() => expect(flag("pending-write")).toBe("false"));
+    expect(
+      (routed.stored("camp")?.state as { campaignMessage?: string } | undefined)?.campaignMessage,
+    ).toBe("Edit two");
   });
 });
