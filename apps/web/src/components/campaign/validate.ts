@@ -109,7 +109,12 @@ export const RESERVED_ROUTE_SEGMENTS = [
 export const RESERVED_CAMPAIGN_IDS: readonly string[] = Array.from(
   new Set<string>([...RESERVED_STORE_AREAS, ...RESERVED_ROUTE_SEGMENTS]),
 );
-export type ReservedCampaignId = (typeof RESERVED_CAMPAIGN_IDS)[number];
+// The literal union, kept precise independent of RESERVED_CAMPAIGN_IDS's own
+// runtime (deduped, `readonly string[]`) type — a nit from the D181 fix
+// round's second review.
+export type ReservedCampaignId =
+  | (typeof RESERVED_STORE_AREAS)[number]
+  | (typeof RESERVED_ROUTE_SEGMENTS)[number];
 
 export function isReservedCampaignId(id: string): id is ReservedCampaignId {
   return RESERVED_CAMPAIGN_IDS.includes(id);
