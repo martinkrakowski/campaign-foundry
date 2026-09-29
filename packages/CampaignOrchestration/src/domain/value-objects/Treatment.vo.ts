@@ -16,18 +16,64 @@ export type ToneKind = (typeof TONE_VALUES)[number];
 export const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /**
- * Campaign identifiers the orchestrator reserves for itself, and which cannot
- * name a campaign: the top-level directory names under an org's output root
- * (`cache`, `jobs`, `orgs`, `packages`), and `last-opened` — the static
- * `/campaigns/last-opened` route (PT-5e, D180). That route would shadow a
- * campaign slugged `last-opened`'s own `GET /campaigns/:id`, which is the only
- * id such a campaign has on the file backend (D179).
+ * Top-level directory names under an org's output root that this org's output
+ * store hides from `GET /output/**` (`fs-output-store.ts`'s `HIDDEN_AREAS`,
+ * which is exactly this list, HX1/D181): the run cache, the job records, the
+ * `last-opened` marker, and `orgs/`, where other tenants' roots live beneath
+ * the local operator's. `packages` is NOT here — packaging output stays
+ * served, even though it is also a reserved campaign id below (it is a route
+ * segment too).
  */
-export const RESERVED_CAMPAIGN_IDS = ["cache", "jobs", "last-opened", "orgs", "packages"] as const;
+export const RESERVED_STORE_AREAS = ["cache", "jobs", "last-opened", "orgs"] as const;
+
+/**
+ * Every static first path segment under `apps/api/server/routes/campaigns/`
+ * — a file (any HTTP method, including a POST-only one) or a directory —
+ * excluding a dynamic segment (`[id]`), `__tests__`, and the index route
+ * itself. `apps/api/server/routes/campaigns/__tests__/route-tree.test.ts`
+ * derives this list from the route tree on disk and fails CI when a new
+ * route forgets to add its segment here.
+ *
+ * A POST-only static file must be reserved too, not just a GET one: Nitro
+ * registers the method on the static path, and when a GET arrives for that
+ * path h3's matcher falls through to the `[id]` GET handler, so a campaign
+ * slugged the same as that segment would be addressed with an empty/wrong
+ * `id` rather than 404ing cleanly (grok plan review,
+ * `nitropack/dist/runtime/internal/app.mjs`, `h3/dist/index.mjs`'s router
+ * `matchAll` fallback).
+ */
+export const RESERVED_ROUTE_SEGMENTS = [
+  "assets",
+  "briefs",
+  "capabilities",
+  "decisions",
+  "generate",
+  "jobs",
+  "last-opened",
+  "package",
+  "packages",
+  "plan",
+  "pools",
+  "preview-frame",
+  "provider-keys",
+  "result",
+  "templates",
+] as const;
+
+/**
+ * Campaign identifiers the orchestrator reserves for itself, and which cannot
+ * name a campaign: the union of `RESERVED_STORE_AREAS` and
+ * `RESERVED_ROUTE_SEGMENTS` (HX1/D181). Kept as one flat list — rather than
+ * two separate checks at each call site — so every existing caller of
+ * `isReservedCampaignId` is unchanged by the split.
+ */
+export const RESERVED_CAMPAIGN_IDS: readonly string[] = Array.from(
+  new Set<string>([...RESERVED_STORE_AREAS, ...RESERVED_ROUTE_SEGMENTS]),
+);
 export type ReservedCampaignId = (typeof RESERVED_CAMPAIGN_IDS)[number];
 
 export function isReservedCampaignId(id: string): id is ReservedCampaignId {
-  return (RESERVED_CAMPAIGN_IDS as readonly string[]).includes(id);
+  return RESERVED_CAMPAIGN_IDS.includes(id);
 }
 
 /**

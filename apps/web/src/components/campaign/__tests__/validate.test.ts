@@ -28,6 +28,8 @@ import {
   getTotalWarningCount,
   PROHIBITED_TERMS,
   RESERVED_CAMPAIGN_IDS,
+  RESERVED_ROUTE_SEGMENTS,
+  RESERVED_STORE_AREAS,
   isReservedCampaignId,
 } from "../validate";
 import { PROHIBITED_TERMS as DOMAIN_PROHIBITED_TERMS } from "@campaignfoundry/GovernanceAndCompliance";
@@ -36,6 +38,8 @@ import { PROHIBITED_TERMS as DOMAIN_PROHIBITED_TERMS } from "@campaignfoundry/Go
 import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
 import {
   RESERVED_CAMPAIGN_IDS as PKG_RESERVED_CAMPAIGN_IDS,
+  RESERVED_ROUTE_SEGMENTS as PKG_RESERVED_ROUTE_SEGMENTS,
+  RESERVED_STORE_AREAS as PKG_RESERVED_STORE_AREAS,
   isReservedCampaignId as pkgIsReservedCampaignId,
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
@@ -289,21 +293,20 @@ describe("validateIdentity", () => {
     expect(validateIdentity(valid())).toEqual({});
   });
 
-  test("RESERVED_CAMPAIGN_IDS equals the package's list (pinned against drift)", () => {
+  test("RESERVED_STORE_AREAS, RESERVED_ROUTE_SEGMENTS and RESERVED_CAMPAIGN_IDS equal the package's lists (pinned against drift)", () => {
+    expect(RESERVED_STORE_AREAS).toEqual(PKG_RESERVED_STORE_AREAS);
+    expect(RESERVED_ROUTE_SEGMENTS).toEqual(PKG_RESERVED_ROUTE_SEGMENTS);
     expect(RESERVED_CAMPAIGN_IDS).toEqual(PKG_RESERVED_CAMPAIGN_IDS);
-    for (const id of ["cache", "jobs", "last-opened", "orgs", "packages", "other-id"]) {
+    for (const id of [...RESERVED_CAMPAIGN_IDS, "other-id"]) {
       expect(isReservedCampaignId(id)).toBe(pkgIsReservedCampaignId(id));
     }
   });
 
-  test.each(["cache", "jobs", "last-opened", "orgs", "packages"] as const)(
-    "rejects reserved campaign id %s",
-    (id) => {
-      expect(validateIdentity(valid({ briefId: id })).briefId).toBe(messages.briefIdReserved(id));
-    },
-  );
+  test.each(RESERVED_CAMPAIGN_IDS)("rejects reserved campaign id %s", (id) => {
+    expect(validateIdentity(valid({ briefId: id })).briefId).toBe(messages.briefIdReserved(id));
+  });
 
-  test.each(["cache", "jobs", "last-opened", "orgs", "packages"] as const)(
+  test.each(RESERVED_CAMPAIGN_IDS)(
     "accepts an existing campaign already named %s (only a new id is refused)",
     (id) => {
       const state = valid({

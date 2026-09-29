@@ -3,6 +3,8 @@ import {
   DEFAULT_TREATMENT,
   LAYOUT_VALUES,
   RESERVED_CAMPAIGN_IDS,
+  RESERVED_ROUTE_SEGMENTS,
+  RESERVED_STORE_AREAS,
   SAFE_ID_PATTERN,
   TONE_VALUES,
   isReservedCampaignId,
@@ -48,17 +50,76 @@ describe("Treatment value object", () => {
     }
   });
 
-  test("RESERVED_CAMPAIGN_IDS lists orchestrator-reserved campaign ids", () => {
-    expect(RESERVED_CAMPAIGN_IDS).toEqual(["cache", "jobs", "last-opened", "orgs", "packages"]);
+  test("RESERVED_STORE_AREAS lists exactly today's hidden output areas", () => {
+    expect(RESERVED_STORE_AREAS).toEqual(["cache", "jobs", "last-opened", "orgs"]);
+  });
+
+  test("RESERVED_ROUTE_SEGMENTS lists every static first segment under routes/campaigns/", () => {
+    expect(RESERVED_ROUTE_SEGMENTS).toEqual([
+      "assets",
+      "briefs",
+      "capabilities",
+      "decisions",
+      "generate",
+      "jobs",
+      "last-opened",
+      "package",
+      "packages",
+      "plan",
+      "pools",
+      "preview-frame",
+      "provider-keys",
+      "result",
+      "templates",
+    ]);
+  });
+
+  test("RESERVED_CAMPAIGN_IDS is the union of RESERVED_STORE_AREAS and RESERVED_ROUTE_SEGMENTS", () => {
+    expect(RESERVED_CAMPAIGN_IDS).toEqual([
+      "cache",
+      "jobs",
+      "last-opened",
+      "orgs",
+      "assets",
+      "briefs",
+      "capabilities",
+      "decisions",
+      "generate",
+      "package",
+      "packages",
+      "plan",
+      "pools",
+      "preview-frame",
+      "provider-keys",
+      "result",
+      "templates",
+    ]);
+    // No duplicates: "jobs" and "last-opened" are in both source lists.
+    expect(new Set(RESERVED_CAMPAIGN_IDS).size).toBe(RESERVED_CAMPAIGN_IDS.length);
   });
 
   test("isReservedCampaignId identifies reserved campaign ids", () => {
-    for (const id of ["cache", "jobs", "last-opened", "orgs", "packages"]) {
+    for (const id of RESERVED_CAMPAIGN_IDS) {
       expect(isReservedCampaignId(id), id).toBe(true);
     }
-    for (const id of ["camp", "my-campaign", "product", "treatment", "default", "last-opened-2"]) {
+    for (const id of [
+      "camp",
+      "my-campaign",
+      "product",
+      "treatment",
+      "default",
+      "last-opened-2",
+      "template",
+      "brief",
+    ]) {
       expect(isReservedCampaignId(id), id).toBe(false);
     }
+  });
+
+  test("packages is reserved (a route segment) but not a hidden store area — it stays served output", () => {
+    expect(isReservedCampaignId("packages")).toBe(true);
+    expect(RESERVED_STORE_AREAS as readonly string[]).not.toContain("packages");
+    expect(RESERVED_ROUTE_SEGMENTS as readonly string[]).toContain("packages");
   });
 
   test("`last-opened` is reserved because the static route of that name would shadow a campaign's own id (PT-5e, D180)", () => {

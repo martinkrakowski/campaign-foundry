@@ -1,7 +1,7 @@
 import { constants, createReadStream } from "node:fs";
 import { open, readdir, readFile, realpath, stat, type FileHandle } from "node:fs/promises";
 import { basename, join, relative, resolve, sep } from "node:path";
-import { RESERVED_CAMPAIGN_IDS, SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
+import { RESERVED_STORE_AREAS, SAFE_ID_PATTERN } from "@campaignfoundry/CampaignOrchestration";
 import { resolveConfined, resolveConfinedForRead } from "../confined-path.js";
 import type {
   OutputLookup,
@@ -14,14 +14,15 @@ const MISSING: OutputLookup = { found: false, reason: "missing" };
 
 /**
  * Areas under the output root that are not this store's output: the run cache,
- * the job records, and `orgs/`, where other tenants' roots live beneath the local
- * operator's (`tenantRoot`, review on #575). Org roots never nest, so no store
- * has output of its own under an `orgs/` segment.
+ * the job records, the `last-opened` marker, and `orgs/`, where other tenants'
+ * roots live beneath the local operator's (`tenantRoot`, review on #575). Org
+ * roots never nest, so no store has output of its own under an `orgs/` segment.
  *
- * Derived from the orchestrator's shared RESERVED_CAMPAIGN_IDS list; `packages`
- * stays served because packaging output is public to its campaign.
+ * Exactly the orchestrator's shared RESERVED_STORE_AREAS list (HX1/D181):
+ * `packages` stays served because packaging output is public to its campaign,
+ * even though it is also a reserved campaign id (RESERVED_ROUTE_SEGMENTS).
  */
-const HIDDEN_AREAS = RESERVED_CAMPAIGN_IDS.filter((id) => id !== "packages");
+const HIDDEN_AREAS = RESERVED_STORE_AREAS;
 
 function isHidden(posix: string): boolean {
   return HIDDEN_AREAS.some((area) => posix === area || posix.startsWith(`${area}/`));
