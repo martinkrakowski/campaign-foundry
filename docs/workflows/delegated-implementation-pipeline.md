@@ -300,9 +300,14 @@ Rules:
 - The gate before pushing is `yarn gate --lane <LANE>` (D183), in the foreground. It runs CI's steps,
   takes the gate lock only around `test:cov` and `verify-manifests`, and prints each step's real
   exit code. Never pipe a gate step through `tail` or `grep`, which hides its exit code (a w05 lane
-  read exit 0 on every failing coverage run that way). A standalone `test:cov`, `mutate` or
-  `verify-manifests` takes the lock with `sh scripts/gate-lock.sh acquire|release <LANE>`, around
-  that one run only.
+  read exit 0 on every failing coverage run that way). A standalone
+  `yarn test:cov`, `yarn mutate …` or `sh scripts/verify-manifests.sh` takes the same lock with
+  `sh scripts/gate-lock.sh run <LANE> -- <cmd>`, which holds it around that one command and passes
+  the command's exit code back. `run` records its own pid, so the lock cannot be reclaimed while
+  the command runs — a bare `sh scripts/gate-lock.sh acquire <LANE>` records the pid of a shell
+  that exits immediately, leaves a lock anyone may take, and is refused. `run` and `yarn gate`
+  take the SAME host lock, so never wrap one in the other: a nested `run` exits 75 (busy) and
+  `yarn gate` inside a `run` exits 75 the same way.
 - Tests live <WHERE>, one behaviour per test, no real clock/network/filesystem in unit tests.
 - Never hand-edit generated files; change the generator/manifest and regenerate.
 - Do not reference paths that do not exist. If the plan and the code disagree, implement the

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "HX3b-lock-a-command",
+  "mutations": [
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "  if [ -n \"$cmd_pid\" ]; then\n    kill -TERM \"$cmd_pid\" 2>/dev/null",
+      "after": "  if [ -n \"$cmd_pid\" ]; then\n    [ \"$1\" = INT ] && kill -TERM \"$cmd_pid\" 2>/dev/null",
+      "because": "dropping the forwarding of TERM leaves the command running when the holder is signalled: `run` exits 143 and releases the lock, but the `sleep 30` it wrapped is still alive, so the lock the next lane takes is a lock a live command is still running against. With the wait in place the failure is no longer a dead command but a hang — the run sits in the wait for the whole 30s — so the test that catches this asserts the elapsed time as well (run must be gone within 5s of the signal), and the mutant fails on that bound rather than on the test's own timeout. INT is kept, so only the TERM path is broken and the TERM test is what has to catch it. The anchor is the two lines of forward_signal, not the bare kill: the heartbeat watcher stops a command on the same signal, and a one-line anchor would match both",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "TERM on run exits 143"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
