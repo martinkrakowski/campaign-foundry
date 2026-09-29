@@ -601,55 +601,79 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     expect(result.stdout).toContain("heartbeat pid");
   }, 15_000);
 
+  /**
+   * One signal, from outside, at a `run` that is holding the lock around a
+   * command which is not going to stop on its own. Everything asserted here is
+   * about the command, not the wrapper: the wrapper's exit code says it reacted,
+   * and only the command's own pid says it stopped.
+   */
+  async function signalRun(
+    shell: string,
+    signal: "SIGINT" | "SIGTERM",
+    expectedStatus: number,
+  ): Promise<void> {
+    const dir = scratch();
+    // The command reports the pid it will be — it execs, so the pid it
+    // publishes IS the sleep's — because "run exited" is not the claim under
+    // test: "the command died with it" is, and only its own pid can show it.
+    const commandPidFile = join(dir, "command.pid");
+    const { child, done } = startLockIn(
+      dir,
+      [
+        "run",
+        "lane-a",
+        "--",
+        "sh",
+        "-c",
+        // The sleep's own stdio is dropped so that a signal this wrapper
+        // FORWARDED closes the pipe with it. A sleep that survives holds
+        // `run`'s stdout open, and the test's result would then arrive when
+        // the sleep did — half a minute later, as a timeout naming the wrong
+        // thing, instead of as the command that outlived its wrapper.
+        `printf '%s\\n' "$$" > "${commandPidFile}"; exec sleep 30 >/dev/null 2>&1`,
+      ],
+      { CF_GATE_HEARTBEAT_SECONDS: "1" },
+      shell,
+    );
+    await waitForFile(commandPidFile);
+    const commandPid = Number(readFileSync(commandPidFile, "utf8").trim());
+    expect(commandPid).toBeGreaterThan(0);
+    expect(isAlive(commandPid)).toBe(true);
+    // Signal the holder the way a person or a CI timeout would: the process
+    // the lock names, which the tests above pin to `run` itself.
+    expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
+    process.kill(Number(lockFile(dir, "pid").trim()), signal);
+
+    const result = await done;
+    // 130/143 are INT/TERM's own conventions, so a caller can tell a signalled
+    // run from a command that failed — and the EXIT trap still ran.
+    expect({ shell, status: result.status }).toEqual({ shell, status: expectedStatus });
+    expect(result.stdout).toContain("released by lane-a");
+    expect(existsSync(lockDir(dir))).toBe(false);
+    // The heartbeat is reaped, not merely orphaned: nothing may outlive the
+    // run, or a later lock refreshes on a pid the test can no longer account for.
+    await waitForDead(heartbeatPidOf(result.stdout));
+    // The command died with the wrapper. A trap on a foreground child is
+    // deferred until that child exits — measured at the full 30s under dash —
+    // so the signal has to be forwarded, or this sleep outlives the run. And
+    // for INT it has to be forwarded as TERM: a command started as an
+    // asynchronous list inherits SIG_IGN for INT and QUIT (POSIX 2.11), so an
+    // INT sent to a `sh` command is a no-op and the command outlives the run
+    // by the whole 30 seconds — after the lock is already gone.
+    await waitForDead(commandPid);
+  }
+
   test("TERM on run exits 143, releases the lock, and takes the command and the heartbeat with it", async () => {
     for (const shell of SIGNAL_SHELLS) {
-      const dir = scratch();
-      // The command reports the pid it will be — it execs, so the pid it
-      // publishes IS the sleep's — because "run exited" is not the claim under
-      // test: "the command died with it" is, and only its own pid can show it.
-      const commandPidFile = join(dir, "command.pid");
-      const { child, done } = startLockIn(
-        dir,
-        [
-          "run",
-          "lane-a",
-          "--",
-          "sh",
-          "-c",
-          // The sleep's own stdio is dropped so that a signal this wrapper
-          // FORWARDED closes the pipe with it. A sleep that survives holds
-          // `run`'s stdout open, and the test's result would then arrive when
-          // the sleep did — half a minute later, as a timeout naming the wrong
-          // thing, instead of as the command that outlived its wrapper.
-          `printf '%s\\n' "$$" > "${commandPidFile}"; exec sleep 30 >/dev/null 2>&1`,
-        ],
-        { CF_GATE_HEARTBEAT_SECONDS: "1" },
-        shell,
-      );
-      await waitForFile(commandPidFile);
-      const commandPid = Number(readFileSync(commandPidFile, "utf8").trim());
-      expect(commandPid).toBeGreaterThan(0);
-      expect(isAlive(commandPid)).toBe(true);
-      // Signal the holder the way a person or a CI timeout would: the process
-      // the lock names, which the tests above pin to `run` itself.
-      expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
-      process.kill(Number(lockFile(dir, "pid").trim()), "SIGTERM");
-
-      const result = await done;
-      // 143 is TERM's own convention, so a caller can tell a signalled run from
-      // a command that failed — and the EXIT trap still ran.
-      expect({ shell, status: result.status }).toEqual({ shell, status: 143 });
-      expect(result.stdout).toContain("released by lane-a");
-      expect(existsSync(lockDir(dir))).toBe(false);
-      // The heartbeat is reaped, not merely orphaned: nothing may outlive the
-      // run, or a later lock refreshes on a pid the test can no longer account for.
-      await waitForDead(heartbeatPidOf(result.stdout));
-      // The command died with the wrapper. A trap on a foreground child is
-      // deferred until that child exits — measured at the full 30s under dash —
-      // so the signal has to be forwarded, or this sleep outlives the run.
-      await waitForDead(commandPid);
+      await signalRun(shell, "SIGTERM", 143);
     }
-  }, 20_000);
+  }, 30_000);
+
+  test("INT on run exits 130, releases the lock, and stops the command too", async () => {
+    for (const shell of SIGNAL_SHELLS) {
+      await signalRun(shell, "SIGINT", 130);
+    }
+  }, 30_000);
 
   test("exits with the command's own status, and still releases the lock", () => {
     const dir = scratch();

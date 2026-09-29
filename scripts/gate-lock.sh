@@ -277,9 +277,27 @@ acquire() {
 # the command refused to stop — the opposite of what the signal asked for.
 # Exiting 130/143 (not the command's own status) is what keeps the two apart
 # for a caller: the command is gone, and the lock is on its way out too.
+#
+# BOTH traps send TERM; the two exit codes are what tells the caller which
+# signal it was. `kill -INT` is not sent because it could not work: with job
+# control disabled, POSIX 2.11 (Shell Execution) has the child of an
+# asynchronous list start with SIGINT and SIGQUIT set to SIG_IGN, and the child
+# keeps that disposition — so under `"$@" &` a `sh` command ignores INT
+# outright and only a command that resets its own handlers (node does) is
+# reachable by it. Measured here, one shell, one instant: the same `kill -INT`
+# left the sh child alive and killed the node child. A forwarded INT therefore
+# gave the worst possible answer — `run` exited 130, released the lock, and left
+# `sh scripts/verify-manifests.sh` mutating the tree with no holder left and no
+# signal left to forward to it. TERM is not on that list, so it is the one
+# signal that reaches every command `run` can be given.
+#
+# `set -m` is NOT the way out of that: it would put the command in its own
+# process group, so the Ctrl-C the tty driver sends to the foreground group
+# would no longer reach the command either, and the job-control output it
+# prints would interleave with the command's own.
 forward_signal() {
   if [ -n "$cmd_pid" ]; then
-    kill -"$1" "$cmd_pid" 2>/dev/null
+    kill -TERM "$cmd_pid" 2>/dev/null
   fi
   exit "$2"
 }
@@ -318,7 +336,8 @@ run_cleanup() {
 # Hold the lock around one command, as the command's own holder. Everything a
 # gate needs to be correct about concurrency, in one call: the lock is taken
 # before the command starts, a heartbeat keeps it fresh while the command runs,
-# the command's own exit code is this one's, and INT/TERM stop both.
+# the command's own exit code is this one's, and INT is forwarded as TERM so
+# both signals stop the command.
 #
 # There is no capture: the command inherits this script's stdout and stderr
 # unchanged, because a gate that buffered a failing test run would report it
