@@ -742,7 +742,7 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
           new Request(`http://x/campaigns/briefs/${UNKNOWN_UUID}/duplicate`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ newId: "dup-unknown" }),
+            body: JSON.stringify({ name: "dup-unknown" }),
           }),
         );
         expect(resUnknown.status).toBe(404);
@@ -753,7 +753,7 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
           new Request(`http://x/campaigns/briefs/${uuid}/duplicate`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ newId: "dup-from-uuid" }),
+            body: JSON.stringify({ name: "dup-from-uuid" }),
           }),
         );
         expect(resUuid.status).toBe(201);
@@ -763,7 +763,7 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
           new Request(`http://x/campaigns/briefs/${slug}/duplicate`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ newId: "dup-from-slug" }),
+            body: JSON.stringify({ name: "dup-from-slug" }),
           }),
         );
         expect(resSlug.status).toBe(201);
@@ -794,7 +794,7 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
           new Request(`http://x/campaigns/briefs/${uuid}/duplicate`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ newId: "dup-race-vanished" }),
+            body: JSON.stringify({ name: "dup-race-vanished" }),
           }),
         );
         expect(resVanished.status).toBe(404);
@@ -808,7 +808,7 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
           new Request(`http://x/campaigns/briefs/${uuid}/duplicate`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ newId: "dup-race-failed" }),
+            body: JSON.stringify({ name: "dup-race-failed" }),
           }),
         );
         expect(resFailed.status).toBe(500);
@@ -837,7 +837,7 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
           new Request(`http://x/campaigns/briefs/${uuid}/duplicate`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ newId: "dup-resolve-fail-copy" }),
+            body: JSON.stringify({ name: "dup-resolve-fail-copy" }),
           }),
         );
         expect(res.status).toBe(500);
@@ -862,7 +862,7 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
           new Request("http://x/campaigns/briefs/camp-dup-fs-scan/duplicate", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ newId: "camp-dup-fs-scan-copy" }),
+            body: JSON.stringify({ name: "camp-dup-fs-scan-copy" }),
           }),
         );
         expect(res.status).toBe(201);

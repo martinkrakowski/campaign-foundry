@@ -68,7 +68,8 @@ async function withDerivedSlug<T>(name: string, attempt: (slug: string) => Promi
 }
 
 /**
- * POST /campaigns — mint a campaign (D177, D178). Body `{ name, type, source?, teamId? }`.
+ * POST /campaigns — mint a campaign (D177, D178). Body
+ * `{ name, type, source?, teamId?, teamOf? }`.
  *
  * The server derives the slug from `name` (the same rule `duplicate.post.ts`
  * uses), deduplicated per org: `-2`, `-3`, … — never a reserved id, never a
@@ -80,10 +81,20 @@ async function withDerivedSlug<T>(name: string, attempt: (slug: string) => Promi
  * campaign itself (PT-5b3, 0013): `type` is validated against the known
  * campaign types first (D177's correction: a blank brief cannot be a
  * version, so there is no brief body yet to carry it); a Save later never
- * clears either.
+ * clears either. `teamOf` (PT-5c2, D177/D178) — a campaign ref (uuid or
+ * slug) — inherits THAT campaign's team, for the web's Save as…, which
+ * mints no `source` and so has no other way to keep the open campaign's
+ * team: resolved through `resolveCampaign` then `campaignTeam`, never
+ * `canAssignTeam` (the caller already sees the source, so inheriting its
+ * team is not an assignment); an org-wide source means OMITTING `teamId`
+ * from the mint, never an explicit `null` (`canAssignTeam` rejects `null`
+ * for a non-owner); a ref that resolves to nothing answers 404 and mints
+ * NOTHING; on a backend with no team column (fs, D166 item 5), `teamOf` is
+ * ignored and the create still answers 201. An explicit `teamId` wins over
+ * an inherited `teamOf`.
  *
  * With a `source`: that campaign's latest version becomes version 1, exactly
- * as `duplicate.post.ts`'s `newId` path does today — brief-scoped assets and
+ * as `duplicate.post.ts`'s own `name` path does — brief-scoped assets and
  * the copy pool included. The caller's own `type` is ignored (never
  * validated for a sourced create): `createCampaign` stores the SOURCE
  * brief's own `type` instead (PT-5b3), while `name` is still the one the
@@ -109,6 +120,7 @@ export default defineEventHandler(async (event) => {
   let name: string;
   let source: string | undefined;
   let teamId: string | null | undefined;
+  let teamOf: string | undefined;
   let type: string | undefined;
   try {
     const body: unknown = await readBody(event);
@@ -155,6 +167,18 @@ export default defineEventHandler(async (event) => {
       }
       teamId = rawTeamId;
     }
+
+    // PT-5c2 (D177, D178): `teamOf` — a campaign REF (uuid or slug) whose
+    // team a BLANK create inherits, for the web's Save as… (which mints no
+    // `source`, so it has no other way to keep the open campaign's team).
+    // Resolved and applied below, in the blank-create branch only.
+    const rawTeamOf = record?.teamOf;
+    if (rawTeamOf !== undefined) {
+      if (typeof rawTeamOf !== "string" || rawTeamOf === "") {
+        throw new Error('"teamOf" must be a non-empty string.');
+      }
+      teamOf = rawTeamOf;
+    }
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: errorMessage(error) };
@@ -176,11 +200,34 @@ export default defineEventHandler(async (event) => {
   }
 
   if (source === undefined) {
+    // `teamOf` inherits, exactly the way a sourced create's own
+    // `sourceTeamId` does (PT-5b2 fix-round item 1): resolved within the
+    // caller's own scope — never through `canAssignTeam`, since inheriting a
+    // team the caller can already SEE is not an elevation — and only when
+    // the backend has teams at all (D166 item 5: ignored on fs, the create
+    // still answers 201). A ref that resolves to nothing (hidden or
+    // missing, PT-2d) answers 404 and mints nothing. An explicit `teamId`
+    // (validated by `canAssignTeam` above) wins over an inherited one.
+    let teamOfTeamId: string | null | undefined;
+    if (teamOf !== undefined && store.supportsTeams) {
+      let teamOfSlug: string;
+      try {
+        teamOfSlug = await resolveCampaignRef(scope, teamOf);
+      } catch (error) {
+        if (error instanceof CampaignNotFoundError) {
+          setResponseStatus(event, 404);
+          return { error: `Brief "${teamOf}" not found.` };
+        }
+        throw error;
+      }
+      teamOfTeamId = await store.campaignTeam(teamOfSlug);
+    }
+    const effectiveTeamId = teamId !== undefined ? teamId : teamOfTeamId;
     try {
       const created = await withDerivedSlug(name, (slug) =>
         store.withBriefLock(slug, async () => {
           try {
-            return await store.createCampaign(slug, { teamId, name, type });
+            return await store.createCampaign(slug, { teamId: effectiveTeamId, name, type });
           } catch (error) {
             if (isExistsError(error)) throw new SlugTakenError();
             throw error;

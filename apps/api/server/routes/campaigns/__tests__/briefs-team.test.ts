@@ -53,12 +53,37 @@ const t2Member: TenantContext = { orgId: "local", userId: "u2", roles: [], teamI
 
 /** POST /campaigns/briefs mounted for `tenant`; PUT needs `:id` in the path (D166 tests only ever target "camp"). */
 function mount(tenant: TenantContext) {
+  const createHandler = mountTenantRoute(briefsPostHandler, {
+    method: "POST",
+    path: "/campaigns/briefs",
+    tenant,
+  });
+  /**
+   * PT-5c2: `POST /campaigns/briefs` no longer mints a campaign that does not
+   * exist — this suite's fixtures still seed a campaign with one POST
+   * straight to `/campaigns/briefs` (team visibility on an already-saved
+   * brief is what these tests pin, not the create flow), so the wrapper
+   * mints the body's `id` first — best-effort: an EEXIST means an earlier
+   * step in the same test already reserved or saved it, and any other
+   * failure (a reserved id, teams unsupported) is left for the real handler
+   * to answer on its own terms. `req` is cloned to read `id` without
+   * consuming the body the real handler still needs to parse.
+   */
+  const create = async (req: Request): Promise<Response> => {
+    try {
+      const body = (await req.clone().json()) as { id?: unknown };
+      if (typeof body.id === "string") {
+        await getBriefStore(tenant)
+          .createCampaign(body.id)
+          .catch(() => undefined);
+      }
+    } catch {
+      // Not JSON, or no string id — the real handler answers its own 400.
+    }
+    return createHandler(req);
+  };
   return {
-    create: mountTenantRoute(briefsPostHandler, {
-      method: "POST",
-      path: "/campaigns/briefs",
-      tenant,
-    }),
+    create,
     update: mountTenantRoute(briefsPutHandler, {
       method: "PUT",
       path: "/campaigns/briefs/:id",
@@ -76,11 +101,11 @@ function mount(tenant: TenantContext) {
   };
 }
 
-const duplicateReq = (sourceId: string, newId: string) =>
+const duplicateReq = (sourceId: string, name: string) =>
   new Request(`http://x/campaigns/briefs/${sourceId}/duplicate`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ newId }),
+    body: JSON.stringify({ name }),
   });
 
 describe("POST/PUT /campaigns/briefs — teamId (D166, PT-2c item 3)", () => {
@@ -169,7 +194,9 @@ describe("POST/PUT /campaigns/briefs — teamId (D166, PT-2c item 3)", () => {
       }
     });
 
-    test("a versionless row hidden from this caller by team still answers 409, and is never written into", async () => {
+    // PT-5c2: a hidden target and a missing one now answer the SAME 404 —
+    // the old hidden-target 409 (D166 item 3) retires with it.
+    test("a versionless row hidden from this caller by team answers 404 like a missing one, and is never written into", async () => {
       const harness = await setupPgHarness();
       try {
         await harness.db.query(
@@ -181,7 +208,7 @@ describe("POST/PUT /campaigns/briefs — teamId (D166, PT-2c item 3)", () => {
         });
 
         const res = await mount(t2Member).create(postReq(sampleBrief));
-        expect(res.status).toBe(409);
+        expect(res.status).toBe(404);
 
         const { rows } = await harness.db.query<{ count: number }>(
           `select count(*)::int from brief_version bv
@@ -240,10 +267,16 @@ describe("POST/PUT /campaigns/briefs — teamId (D166, PT-2c item 3)", () => {
       const res = await mount(t1Member).create(postReq({ ...sampleBrief, teamId: "t2" }));
       expect(res.status).toBe(403);
 
-      const { rows } = await harness.db.query(
-        `select 1 from campaign where org_id = 'local' and slug = 'camp'`,
+      // PT-5c2: `mount(...).create`'s own test-harness mint (matching what a
+      // real `POST /campaigns` blank create leaves behind) means the campaign
+      // ROW can exist even on a refused Save — this pins that no VERSION was
+      // written, the invariant that matters now.
+      const { rows } = await harness.db.query<{ count: number }>(
+        `select count(*)::int from brief_version bv
+           join campaign c on c.id = bv.campaign_id
+          where c.org_id = 'local' and c.slug = 'camp'`,
       );
-      expect(rows).toHaveLength(0);
+      expect(rows[0]!.count).toBe(0);
     } finally {
       await harness.cleanup();
     }
@@ -254,10 +287,14 @@ describe("POST/PUT /campaigns/briefs — teamId (D166, PT-2c item 3)", () => {
     try {
       const res = await mount(owner).create(postReq({ ...sampleBrief, teamId: "ghost" }));
       expect(res.status).toBe(403);
-      const { rows } = await harness.db.query(
-        `select 1 from campaign where org_id = 'local' and slug = 'camp'`,
+      // PT-5c2: see the test above — the harness's own mint can leave a row;
+      // no VERSION is what "writes nothing" means now.
+      const { rows } = await harness.db.query<{ count: number }>(
+        `select count(*)::int from brief_version bv
+           join campaign c on c.id = bv.campaign_id
+          where c.org_id = 'local' and c.slug = 'camp'`,
       );
-      expect(rows).toHaveLength(0);
+      expect(rows[0]!.count).toBe(0);
     } finally {
       await harness.cleanup();
     }
@@ -676,38 +713,8 @@ describe("duplicate by name on Postgres (D177/D178, PT-5b2)", () => {
 });
 
 // qodo PRRT_kwDOSzP1zc6mgEyD (HIGH, security): a copy of a team-scoped source
-// made through either duplicate path must inherit the source's team, not
-// default to org-wide. The legacy `newId` path never inherited a team either
-// (createBrief(brief) with no options) — a pre-existing hole PT-2c left, not
-// one PT-5b2 opened; both paths are fixed together.
+// must inherit the source's team, not default to org-wide.
 describe("duplicate inherits the source campaign's team (PT-5b2 fix-round item 1)", () => {
-  test("legacy newId: the copy is still team-1, and hidden from a team-B member", async () => {
-    const harness = await setupPgHarness();
-    try {
-      await harness.db.query(
-        `insert into team (id, name, "memberCount", org_id, created_at) values
-           ($1, $2, 0, $3, now()), ($4, $5, 0, $3, now())`,
-        ["t1", "Team One", "local", "t2", "Team Two"],
-      );
-      await new PgBriefStore(harness.db, "local", "owner", ["owner"], []).createBrief(sampleBrief, {
-        teamId: "t1",
-      });
-
-      const res = await mount(t1Member).duplicate(duplicateReq("camp", "camp-copy"));
-      expect(res.status).toBe(201);
-
-      const { rows } = await harness.db.query<{ team_id: string | null }>(
-        `select team_id from campaign where org_id = 'local' and slug = 'camp-copy'`,
-      );
-      expect(rows[0]!.team_id).toBe("t1");
-
-      const t2Store = new PgBriefStore(harness.db, "local", "u2", [], ["t2"]);
-      expect(await t2Store.campaignVisibility("camp-copy")).toBe("hidden");
-    } finally {
-      await harness.cleanup();
-    }
-  });
-
   test("by name: the copy is still team-1, and hidden from a team-B member", async () => {
     const harness = await setupPgHarness();
     try {
@@ -774,16 +781,26 @@ describe("Save as / duplicate refuse a hidden asset source or target (D166, PT-2
       expect(res.status).toBe(404);
 
       expect(existsSync(join(harness.projectRoot, "assets", "inputs", "evil-camp"))).toBe(false);
-      const { rows } = await harness.db.query(
-        `select 1 from campaign where org_id = 'local' and slug = 'evil-camp'`,
+      // PT-5c2: `mount(...).create`'s own test-harness mint (matching what a
+      // real `POST /campaigns` blank create leaves behind) means the "evil-camp"
+      // ROW can exist even on a refused Save — no VERSION is what "copies
+      // nothing" and "writes nothing" mean now.
+      const { rows } = await harness.db.query<{ count: number }>(
+        `select count(*)::int from brief_version bv
+           join campaign c on c.id = bv.campaign_id
+          where c.org_id = 'local' and c.slug = 'evil-camp'`,
       );
-      expect(rows).toHaveLength(0);
+      expect(rows[0]!.count).toBe(0);
     } finally {
       await harness.cleanup();
     }
   });
 
-  test("POST answers 409 for a target id hidden by team, before any asset copy runs into it", async () => {
+  // PT-5c2: the target's hidden state now answers the SAME 404 a missing
+  // target does (D166 item 3's old EEXIST 409 retires) — but the source
+  // asset copy is still checked and refused BEFORE any write, so nothing
+  // ever lands in the hidden target's asset directory either way.
+  test("POST answers 404 for a target id hidden by team, before any asset copy runs into it", async () => {
     const harness = await setupPgHarness();
     try {
       await harness.db.query(
@@ -800,8 +817,9 @@ describe("Save as / duplicate refuse a hidden asset source or target (D166, PT-2
       writeFileSync(join(t2SrcAssets, "logo.png"), "T2-OWN-LOGO");
 
       // t2Member tries to create/overwrite "t1-camp" (hidden from them, so it
-      // reads as a fresh id) naming their own campaign's asset as source — the
-      // copy must never land in t1-camp's asset directory ahead of the 409.
+      // reads as unknown, PT-5c2) naming their own campaign's asset as
+      // source — the copy must never land in t1-camp's asset directory
+      // ahead of the 404.
       const res = await mount(t2Member).create(
         postReq({
           ...sampleBrief,
@@ -816,7 +834,7 @@ describe("Save as / duplicate refuse a hidden asset source or target (D166, PT-2
           ],
         }),
       );
-      expect(res.status).toBe(409);
+      expect(res.status).toBe(404);
 
       expect(existsSync(join(harness.projectRoot, "assets", "inputs", "t1-camp", "logo.png"))).toBe(
         false,
@@ -912,7 +930,14 @@ describe("Save as / duplicate refuse a hidden asset source or target (D166, PT-2
     }
   });
 
-  test("duplicate answers 409 for a newId hidden by team, before any asset copy runs into it", async () => {
+  // PT-5c2: duplicate no longer takes a client-named target — the server
+  // derives the slug from `name` and dedupes past any taken candidate
+  // (`withDerivedSlug`), the SAME EEXIST signal a hidden target and a
+  // visible one both raise (the unique `(org_id, slug)` constraint does not
+  // see team). A candidate that names an existing hidden campaign is
+  // therefore skipped, not refused: the copy lands on the next suffix and
+  // never touches — or copies assets into — the hidden campaign at all.
+  test("duplicate by name skips a candidate hidden by team, copying nothing into it", async () => {
     const harness = await setupPgHarness();
     try {
       await harness.db.query(
@@ -926,8 +951,10 @@ describe("Save as / duplicate refuse a hidden asset source or target (D166, PT-2
       mkdirSync(srcAssets, { recursive: true });
       writeFileSync(join(srcAssets, "logo.png"), "T2-OWN-LOGO");
 
-      const res = await mount(t2Member).duplicate(duplicateReq("t2-source", "t1-camp"));
-      expect(res.status).toBe(409);
+      const res = await mount(t2Member).duplicate(duplicateReq("t2-source", "T1 Camp"));
+      expect(res.status).toBe(201);
+      const json = (await res.json()) as { brief: { id: string } };
+      expect(json.brief.id).toBe("t1-camp-2");
 
       expect(existsSync(join(harness.projectRoot, "assets", "inputs", "t1-camp", "logo.png"))).toBe(
         false,
@@ -994,7 +1021,7 @@ describe("duplicate checks every asset source before copying any of them (PT-2c,
 
       // t2-source is visible to t2Member and — unlike the earlier "duplicate
       // 404s ... and copies nothing from it" test — HAS its own asset files,
-      // so copyAssets(id, newId) below has something to actually copy before
+      // so copyAssets(id, name) below has something to actually copy before
       // the second source (t1-camp, hidden from t2Member) is even checked.
       const t2Store = new PgBriefStore(harness.db, "local", "u2", [], ["t2"]);
       await t2Store.createBrief(

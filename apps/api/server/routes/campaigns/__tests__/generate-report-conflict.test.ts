@@ -3,8 +3,10 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler } from "h3";
+import { resetProjectRoot } from "@campaignfoundry/shared";
 import { getRunningJobId, resetJobs } from "../../../lib/jobs.js";
 import { setCapabilities } from "../../../lib/capabilities.js";
+import { getBriefStore } from "../../../lib/ports/index.js";
 import generateHandler from "../generate.post.js";
 import jobHandler from "../jobs/[id].get.js";
 
@@ -83,11 +85,17 @@ describe("POST /campaigns/generate — the report merge is a conditional write",
     throw new Error(`timed out waiting for job ${jobId}`);
   }
 
-  beforeEach(() => {
+  const origRoot = process.env.PROJECT_ROOT;
+
+  beforeEach(async () => {
     run.gate = Promise.resolve();
     run.open = () => {};
     dir = mkdtempSync(join(tmpdir(), "cf-report-conflict-"));
     process.env.OUTPUT_DIR = dir;
+    // PT-5c2: generate now requires a known campaign.
+    process.env.PROJECT_ROOT = dir;
+    resetProjectRoot();
+    await getBriefStore(LOCAL_TENANT).createCampaign("camp");
     setCapabilities({ motion: true });
   });
   afterEach(async () => {
@@ -95,6 +103,9 @@ describe("POST /campaigns/generate — the report merge is a conditional write",
     rmSync(dir, { recursive: true, force: true });
     if (origOut === undefined) delete process.env.OUTPUT_DIR;
     else process.env.OUTPUT_DIR = origOut;
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+    resetProjectRoot();
     setCapabilities({ motion: false, reason: "not probed" });
   });
 

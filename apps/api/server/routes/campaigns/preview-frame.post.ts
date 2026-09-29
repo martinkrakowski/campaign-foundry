@@ -26,6 +26,7 @@ import {
 import { parseBrief } from "../../lib/load-brief.js";
 import { LruCache } from "../../lib/preview-cache.js";
 import { platformZones } from "../../lib/platform-zones.js";
+import { getBriefStore } from "../../lib/ports/index.js";
 import { runEnvironment, type RunEnvironment } from "../../lib/run-environment.js";
 import { requestTenant } from "../../lib/tenant.js";
 
@@ -51,6 +52,10 @@ import { requestTenant } from "../../lib/tenant.js";
  * entering as a content hash of its bytes, never object identity — and consults
  * a small in-memory LRU before compositing. The key travels to the client in the
  * response header.
+ *
+ * PT-5c2: `brief.id` must name a known campaign (`campaignMeta` defined on
+ * both backends) or the answer is 404 — a hidden and a missing campaign
+ * identically, and nothing is rendered for either.
  */
 
 /** Bound on the in-memory frame cache — a few editor sessions' worth of cells. */
@@ -225,6 +230,13 @@ export default defineEventHandler(async (event) => {
   } catch {
     setResponseStatus(event, 500);
     return { error: "Could not read the run environment." };
+  }
+  // PT-5c2: the campaign must be known — see `generate.post.ts`'s identical
+  // gate. Previously this route had no check at all; a hidden and a missing
+  // campaign now answer the identical 404, and nothing is rendered for either.
+  if ((await getBriefStore(env).campaignMeta(brief.id)) === undefined) {
+    setResponseStatus(event, 404);
+    return { error: `Campaign "${brief.id}" not found.` };
   }
   const result = await previewAdapters(env).useCase.execute(brief, selection);
   if (!result.success) {

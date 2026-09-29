@@ -12,11 +12,13 @@ import {
   OpenRouterImageGenerator,
   ProceduralBackgroundGenerator,
 } from "@campaignfoundry/CreativeGeneration";
+import { resetProjectRoot } from "@campaignfoundry/shared";
 import route, {
   previewAdapters,
   previewBackgroundGenerator,
   resetPreviewAdapters,
 } from "../preview-frame.post.js";
+import { getBriefStore } from "../../../lib/ports/index.js";
 import { runEnvironment } from "../../../lib/run-environment.js";
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
 
@@ -93,17 +95,22 @@ describe("POST /campaigns/preview-frame", () => {
   let dir: string;
   const origRoot = process.env.PROJECT_ROOT;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "cf-preview-frame-"));
     mkdirSync(join(dir, "assets", "inputs"), { recursive: true });
     writeFileSync(join(dir, "assets", "inputs", "alpha-logo.png"), ONE_PX_PNG);
     process.env.PROJECT_ROOT = dir;
+    // `projectRoot()` is memoized per process, not per test.
+    resetProjectRoot();
+    // PT-5c2: preview-frame now requires a known campaign.
+    await getBriefStore(LOCAL_TENANT).createCampaign("camp");
     resetPreviewAdapters();
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
     if (origRoot === undefined) delete process.env.PROJECT_ROOT;
     else process.env.PROJECT_ROOT = origRoot;
+    resetProjectRoot();
   });
 
   test("returns image/png whose dimensions match the requested ratio, with the cache key in the header", async () => {

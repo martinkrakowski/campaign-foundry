@@ -392,7 +392,11 @@ describe("PT-2d: team gates on routes (D166)", () => {
     expect(resT1.status).toBe(200);
   });
 
-  test("POST /campaigns/generate answers 404 for team-B on stored hidden campaign, 202 for team-1, and 202 for unknown draft", async () => {
+  // PT-5c2 closes the gap this test used to document: generate now requires
+  // a KNOWN campaign (`campaignMeta` defined — the campaign must already be
+  // minted through `POST /campaigns`), so an unsaved, never-minted "draft"
+  // id no longer runs — it answers the identical 404 a hidden campaign does.
+  test("POST /campaigns/generate answers 404 for team-B on stored hidden campaign, 404 for an unknown/unminted draft, and 202 for team-1", async () => {
     const callTB = mountTenantRoute(generatePostHandler, {
       method: "POST",
       path: "/campaigns/generate",
@@ -408,7 +412,7 @@ describe("PT-2d: team gates on routes (D166)", () => {
     expect(resTB.status).toBe(404);
     expect(await resTB.json()).toEqual({ error: 'Campaign "t1-camp" not found.' });
 
-    // Draft with unknown id still works for team-B
+    // A never-minted "draft" id answers the SAME 404, and starts no job.
     const resDraftTB = await callTB(
       new Request("http://x/campaigns/generate?model=procedural", {
         method: "POST",
@@ -416,9 +420,8 @@ describe("PT-2d: team gates on routes (D166)", () => {
         body: JSON.stringify({ ...sampleBrief, id: "draft-camp" }),
       }),
     );
-    expect(resDraftTB.status).toBe(202);
-    const { jobId: draftJobId } = (await resDraftTB.json()) as { jobId: string };
-    await awaitSettled(draftJobId, tBMember);
+    expect(resDraftTB.status).toBe(404);
+    expect(await resDraftTB.json()).toEqual({ error: 'Campaign "draft-camp" not found.' });
 
     const callT1 = mountTenantRoute(generatePostHandler, {
       method: "POST",
@@ -534,6 +537,10 @@ describe("PT-2d: team gates on routes (D166)", () => {
     expect(existsSync(join(harness.outputRoot, "packages", "t1-camp"))).toBe(true);
   });
 
+  // PT-5c2: plan now gates the WHOLE route on a known campaign, not just the
+  // pool — a hidden campaign 404s before the planner ever runs, an even
+  // tighter leak-proofing than the old pool-only hide (422, which still
+  // named the campaign's own pool file path).
   test("POST /campaigns/plan leaks no headlines for a hidden campaign", async () => {
     await writePool(t1Member, {
       briefId: "t1-camp",
@@ -566,11 +573,8 @@ describe("PT-2d: team gates on routes (D166)", () => {
         body: JSON.stringify(pooledBrief),
       }),
     );
-    expect(resTB.status).toBe(422);
-    expect(await resTB.json()).toEqual({
-      error:
-        'Headline axis "pool://copy" needs at least one approved entry in copy pool briefs/t1-camp/pools.json.',
-    });
+    expect(resTB.status).toBe(404);
+    expect(await resTB.json()).toEqual({ error: 'Campaign "t1-camp" not found.' });
 
     const callT1 = mountTenantRoute(planPostHandler, {
       method: "POST",

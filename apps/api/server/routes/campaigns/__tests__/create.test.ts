@@ -14,7 +14,6 @@ import { InvalidCopyPoolError } from "../../../lib/ports/pool-store.port.js";
 import { getAssetStore, getBriefStore, getPoolStore } from "../../../lib/ports/index.js";
 import { PgBriefStore } from "../../../lib/ports/pg-brief-store.js";
 import createHandler from "../index.post.js";
-import duplicateHandler from "../briefs/[id]/duplicate.post.js";
 import briefsGetHandler from "../briefs.get.js";
 import resultGetHandler from "../result.get.js";
 import decisionsGetHandler from "../decisions.get.js";
@@ -41,6 +40,34 @@ const createReq = (body: unknown) =>
   });
 
 function mount(tenant: TenantContext = LOCAL_TENANT) {
+  const createBriefHandler = mountTenantRoute(briefsPostHandler, {
+    method: "POST",
+    path: "/campaigns/briefs",
+    tenant,
+  });
+  /**
+   * PT-5c2: `POST /campaigns/briefs` no longer mints a campaign that does not
+   * exist — this suite's own fixtures still seed a SOURCE campaign with one
+   * POST straight to `/campaigns/briefs` (what a sourced `POST /campaigns`
+   * copies FROM is what these tests pin, not how the source itself got
+   * saved), so the wrapper mints the body's `id` first — best-effort: an
+   * EEXIST means an earlier step in the same test already reserved or saved
+   * it. `req` is cloned to read `id` without consuming the body the real
+   * handler still needs to parse.
+   */
+  const createBrief = async (req: Request): Promise<Response> => {
+    try {
+      const body = (await req.clone().json()) as { id?: unknown };
+      if (typeof body.id === "string") {
+        await getBriefStore(tenant)
+          .createCampaign(body.id)
+          .catch(() => undefined);
+      }
+    } catch {
+      // Not JSON, or no string id — the real handler answers its own 400.
+    }
+    return createBriefHandler(req);
+  };
   return {
     create: mountTenantRoute(createHandler, { method: "POST", path: "/campaigns", tenant }),
     list: mountTenantRoute(briefsGetHandler, { path: "/campaigns/briefs", tenant }),
@@ -56,11 +83,7 @@ function mount(tenant: TenantContext = LOCAL_TENANT) {
       path: "/campaigns/packages/:campaignId",
       tenant,
     }),
-    createBrief: mountTenantRoute(briefsPostHandler, {
-      method: "POST",
-      path: "/campaigns/briefs",
-      tenant,
-    }),
+    createBrief,
   };
 }
 
@@ -314,6 +337,150 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
           await harness.cleanup();
         }
       });
+
+      describe("teamOf (PT-5c2): a blank create inherits another campaign's team", () => {
+        test("teamOf from a team-1 source lands the new campaign in team-1", async () => {
+          const harness = await setup();
+          const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+          try {
+            await pgHarness.db.query(
+              `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+              ["t1", "Team One", "local"],
+            );
+            const source = await mount(t1Member).create(
+              createReq({ name: "Team One Source", teamId: "t1" }),
+            );
+            const { slug: sourceSlug } = (await source.json()) as { slug: string };
+
+            const res = await mount(t1Member).create(
+              createReq({ name: "Copy Of Teamed", teamOf: sourceSlug }),
+            );
+            expect(res.status).toBe(201);
+            const { slug } = (await res.json()) as { slug: string };
+            const { rows } = await pgHarness.db.query<{ team_id: string | null }>(
+              `select team_id from campaign where org_id = 'local' and slug = $1`,
+              [slug],
+            );
+            expect(rows[0]!.team_id).toBe("t1");
+          } finally {
+            await harness.cleanup();
+          }
+        });
+
+        // canAssignTeam rejects an EXPLICIT teamId: null for a non-owner, but
+        // teamOf never goes through canAssignTeam — the caller already sees
+        // the org-wide source, so inheriting its (lack of a) team is not an
+        // assignment.
+        test("a non-owner member's Save as of an org-wide source answers 201 and stays org-wide", async () => {
+          const harness = await setup();
+          const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+          try {
+            const source = await mount().create(createReq({ name: "Org Wide Source" }));
+            const { slug: sourceSlug } = (await source.json()) as { slug: string };
+
+            const res = await mount(t1Member).create(
+              createReq({ name: "Copy Of Org Wide", teamOf: sourceSlug }),
+            );
+            expect(res.status).toBe(201);
+            const { slug } = (await res.json()) as { slug: string };
+            const { rows } = await pgHarness.db.query<{ team_id: string | null }>(
+              `select team_id from campaign where org_id = 'local' and slug = $1`,
+              [slug],
+            );
+            expect(rows[0]!.team_id).toBeNull();
+          } finally {
+            await harness.cleanup();
+          }
+        });
+
+        test("a hidden teamOf answers 404 and mints nothing", async () => {
+          const harness = await setup();
+          const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+          try {
+            await pgHarness.db.query(
+              `insert into team (id, name, "memberCount", org_id, created_at) values ($1, $2, 0, $3, now())`,
+              ["t1", "Team One", "local"],
+            );
+            const hidden = await mount(LOCAL_TENANT).create(
+              createReq({ name: "Hidden Source", teamId: "t1" }),
+            );
+            const { slug: hiddenSlug } = (await hidden.json()) as { slug: string };
+
+            const res = await mount(t2Member).create(
+              createReq({ name: "Copy Of Hidden", teamOf: hiddenSlug }),
+            );
+            expect(res.status).toBe(404);
+            expect(await res.json()).toEqual({ error: `Brief "${hiddenSlug}" not found.` });
+
+            const { rows } = await pgHarness.db.query(
+              `select 1 from campaign where org_id = 'local' and slug = 'copy-of-hidden'`,
+            );
+            expect(rows).toHaveLength(0);
+          } finally {
+            await harness.cleanup();
+          }
+        });
+
+        test("an unknown teamOf answers 404 and mints nothing", async () => {
+          const harness = await setup();
+          const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+          try {
+            const res = await mount().create(
+              createReq({ name: "Copy Of Nothing", teamOf: "no-such-campaign" }),
+            );
+            expect(res.status).toBe(404);
+            const { rows } = await pgHarness.db.query(
+              `select 1 from campaign where org_id = 'local' and slug = 'copy-of-nothing'`,
+            );
+            expect(rows).toHaveLength(0);
+          } finally {
+            await harness.cleanup();
+          }
+        });
+
+        test("an explicit teamId wins over teamOf", async () => {
+          const harness = await setup();
+          const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+          try {
+            await pgHarness.db.query(
+              `insert into team (id, name, "memberCount", org_id, created_at) values
+                 ($1, $2, 0, $3, now()), ($4, $5, 0, $3, now())`,
+              ["t1", "Team One", "local", "t2", "Team Two"],
+            );
+            const source = await mount(LOCAL_TENANT).create(
+              createReq({ name: "Team One Source Again", teamId: "t1" }),
+            );
+            const { slug: sourceSlug } = (await source.json()) as { slug: string };
+
+            const res = await mount(LOCAL_TENANT).create(
+              createReq({ name: "Explicit Wins", teamOf: sourceSlug, teamId: "t2" }),
+            );
+            expect(res.status).toBe(201);
+            const { slug } = (await res.json()) as { slug: string };
+            const { rows } = await pgHarness.db.query<{ team_id: string | null }>(
+              `select team_id from campaign where org_id = 'local' and slug = $1`,
+              [slug],
+            );
+            expect(rows[0]!.team_id).toBe("t2");
+          } finally {
+            await harness.cleanup();
+          }
+        });
+      });
+    }
+
+    if (backend === "fs") {
+      test("teamOf on fs is ignored (D166 item 5), and the create still answers 201", async () => {
+        const harness = await setup();
+        try {
+          const res = await mount().create(
+            createReq({ name: "Ignored TeamOf", teamOf: "whatever" }),
+          );
+          expect(res.status).toBe(201);
+        } finally {
+          await harness.cleanup();
+        }
+      });
     }
 
     test("an unexpected createCampaign failure (not EFORBIDDEN) surfaces as 500", async () => {
@@ -331,49 +498,15 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
     });
 
     describe("sourced create (copies the source's latest version as version 1)", () => {
-      // coderabbit PRRT_kwDOSzP1zc6mg8cg: the legacy `newId` path mints
-      // nothing, and on fs its visibility check cannot see a reserved
-      // directory, so a failure there must never release a reservation that
-      // another request (this blank create) made.
-      test("a failed legacy newId duplicate leaves another request's reservation in place", async () => {
-        const harness = await setup();
-        try {
-          const { create, createBrief } = mount();
-          await createBrief(
-            new Request("http://x/campaigns/briefs", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify(sampleBrief("source-camp")),
-            }),
-          );
-          const blank = await create(createReq({ name: "Held", type: "social-post" }));
-          expect(((await blank.json()) as { slug: string }).slug).toBe("held");
-
-          const duplicate = mountTenantRoute(duplicateHandler, {
-            method: "POST",
-            path: "/campaigns/briefs/:id/duplicate",
-            tenant: LOCAL_TENANT,
-          });
-          const spy = vi
-            .spyOn(getAssetStore(LOCAL_TENANT), "copyAssets")
-            .mockRejectedValue(Object.assign(new Error("EIO"), { code: "EIO" }));
-          await duplicate(
-            new Request("http://x/campaigns/briefs/source-camp/duplicate", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ newId: "held" }),
-            }),
-          );
-          spy.mockRestore();
-
-          // "held" is still reserved, so the same name dedupes past it.
-          const again = await create(createReq({ name: "Held", type: "social-post" }));
-          expect(((await again.json()) as { slug: string }).slug).toBe("held-2");
-        } finally {
-          await harness.cleanup();
-        }
-      });
-
+      // PT-5c2: duplicate's own dedupe (`name`, not a literal `newId`) means a
+      // failure at duplicate's copyAssets step lands on a candidate slug IT
+      // minted (the derived slug dedupes past whatever another request
+      // already reserved), so it only ever releases its OWN reservation —
+      // never one another request made. That EIO-mid-copy release shape is
+      // already covered directly: "a failure at createBrief leaves no listed
+      // brief and no dest pool" (briefs.test.ts) and this describe block's
+      // own sourced-create race tests below exercise the identical
+      // release-on-failure path for `index.post.ts`'s attempt().
       test("mints the campaign, writes version 1, and answers a revision", async () => {
         const harness = await setup();
         try {

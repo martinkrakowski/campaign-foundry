@@ -35,6 +35,10 @@ import {
  * settles waits for it (bounded by the probe's own timeout); if the probe still has
  * not landed the answer is 503 with a retry hint — never a 400 that reads as an
  * invalid brief.
+ *
+ * PT-5c2: the campaign must be known (`campaignMeta` defined on both
+ * backends) — a hidden and a missing campaign answer the identical 404, and
+ * nothing is claimed or written for either.
  */
 
 export default defineEventHandler(async (event) => {
@@ -103,8 +107,12 @@ export default defineEventHandler(async (event) => {
     return { error: "Could not read the run environment.", campaignId: brief.id };
   }
 
+  // PT-5c2: the campaign must be known — `campaignMeta` is defined on both
+  // backends only for a minted campaign (unlike `campaignVisibility`, which
+  // misses a versionless campaign on fs) — a hidden and a missing campaign
+  // answer the identical 404.
   const briefs = getBriefStore(env);
-  if (briefs.supportsTeams && (await briefs.campaignVisibility(brief.id)) === "hidden") {
+  if ((await briefs.campaignMeta(brief.id)) === undefined) {
     setResponseStatus(event, 404);
     return { error: `Campaign "${brief.id}" not found.` };
   }

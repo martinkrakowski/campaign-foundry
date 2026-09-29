@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-5c2",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/index.post.ts",
+      "before": "    const effectiveTeamId = teamId !== undefined ? teamId : teamOfTeamId;\n",
+      "after": "    const effectiveTeamId = teamId; // mutant: teamOf ignored on Postgres\n",
+      "because": "teamOf is ignored on Postgres (the new campaign never inherits the source's team)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/create.test.ts",
+        "-t",
+        "teamOf from a team-1 source lands the new campaign in team-1"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

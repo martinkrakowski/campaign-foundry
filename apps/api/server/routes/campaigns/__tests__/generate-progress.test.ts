@@ -3,8 +3,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler } from "h3";
+import { resetProjectRoot } from "@campaignfoundry/shared";
 import { resetJobs } from "../../../lib/jobs.js";
 import { setCapabilities } from "../../../lib/capabilities.js";
+import { getBriefStore } from "../../../lib/ports/index.js";
 import generateHandler from "../generate.post.js";
 import jobHandler from "../jobs/[id].get.js";
 
@@ -90,12 +92,18 @@ describe("POST /campaigns/generate — the job carries the run's real progress",
     throw new Error(`timed out; last snapshot ${JSON.stringify(last)}`);
   }
 
-  beforeEach(() => {
+  const origRoot = process.env.PROJECT_ROOT;
+
+  beforeEach(async () => {
     run.gate = Promise.resolve();
     run.open = () => {};
     run.reported = undefined;
     dir = mkdtempSync(join(tmpdir(), "cf-generate-progress-"));
     process.env.OUTPUT_DIR = dir;
+    // PT-5c2: generate now requires a known campaign.
+    process.env.PROJECT_ROOT = dir;
+    resetProjectRoot();
+    await getBriefStore(LOCAL_TENANT).createCampaign("camp");
     setCapabilities({ motion: true });
   });
   afterEach(async () => {
@@ -103,6 +111,9 @@ describe("POST /campaigns/generate — the job carries the run's real progress",
     rmSync(dir, { recursive: true, force: true });
     if (origOut === undefined) delete process.env.OUTPUT_DIR;
     else process.env.OUTPUT_DIR = origOut;
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+    resetProjectRoot();
     setCapabilities({ motion: false, reason: "not probed" });
   });
 

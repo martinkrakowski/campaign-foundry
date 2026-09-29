@@ -509,7 +509,7 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
         new Request("http://x/campaigns/briefs/camp/duplicate", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ newId: "camp-copy" }),
+          body: JSON.stringify({ name: "camp-copy" }),
         }),
       );
       expect(resAcme.status).toBe(404);
@@ -523,7 +523,7 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
         new Request("http://x/campaigns/briefs/camp/duplicate", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ newId: "camp-copy" }),
+          body: JSON.stringify({ name: "camp-copy" }),
         }),
       );
       expect(resLocal.status).toBe(201);
@@ -546,7 +546,7 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
         new Request("http://x/campaigns/briefs/camp/duplicate", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ newId: "camp-copy" }),
+          body: JSON.stringify({ name: "camp-copy" }),
         }),
       );
       expect(resAcme.status).toBe(404);
@@ -560,7 +560,7 @@ describe("PT-2b: cross-tenant ownership at the port (item 2 and item 4)", () => 
         new Request("http://x/campaigns/briefs/camp/duplicate", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ newId: "camp-copy" }),
+          body: JSON.stringify({ name: "camp-copy" }),
         }),
       );
       expect(resLocal.status).toBe(201);
