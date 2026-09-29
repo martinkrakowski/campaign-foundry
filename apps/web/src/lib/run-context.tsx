@@ -1363,9 +1363,28 @@ export function RunProvider({ children }: { children: ReactNode }) {
     // not an application (D37), so restoring it here would put a released campaign
     // back on the shell and let Generate spend image-generation credits on it.
     if (briefDecidedRef.current) return cleanup;
+    // A page that names its own campaign in the URL owns that campaign (D180: the
+    // URL is the single source of truth for which campaign a shell page shows), and
+    // its own `?campaign=` open is already in flight by the time this effect runs —
+    // `usePageCampaignParam` is a child of this provider, and a child's effects run
+    // first. The pointer read below is ONE request where that open is a
+    // `getCampaign` and then a `listBriefs`, so it normally answers FIRST; because
+    // `briefDecidedRef` only flips when the page's open COMMITS, the pointer's
+    // `openPageCampaign` used to bump `pageCampaignSeq` and supersede it, leaving
+    // the pointer's campaign on screen under the URL's id and writing it back as
+    // the pointer. The pointer decides where a BARE url goes; a url that is not
+    // bare is not its to decide (fix round, qodo PRRT_kwDOSzP1zc6nELaK).
+    const pageCampaign = new URLSearchParams(window.location.search).get("campaign");
+    if (pageCampaign !== null) return cleanup;
+    // A page open that starts while this read is out supersedes it, exactly as one
+    // that started before it does. `openPageCampaign` is only reachable through a
+    // page hook, so this is a navigation from a bare url to a campaign-addressed
+    // one while the pointer is still in flight; without the check the pointer's
+    // later answer would take the campaign back (same finding).
+    const owned = pageCampaignSeq.current;
     void fetchLastOpened()
       .then((campaignId) => {
-        if (!active || briefDecidedRef.current) return;
+        if (!active || briefDecidedRef.current || pageCampaignSeq.current !== owned) return;
         if (campaignId !== null) {
           openPageCampaign(campaignId);
           return;

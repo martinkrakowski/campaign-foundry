@@ -4939,6 +4939,166 @@ describe("RunProvider — the page's ?campaign= (PT-5c3, D180)", () => {
     expect(result.current.membershipError).toBeNull();
   });
 
+  // Fix round (qodo PRRT_kwDOSzP1zc6nELaK). The mount effect's pointer read is
+  // ONE request; the page's own `?campaign=` open is a `getCampaign` and then a
+  // `listBriefs`. The pointer therefore normally answers first, and because
+  // `briefDecidedRef` only flips when the page's open COMMITS, the pointer's
+  // `openPageCampaign` bumped `pageCampaignSeq` and threw the URL's campaign
+  // away — showing one campaign under another's id, and writing the wrong one
+  // back as the pointer. The listing here is held until the pointer has been
+  // answered, so the ordering the finding names is the ordering the test runs.
+  const pointerRaceApi = (opts: {
+    pointer: string;
+    /** Held so the page's own open cannot commit before the pointer answers. */
+    holdListing?: boolean;
+  }) => {
+    let releaseListing!: () => void;
+    const listing = opts.holdListing
+      ? new Promise<Response>((res) => {
+          releaseListing = () =>
+            res(
+              json({
+                briefs: [
+                  { file: `${SLUG}.yaml`, brief: storedBrief, campaignId: UUID },
+                  {
+                    file: "other.yaml",
+                    brief: { ...storedBrief, id: "other-slug", campaignMessage: "the pointer's" },
+                    campaignId: opts.pointer,
+                  },
+                ],
+              }),
+            );
+        })
+      : Promise.resolve(
+          json({
+            briefs: [
+              { file: `${SLUG}.yaml`, brief: storedBrief, campaignId: UUID },
+              {
+                file: "other.yaml",
+                brief: { ...storedBrief, id: "other-slug", campaignMessage: "the pointer's" },
+                campaignId: opts.pointer,
+              },
+            ],
+          }),
+        );
+    vi.mocked(globalThis.fetch).mockImplementation((url) => {
+      const u = String(url);
+      if (u === `${API}/campaigns/last-opened`)
+        return Promise.resolve(json({ campaignId: opts.pointer }));
+      if (u === `${API}/campaigns/briefs`) return listing;
+      if (u === `${API}/campaigns/${UUID}` || u === `${API}/campaigns/${opts.pointer}`) {
+        return Promise.resolve(
+          json({
+            campaignId: u.endsWith(UUID) ? UUID : opts.pointer,
+            slug: u.endsWith(UUID) ? SLUG : "other-slug",
+            name: "Autumn Launch",
+            type: "social-post",
+            hasVersion: true,
+          }),
+        );
+      }
+      return Promise.resolve(json(EMPTY_REPORT));
+    });
+    return () => releaseListing?.();
+  };
+
+  test("a full page load of ?campaign= keeps the URL's campaign: the mount pointer never supersedes it (qodo PRRT_kwDOSzP1zc6nELaK)", async () => {
+    const OTHER = "018f6d2a-1111-7b4a-8d21-3f9e2a5b6c7d";
+    const releaseListing = pointerRaceApi({ pointer: OTHER, holdListing: true });
+    const probe = () => {
+      usePageCampaignParam();
+      return useRun();
+    };
+    window.history.replaceState(null, "", `/grid?campaign=${UUID}`);
+    const { result, unmount } = renderHook(probe, { wrapper });
+    // The pointer has answered and its own open has run to completion; only
+    // then is the page's held listing released.
+    await waitFor(() => expect(result.current.brief.id).not.toBe(SLUG));
+    await act(async () => {
+      releaseListing();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // The URL is the source of truth (D180): the campaign it names is the one
+    // on screen — not the pointer's, under the URL's id.
+    expect(result.current.brief.id).toBe(SLUG);
+    expect(result.current.brief.campaignMessage).toBe("m");
+    unmount();
+    window.history.replaceState(null, "", "/grid");
+  });
+
+  test("a page open that starts while the mount pointer is in flight wins it (qodo PRRT_kwDOSzP1zc6nELaK)", async () => {
+    const OTHER = "018f6d2a-1111-7b4a-8d21-3f9e2a5b6c7d";
+    // A deferred Response PER pointer read, not one shared promise: a Response
+    // body is read once, and two callers read the pointer on a bare page (the
+    // shell's restore and the page's redirect), so a single shared Response
+    // would starve the second of them and quietly disarm this test.
+    const pointerReads: (() => void)[] = [];
+    // The visitor's own page open is held mid-flight, so the pointer's answer
+    // lands while it is still resolving — the window the seq guard exists for.
+    let releaseListing!: () => void;
+    const listingHeld = new Promise<Response>((r) => {
+      releaseListing = () =>
+        r(
+          json({
+            briefs: [
+              { file: `${SLUG}.yaml`, brief: storedBrief, campaignId: UUID },
+              {
+                file: "other.yaml",
+                brief: { ...storedBrief, id: "other-slug", campaignMessage: "the pointer's" },
+                campaignId: OTHER,
+              },
+            ],
+          }),
+        );
+    });
+    vi.mocked(globalThis.fetch).mockImplementation((url) => {
+      const u = String(url);
+      if (u === `${API}/campaigns/last-opened`) {
+        return new Promise<Response>((res) => {
+          pointerReads.push(() => res(json({ campaignId: OTHER })));
+        });
+      }
+      if (u === `${API}/campaigns/briefs`) return listingHeld;
+      if (u === `${API}/campaigns/${UUID}` || u === `${API}/campaigns/${OTHER}`) {
+        return Promise.resolve(
+          json({
+            campaignId: u.endsWith(UUID) ? UUID : OTHER,
+            slug: u.endsWith(UUID) ? SLUG : "other-slug",
+            name: "Autumn Launch",
+            type: "social-post",
+            hasVersion: true,
+          }),
+        );
+      }
+      return Promise.resolve(json(EMPTY_REPORT));
+    });
+    // A BARE page, so the mount effect does ask for the pointer at all.
+    window.history.replaceState(null, "", "/grid");
+    const probe = () => {
+      usePageCampaignParam();
+      return useRun();
+    };
+    const { result, unmount } = renderHook(probe, { wrapper });
+    // A navigation to a campaign-addressed url while that read is still out:
+    // the visitor's own page, which must own the campaign.
+    await act(async () => {
+      result.current.openPageCampaign(UUID);
+    });
+    await act(async () => {
+      for (const answer of pointerReads) answer();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await act(async () => {
+      releaseListing();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // Without the seq guard the pointer's own open superseded this one and the
+    // shell fell all the way back to the default brief.
+    expect(result.current.brief.id).toBe(SLUG);
+    expect(result.current.brief.campaignMessage).toBe("m");
+    unmount();
+  });
+
   test("the page hook hands the URL's ?campaign= through, and a bare page hands null", async () => {
     const urls: string[] = [];
     mockPipelineApi({
