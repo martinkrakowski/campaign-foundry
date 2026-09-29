@@ -985,7 +985,9 @@ describe("GridPage — the page's ?campaign= (PT-5c3, D180)", () => {
                   targetRegion: "DE",
                   targetAudience: "a",
                   campaignMessage: "m",
-                  products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+                  products: [
+                    { id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" },
+                  ],
                 },
               },
             ],
