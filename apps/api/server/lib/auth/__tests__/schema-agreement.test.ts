@@ -1,4 +1,4 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, afterEach } from "vitest";
 import { betterAuth } from "better-auth";
 import { getMigrations } from "better-auth/db/migration";
 import { loadMigrations, migrate } from "../../db/migrate.js";
@@ -18,15 +18,39 @@ import type { Mail, MailerPort } from "../mailer.port.js";
  * fresh `CREATE DATABASE` on the server `TEST_PG_URL` names), which is what
  * these tests need: each applies its own migrations.
  */
-async function migratedAuthDatabase(): Promise<Awaited<ReturnType<typeof authDatabase>>> {
+/**
+ * Teardown, not the last line of a test. Every test here opens a database that
+ * is a `cf_t_*` on a real server rather than an object the collector reclaims,
+ * and an assertion that fails before the close leaves it there —
+ * `pglite-client.ts`'s per-file check would then fail the file and name the
+ * leak without removing it, so the next run on that server starts with it.
+ */
+const opened: Array<() => Promise<void>> = [];
+
+afterEach(async () => {
+  for (const close of opened.splice(0)) await close();
+});
+
+/**
+ * An empty database, registered for that teardown before anything can fail on
+ * it — the migration below is the first thing that can reject, and on a server
+ * its database outlives the rejection.
+ */
+async function trackedAuthDatabase(): Promise<Awaited<ReturnType<typeof authDatabase>>> {
   const database = await authDatabase();
+  opened.push(database.end);
+  return database;
+}
+
+async function migratedAuthDatabase(): Promise<Awaited<ReturnType<typeof authDatabase>>> {
+  const database = await trackedAuthDatabase();
   await migrate(database.sql, await loadMigrations());
   return database;
 }
 
 describe("Better Auth against the test database (PT-1a, D174b(2))", () => {
   test("a real operation runs through the double: magic-link sign-in writes a verification row and sends mail", async () => {
-    const { pool, sql, end } = await migratedAuthDatabase();
+    const { pool, sql } = await migratedAuthDatabase();
     const sent: Mail[] = [];
     const mailer: MailerPort = {
       send: async (mail) => {
@@ -58,7 +82,6 @@ describe("Better Auth against the test database (PT-1a, D174b(2))", () => {
     );
     expect(rows.rows).toHaveLength(1);
     expect(rows.rows[0]!.identifier).toEqual(expect.any(String));
-    await end();
   });
 
   /**
@@ -70,7 +93,7 @@ describe("Better Auth against the test database (PT-1a, D174b(2))", () => {
    * first time a route touches the missing piece.
    */
   test("0008_auth leaves nothing for Better Auth's own migration inspection to create", async () => {
-    const { pool, end } = await migratedAuthDatabase();
+    const { pool } = await migratedAuthDatabase();
     const instance = betterAuth(
       authOptions({
         database: pool,
@@ -86,11 +109,10 @@ describe("Better Auth against the test database (PT-1a, D174b(2))", () => {
     expect(plan.toBeAdded).toEqual([]);
     expect(plan.toBeAddedIndexes).toEqual([]);
     expect(plan.unsafeChanges).toEqual([]);
-    await end();
   });
 
   test("0008_auth refuses a second account row for the same provider identity", async () => {
-    const { sql, end } = await migratedAuthDatabase();
+    const { sql } = await migratedAuthDatabase();
     await sql.exec(
       "insert into \"user\" (id, name, email, email_verified, updated_at) values ('u1', 'U', 'u1@example.com', false, now())",
     );
@@ -102,11 +124,10 @@ describe("Better Auth against the test database (PT-1a, D174b(2))", () => {
 
     await link("a1");
     await expect(link("a2")).rejects.toThrow(/account_provider_id_account_id_uidx/);
-    await end();
   });
 
   test("0008_auth is additive: applies on top of an existing org column from 0007 without assuming 0005-0007 exist", async () => {
-    const { pool, sql, end } = await authDatabase();
+    const { pool, sql } = await trackedAuthDatabase();
     const all = await loadMigrations();
     const prior = all.filter((m) => m.id < "0008_auth");
     await migrate(sql, prior);
@@ -138,6 +159,5 @@ describe("Better Auth against the test database (PT-1a, D174b(2))", () => {
     expect(plan.toBeAdded).toEqual([]);
     expect(plan.toBeAddedIndexes).toEqual([]);
     expect(plan.unsafeChanges).toEqual([]);
-    await end();
   });
 });

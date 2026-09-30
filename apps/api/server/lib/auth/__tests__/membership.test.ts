@@ -23,9 +23,12 @@ describe("memberTenant (PT-1a item 3)", () => {
   // it is closed here rather than left for `pglite-client.ts`'s leak assertion
   // to fail the file.
   let db: SqlClient | undefined;
+  let auth: Awaited<ReturnType<typeof authDatabase>> | undefined;
   afterEach(async () => {
     await db?.end();
     db = undefined;
+    await auth?.end();
+    auth = undefined;
   });
 
   test("undefined when the user has no membership at all", async () => {
@@ -187,7 +190,10 @@ describe("memberTenant (PT-1a item 3)", () => {
     });
 
     test("proves Better Auth session carries activeOrganizationId", async () => {
-      const { pool, sql, end } = await authDatabase();
+      // Tracked before the migration, so a rejected one cannot leave the
+      // database behind on a server backend.
+      auth = await authDatabase();
+      const { pool, sql } = auth;
       await migrate(sql, await loadMigrations());
 
       let magicUrl = "";
@@ -258,8 +264,6 @@ describe("memberTenant (PT-1a item 3)", () => {
       const tenant = await memberTenant(sql, session!.user.id, activeOrgId);
       expect(tenant?.orgId).toBe("zeta");
       expect(tenant?.roles).toEqual(["owner"]);
-
-      await end();
     });
   });
 });
