@@ -254,6 +254,14 @@ describe("runCli — refusals", () => {
     expect(err.join("\n")).toContain("EACCES: read-only file system");
   });
 
+  test("the written brief ends with a newline, as every other text file here does", async () => {
+    const { io, written } = harness();
+    expect(await runCli(io)).toBe(0);
+    // Added at the write and NOT in `render`, which still returns Template E's
+    // text byte for byte — that is what the drift test compares against the doc.
+    expect(written[0]?.text.endsWith("A task you launched is not a result.\n")).toBe(true);
+  });
+
   test("a PR with nothing unresolved says so, and still writes the brief it was asked for", async () => {
     const { io, written, log } = harness({ pages: () => page([CLOSED]) });
     expect(await runCli(io)).toBe(0);

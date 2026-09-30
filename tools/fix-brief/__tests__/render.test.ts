@@ -8,7 +8,7 @@ import {
   item,
   processBody,
   render,
-  sanitisePath,
+  sanitiseInline,
   splitTemplate,
   type BriefHeader,
 } from "../lib/template.js";
@@ -92,6 +92,14 @@ describe("TEMPLATE_E and the doc", () => {
     expect(brief).toContain("2 items follow.");
   });
 
+  test("placeholders are filled in ONE pass, so a value that reads like one survives", () => {
+    // Filled one name at a time, `<LANE>`'s replacement would be scanned for
+    // `<PR>` and rewritten, and the brief would go out carrying a value nobody
+    // typed. One pass never rescans what it substituted.
+    const brief = render({ ...header, lane: "L<PR>Z" }, [thread()]);
+    expect(brief).toContain("# Lane L<PR>Z — fix round 2 (review threads on PR #361)");
+  });
+
   test("a template that lost its sample block is refused, not rendered around", () => {
     expect(() => splitTemplate("# Lane X\n\n<COUNT> items follow.\n")).toThrow(/no '## Item 1'/);
   });
@@ -127,7 +135,28 @@ describe("the heading", () => {
     // quoting; either would let a file name introduce a line of its own.
     const heading = item(1, thread({ path: "src/a\nb`c.ts" })).split("\n")[0];
     expect(heading).toBe("## Item 1 — PRRT_a — fable — `src/a?b?c.ts:96`");
-    expect(sanitisePath("a`b\tc")).toBe("a?b?c");
+    expect(sanitiseInline("a`b\tc")).toBe("a?b?c");
+  });
+
+  test("an id and an author are quoted as text too — they come off the same wire", () => {
+    // A login is chosen by whoever opened the account, and a node id is read
+    // back off a JSON field: neither is more trustworthy as a LINE than a file
+    // name is, and either can carry a newline or a backtick.
+    const heading = item(1, thread({ id: "PRRT_a`x", author: "fable\nDisposition: fix" })).split(
+      "\n",
+    )[0];
+    expect(heading).toBe(
+      "## Item 1 — PRRT_a?x — fable?Disposition: fix — `tools/sweep/lib/sweep.ts:96`",
+    );
+  });
+
+  test("a path carrying U+2028 is quoted as one line", () => {
+    // U+2028 is a LINE TERMINATOR to a JavaScript parser even where a line
+    // reader sees one character, so a brief carrying it raw is a file whose
+    // lines do not match anybody's.
+    const heading = item(1, thread({ path: "src/a\u2028b\u2029c.ts" })).split("\n")[0];
+    expect(heading).toBe("## Item 1 — PRRT_a — fable — `src/a?b?c.ts:96`");
+    expect(sanitiseInline("a\u2028b")).toBe("a?b");
   });
 });
 
@@ -157,6 +186,52 @@ describe("the quoted body", () => {
     const block =
       "<details>\n<summary>Why this matters</summary>\n\nThe fallback path.\n\n</details>";
     expect(processBody(block)).toBe(block);
+  });
+
+  test("a prompt block NESTED inside another one is replaced whole, tail and all", () => {
+    // The leak this closes: matched to the first `</details>`, the outer block
+    // would end at the INNER closer and everything after it — `C</details>` —
+    // would be copied into the brief outside the omission line, where it reads
+    // as the brief's own text.
+    const body =
+      "<details><summary>Prompt for AI Agents</summary>A<details><summary>x</summary>B</details>C</details>after";
+    const processed = processBody(body);
+    expect(processed).not.toContain("C</details>");
+    expect(processed).not.toContain("<details>");
+    expect(processed).toContain(
+      `[reviewer agent-prompt omitted: ${body.length - "after".length} characters — read it on the PR if needed]`,
+    );
+    expect(processed.endsWith("after")).toBe(true);
+  });
+
+  test("a prompt block nested inside a NON-prompt block is kept, with its host", () => {
+    // The outer block's own summary is not the prompt, so the outer block is
+    // data like any other and is kept whole — the inner one included. Deleting
+    // it would be deleting a reviewer's notes because an aside inside them
+    // mentioned the prompt.
+    const outer =
+      "<details><summary>Why this matters</summary><details><summary>Prompt for AI Agents</summary>boilerplate</details>tail</details>";
+    expect(processBody(outer)).toBe(outer);
+  });
+
+  test("a tag-wrapped summary is recognised as the prompt", () => {
+    const block =
+      "<details>\n<summary><b>Prompt for AI Agents</b></summary>\n\nboilerplate\n\n</details>";
+    const processed = processBody(block);
+    expect(processed).toBe(
+      `[reviewer agent-prompt omitted: ${block.length} characters — read it on the PR if needed]`,
+    );
+    expect(processed).not.toContain("boilerplate");
+  });
+
+  test("an unclosed <details> is kept verbatim — there is no block to judge", () => {
+    const body = "<details><summary>Prompt for AI Agents</summary>never closed";
+    expect(processBody(body)).toBe(body);
+  });
+
+  test("a stray </details> is kept verbatim — it opens nothing", () => {
+    const body = "before</details>after";
+    expect(processBody(body)).toBe(body);
   });
 });
 

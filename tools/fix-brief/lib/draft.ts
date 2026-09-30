@@ -60,7 +60,10 @@ export class FixBriefRefusal extends Error {
  *    not on this PR at all.
  *
  * The write is the last thing that happens, and it is the only thing this tool
- * writes: no GitHub mutation is issued anywhere in this file.
+ * writes: no GitHub mutation is issued anywhere in this file. The existence
+ * check above is refused *before* the fetch, and the entry wrapper opens the
+ * file with `wx`, so the two together also hold when something creates it
+ * between the check and the write.
  */
 export async function draftBrief(plan: FixBriefArgs, deps: FixBriefDeps): Promise<FixBriefOutcome> {
   if (await deps.exists(plan.out)) {
@@ -84,8 +87,11 @@ export async function draftBrief(plan: FixBriefArgs, deps: FixBriefDeps): Promis
   }
 
   const chosen = selectThreads(plan, fetched.threads);
-  const brief = render(plan, chosen);
-  await deps.writeFile(plan.out, brief);
+  // The newline is added HERE and not in `render`, so `render` still returns
+  // Template E's text byte for byte — which is what the drift test compares
+  // against the doc — while the file a lane reads ends with one, as every
+  // other text file in a repository does.
+  await deps.writeFile(plan.out, `${render(plan, chosen)}\n`);
   return { out: plan.out, threadIds: chosen.map((t) => t.id) };
 }
 

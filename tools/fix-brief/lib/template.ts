@@ -100,28 +100,44 @@ export function splitTemplate(raw: string): TemplateParts {
   return { head: raw.slice(0, start), footer: raw.slice(end + SAMPLE_ITEM_END.length) };
 }
 
+/** The seven names the template writes; nothing else is a placeholder. */
+export type Placeholder = "LANE" | "ROUND" | "PR" | "WORKTREE" | "BRANCH" | "TIP" | "COUNT";
+
 /**
- * Fills the template's own placeholders and nothing else: each name is
- * replaced where the template writes it, so a `<COUNT>` that is left behind
- * cannot be mistaken for a number, and the sample item's `<path>`/`<line>`
- * (which no value in `values` names) are gone before this ever runs.
+ * Fills the template's own placeholders, in ONE pass.
+ *
+ * One pass is the whole point. Filling them one name at a time means the text
+ * a name introduces is itself scanned for the remaining ones, so an operator
+ * value that happens to read `<PR>` — a lane id chosen to look like a template,
+ * a branch called `<LANE>` — is substituted a second time and the brief goes
+ * out with a value nobody typed. A single replace over every name at once
+ * cannot do that: the replacement is never rescanned.
+ *
+ * There is no fallback for an unknown name, because the pattern only matches
+ * the seven names above and {@link Placeholder} is the whole of them: a
+ * fallback would be a branch no input can reach, and a silent one at that.
  */
-export function substitute(text: string, values: Readonly<Record<string, string>>): string {
-  let filled = text;
-  for (const [name, value] of Object.entries(values)) {
-    filled = filled.replaceAll(`<${name}>`, value);
-  }
-  return filled;
+export function substitute(text: string, values: Readonly<Record<Placeholder, string>>): string {
+  return text.replace(
+    /<(LANE|ROUND|PR|WORKTREE|BRANCH|TIP|COUNT)>/g,
+    (_, name: string) => values[name as Placeholder],
+  );
 }
 
 /**
- * A thread's `path` off the wire is TEXT, not a path this tool opens — it is
- * quoted into a heading and nothing more. Control characters (a newline in a
- * file name is legal in a repository) would end the heading's line, and a
- * backtick would end its quoting, so both become `?`.
+ * A field off the wire, rendered INLINE in a heading: a thread's `path`, its
+ * `id` and its author login are all text this tool quotes and never opens, and
+ * all three arrive from the same untrusted party.
+ *
+ * Control characters (a newline in a file name is legal in a repository),
+ * U+2028/U+2029 (which are line terminators to a JavaScript parser even where
+ * they are not to a line reader) and the backtick itself all become `?`. A
+ * newline or a line separator would end the heading's line, and a backtick
+ * would end its quoting — either way a value off the wire would be writing the
+ * line it sits on rather than filling it in.
  */
-export function sanitisePath(path: string): string {
-  return path.replace(/[\p{Cc}`]/gu, "?");
+export function sanitiseInline(text: string): string {
+  return text.replace(/[\p{Cc}\p{Zl}\p{Zp}\x60]/gu, "?");
 }
 
 /**
@@ -131,15 +147,81 @@ export function sanitisePath(path: string): string {
  * the quoted span is always the path — and the line it names, when it has one.
  */
 function anchorOf(thread: ReviewThread): string {
-  const file = sanitisePath(thread.path);
+  const file = sanitiseInline(thread.path);
   const line = thread.isOutdated ? thread.originalLine : thread.line;
   if (line === null) return `\`${file}\` (file-level)`;
   return thread.isOutdated ? `\`${file}:${line}\` (outdated)` : `\`${file}:${line}\``;
 }
 
 const HTML_COMMENT = /<!--[\s\S]*?-->/g;
-const DETAILS_BLOCK = /<details\b[^>]*>[\s\S]*?<\/details>/gi;
-const AGENT_PROMPT_SUMMARY = /<summary\b[^>]*>[^<]*Prompt for AI Agents/i;
+const DETAILS_TAG = /<\/?details\b[^>]*>/gi;
+
+/**
+ * The block's OWN first summary, anchored at the block's start.
+ *
+ * Anchored, because a prompt block nested INSIDE a block about something else
+ * is not that block's own summary: the outer block is kept verbatim (it is
+ * quoted data either way, inside a fence chosen for the whole body), and the
+ * inner one is part of what it kept. Matching anywhere in the block would
+ * silently delete a reviewer's notes because one quoted aside inside them
+ * mentioned the prompt.
+ *
+ * The summary's text is matched through any tags inside it — `<b>`, `<code>`,
+ * a nested `<summary>` — up to its own `</summary>`, because the word is what
+ * identifies the block, not the markup around it.
+ */
+const AGENT_PROMPT_BLOCK =
+  /^<details\b[^>]*>\s*<summary\b[^>]*>(?:(?!<\/summary>)[\s\S])*Prompt for AI Agents/i;
+
+/** One `<details>…</details>` span, as offsets into the text it was found in. */
+interface DetailsBlock {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+}
+
+/**
+ * Every COMPLETE `<details>` block, counting depth rather than matching to the
+ * first `</details>`.
+ *
+ * A non-greedy match ends at the first closing tag, so a block containing
+ * another block is cut in half: everything from that stray closer to the real
+ * end is left outside the block, verbatim, in the brief. That is the leak this
+ * scan closes — the tail of a prompt block is exactly the part that would go on
+ * to be read as the brief's own text. Depth is the honest reading of HTML here:
+ * a block opens at depth 0 and closes when depth returns to it, whatever is
+ * nested inside.
+ *
+ * Two shapes pass through untouched, both because there is no block to judge: an
+ * unclosed `<details>` (depth never returns to 0) and a stray `</details>` at
+ * depth 0. Both are kept verbatim, exactly as the non-greedy matcher kept them,
+ * so neither becomes a reason to drop text a reviewer wrote.
+ */
+function detailsBlocks(text: string): readonly DetailsBlock[] {
+  const blocks: DetailsBlock[] = [];
+  let depth = 0;
+  let start = 0;
+  // `exec` rather than `matchAll`, for one reason: its `index` is a number,
+  // where `matchAll`'s is optional — and `?? 0` for the case that cannot happen
+  // is a branch no input can reach, which under this repo's 100% threshold is
+  // either dead weight or a hole cut for a test that does not exist. The loop
+  // always runs to the null that resets `lastIndex`.
+  for (let match = DETAILS_TAG.exec(text); match !== null; match = DETAILS_TAG.exec(text)) {
+    const at = match.index;
+    if (match[0].startsWith("</")) {
+      if (depth === 0) continue;
+      depth -= 1;
+      if (depth === 0) {
+        const end = at + match[0].length;
+        blocks.push({ start, end, text: text.slice(start, end) });
+      }
+      continue;
+    }
+    if (depth === 0) start = at;
+    depth += 1;
+  }
+  return blocks;
+}
 
 /**
  * The reviewer's own agent prompt — several hundred characters of boilerplate
@@ -156,15 +238,20 @@ function omissionFor(block: string): string {
 /**
  * A comment body as UNTRUSTED DATA, prepared for quoting: HTML comments go
  * first (they are invisible on the PR and would otherwise ride along as
- * instructions), then the reviewer agent prompt is replaced by its omission
- * line. Everything else is kept verbatim — a paraphrase is how a finding stops
- * being the finding.
+ * instructions), then each complete `<details>` block is judged on its own and
+ * a reviewer agent prompt replaced by its omission line. Everything else is
+ * kept verbatim — a paraphrase is how a finding stops being the finding.
  */
 export function processBody(body: string): string {
   const withoutComments = body.replace(HTML_COMMENT, "");
-  return withoutComments.replace(DETAILS_BLOCK, (block) =>
-    AGENT_PROMPT_SUMMARY.test(block) ? omissionFor(block) : block,
-  );
+  let quoted = "";
+  let copiedTo = 0;
+  for (const block of detailsBlocks(withoutComments)) {
+    quoted += withoutComments.slice(copiedTo, block.start);
+    quoted += AGENT_PROMPT_BLOCK.test(block.text) ? omissionFor(block.text) : block.text;
+    copiedTo = block.end;
+  }
+  return quoted + withoutComments.slice(copiedTo);
 }
 
 /**
@@ -185,12 +272,20 @@ export function fenceFor(body: string): string {
   return "`".repeat(Math.max(3, longest + 1));
 }
 
-/** One `## Item N` block: heading, disposition, the quoted body, the end line. */
+/**
+ * One `## Item N` block: heading, disposition, the quoted body, the end line.
+ *
+ * The heading carries three fields off the wire — the id, the author and the
+ * anchor — and all three go through {@link sanitiseInline}, because a login or
+ * a node id is no more trustworthy as a line of text than a file name is.
+ */
 export function item(n: number, thread: ReviewThread): string {
   const quote = processBody(thread.body);
   const fence = fenceFor(quote);
+  const id = sanitiseInline(thread.id);
+  const author = sanitiseInline(thread.author);
   return [
-    `## Item ${n} — ${thread.id} — ${thread.author} — ${anchorOf(thread)}`,
+    `## Item ${n} — ${id} — ${author} — ${anchorOf(thread)}`,
     DISPOSITION,
     fence,
     quote,
@@ -210,7 +305,7 @@ export function item(n: number, thread: ReviewThread): string {
  */
 export function render(header: BriefHeader, threads: readonly ReviewThread[]): string {
   const { head, footer } = splitTemplate(TEMPLATE_E);
-  const values: Readonly<Record<string, string>> = {
+  const values: Readonly<Record<Placeholder, string>> = {
     LANE: header.lane,
     ROUND: String(header.round),
     PR: String(header.pr),

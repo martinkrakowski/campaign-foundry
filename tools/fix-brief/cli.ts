@@ -78,7 +78,14 @@ if (process.argv[1]) {
       argv: process.argv.slice(2),
       log: (text) => console.log(text),
       logError: (text) => console.error(text),
-      writeFile: (path, text) => writeFile(path, text, "utf8"),
+      // `wx` is the half of "never overwrite round k" that the pre-check in
+      // draft.ts cannot be: that check and this write are two separate moments,
+      // and anything that creates the file between them — another round on the
+      // same path, a second lane, a stray editor buffer — is refused by the
+      // kernel rather than truncated by this tool. The cost is an EEXIST that
+      // this entry's catch reports as exit 1, like any other failed write, with
+      // the path in the message.
+      writeFile: (path, text) => writeFile(path, text, { encoding: "utf8", flag: "wx" }),
       exists: async (path) => {
         try {
           await access(path);
