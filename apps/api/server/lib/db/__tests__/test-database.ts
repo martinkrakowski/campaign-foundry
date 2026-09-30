@@ -465,9 +465,19 @@ export async function ensureTemplate(migrations?: readonly Migration[]): Promise
   return building;
 }
 
-/** Stop believing this process built a template, so the next caller builds it again. */
-function forgetTemplate(name: string): void {
-  builtTemplates.delete(name);
+/**
+ * Stop believing this process built a template, so the next caller builds it again.
+ *
+ * `observed` is the promise the caller was actually handed, and the entry is
+ * only dropped if that is still what is filed under the name. Two clones in this
+ * process can miss the same template together: the first forgets it and starts a
+ * rebuild, and the second — deleting by name alone — would throw that rebuild
+ * away and start a third. They would still be correct, since the builds
+ * serialise on the lock and all but the first find the template marked, but N
+ * clones would pay for N builds over one dropped database.
+ */
+function forgetTemplate(name: string, observed: Promise<string> | undefined): void {
+  if (builtTemplates.get(name) === observed) builtTemplates.delete(name);
 }
 
 /**
@@ -571,6 +581,9 @@ export async function migratedFromTemplate(
   migrations?: readonly Migration[],
 ): Promise<SqlClient> {
   const name = nextCloneName();
+  // What this process believes about the template BEFORE the copy, so a 3D000
+  // below forgets that and not whatever has been filed under the name since.
+  const remembered = builtTemplates.get(template);
   try {
     await maintenanceStatement(
       `create database ${identifier(name)} template ${identifier(template)}`,
@@ -581,7 +594,7 @@ export async function migratedFromTemplate(
     // copying. What this process remembered is now wrong, so it is forgotten
     // and rebuilt — once, because a template that keeps vanishing is a fault to
     // report, not to spin on.
-    forgetTemplate(template);
+    forgetTemplate(template, remembered);
     const rebuilt = await ensureTemplate(migrations);
     await maintenanceStatement(
       `create database ${identifier(name)} template ${identifier(rebuilt)}`,
