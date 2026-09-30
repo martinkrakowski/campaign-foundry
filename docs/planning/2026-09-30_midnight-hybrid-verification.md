@@ -1,7 +1,7 @@
 # Midnight Hybrid Verification — Architecture & Development Plan
 
 **Date:** 2026-09-30
-**Status:** **r2 — Fable plan review folded (3 blockers, 11 fixes, 7 notes). D187–D189 await the owner.** r1's CI split (MH3) is DROPPED under the owner's principle below.
+**Status:** **r2 — Fable plan review folded (3 blockers, 11 fixes, 7 notes). D187–D189 STAMPED (owner, 2026-09-30: "stamp D187–D189").** r1's CI split (MH3) is DROPPED under the owner's principle below.
 **Decision ids introduced:** D187 – D189
 **Lane ids introduced:** MH1, MH2 (`grep -rniwE 'MH[0-9]+'` and D187–D189: no collisions). MH3 is withdrawn.
 **Relates to:**
@@ -26,9 +26,9 @@ Both default to today's behaviour: no profile, one slot. Nothing contributor-fac
 
 | id | Decision |
 |---|---|
-| **D187** | **Host-sensitive tests are declared with vitest TAGS, and a local gate profile may filter them out.**<br>- `vitest.config.ts` declares `test.tags: [{ name: "golden-bytes", description: "<host facts>" }, { name: "cpu-bound", description: "<host facts>" }]`.<br>- The affected `describe`/`test` carries `{ tags: [...] }`. Tags are per TEST, not per file, because `routes.test.ts` has 76 tests and only 2 are CPU-bound.<br>- `yarn gate --profile midnight` filters with `--tagsFilter '!golden-bytes && !cpu-bound'` and prints the excluded tests (from `vitest --listTags=json`).<br>- The default gate (no profile) filters nothing.<br>- A profiled run enforces NO coverage thresholds. GitHub CI enforces 100% on the full run. |
-| **D188** | **The gate lock is a per-host semaphore of `CF_GATE_SLOTS` slots** (default 1, today's behaviour):<br>- slot 0 stays `cf-gate.lock` (unsuffixed, byte-identical at SLOTS=1); slots 1..N-1 are `cf-gate.lock.<n>`;<br>- every subcommand finds the caller's slot by scanning;<br>- **`CF_GATE_SLOTS` is set HOST-WIDE** (never per seat), because a SLOTS=1 acquirer would take slot 0 while other slots are busy;<br>- **one gate per worktree,** because `verify-manifests` mutates the tree and the lock is per host, not per checkout. |
-| **D189** | **Midnight is never a CI path.**<br>- The complete CI (today's `ci` job plus TP1's server step, `ci.yml:42-275`) stays on GitHub-hosted runners, unchanged, and remains the only required check (`merge-prs.sh:68` `^Build`, unchanged).<br>- No self-hosted runner is registered for this repository.<br>- **If CI speed ever becomes the goal,** the path is `vitest --shard` across hosted jobs, with `--reporter=blob` and `vitest --merge-reports --coverage` (natively supported; thresholds apply on the merged map). There is no runner and no security surface. That would be its own plan. |
+| **D187** | **STAMPED — Owner, 2026-09-30.** **Host-sensitive tests are declared with vitest TAGS, and a local gate profile may filter them out.**<br>- `vitest.config.ts` declares `test.tags: [{ name: "golden-bytes", description: "<host facts>" }, { name: "cpu-bound", description: "<host facts>" }]`.<br>- The affected `describe`/`test` carries `{ tags: [...] }`. Tags are per TEST, not per file, because `routes.test.ts` has 76 tests and only 2 are CPU-bound.<br>- `yarn gate --profile midnight` filters with `--tagsFilter '!golden-bytes && !cpu-bound'` and prints the excluded tests (from `vitest --listTags=json`).<br>- The default gate (no profile) filters nothing.<br>- A profiled run enforces NO coverage thresholds. GitHub CI enforces 100% on the full run. |
+| **D188** | **STAMPED — Owner, 2026-09-30.** **The gate lock is a per-host semaphore of `CF_GATE_SLOTS` slots** (default 1, today's behaviour):<br>- slot 0 stays `cf-gate.lock` (unsuffixed, byte-identical at SLOTS=1); slots 1..N-1 are `cf-gate.lock.<n>`;<br>- every subcommand finds the caller's slot by scanning;<br>- **`CF_GATE_SLOTS` is set HOST-WIDE** (never per seat), because a SLOTS=1 acquirer would take slot 0 while other slots are busy;<br>- **one gate per worktree,** because `verify-manifests` mutates the tree and the lock is per host, not per checkout. |
+| **D189** | **STAMPED — Owner, 2026-09-30.** **Midnight is never a CI path.**<br>- The complete CI (today's `ci` job plus TP1's server step, `ci.yml:42-275`) stays on GitHub-hosted runners, unchanged, and remains the only required check (`merge-prs.sh:68` `^Build`, unchanged).<br>- No self-hosted runner is registered for this repository.<br>- **If CI speed ever becomes the goal,** the path is `vitest --shard` across hosted jobs, with `--reporter=blob` and `vitest --merge-reports --coverage` (natively supported; thresholds apply on the merged map). There is no runner and no security surface. That would be its own plan. |
 
 ---
 
@@ -57,7 +57,7 @@ Every lane inherits the pipeline and skill rules. The seat is **space-bunny**. M
 
 ## 3. Owner actions
 
-1. **Stamp D187–D189.**
+1. **DONE 2026-09-30: D187–D189 stamped.**
 2. **After MH2 merges:** set `CF_GATE_SLOTS=3` host-wide on midnight (`/etc/environment`, which needs sudo) and on the opencode service's environment drop-in.
 
 ## 4. Definition of done
