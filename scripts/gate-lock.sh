@@ -453,9 +453,10 @@ beat_is_stale() {
 # metadata can therefore only be one that was abandoned, never one still
 # being written: the old mkdir-then-write ordering had exactly that window,
 # and a contender that reclaimed the half-written name left its creator
-# writing into a directory it no longer owned. A failed `mv` means the name
-# is held (a directory rename onto a non-empty directory fails), i.e. busy.
-# Returns 0 only if the lock is verifiably ours.
+# writing into a directory it no longer owned. The name being held (busy) shows
+# up either as a failed `mv` or, since `mv` onto an existing directory moves the
+# candidate INTO it and exits 0, as our candidate nested inside the holder's
+# lock; both return 1. Returns 0 only if the lock is verifiably ours.
 try_create() {
   cand="$LOCK.cand.$$"
   # Our own pid is unique among live processes, so a leftover cand dir with
