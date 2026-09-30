@@ -1,7 +1,7 @@
 # Midnight Hybrid Verification — Architecture & Development Plan
 
 **Date:** 2026-09-30
-**Status:** **r2 — Fable plan review folded (3 blockers, 11 fixes, 7 notes). D187–D189 STAMPED (owner, 2026-09-30: "stamp D187–D189").** **r3:** Fable's pre-dispatch re-check folded (3 fixes, 5 notes). It corrected D187's listing command, so **D187 needs a re-stamp.** **r4:** Fable's brief review corrected the slot-name rule (F2) and MH2's second-signal recipe (F1), so **D188 also needs a re-stamp.** r1's CI split (MH3) is DROPPED under the owner's principle below.
+**Status:** **r2 — Fable plan review folded (3 blockers, 11 fixes, 7 notes). D187–D189 STAMPED (owner, 2026-09-30: "stamp D187–D189").** **r3:** Fable's pre-dispatch re-check folded (3 fixes, 5 notes). It corrected D187's listing command, so D187 needed a re-stamp. **r4:** Fable's brief review corrected the slot-name rule (F2) and MH2's second-signal recipe (F1), so D188 also needed one. **D187 and D188 RE-STAMPED (owner, 2026-09-30: "re-stamp D187 and D188"), over the r4 text Fable cleared.** r1's CI split (MH3) is DROPPED under the owner's principle below.
 **Decision ids introduced:** D187 – D189
 **Lane ids introduced:** MH1, MH2 (`grep -rniwE 'MH[0-9]+'` and D187–D189: no collisions). MH3 is withdrawn.
 **Relates to:**
