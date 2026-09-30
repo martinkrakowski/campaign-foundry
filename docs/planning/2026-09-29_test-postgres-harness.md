@@ -59,3 +59,26 @@ Every lane inherits the pipeline and skill rules: `yarn gate`, 100% coverage, a 
 - CI runs the server path on every PR.
 - A midnight worktree's `yarn gate` passes 13/13 with `TEST_PG_URL` set, and its wall time is recorded.
 - The orchestrator's dispatch notes (`cast.md`) say which host runs campaign-foundry lanes, with the evidence.
+
+---
+
+## 5. Shipped and measured (2026-09-30)
+
+**TP1 shipped as [#633](https://github.com/martinkrakowski/campaign-foundry/pull/633) (`109be92b`).** It had two Fable plan reviews and three Fable PR rounds. The server path runs in CI on every PR: 2,369 api tests in about 74 s. The implementer ran the server suite twice consecutively and once at 16 workers against midnight's persistent `cf-test-pg`.
+
+**The midnight acceptance run** (`yarn gate`, `TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres`):
+
+| | Before TP1 | After TP1 |
+|---|---|---|
+| Wall time | 890 s | 610 s |
+| Failed tests | 245 / 8,308 | 10 / 8,337 |
+| Postgres-harness timeouts | 231 | 0 |
+
+**Remaining failures, which the hardware causes (not fixable there without weakening the gate):**
+- **4 byte-exact media goldens** (VG2 MP4, VE3b1 audio, C1 motion, K3 text effects) fail as MISMATCHES. The goldens are CI-runner-recorded, and the encoders' output depends on SIMD paths that the no-AVX2 Xeon E5-2697 v2 lacks.
+- **6 CPU-heavy generate and render tests** time out at 5 s: the generate CLI, `pipeline.test`, `routes.test`'s generate, `capability-race` and `generate-report-conflict`.
+
+**Verdict (orchestrator, 2026-09-30): hybrid.**
+- Midnight may host lane implementation, including Postgres-backed runs.
+- Gating stays on the Mac and CI; a lane that implements on midnight pushes and lets CI gate.
+- Midnight is not a gating host for campaign-foundry.
