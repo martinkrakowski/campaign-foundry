@@ -8,7 +8,9 @@
 #   directory sessions agents models secs tokens_in tokens_out tokens_reasoning
 #   cache_read cache_write cost
 # `secs` runs from the first session's creation to the last session's latest
-# update, so for a live lane it is "so far". `cost` is what opencode recorded;
+# update. opencode writes those times when a tool call RETURNS, so for a live
+# lane inside a long call (a gate, a test run) `secs` stops at the last step
+# that finished, not at now. `cost` is what opencode recorded;
 # a free seat records 0, so compare seats on tokens and time, not cost.
 #
 # --host runs the query over ssh on the host whose `opencode serve` ran the
