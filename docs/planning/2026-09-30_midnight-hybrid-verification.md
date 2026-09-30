@@ -75,3 +75,59 @@ Every lane inherits the pipeline and skill rules. The seat is **space-bunny**. M
 |---|---|---|---|---|
 | **MH4-one-gate-per-worktree** | high | **Qodo #2 on PR #636.** With `CF_GATE_SLOTS>1`, a second gate in the same checkout takes another slot, and both run `verify-manifests` (which mutates the tree) at once. "One gate per worktree" is only documented. Enforce it: each slot records the caller's worktree (`git rev-parse --show-toplevel`, else `pwd -P`) at `try_create`, and **the check runs AFTER a slot is won**, so the rule is deterministic under a race: if a LIVE same-worktree holder sits in a LOWER slot, release your own and exit 75 naming it. A slot with no `worktree` file never blocks. The existing SLOTS=3 tests spawn each run from its own `git init` scratch dir (`startLockIn`/`runLockIn` gain a `cwd` option). At SLOTS=1 behaviour is unchanged, except that a caller matching a live numbered-slot holder's worktree now gets 75. One mutation, where dropping the check makes the same-worktree test fail. | `scripts/gate-lock.sh`, `tools/gate/__tests__/gate-lock.test.ts`, a manifest | change the pinned-slot or provenance rules from MH2's fix round 2 |
 | **MH5-gate-acquire-window** | high | **A pre-existing leak, found by the MH2 lane (reproduced 25/25).** A TERM between `gate.sh`'s acquire rename and `LOCK_HELD=1` exits 143 with nothing released. The next acquirer's liveness check reclaims it, so it is a leak, not a permanent hold. Fable's fix: `release_lock` falls back like `run_cleanup`, releasing the slot `acquire` reported when `LOCK_HELD=0` and that slot is ours. | `scripts/gate.sh` (`release_lock`), `tools/gate/__tests__/gate-signals.test.ts` | — |
+
+---
+
+## 6. Shipped (wave `midnight-hybrid-w01`, 2026-09-30)
+
+| Lane | PR → main | Rounds | Result |
+|---|---|---|---|
+| **MH1-gate-profiles** | #637 → 8ae711c3 | 1 + 2 fix rounds | **`yarn gate --profile midnight`: 13/13 on midnight, 603 s, 8,354 passed, 0 failed.** This is the first fully green gate midnight has produced for this repo. |
+| **MH2-gate-lock-slots** | #636 → b7bb9ce6 | 1 + 3 lane fix rounds + 1 orchestrator fix | `CF_GATE_SLOTS` semaphore (≤ 64); the pinned slot; canonical, owned slots only; the second-signal release; busy acquires leave nothing in the holder's lock. 7 mutations. |
+
+**Both lanes ran on midnight** (space-bunny, `--agent lane`, briefs in `.agents/briefs/`). The orchestrator verified every round on the Mac before any PR.
+
+| Run | Wall (s) | Steps |
+|---|---:|---:|
+| MH1 | 2,527 | 110 |
+| MH1 fix 1 | 646 | 55 |
+| MH1 fix 2 | 1,264 | 66 |
+| MH2 | 2,182 | 145 |
+| MH2 fix 1 | 912 | 79 |
+| MH2 fix 2 | 1,991 | — |
+| MH2 fix 3 | 2,274 | — |
+
+**What each review layer caught** (every finding was fixed or refuted with its mechanism):
+- **Fable, on the plan and briefs (r3, r4):**
+  - a wrong vitest listing command in D187;
+  - a shared test file between the two lanes;
+  - a slot-name glob that matched slot 1's own transients;
+  - an MH2 signal recipe that could not reproduce the gap;
+  - a snapshot file that CI would reject;
+  - a mutation that would have run the real gate.
+- **The orchestrator's Mac cross-check:** MH2's SLOTS=3 test was order-dependent, failing 11/15 on the Mac while it passed on midnight, and each failure leaked looping processes.
+- **Fable, pre-PR:**
+  - MH1: an empty `--profile` fell through to the default gate;
+  - MH2: an uncapped slot count; `gate-signals` swallowed its asserted line under bash-as-sh, where the Mac's `/bin/sh` is bash and midnight's is dash; the "no slot recorded" path leaked the lock.
+- **Qodo:**
+  - **a security finding:** forged digit-suffixed slots redirected verify and heartbeat. It is reachable where the lock parent is shared, as with the `/tmp` fallback. **Fixed by pinning the acquired slot and trusting only canonical slots the caller owns;**
+  - heartbeat matched by pid;
+  - a vacuous `survived` read;
+  - zero-padded counts;
+  - MH1's listing filter drifting from the profile.
+- **CodeRabbit:** every busy acquire nested its candidate inside the holder's lock. The orchestrator fixed it in 2d53760b, and Fable reviewed that fix.
+- **Refuted, with evidence:** PR-Agent's quoting claim, and Qodo's "lists skipped tests" claim.
+
+**D188 behaviour note:** a recycled pid of a `kill -9`'d gate, whose orphaned heartbeat still refreshes slot 0, now gets exit 2 ("already holds") instead of an endless 75.
+
+**DoD status:**
+- D187–D189 are stamped ✅.
+- MH1 and MH2 are merged, with their mutations caught ✅.
+- The profile gate passes 13/13 on midnight ✅.
+- `ci.yml` and `REQUIRED_CHECK` are unchanged, and `required-check.test.ts` pins them ✅.
+- **Open:** three concurrent gates on midnight, demonstrated once. This needs the owner to set `CF_GATE_SLOTS=3` host-wide (sudo).
+
+**Follow-ups:**
+- **MH4:** one gate per worktree, enforced (§5);
+- **MH5:** the `gate.sh` acquire-window leak (§5);
+- **MH6 (new):** `run_test_cov` swallows the gate's own cleanup messages when a signal lands during `test:cov` under bash-as-sh. The lock is still released. Proposed fix: `exec 3>&1` at start, and `>&3` in cleanup.

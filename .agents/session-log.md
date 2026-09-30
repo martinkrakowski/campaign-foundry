@@ -6685,3 +6685,31 @@ and source formatting, recorded here rather than fixed.
   - A separate Opus 5.5 orchestrator drives it, with hexagen waves logging to `~/.waves-hexagen` and its wave-status on port 4318.
   - Wave 1 was blocked on #631, which is now merged. Pass the `run_cleanup` second-signal fix to its OW3 port.
 - **Follow-ups:** listed in the hardening plan's shipped note.
+
+## 2026-09-30 — midnight lanes: HXF1, lane-usage, MH1, MH2 (wave `midnight-hybrid-w01`)
+
+**Merged:**
+
+| PR | What | Merge SHA |
+|---|---|---|
+| #634 | `lane-usage` | d5175dbc |
+| #635 | HXF1, the first midnight lane | f0abd583 |
+| #637 | MH1, `--profile midnight` (13/13 on midnight) | 8ae711c3 |
+| #636 | MH2, `CF_GATE_SLOTS` plus the second-signal and forged-slot fixes | b7bb9ce6 |
+
+**All lanes ran on midnight's opencode server** (space-bunny, `--agent lane`) through `ocm-run`. The orchestrator fetched, verified on the Mac, pushed and merged.
+
+**Lessons:**
+- Briefs must sit inside the worktree, because `lane` denies external directories.
+- Never run a full gate on midnight.
+- Set a noreply git identity on every lane host. `martin@midnight.lan` leaked into f0abd583 as a Co-authored-by.
+- Cross-verify on a second host, because `/bin/sh` differs: bash 3.2 on the Mac, dash on midnight and CI.
+- Stagger lanes that share the host lock.
+- The pre-PR gate accepts only `clear` or `changes-required`.
+- Review bots (Qodo, CodeRabbit) found real security and correctness defects AFTER Fable's approval. Keep them in the loop.
+
+**Owner decisions:**
+- D187–D189 stamped, then D187 and D188 re-stamped over r4.
+- Midnight's global git email is now noreply.
+- User-level `~/.claude/CLAUDE.md` created (midnight dispatch rules).
+- **Open:** the opencode proposals (session resume, a step cap, sharing disabled) and `CF_GATE_SLOTS=3` on midnight.
