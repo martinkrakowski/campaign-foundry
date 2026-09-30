@@ -51,7 +51,7 @@ Every lane inherits the pipeline and skill rules: `yarn gate`, 100% coverage, a 
 ## 3. Owner actions
 
 1. **Stamp D186.**
-2. **Install the test Postgres on midnight** (the command is in the orchestrator's message, 2026-09-29). It runs Postgres 18 in Docker on `127.0.0.1:5433`, with trust auth on loopback and durability off (a test server).
+2. **DONE 2026-09-29: the test Postgres is installed on midnight.** Docker container `cf-test-pg` (`postgres:18`, 18.6), on `127.0.0.1:5433`, user `cf_test`, trust auth on loopback, with `fsync`, `synchronous_commit` and `full_page_writes` off, and `max_connections=300`. It restarts unless stopped, with volume `cf-test-pg`. Verified from the orchestrator: a `CREATE DATABASE … TEMPLATE` clone took **110 ms**, against 5.2–6.5 s per PGlite start on the same host.
 
 ## 4. Definition of done
 
