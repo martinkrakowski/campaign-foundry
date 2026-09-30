@@ -1,0 +1,386 @@
+import { createHash } from "node:crypto";
+import pg from "pg";
+import { databaseConfig, type DatabaseConfig } from "../database-config.js";
+import { checksum, loadMigrations, migrate, type Migration } from "../migrate.js";
+import { pgClient, poolOptions, type PgPool } from "../pg-client.js";
+import type { SqlClient } from "../sql-client.js";
+
+/**
+ * The real-Postgres half of the database test harness (D186), selected by
+ * `TEST_PG_URL`.
+ *
+ * Every database test starts a fresh PGlite — a real Postgres compiled to
+ * WebAssembly, in process. That costs almost nothing on a fast machine and
+ * 5.2–6.5 s per start on an older one, where it is the whole reason the gate
+ * cannot pass. When `TEST_PG_URL` names a server, this module builds ONE
+ * migrated template database on it and hands each test a `CREATE DATABASE …
+ * TEMPLATE` copy of that: 110 ms, against that same host's 5.2 s PGlite start.
+ *
+ * A separate module from `pglite-client.ts` so the import graph stays one way:
+ * that file is the PGlite primitive and the suite's entry point, and it
+ * dispatches into this one. Nothing here imports it. Everything here is
+ * therefore only true of a real server — where the staging database is never a
+ * test target, and `TEST_DATABASE_URL` (the CI concurrency proofs) keeps its own
+ * separate meaning.
+ */
+
+/** The one environment read in the harness. Unset or empty: PGlite, exactly as before. */
+export function testDatabaseBackend(): "server" | "pglite" {
+  return process.env["TEST_PG_URL"] ? "server" : "pglite";
+}
+
+/**
+ * A probe's own connect timeout, well under `pg-client.ts`'s `CONNECT_TIMEOUT_MS`
+ * (10 s): a set-but-unreachable `TEST_PG_URL` must say so in seconds, once, not
+ * once per test file.
+ */
+const PROBE_TIMEOUT_MS = 2_000;
+
+/** One template per migration set: `cf_tpl_` plus a hash of that set. */
+const TEMPLATE_PREFIX = "cf_tpl_";
+const TEMPLATE_HASH_LENGTH = 12;
+
+/** A test's own database: who made it, roughly when, and which of theirs it is. */
+const CLONE_PREFIX = "cf_t_";
+
+/**
+ * The advisory lock that serialises template builds. Any fixed key will do,
+ * provided every process building the template uses the same one — and it must
+ * NOT be `migrate.ts`'s `MIGRATION_LOCK` (7_210_431), which is transaction-level
+ * and lives inside the template's own migration.
+ */
+const TEMPLATE_LOCK = 424_242;
+
+/** How old a `cf_t_*` database must be before cleanup will even consider it. */
+const ORPHAN_MAX_AGE_S = 3_600;
+
+/** How long a superseded `cf_tpl_*` template lives before cleanup drops it. */
+const STALE_TEMPLATE_MAX_AGE_S = 86_400;
+
+/** Epoch seconds — the unit both a clone's name and a template's comment record. */
+function epochSeconds(): number {
+  return Math.floor(Date.now() / 1000);
+}
+
+/** Per-process counter, so two databases built in the same second still differ. */
+let sequence = 0;
+
+function nextCloneName(): string {
+  return `${CLONE_PREFIX}${process.pid}_${epochSeconds()}_${sequence++}`;
+}
+
+/** `cf_t_<pid>_<epoch>_<counter>`, or undefined for anything this harness did not name. */
+const CLONE_NAME = /^cf_t_(\d+)_(\d+)_(\d+)$/;
+
+/**
+ * The template's name: the identity of the migration set, and nothing else.
+ *
+ * The hash covers each migration's id AND its SQL's checksum — the same pair
+ * `schema_migrations` records, and the reason an edited migration (which
+ * `migrate()` refuses in place) is a different set, not a different version of
+ * this one. Pure, and the only part of the server path a test can pin without a
+ * server.
+ */
+export function templateName(migrations: readonly Migration[]): string {
+  const shape = migrations.map((m) => ({ id: m.id, checksum: checksum(m.sql) }));
+  return `${TEMPLATE_PREFIX}${createHash("sha256").update(JSON.stringify(shape)).digest("hex").slice(0, TEMPLATE_HASH_LENGTH)}`;
+}
+
+/** A database name this harness may interpolate into DDL. */
+function identifier(name: string): string {
+  if (!/^[a-z0-9_]+$/.test(name)) throw new Error(`refusing an unsafe database name: ${name}`);
+  return `"${name}"`;
+}
+
+/**
+ * The maintenance database `TEST_PG_URL` names: the one every test server
+ * connects to, and the only one `CREATE DATABASE` may be run from.
+ *
+ * `readCa` throws because it is never reached — a loopback test server is
+ * reached over plain TCP, and `databaseConfig` calls this only for a CA path. A
+ * REMOTE `TEST_PG_URL` is refused by `databaseConfig` itself, which is the point:
+ * the harness must never be pointed at a hosted database.
+ */
+export function maintenanceConfig(): DatabaseConfig {
+  return databaseConfig({ url: process.env["TEST_PG_URL"] }, () => {
+    throw new Error("a local TEST_PG_URL needs no CA");
+  });
+}
+
+/** The same server, pointed at one named database, over one connection. */
+export function cloneConfig(database: string): DatabaseConfig {
+  return { ...maintenanceConfig(), database, max: 1 };
+}
+
+/**
+ * Connect once and prove the server is there, naming the variable when it is
+ * not.
+ */
+export async function probeServer(config: DatabaseConfig = maintenanceConfig()): Promise<void> {
+  const client = new pg.Client({
+    ...poolOptions(config),
+    connectionTimeoutMillis: PROBE_TIMEOUT_MS,
+  });
+  try {
+    await client.connect();
+    await client.query("select 1");
+  } catch (error) {
+    throw new Error(
+      `TEST_PG_URL set but unreachable (${error instanceof Error ? error.message : String(error)}) — ` +
+        "unset it to run the suite on PGlite, or start the test server it names",
+      { cause: error },
+    );
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
+const probes = new Map<string, Promise<void>>();
+
+/**
+ * The first use of the server path probes; later uses reuse that answer, so a
+ * server that is down is reported once per process rather than once per test
+ * file. Keyed by the server probed, so pointing the harness somewhere else
+ * earns its own verdict rather than inheriting one.
+ */
+export function requireServerReachable(
+  config: DatabaseConfig = maintenanceConfig(),
+): Promise<void> {
+  const key = `${config.host}:${config.port}/${config.user}/${config.database}`;
+  const existing = probes.get(key);
+  if (existing) return existing;
+  const attempt = probeServer(config);
+  probes.set(key, attempt);
+  return attempt;
+}
+
+/**
+ * One session to the maintenance database. A bare `pg.Client`, not a pool: an
+ * advisory lock is held by a SESSION, so every statement that lock guards has to
+ * arrive on the connection that took it.
+ *
+ * `CREATE`/`DROP`/`ALTER DATABASE` also cannot run inside a transaction, which
+ * this is not.
+ */
+async function maintenanceSession(): Promise<pg.Client> {
+  const client = new pg.Client(poolOptions(maintenanceConfig()));
+  await client.connect();
+  return client;
+}
+
+/** One statement on its own maintenance session, then closed. */
+async function maintenanceStatement(text: string): Promise<void> {
+  const session = await maintenanceSession();
+  try {
+    await session.query(text);
+  } finally {
+    await session.end();
+  }
+}
+
+/** A process is alive if its pid is; `EPERM` means it exists under another user, which still counts. */
+export function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * Drop what a killed run left behind, before this run adds to its own pile.
+ *
+ * A `cf_t_*` database is a candidate only once it is more than an hour old AND
+ * its pid is gone. The age guard is what makes the pid check safe to read as an
+ * answer — a recycled pid, or a host reboot, must not orphan a live run's
+ * database mid-test — and the pid check is what stops that age guard from
+ * leaving every hour-old run's databases to accumulate. A `cf_tpl_*` template
+ * other than the current one is dropped a day after it was built, which is how a
+ * template for migrations this branch no longer ships expires.
+ */
+export async function dropOrphans(currentTemplate: string): Promise<string[]> {
+  const session = await maintenanceSession();
+  const dropped: string[] = [];
+  try {
+    const { rows } = await session.query<{ datname: string; description: string | null }>(
+      "select d.datname, s.description from pg_database d left join pg_shdescription s" +
+        " on s.objoid = d.oid and s.classoid = 'pg_database'::regclass" +
+        ` where d.datname like 'cf\\_%'`,
+    );
+    const now = epochSeconds();
+    for (const { datname, description } of rows) {
+      if (datname === currentTemplate) continue;
+      const clone = CLONE_NAME.exec(datname);
+      if (clone) {
+        if (now - Number(clone[2]) <= ORPHAN_MAX_AGE_S) continue;
+        if (processAlive(Number(clone[1]))) continue;
+      } else if (!datname.startsWith(TEMPLATE_PREFIX)) {
+        continue;
+      } else {
+        const built = Number(description);
+        if (!Number.isFinite(built) || now - built <= STALE_TEMPLATE_MAX_AGE_S) continue;
+      }
+      await session.query(`drop database ${identifier(datname)} with (force)`);
+      dropped.push(datname);
+    }
+  } finally {
+    await session.end();
+  }
+  return dropped;
+}
+
+/**
+ * The one migrated template every test copies, built once per migration set.
+ *
+ * Held under a session-level advisory lock for the WHOLE build, so N workers
+ * arriving together build it exactly once and the rest find it finished. The
+ * lock is released only after the template is marked, because a second worker
+ * arriving in the middle would otherwise see a plain database and — correctly,
+ * for a killed build — drop the one being built.
+ *
+ * A database of the right name that is NOT a template is a build killed between
+ * `CREATE` and `ALTER`: drop it and build again.
+ */
+export async function ensureTemplate(migrations?: readonly Migration[]): Promise<string> {
+  await requireServerReachable();
+  const shipped = migrations ?? (await loadMigrations());
+  const name = templateName(shipped);
+  const session = await maintenanceSession();
+  try {
+    await session.query("select pg_advisory_lock($1)", [TEMPLATE_LOCK]);
+    await dropOrphans(name);
+    const existing = await session.query<{ datistemplate: boolean }>(
+      "select datistemplate from pg_database where datname = $1",
+      [name],
+    );
+    if (existing.rows[0]?.datistemplate === true) return name;
+    if (existing.rows.length > 0) {
+      await session.query(`drop database ${identifier(name)} with (force)`);
+    }
+    await session.query(`create database ${identifier(name)}`);
+    const build = pgClient(cloneConfig(name));
+    try {
+      await migrate(build, shipped);
+    } finally {
+      // A database cannot be marked a template while a session is connected to
+      // it — and the next test's clone copies it.
+      await build.end();
+    }
+    await session.query(`alter database ${identifier(name)} is_template true`);
+    await session.query(`comment on database ${identifier(name)} is '${epochSeconds()}'`);
+    return name;
+  } finally {
+    await session.query("select pg_advisory_unlock($1)", [TEMPLATE_LOCK]).catch(() => undefined);
+    await session.end();
+  }
+}
+
+/** True when a statement failed because the database it named does not exist. */
+function isMissingDatabase(error: unknown): boolean {
+  return (error as { code?: string }).code === "3D000";
+}
+
+/** Drop a database, from the maintenance connection: a database cannot drop itself. */
+export async function drop(name: string): Promise<void> {
+  await maintenanceStatement(`drop database ${identifier(name)} with (force)`);
+}
+
+/** A `SqlClient` whose `end()` also drops the database it was opened against. */
+async function owning(config: DatabaseConfig): Promise<SqlClient> {
+  const name = config.database;
+  const client = pgClient(config);
+  return {
+    ...client,
+    end: async () => {
+      await client.end();
+      await drop(name);
+    },
+  };
+}
+
+/**
+ * A migrated database: a copy of the template, then the production client over
+ * it. A copy rather than a migration run, because every test that wants a
+ * migrated database wants the same one.
+ */
+export async function migratedServerDatabase(): Promise<SqlClient> {
+  const template = await ensureTemplate();
+  const name = nextCloneName();
+  try {
+    await maintenanceStatement(
+      `create database ${identifier(name)} template ${identifier(template)}`,
+    );
+  } catch (error) {
+    if (!isMissingDatabase(error)) throw error;
+    // Cleanup raced this clone and took the template between building and
+    // copying. Build it once more and try again — once, because a template that
+    // keeps vanishing is a fault to report, not to spin on.
+    const rebuilt = await ensureTemplate();
+    await maintenanceStatement(
+      `create database ${identifier(name)} template ${identifier(rebuilt)}`,
+    );
+  }
+  return owning(cloneConfig(name));
+}
+
+/** An empty database: a fresh `CREATE DATABASE`, with no template behind it. */
+export async function emptyServerDatabase(): Promise<SqlClient> {
+  await requireServerReachable();
+  const name = nextCloneName();
+  await maintenanceStatement(`create database ${identifier(name)}`);
+  return owning(cloneConfig(name));
+}
+
+/**
+ * Better Auth's pool, and the `SqlClient` over the SAME pool.
+ *
+ * The database is always empty: `schema-agreement.test.ts` needs an empty one to
+ * run `migrate(sql, prior)` before `0008_auth`, and every other site migrates
+ * what it finds, so a template behind this would be a template those migrations
+ * could not be applied to.
+ *
+ * The idle-error handler is `instance.ts`'s, and it is on the pool rather than
+ * inherited from `pgClient` because Better Auth holds this pool directly: an
+ * unhandled `error` there would end the process.
+ */
+export async function authServerDatabase(): Promise<AuthDatabase> {
+  await requireServerReachable();
+  const name = nextCloneName();
+  await maintenanceStatement(`create database ${identifier(name)}`);
+  const config = cloneConfig(name);
+  const pool = new pg.Pool(poolOptions(config));
+  pool.on("error", (error) => {
+    console.warn(`[auth] an idle connection failed: ${error.message}`);
+  });
+  return {
+    pool,
+    sql: pgClient(config, () => pool as unknown as PgPool),
+    end: async () => {
+      await pool.end();
+      await drop(name);
+    },
+  };
+}
+
+/** What the four Better Auth sites swap in for their own `new PGlite()` dance. */
+export interface AuthDatabase {
+  readonly pool: PgPool;
+  readonly sql: SqlClient;
+  readonly end: () => Promise<void>;
+}
+
+/** The `cf_t_*` databases this process created and has not dropped. */
+export async function leakedDatabases(): Promise<string[]> {
+  await requireServerReachable();
+  const session = await maintenanceSession();
+  try {
+    const { rows } = await session.query<{ datname: string }>(
+      "select datname from pg_database where datname like $1",
+      [`${CLONE_PREFIX}${process.pid}\\_%`],
+    );
+    return rows.map((r) => r.datname);
+  } finally {
+    await session.end();
+  }
+}
