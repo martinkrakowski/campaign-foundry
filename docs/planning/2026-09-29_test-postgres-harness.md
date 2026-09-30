@@ -1,7 +1,7 @@
 # Test Postgres Harness — Architecture & Development Plan
 
 **Date:** 2026-09-29
-**Status:** **r1 — PROPOSED.** D186 awaits the owner. Needs a plan review (Fable) before dispatch.
+**Status:** **r1 — D186 STAMPED (owner, 2026-09-29: "stamp D186").** Fable plan review in progress; nothing is dispatched until it clears.
 **Decision ids introduced:** D186
 **Lane ids introduced:** TP1. `git grep -P '\bTP[0-9]'` over `docs/planning/` was empty; the known positive `\bHX7\b` matched with the same command.
 **Relates to:**
@@ -22,7 +22,7 @@ The fix is a **real, long-running test Postgres**, selected by environment, with
 
 | id | Decision |
 |---|---|
-| **D186** | **The test harness can run database tests against a real Postgres server named by `TEST_PG_URL`.**<br>- When it is set, each migrated test database is a copy of a template (`CREATE DATABASE … TEMPLATE`) that is migrated once per migration-set hash. Each empty test database is a fresh `CREATE DATABASE`. Each is dropped when the test or file finishes, through the same single-connection `SqlClient` shape PGlite has today.<br>- When it is unset, PGlite is used, unchanged.<br>- **The staging database is never a test target.** The test server is a separate Postgres 18 (staging's major version) on the host that runs the lanes, bound to loopback.<br>- `TEST_DATABASE_URL` keeps its current meaning (the CI concurrency proofs) and is not reused. |
+| **D186** | **STAMPED — Owner, 2026-09-29.** **The test harness can run database tests against a real Postgres server named by `TEST_PG_URL`.**<br>- When it is set, each migrated test database is a copy of a template (`CREATE DATABASE … TEMPLATE`) that is migrated once per migration-set hash. Each empty test database is a fresh `CREATE DATABASE`. Each is dropped when the test or file finishes, through the same single-connection `SqlClient` shape PGlite has today.<br>- When it is unset, PGlite is used, unchanged.<br>- **The staging database is never a test target.** The test server is a separate Postgres 18 (staging's major version) on the host that runs the lanes, bound to loopback.<br>- `TEST_DATABASE_URL` keeps its current meaning (the CI concurrency proofs) and is not reused. |
 
 ---
 
@@ -50,7 +50,7 @@ Every lane inherits the pipeline and skill rules: `yarn gate`, 100% coverage, a 
 
 ## 3. Owner actions
 
-1. **Stamp D186.**
+1. **DONE 2026-09-29: D186 stamped.**
 2. **DONE 2026-09-29: the test Postgres is installed on midnight.** Docker container `cf-test-pg` (`postgres:18`, 18.6), on `127.0.0.1:5433`, user `cf_test`, trust auth on loopback, with `fsync`, `synchronous_commit` and `full_page_writes` off, and `max_connections=300`. It restarts unless stopped, with volume `cf-test-pg`. Verified from the orchestrator: a `CREATE DATABASE … TEMPLATE` clone took **110 ms**, against 5.2–6.5 s per PGlite start on the same host.
 
 ## 4. Definition of done
