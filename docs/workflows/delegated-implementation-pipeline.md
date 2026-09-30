@@ -424,8 +424,10 @@ Never resolve a thread you did not answer, and never claim a fix you have not ve
 ### Template E — Fix-round brief for a sandboxed lane (the text `yarn fix-brief` drafts)
 
 Template C is for a lane that pushes. This one is for a lane that only commits (e.g. `--agent lane`
-on midnight): the orchestrator fetches, verifies, and pushes. The placeholders are `<LANE>`,
-`<ROUND>`, `<PR>`, `<WORKTREE>`, `<BRANCH>`, `<TIP>` and `<COUNT>`, and nothing else varies. Each
+on midnight): the orchestrator fetches, verifies, and pushes. The header and footer placeholders are
+`<LANE>`, `<ROUND>`, `<PR>`, `<WORKTREE>`, `<BRANCH>`, `<TIP>` and `<COUNT>`. The `## Item 1` block is the
+per-item layout, repeated once per thread (a label such as `(outdated)` or `(file-level)` sits outside
+the path's backticks). `## Verification` is the placeholder the orchestrator edits. Each
 item's `Disposition:` line is the orchestrator's triage (fix / refute / defer), filled in before
 dispatch. The drafted brief still goes to the plan reviewer before any lane sees it.
 
