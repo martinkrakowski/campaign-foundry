@@ -44,12 +44,20 @@ const TEMPLATE_HASH_LENGTH = 12;
 const CLONE_PREFIX = "cf_t_";
 
 /**
- * The advisory lock that serialises template builds. Any fixed key will do,
- * provided every process building the template uses the same one — and it must
- * NOT be `migrate.ts`'s `MIGRATION_LOCK` (7_210_431), which is transaction-level
- * and lives inside the template's own migration.
+ * The advisory lock that serialises everything that creates, dates or drops a
+ * harness template. Any fixed key will do, provided every process uses the same
+ * one — and it must NOT be `migrate.ts`'s `MIGRATION_LOCK` (7_210_431), which is
+ * transaction-level and lives inside the template's own migration.
+ *
+ * A sweep takes it as well as a build. That is the whole point of it: a template
+ * is undated from `CREATE` until its `COMMENT`, and an undated template reads as
+ * built at zero, so a sweep that ran beside a build would read a half-built
+ * template as ancient and drop it. Waiting is the correct answer for a sweep
+ * that arrives mid-build — a run in flight finishes in seconds, and a person who
+ * ran `yarn test:pg-clean` at the wrong moment gets a wait rather than a
+ * casualty.
  */
-const TEMPLATE_LOCK = 424_242;
+export const TEMPLATE_LOCK = 424_242;
 
 /** How old a `cf_t_*` database must be before cleanup will even consider it. */
 const ORPHAN_MAX_AGE_S = 3_600;
@@ -258,52 +266,70 @@ async function untemplate(session: pg.Client, name: string): Promise<void> {
  * `everyClone` is the difference between the two callers: automatic cleanup
  * respects the age and pid bounds below, because it runs unattended against a
  * server other runs may be using, and the on-demand script does not.
+ *
+ * A sweep that is not part of a build takes `TEMPLATE_LOCK` first, so it cannot
+ * run beside a build and read its half-written template as stale. The one that
+ * IS part of a build arrives with the lock already held, on the session below —
+ * which is why this takes the session rather than opening one: taking a
+ * session-level advisory lock a second time on another session is a deadlock,
+ * not a no-op.
  */
 async function dropHarnessDatabases(
   currentTemplate: string,
   everyClone: boolean,
 ): Promise<string[]> {
   const session = await maintenanceSession();
-  const dropped: string[] = [];
   try {
-    const { rows } = await session.query<{ datname: string; description: string | null }>(
-      "select d.datname, s.description from pg_database d left join pg_shdescription s" +
-        " on s.objoid = d.oid and s.classoid = 'pg_database'::regclass" +
-        ` where d.datname like 'cf\\_%'`,
-    );
-    const now = epochSeconds();
-    for (const { datname, description } of rows) {
-      if (datname === currentTemplate) continue;
-      const clone = CLONE_NAME.exec(datname);
-      if (clone) {
-        if (!everyClone) {
-          if (now - Number(clone[2]) <= ORPHAN_MAX_AGE_S) continue;
-          if (processAlive(Number(clone[1]))) continue;
-        }
-      } else if (!TEMPLATE_NAME.test(datname)) {
-        // Not a name this harness builds. Left alone rather than interpolated
-        // into a DROP it has no business running.
-        continue;
-      } else {
-        // A template this harness built always carries the epoch it was built
-        // at. One with no comment is from something else, or from a build that
-        // was killed before it could record itself — and a build cannot be in
-        // flight here, because this runs under the same lock that builds one.
-        const built = description === null || description === "" ? 0 : Number(description);
-        if (!Number.isFinite(built) || now - built <= STALE_TEMPLATE_MAX_AGE_S) continue;
-        // Then the flag has to come off before the drop: `with (force)` overrides
-        // the connected-sessions check and nothing else, and a template
-        // database cannot be dropped at all (42809). Without this the cleanup
-        // below throws, and since it runs on every template step it takes every
-        // later test in the run with it — including `yarn test:pg-clean`, which
-        // is the way a person gets out of exactly that state.
-        await untemplate(session, datname);
-      }
-      await session.query(`drop database ${identifier(datname)} with (force)`);
-      dropped.push(datname);
-    }
+    await session.query("select pg_advisory_lock($1)", [TEMPLATE_LOCK]);
+    return await sweep(session, currentTemplate, everyClone);
   } finally {
+    await session.query("select pg_advisory_unlock($1)", [TEMPLATE_LOCK]).catch(() => undefined);
     await session.end();
+  }
+}
+
+/** The scan and the drops, on a session that already holds `TEMPLATE_LOCK`. */
+async function sweep(
+  session: pg.Client,
+  currentTemplate: string,
+  everyClone: boolean,
+): Promise<string[]> {
+  const dropped: string[] = [];
+  const { rows } = await session.query<{ datname: string; description: string | null }>(
+    "select d.datname, s.description from pg_database d left join pg_shdescription s" +
+      " on s.objoid = d.oid and s.classoid = 'pg_database'::regclass" +
+      ` where d.datname like 'cf\\_%'`,
+  );
+  const now = epochSeconds();
+  for (const { datname, description } of rows) {
+    if (datname === currentTemplate) continue;
+    const clone = CLONE_NAME.exec(datname);
+    if (clone) {
+      if (!everyClone) {
+        if (now - Number(clone[2]) <= ORPHAN_MAX_AGE_S) continue;
+        if (processAlive(Number(clone[1]))) continue;
+      }
+    } else if (!TEMPLATE_NAME.test(datname)) {
+      // Not a name this harness builds. Left alone rather than interpolated
+      // into a DROP it has no business running.
+      continue;
+    } else {
+      // A template this harness built always carries the epoch it was built at.
+      // One with no comment is from something else, or from a build that was
+      // killed before it could record itself — and a build cannot be in flight
+      // here, because the lock is held across every build and every sweep.
+      const built = description === null || description === "" ? 0 : Number(description);
+      if (!Number.isFinite(built) || now - built <= STALE_TEMPLATE_MAX_AGE_S) continue;
+      // Then the flag has to come off before the drop: `with (force)` overrides
+      // the connected-sessions check and nothing else, and a template database
+      // cannot be dropped at all (42809). Without this the cleanup below throws,
+      // and since it runs on every template step it takes every later test in the
+      // run with it — including `yarn test:pg-clean`, which is the way a person
+      // gets out of exactly that state.
+      await untemplate(session, datname);
+    }
+    await session.query(`drop database ${identifier(datname)} with (force)`);
+    dropped.push(datname);
   }
   return dropped;
 }
@@ -342,7 +368,7 @@ async function buildTemplate(
   name: string,
   shipped: readonly Migration[],
 ): Promise<string> {
-  await dropOrphans(name);
+  await sweep(session, name, false);
   const existing = await session.query<{ datistemplate: boolean; description: string | null }>(
     "select d.datistemplate, s.description from pg_database d left join pg_shdescription s" +
       " on s.objoid = d.oid and s.classoid = 'pg_database'::regclass where d.datname = $1",

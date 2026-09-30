@@ -14,6 +14,7 @@ import {
   migratedFromTemplate,
   testDatabaseBackend,
   templateName,
+  TEMPLATE_LOCK,
   whileBuilding,
 } from "./test-database.js";
 
@@ -312,6 +313,41 @@ describe.skipIf(!server)("orphan cleanup (D186)", () => {
     expect(left).toContain(live);
     expect(left).toContain(young);
     expect(left).not.toContain(stale);
+  });
+
+  test("a sweep waits for a build in flight instead of racing it", async () => {
+    // The sweep the on-demand script runs, beside a build the way a run's own
+    // build is. A template is undated from `CREATE` until its `COMMENT`, and an
+    // undated template reads as built at zero — so a sweep that does not take
+    // the build lock reads a half-built template as ancient and drops it. The
+    // `afterEach` here plants the fixture, which makes it a template a day old.
+    const stale = `cf_tpl_${"1".repeat(12)}`;
+    await createDatabase(stale);
+    created.push(stale);
+    await markAsTemplate(stale);
+    await commentOn(stale, `${Math.floor(Date.now() / 1000) - 90_000}`);
+
+    const current = templateName(await loadMigrations());
+    const building = await maintenanceSession();
+    await building.query("select pg_advisory_lock($1)", [TEMPLATE_LOCK]);
+    try {
+      let swept = false;
+      const sweeping = dropOrphans(current).then((dropped) => {
+        swept = true;
+        return dropped;
+      });
+      // Long enough for an unlocked sweep to have finished and dropped it.
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(swept).toBe(false);
+      expect(await names()).toContain(stale);
+
+      await building.query("select pg_advisory_unlock($1)", [TEMPLATE_LOCK]);
+      expect(await sweeping).toContain(stale);
+    } finally {
+      await building.query("select pg_advisory_unlock($1)", [TEMPLATE_LOCK]).catch(() => undefined);
+      await building.end();
+    }
+    expect(await names()).not.toContain(stale);
   });
 
   test("the current template is never dropped by its own cleanup", async () => {

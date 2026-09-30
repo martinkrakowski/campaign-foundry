@@ -14,6 +14,9 @@ import { dropEveryTestDatabase, testDatabaseBackend } from "./test-database.js";
  *
  * This one is the manual, unbounded version, for when a run was killed hard
  * enough to leave a database an hour old, or when a server is being retired.
+ * It waits for a build in flight rather than dropping the template that build is
+ * half-way through writing — which is the one thing here that can lose a run.
+ *
  * It is a script and not a test, so "it reads TEST_PG_URL" is true of it and of
  * nothing else in the harness; with the variable unset it says so and does
  * nothing, because there is no server and nothing to drop.
