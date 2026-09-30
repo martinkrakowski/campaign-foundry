@@ -7,6 +7,7 @@ import { authDatabase, emptyDatabase, migratedDatabase } from "./pglite-client.j
 import {
   cloneConfig,
   dropHarnessDatabase,
+  dropOrphans,
   ensureTemplate,
   maintenanceConfig,
   maintenanceSession,
@@ -56,16 +57,6 @@ async function markAsTemplate(name: string): Promise<void> {
   const session = await maintenanceSession();
   try {
     await session.query(`alter database "${name}" is_template true`);
-  } finally {
-    await session.end();
-  }
-}
-
-/** A build killed before it could record itself: the flag, and no epoch. */
-async function clearComment(name: string): Promise<void> {
-  const session = await maintenanceSession();
-  try {
-    await session.query(`comment on database "${name}" is null`);
   } finally {
     await session.end();
   }
@@ -141,15 +132,17 @@ describe.skipIf(!server)("the template (D186)", () => {
 
   test("a build killed between the flag and the comment is dated, not read as ancient", async () => {
     const migrations = [m("0001_stamped", "create table stamped (x int);")];
-    const name = await ensureTemplate(migrations);
+    const name = templateName(migrations);
+    // Planted rather than built, because the point is a build this process knows
+    // nothing about: a build killed between `ALTER … IS_TEMPLATE true` and its
+    // `COMMENT` leaves a finished template with nothing to date it, and the
+    // cleanup rule for an undated template is "older than a day" — true of it at
+    // once, so the next worker's sweep would take it out from under every test
+    // copying it. Being this run's current template is all that saves it, and
+    // only until the next run, when it is not.
+    await createDatabase(name);
     created.push(name);
-    // The other way a build is killed: the `ALTER` landed and the `COMMENT` after
-    // it did not. The template is finished, but with nothing to date it, and the
-    // cleanup rule for an undated template is "older than a day" — which reads as
-    // true at once, so the next worker's sweep would take it out from under
-    // every test copying it. Being the current template is what saves it from
-    // THAT, and only from that.
-    await clearComment(name);
+    await markAsTemplate(name);
     expect(await commentOf(name)).toBeNull();
 
     expect(await ensureTemplate(migrations)).toBe(name);
@@ -157,6 +150,23 @@ describe.skipIf(!server)("the template (D186)", () => {
     // A real epoch, not merely something: `Number(null)` is 0, so an undated
     // template fails this as "expected 0 to be greater than 0".
     expect(Number(await commentOf(name))).toBeGreaterThan(0);
+  });
+
+  test("the template is built once per process, not once per clone", async () => {
+    const migrations = [m("0001_once", "create table once_only (x int);")];
+    const name = await ensureTemplate(migrations);
+    created.push(name);
+
+    // Gone from the server, and answered from what this process built all the
+    // same: the build is a global advisory lock, a pg_database scan and an
+    // orphan sweep on a session of its own, and the second clone of a suite has
+    // no reason to pay for any of it. A clone that finds the template missing
+    // is the one thing that undoes this, and it rebuilds.
+    await dropHarnessDatabase(name);
+    expect(await names()).not.toContain(name);
+
+    expect(await ensureTemplate(migrations)).toBe(name);
+    expect(await names()).not.toContain(name);
   });
 
   test("a build killed before it was marked a template is dropped and built again", async () => {
@@ -211,6 +221,27 @@ describe.skipIf(!server)("migrated and empty databases (D186)", () => {
     }
   });
 
+  test("a clone whose template was cleaned up underneath it rebuilds and copies", async () => {
+    // What makes remembering the template name safe. Without forgetting it on
+    // 3D000, the second `CREATE … TEMPLATE` would fail the same way and the run
+    // would be over: the name this process remembers is exactly the one that
+    // stopped existing.
+    const name = await ensureTemplate();
+    await dropHarnessDatabase(name);
+    expect(await names()).not.toContain(name);
+
+    const db = await migratedDatabase();
+    try {
+      const applied = await db.query<{ id: string }>(
+        "select id from schema_migrations order by id",
+      );
+      expect(applied.rows.map((r) => r.id)).toEqual((await loadMigrations()).map((x) => x.id));
+    } finally {
+      await db.end();
+    }
+    expect(await names()).toContain(name);
+  });
+
   test("end() drops the database it was opened against", async () => {
     const before = await names();
     const db = await emptyDatabase();
@@ -241,7 +272,9 @@ describe.skipIf(!server)("orphan cleanup (D186)", () => {
     await markAsTemplate(stale);
     await commentOn(stale, `${Math.floor(Date.now() / 1000) - 90_000}`);
 
-    await ensureTemplate();
+    // The sweep itself, not the template step that carries it: this is a test of
+    // the bounds, and the template step only runs them once per process now.
+    await dropOrphans(templateName(await loadMigrations()));
 
     const left = await names();
     expect(left).not.toContain(old);
@@ -252,6 +285,7 @@ describe.skipIf(!server)("orphan cleanup (D186)", () => {
 
   test("the current template is never dropped by its own cleanup", async () => {
     const name = await ensureTemplate();
+    expect(await dropOrphans(name)).not.toContain(name);
     expect(await names()).toContain(name);
   });
 });

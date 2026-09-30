@@ -309,10 +309,7 @@ export async function dropHarnessDatabase(name: string): Promise<void> {
  * A database of the right name that is NOT a template is a build killed between
  * `CREATE` and `ALTER`: drop it and build again.
  */
-export async function ensureTemplate(migrations?: readonly Migration[]): Promise<string> {
-  await requireServerReachable();
-  const shipped = migrations ?? (await loadMigrations());
-  const name = templateName(shipped);
+async function buildTemplate(name: string, shipped: readonly Migration[]): Promise<string> {
   const session = await maintenanceSession();
   try {
     await session.query("select pg_advisory_lock($1)", [TEMPLATE_LOCK]);
@@ -354,6 +351,42 @@ export async function ensureTemplate(migrations?: readonly Migration[]): Promise
   }
 }
 
+/**
+ * The templates this process has already built, by name.
+ *
+ * Every `migratedDatabase()` asks for one, and behind that ask sat the whole
+ * build: a global advisory lock (so every worker on the host queues on it), a
+ * `pg_database` scan and an orphan sweep, on a maintenance session apiece. The
+ * row asks for the template to exist before the first clone, and the answer is
+ * the same name every time after that — so the name is remembered, and only a
+ * clone that finds the template gone (3D000, see `migratedServerDatabase`) takes
+ * the memory back out and pays for the build again.
+ *
+ * Keyed by name, so a test asking for a synthetic migration set gets its own
+ * entry and never inherits the shipped one. Per process, and a vitest file runs
+ * in a process of its own, so this is per test file.
+ */
+const builtTemplates = new Map<string, Promise<string>>();
+
+export async function ensureTemplate(migrations?: readonly Migration[]): Promise<string> {
+  await requireServerReachable();
+  const shipped = migrations ?? (await loadMigrations());
+  const name = templateName(shipped);
+  const remembered = builtTemplates.get(name);
+  if (remembered) return remembered;
+  const building = buildTemplate(name, shipped);
+  builtTemplates.set(name, building);
+  // A build that failed is not an answer to hand the next test: the server was
+  // down for a moment, it is not down forever.
+  await building.catch(() => builtTemplates.delete(name));
+  return building;
+}
+
+/** Stop believing this process built a template, so the next caller builds it again. */
+function forgetTemplate(name: string): void {
+  builtTemplates.delete(name);
+}
+
 /** True when a statement failed because the database it named does not exist. */
 function isMissingDatabase(error: unknown): boolean {
   return (error as { code?: string }).code === "3D000";
@@ -392,8 +425,10 @@ export async function migratedServerDatabase(): Promise<SqlClient> {
   } catch (error) {
     if (!isMissingDatabase(error)) throw error;
     // Cleanup raced this clone and took the template between building and
-    // copying. Build it once more and try again — once, because a template that
-    // keeps vanishing is a fault to report, not to spin on.
+    // copying. What this process remembered is now wrong, so it is forgotten
+    // and rebuilt — once, because a template that keeps vanishing is a fault to
+    // report, not to spin on.
+    forgetTemplate(template);
     const rebuilt = await ensureTemplate();
     await maintenanceStatement(
       `create database ${identifier(name)} template ${identifier(rebuilt)}`,
