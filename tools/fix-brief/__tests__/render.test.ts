@@ -224,6 +224,31 @@ describe("the quoted body", () => {
     expect(processed).not.toContain("boilerplate");
   });
 
+  test("a Qodo-shaped Agent Prompt block is omitted — this repo has been reviewed by it", () => {
+    // The evidence is a fix brief: qodo-code-review labels its agent block
+    // `<summary><strong>Agent Prompt</strong></summary>`, and a rule that knows
+    // only "Prompt for AI Agents" kept several hundred characters of
+    // instructions to a model, verbatim, in the middle of a dispatched brief.
+    const block =
+      "<details>\n<summary><strong>Agent Prompt</strong></summary>\n\n" +
+      "## Issue description\nReject line breaks in header values.\n\n</details>";
+    const processed = processBody(block);
+    expect(processed).toBe(
+      `[reviewer agent-prompt omitted: ${block.length} characters — read it on the PR if needed]`,
+    );
+    expect(processed).not.toContain("Issue description");
+  });
+
+  test("a summary that merely mentions agent prompts is kept — the label ends at a word boundary", () => {
+    // "Agent Prompt" is a case-insensitive PREFIX of this phrase. Without the
+    // `\b` after the label, a reviewer's own heading about agent prompts would
+    // be deleted and replaced by an omission line — the finding fixed by
+    // widening the label re-introduced by dropping that one character.
+    const block =
+      "<details>\n<summary>Agent prompts are discussed below</summary>\n\nA real note.\n\n</details>";
+    expect(processBody(block)).toBe(block);
+  });
+
   test("an unclosed <details> is kept verbatim — there is no block to judge", () => {
     const body = "<details><summary>Prompt for AI Agents</summary>never closed";
     expect(processBody(body)).toBe(body);

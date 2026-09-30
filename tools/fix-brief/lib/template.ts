@@ -166,12 +166,20 @@ const DETAILS_TAG = /<\/?details\b[^>]*>/gi;
  * silently delete a reviewer's notes because one quoted aside inside them
  * mentioned the prompt.
  *
- * The summary's text is matched through any tags inside it — `<b>`, `<code>`,
+ * The summary's text is matched through any tags inside it — `<b>`, `<strong>`,
  * a nested `<summary>` — up to its own `</summary>`, because the word is what
- * identifies the block, not the markup around it.
+ * identifies the block, not the markup around it. Both the label this repo's
+ * own reviewers use (`Prompt for AI Agents`) and Qodo's (`Agent Prompt`) are
+ * matched, because both blocks are several hundred characters of instructions
+ * to a model and neither means anything to a lane.
+ *
+ * The trailing `\b` is what keeps "Agent prompts are discussed below" out: the
+ * label is a case-insensitive prefix of that phrase, so without it a reviewer's
+ * own heading about agent prompts would be deleted and replaced by an omission
+ * line. `</strong>` and `</summary>` after the label both satisfy it.
  */
 const AGENT_PROMPT_BLOCK =
-  /^<details\b[^>]*>\s*<summary\b[^>]*>(?:(?!<\/summary>)[\s\S])*Prompt for AI Agents/i;
+  /^<details\b[^>]*>\s*<summary\b[^>]*>(?:(?!<\/summary>)[\s\S])*(?:Prompt for AI Agents|Agent Prompt)\b/i;
 
 /** One `<details>…</details>` span, as offsets into the text it was found in. */
 interface DetailsBlock {

@@ -47,7 +47,55 @@ function numberAfter(argv: readonly string[], i: number, flag: string, usage: st
   if (!/^\d+$/.test(raw)) {
     throw new Error(`${flag} wants a number, got '${raw}'\n${usage}`);
   }
-  return Number(raw);
+  // Digits are not a number. `0` is no PR and no round; a value past the safe
+  // integer limit is silently rounded, so `--pr 9007199254740993` would ask the
+  // forge about a PR that is not the one the caller named and be told nothing
+  // useful; and a 400-digit run of them converts to Infinity, which
+  // `--round` would then write into a brief's own header as the word
+  // "Infinity". Both are argv mistakes, so both stop here, where the caller can
+  // see the spelling they typed, rather than at the forge.
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${flag} wants a positive whole number, got '${raw}'\n${usage}`);
+  }
+  return value;
+}
+
+/**
+ * What may NOT appear in a value the brief's header will carry: a line break, a
+ * line or paragraph separator, or any other control character.
+ *
+ * These four values are the only ones this tool writes into the brief, and they
+ * are written verbatim — one per line, with no quoting. A `--lane` carrying a
+ * newline is not a lane id with a newline in it; it is a second line of the
+ * brief, and `## Item 4` on that line is an item heading, and anything after it
+ * is read as this brief's own instructions by whoever is dispatched with the
+ * file. `sanitiseInline` exists for fields that arrive from the forge and must
+ * be rendered anyway; an argv value is a caller's own typing, so it is refused
+ * (exit 2) instead of quietly mangled into `?`.
+ *
+ * A backtick is NOT in this class. It cannot end a line — the header's lines
+ * are its own — and refusing it would refuse a branch name that legitimately
+ * contains one, with nothing to buy.
+ */
+const NOT_ONE_LINE = /[\p{Cc}\p{Zl}\p{Zp}]/u;
+
+/**
+ * Reads a value that the brief's header will carry, and refuses one that would
+ * write a line of its own. `--out` and `--threads` are deliberately NOT read
+ * this way: neither is substituted into the brief — `--out` is a `writeFile`
+ * path and a log line, and a `--threads` id must equal a forge thread id or the
+ * run refuses with 1 — so refusing a control character there would stop a call
+ * whose output cannot be affected by it.
+ */
+function headerValueAfter(argv: readonly string[], i: number, flag: string, usage: string): string {
+  const raw = valueAfter(argv, i, flag, usage);
+  if (NOT_ONE_LINE.test(raw)) {
+    throw new Error(
+      `${flag} must be a single line: it is written into the brief's header verbatim\n${usage}`,
+    );
+  }
+  return raw;
 }
 
 /**
@@ -57,7 +105,9 @@ function numberAfter(argv: readonly string[], i: number, flag: string, usage: st
  * `--round` is a counter, like `--pr`, and is held to the same rule: a round
  * called "next" or "r2" is a label this brief has nowhere to put.
  *
- * Three checks here are NOT in `sweep`'s parser, and each is deliberate:
+ * The checks here that are NOT in `sweep`'s parser are these three, and each is
+ * deliberate — the rest are documented where they live ({@link
+ * numberAfter}, {@link headerValueAfter}):
  *
  * - **A flag given twice** is refused (2). `sweep` can take `--thread` twice on
  *   purpose, because one class is several threads; every flag here states one
@@ -100,7 +150,7 @@ export function parseFixBriefArgs(argv: readonly string[]): FixBriefArgs {
         break;
       case "--lane":
         once(flag);
-        lane = valueAfter(argv, ++i, flag, FIX_BRIEF_USAGE);
+        lane = headerValueAfter(argv, ++i, flag, FIX_BRIEF_USAGE);
         break;
       case "--round":
         once(flag);
@@ -108,15 +158,15 @@ export function parseFixBriefArgs(argv: readonly string[]): FixBriefArgs {
         break;
       case "--worktree":
         once(flag);
-        worktree = valueAfter(argv, ++i, flag, FIX_BRIEF_USAGE);
+        worktree = headerValueAfter(argv, ++i, flag, FIX_BRIEF_USAGE);
         break;
       case "--branch":
         once(flag);
-        branch = valueAfter(argv, ++i, flag, FIX_BRIEF_USAGE);
+        branch = headerValueAfter(argv, ++i, flag, FIX_BRIEF_USAGE);
         break;
       case "--tip":
         once(flag);
-        tip = valueAfter(argv, ++i, flag, FIX_BRIEF_USAGE);
+        tip = headerValueAfter(argv, ++i, flag, FIX_BRIEF_USAGE);
         break;
       case "--out":
         once(flag);

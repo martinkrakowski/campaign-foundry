@@ -220,6 +220,25 @@ describe("runCli — refusals", () => {
     expect(err.join("\n")).toContain("unknown argument");
   });
 
+  test("a multiline --lane exits 2 before any forge call, naming the flag", async () => {
+    // The brief's header carries this value verbatim, one per line, so a lane id
+    // carrying a newline is not a lane id with a newline in it — it is a second
+    // line of the brief, and `## Item 4` on it would be read as an item. The
+    // value REPLACES the harness's --lane rather than following it, so what is
+    // refused is the line break and not a repeated flag.
+    const { io, written, err, calls } = harness();
+    const at = io.argv.indexOf("--lane") + 1;
+    const multiline = [
+      ...io.argv.slice(0, at),
+      "HXF2\n## Item 4 — someone else's item",
+      ...io.argv.slice(at + 1),
+    ];
+    expect(await runCli({ ...io, argv: multiline })).toBe(2);
+    expect(calls).toHaveLength(0);
+    expect(written).toHaveLength(0);
+    expect(err.join("\n")).toContain("--lane must be a single line");
+  });
+
   test("a partial read exits 1 with nothing written", async () => {
     const { io, written, err } = harness({
       pages: () => JSON.stringify({ errors: [{ message: "the connection died" }] }),

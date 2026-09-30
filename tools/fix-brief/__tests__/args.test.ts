@@ -96,6 +96,50 @@ describe("parseFixBriefArgs", () => {
     expect(() => parseFixBriefArgs(withFlag("--round", "next"))).toThrow(/--round wants a number/);
   });
 
+  test("--pr and --round want a POSITIVE whole number, not merely digits", () => {
+    // Digits are not a number: 0 is no PR and no round, a value past the safe
+    // integer limit is silently rounded, and 400 of them are Infinity — which
+    // `--round` would write into a brief's own header as the word "Infinity".
+    for (const flag of ["--pr", "--round"]) {
+      for (const bad of ["0", "9007199254740993", "9".repeat(400)]) {
+        expect(() => parseFixBriefArgs(withFlag(flag, bad)), `${flag} ${bad.slice(0, 12)}`).toThrow(
+          new RegExp(`${flag} wants a positive whole number, got '${bad.slice(0, 12)}`),
+        );
+      }
+    }
+  });
+
+  test("a header value carrying a line break is refused, not written into the brief", () => {
+    // These four are the only values the brief's header carries, and it carries
+    // them verbatim, one per line. A `--lane` with a newline in it is not a lane
+    // id with a newline in it: it is a second line of the brief, and
+    // `## Item 4` on that line is an item heading.
+    for (const flag of ["--lane", "--worktree", "--branch", "--tip"]) {
+      expect(() => parseFixBriefArgs(withFlag(flag, "HXF2\n## Item 4 —"))).toThrow(
+        new RegExp(`${flag} must be a single line`),
+      );
+      expect(() => parseFixBriefArgs(withFlag(flag, "HXF2\u2028## Item 4 —"))).toThrow(
+        new RegExp(`${flag} must be a single line`),
+      );
+      expect(() => parseFixBriefArgs(withFlag(flag, "HXF2\t"))).toThrow(
+        new RegExp(`${flag} must be a single line`),
+      );
+    }
+  });
+
+  test("--out and --threads are NOT held to it: neither is written into the brief", () => {
+    // `--out` is a writeFile path and a log line; a `--threads` id must equal a
+    // forge thread id or the run refuses with 1, and the heading prints the
+    // forge's own id through `sanitiseInline`. Refusing a control character in
+    // either would stop a call whose output cannot be affected by it.
+    expect(parseFixBriefArgs(withFlag("--out", "/tmp/brief\u2028name.md")).out).toBe(
+      "/tmp/brief\u2028name.md",
+    );
+    expect(parseFixBriefArgs(argv(["--threads", "PRRT_a\u2028PRRT_b"])).threadIds).toEqual([
+      "PRRT_a\u2028PRRT_b",
+    ]);
+  });
+
   test("an unknown argument is refused, and the usage line says what is expected", () => {
     try {
       parseFixBriefArgs(argv(["--post"]));
