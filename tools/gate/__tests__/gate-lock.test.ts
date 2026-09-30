@@ -1323,6 +1323,45 @@ describe("gate-lock.sh CF_GATE_SLOTS", () => {
     expect(existsSync(lockDir(dir))).toBe(false);
   });
 
+  test("a slot count past the ceiling is a broken invocation, and is never reported as busy", () => {
+    const dir = scratch();
+    // The ceiling is 64, and a value over it is refused as what it is: a
+    // misconfiguration. Busy is a claim about the host — something else holds
+    // something — and a caller told busy sleeps and retries, so a seat with a
+    // count of 99999999999999999999 in its environment would retry an idle host
+    // for ever and never find out why.
+    //
+    // The last two are the values that motivated the ceiling, and the reason the
+    // check is made on DIGITS rather than by arithmetic: a shell's `[` cannot
+    // compare 99999999999999999999 with 64 (it answers false and complains), so
+    // a range test on that value does not bound it — it falls through into the
+    // slot loop, and an idle host is reported busy.
+    for (const tooMany of ["65", "99999999999999999999", "123456789012345678901234567890"]) {
+      const refused = runLockIn(dir, ["acquire", "lane-a"], {
+        CF_GATE_CALLER_PID: "424242",
+        CF_GATE_SLOTS: tooMany,
+      });
+      expect({ tooMany, status: refused.status, stderr: refused.stderr }).toEqual({
+        tooMany,
+        status: 2,
+        // No busy line and no shell arithmetic diagnostic: both of those are
+        // answers this host must not give.
+        stderr: `gate-lock: CF_GATE_SLOTS must be at most 64 slots: ${tooMany}\n`,
+      });
+      // Refused before the acquire, like every other invalid count.
+      expect(existsSync(lockDir(dir))).toBe(false);
+    }
+
+    // The boundary itself is a legal host, and takes its slot like any other.
+    const ceiling = runLockIn(dir, ["acquire", "lane-a"], {
+      CF_GATE_CALLER_PID: "424242",
+      CF_GATE_SLOTS: "64",
+    });
+    expect(ceiling.status).toBe(0);
+    expect(ceiling.stdout).toContain("acquired by lane-a");
+    expect(slotFile(lockDir(dir), "pid").trim()).toBe("424242");
+  });
+
   test("three runs hold three slots at once, and a fourth is busy", async () => {
     const dir = scratch();
     // Each command waits for a file of its own, so all three are provably parked
@@ -1336,33 +1375,51 @@ describe("gate-lock.sh CF_GATE_SLOTS", () => {
         { CF_GATE_SLOTS: "3" },
       ),
     );
-    for (let n = 0; n < lanes.length; n++) {
-      await waitForFile(join(slotDir(dir, n), "pid"));
-      expect(slotFile(slotDir(dir, n), "owner").trim()).toBe(lanes[n]);
-      // The holder is the run itself, exactly as at SLOTS=1.
-      expect(slotFile(slotDir(dir, n), "pid").trim()).toBe(String(started[n].child.pid));
-    }
+    try {
+      for (let n = 0; n < lanes.length; n++) {
+        await waitForFile(join(slotDir(dir, n), "pid"));
+      }
+      // WHICH run wins which slot is a race — three acquirers are three
+      // concurrent mkdirs, and spawn order decides nothing — so the claim is
+      // about the set of holders and about each slot naming the pid of the run
+      // that owns it, not about which lane landed where.
+      const owners = lanes.map((_, n) => slotFile(slotDir(dir, n), "owner").trim());
+      expect([...owners].sort()).toEqual([...lanes].sort());
+      for (let n = 0; n < lanes.length; n++) {
+        const holder = started[lanes.indexOf(owners[n])];
+        // The holder is the run itself, exactly as at SLOTS=1.
+        expect(slotFile(slotDir(dir, n), "pid").trim()).toBe(String(holder.child.pid));
+      }
 
-    // A fourth caller, with the host's full three slots busy.
-    const fourth = runLockIn(dir, ["run", "lane-d", "--", "true"], { CF_GATE_SLOTS: "3" });
-    expect(fourth.status).toBe(75);
-    expect(fourth.stderr).toContain("busy");
-    // It names the first holder, which is the one a retrying caller waits for.
-    expect(fourth.stderr).toContain("lane-a");
-    // Refused, not damaging: all three locks are intact and no fourth appeared.
-    expect(existsSync(join(dir, "cf-gate.lock.3"))).toBe(false);
-    for (let n = 0; n < lanes.length; n++) {
-      expect(slotFile(slotDir(dir, n), "owner").trim()).toBe(lanes[n]);
-    }
+      // A fourth caller, with the host's full three slots busy.
+      const fourth = runLockIn(dir, ["run", "lane-d", "--", "true"], { CF_GATE_SLOTS: "3" });
+      expect(fourth.status).toBe(75);
+      expect(fourth.stderr).toContain("busy");
+      // It names the first holder, which is the one a retrying caller waits for
+      // — and the first slot is whichever run happened to win it.
+      expect(fourth.stderr).toContain(slotFile(slotDir(dir, 0), "owner").trim());
+      // Refused, not damaging: all three locks are intact and no fourth appeared.
+      expect(existsSync(join(dir, "cf-gate.lock.3"))).toBe(false);
+      for (let n = 0; n < lanes.length; n++) {
+        expect(slotFile(slotDir(dir, n), "owner").trim()).toBe(owners[n]);
+      }
 
-    for (const lane of lanes) writeFileSync(join(dir, `go-${lane}`), "");
-    for (const run of started) {
-      const result = await run.done;
-      expect(result.status).toBe(0);
-    }
-    // Each holder gave back its own slot and nobody else's.
-    for (let n = 0; n < lanes.length; n++) {
-      expect(existsSync(slotDir(dir, n))).toBe(false);
+      for (const lane of lanes) writeFileSync(join(dir, `go-${lane}`), "");
+      for (const run of started) {
+        const result = await run.done;
+        expect(result.status).toBe(0);
+      }
+      // Each holder gave back its own slot and nobody else's.
+      for (let n = 0; n < lanes.length; n++) {
+        expect(existsSync(slotDir(dir, n))).toBe(false);
+      }
+    } finally {
+      // A failed assertion must not leave three runs parked on files in a TMPDIR
+      // the afterEach has already removed — they would loop forever with nobody
+      // left to release their slots. Releasing again is harmless: the go files
+      // are writes, and `done` is one promise however many callers await it.
+      for (const lane of lanes) writeFileSync(join(dir, `go-${lane}`), "");
+      await Promise.all(started.map((run) => run.done));
     }
   }, 30_000);
 

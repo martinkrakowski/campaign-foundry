@@ -116,11 +116,14 @@ describe("gate.sh signals", () => {
       const dir = scratch();
       const releaseMarker = join(dir, "paused-before-release");
       // test:cov is a LOCKED step, so the gate takes the lock, runs the step
-      // under it, and releases afterwards.
+      // under it, and releases afterwards. Three seconds, not one: the first
+      // TERM is deferred until the step exits, and a step that ended inside a
+      // second of the heartbeat line could have that TERM land after the whole
+      // gate was gone, which is a failure of the test's timing, not of the fix.
       const { child, stdoutSoFar, done } = startGate(
         dir,
         {
-          CF_GATE_STEPS: "test:cov\tsleep 1",
+          CF_GATE_STEPS: "test:cov\tsleep 3",
           CF_GATE_TEST_PAUSE_BEFORE_RELEASE: releaseMarker,
         },
         shell,

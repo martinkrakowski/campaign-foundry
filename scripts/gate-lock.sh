@@ -24,12 +24,15 @@
 # `cf-gate.lock.<n>.reclaim.<pid>.<x>`) are derived from that slot's own path and
 # are never slots themselves.
 #
-# CF_GATE_SLOTS IS SET HOST-WIDE — /etc/environment on the midnight host, not in
-# one seat's environment — because the number of slots is a property of the host
-# and a disagreement between two seats is not a smaller number of gates: a
-# caller that believes in one slot takes slot 0 while the others are busy, and
-# the holder it cannot see is the one it just ran beside. A seat may raise it
-# only while it holds nothing, and never to disagree with a holder.
+# CF_GATE_SLOTS IS SET HOST-WIDE, AND ONLY HOST-WIDE — /etc/environment on the
+# midnight host, never in one seat's environment, at any moment and whatever that
+# seat is holding. The number of slots is a property of the host, and the reason
+# does not depend on what any one seat is doing: a caller that believes in one
+# slot takes slot 0 while the others are busy, and the holder it cannot see is
+# the one it just ran beside. That is equally true of a seat holding nothing —
+# a seat's own view of the host is the thing that is wrong, and holding less is
+# not a reason to hold a different opinion of it. So the way to change the count
+# is to change the host's, for every seat at once.
 #
 # ONE GATE PER WORKTREE, even at SLOTS>1, because the lock is per host and not
 # per checkout: `verify-manifests` mutates the tree it is verifying, so two
@@ -128,8 +131,25 @@ esac
 
 # How many slots this host has. Validated exactly like CF_GATE_STALE_SECONDS —
 # a value that cannot be a count is a broken invocation whichever subcommand it
-# arrived on — and then for a minimum, because zero slots is not a host with no
-# gates, it is a host where every caller is silently unprotected.
+# arrived on. The two range tests that follow are separate on purpose, and the
+# ceiling is judged FIRST and BY DIGITS, because neither a shell's integer test
+# nor a count with more slots than the host has gates for is a report of busy:
+#
+#   0            is not a host with no gates, it is a host where every caller
+#                is silently unprotected  -> exit 2, "at least one slot"
+#   1..64        is a host with that many  -> accepted
+#   65+          is a broken invocation    -> exit 2, "at most 64 slots"
+#   99999…       (20 or 30 digits) is not a comparison any shell can make. `[`
+#                answers false and says so — `Illegal number` under dash,
+#                `integer expression expected` under bash — so BOTH range tests
+#                fall through, the slot loop is entered with a count nothing can
+#                bound, and an idle host is reported as `busy` with exit 75 —
+#                telling the caller to sleep and retry a host that is not
+#                holding anything, forever. So a value of three or more digits
+#                is over the ceiling whatever it is, and is answered before any
+#                `[` sees it; only a one- or two-digit value (at most 99) is
+#                handed to the tests below.
+MAX_SLOTS=64
 SLOTS="${CF_GATE_SLOTS:-1}"
 case "$SLOTS" in
   ''|*[!0-9]*)
@@ -137,6 +157,19 @@ case "$SLOTS" in
     exit 2
     ;;
 esac
+case "$SLOTS" in
+  [0-9][0-9][0-9]*) slots_over_cap=yes ;;
+  *)
+    slots_over_cap=no
+    if [ "$SLOTS" -gt "$MAX_SLOTS" ]; then
+      slots_over_cap=yes
+    fi
+    ;;
+esac
+if [ "$slots_over_cap" = yes ]; then
+  printf '%s\n' "gate-lock: CF_GATE_SLOTS must be at most $MAX_SLOTS slots: $SLOTS" >&2
+  exit 2
+fi
 if [ "$SLOTS" -lt 1 ]; then
   printf '%s\n' "gate-lock: CF_GATE_SLOTS must be at least one slot: $SLOTS" >&2
   exit 2
@@ -374,9 +407,16 @@ require_caller_pid() {
 #
 # Everything the judgement needs is per slot: the pass counter (so five passes
 # without winning a NAME is still five passes on that slot, not five spread over
-# the host), the reclaim, and the pause hook the reclaim races through. With
-# SLOTS=1 the outer loop runs once and every message is the one a single-slot
-# host produced before slots existed.
+# the host), the reclaim, and the pause hook the reclaim races through. At
+# SLOTS=1 the outer loop runs once and the PATH it names and the exit codes are
+# exactly what a single-slot host produced before slots existed — the lock is
+# still `cf-gate.lock` unsuffixed, which is what D188 stamps, and 0/2/75 mean
+# what they always meant. Four messages did gain a suffix, naming the slot path
+# where they used to name `cf-gate.lock` in prose: `acquired by … at $LOCK`,
+# `busy — … at $LOCK`, `released by … from $LOCK` and status' `slot $LOCK held
+# by`. Nothing consumes a whole line of those — the tests match the part before
+# the path — and a message that says which slot it means is worth more at
+# SLOTS>1 than byte-equality with a message that could only ever be about slot 0.
 acquire() {
   lane=$1
   slot_no=0

@@ -311,12 +311,13 @@ Rules:
 - `CF_GATE_SLOTS` (default 1) is how many of those host locks the host has: slot 0 is the
   historical `cf-gate.lock`, slot 1 is `cf-gate.lock.1`, and an acquirer takes the first free
   one, so two gates on a host with room for both no longer refuse each other. It is set
-  **HOST-WIDE** — `/etc/environment` on midnight, a seat's environment at most when that seat
-  holds nothing — and **never per seat**: two seats that disagree do not get a smaller number of
-  gates, they get a seat that takes slot 0 while the other slots are busy and runs beside a
-  holder it cannot see. And **one gate per worktree** even at `CF_GATE_SLOTS=3`: the slots are
-  per host, not per checkout, and `verify-manifests` mutates the tree it verifies, so two gates
-  in two worktrees would each be handed a slot and each would write manifests the other reads.
+  **HOST-WIDE** — `/etc/environment` on midnight — and **never per seat, at any moment and
+  whatever that seat holds**: two seats that disagree do not get a smaller number of gates,
+  they get a seat that takes slot 0 while the other slots are busy and runs beside a holder it
+  cannot see. Change the count on the host, for every seat at once. And **one gate per
+  worktree** even at `CF_GATE_SLOTS=3`: the slots are per host, not per checkout, and
+  `verify-manifests` mutates the tree it verifies, so two gates in two worktrees would each be
+  handed a slot and each would write manifests the other reads.
 - Tests live <WHERE>, one behaviour per test, no real clock/network/filesystem in unit tests.
 - The database tests run on PGlite unless `TEST_PG_URL` is set, and on a loaded host you should set
   it: `TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres`. Every migrated test database is then
