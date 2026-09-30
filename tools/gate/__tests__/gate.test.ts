@@ -529,6 +529,26 @@ describe("yarn gate --profile", () => {
     const glob = runGate(["--profile", "*"], stepsEnv([["build", "true"]]));
     expect(glob.status).toBe(2);
     expect(glob.stderr).toContain("invalid profile name");
+
+    // An EMPTY value is the same fall-through wearing a profile's clothes: every
+    // check downstream reads an empty PROFILE as no profile at all, so
+    // `--profile ''` ran the DEFAULT gate — filtering nothing, enforcing
+    // coverage — under a flag that promised a filtered, timeout-carrying run.
+    const empty = runGate(["--profile", ""], stepsEnv([["build", "true"]]));
+    expect(empty.status).toBe(2);
+    expect(empty.stderr).toContain("invalid profile name");
+    expect(empty.stdout).not.toContain("==> [1/1] build");
+
+    // And it is refused even when a real profile came first: the flag's meaning
+    // is whatever came LAST, so `--profile midnight --profile ''` is an empty
+    // profile asked for, not a profile named by the pair.
+    const reset = runGate(
+      ["--profile", "midnight", "--profile", ""],
+      stepsEnv([["build", "true"]]),
+    );
+    expect(reset.status).toBe(2);
+    expect(reset.stderr).toContain("invalid profile name");
+    expect(reset.stdout).not.toContain("==> [1/1] build");
   });
 
   test("--print-steps prints the resolved steps and runs nothing", () => {
@@ -552,7 +572,7 @@ describe("yarn gate --profile", () => {
 
   test("a profiled run says coverage is not enforced, and names what it excluded", () => {
     const r = runGate(["--profile", "midnight"], {
-      ...stepsEnv([["build", "true"]]),
+      ...stepsEnv([["test:cov", 'printf "the tests ran\\n"']]),
       CF_GATE_LIST_EXCLUDED: 'printf "excluded: one golden\\n"',
     });
     expect(r.status).toBe(0);
@@ -561,18 +581,44 @@ describe("yarn gate --profile", () => {
     );
     expect(r.stdout).toContain("EXCLUDES");
     expect(r.stdout).toContain("excluded: one golden");
+    // Before the tests, not after: the names describe the run about to happen,
+    // which is the only moment a reader is still in time to want them.
+    expect(r.stdout.indexOf("excluded: one golden")).toBeLessThan(
+      r.stdout.indexOf("the tests ran"),
+    );
     // The caveat is the PROFILE's to carry: the default gate says neither,
     // because it does enforce coverage.
-    const plain = runGate(["--lane", "lane-b"], stepsEnv([["build", "true"]]));
+    const plain = runGate(["--lane", "lane-b"], stepsEnv([["test:cov", "true"]]));
     expect(plain.stdout).not.toContain("not enforced under a profile");
   });
 
-  test("a listing that cannot run does not fail a profiled gate", () => {
-    // Informational output must not become a step: the gate's own steps have
-    // not started yet, and one that fails on the naming of its exclusions is a
-    // gate that refuses to tell you what it could not run.
+  test("a profiled run that fails before the test step never pays for the collection", () => {
+    // Naming the exclusions means collecting the suite, which measured 18.5 s
+    // and about 10 cores on this host. A gate that fails at build must not pay
+    // it for a test step it never reaches — so the listing belongs inside the
+    // test step, not at the top of the run.
+    const dir = scratch();
+    const listMarker = join(dir, "list-ran");
     const r = runGate(["--profile", "midnight"], {
-      ...stepsEnv([["build", "true"]]),
+      TMPDIR: dir,
+      ...stepsEnv([
+        ["build", 'sh -c "exit 1"'],
+        ["test:cov", "true"],
+      ]),
+      CF_GATE_LIST_EXCLUDED: `touch ${listMarker}`,
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("FAILED at step 'build' (exit 1)");
+    expect(existsSync(listMarker)).toBe(false);
+    expect(r.stdout).not.toContain("EXCLUDES");
+  });
+
+  test("a listing that cannot run does not fail a profiled gate", () => {
+    // Informational output must not become a step: a gate whose test step fails
+    // on the naming of its exclusions fails for the wrong reason, and the
+    // exclusion names are a courtesy, not a result.
+    const r = runGate(["--profile", "midnight"], {
+      ...stepsEnv([["test:cov", "true"]]),
       CF_GATE_LIST_EXCLUDED: 'sh -c "exit 3"',
     });
     expect(r.status).toBe(0);

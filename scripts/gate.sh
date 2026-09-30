@@ -1,5 +1,6 @@
 #!/bin/sh
-# The in-repo gate (plan D183, lane HX3-gate-in-repo): `yarn gate [--lane <id>]`.
+# The in-repo gate (plan D183, lane HX3-gate-in-repo):
+# `yarn gate [--lane <id>] [--profile <name>] [--print-steps]`.
 #
 # Runs CI's gate steps in the foreground, one after another, and prints each
 # step's real exit code, stopping at the first failure by name. The default
@@ -45,9 +46,10 @@
 # does NOT enforce coverage, and says so on every run: a filtered suite cannot
 # cover what it did not run, so a local number would be a number it did not
 # earn — GitHub CI enforces 100% on the full run, with nothing filtered. The
-# names of the excluded tests are printed before the run, so a green profiled
-# gate can never read as "the whole suite passed". No profile at all means
-# today's command, byte for byte.
+# names of the excluded tests are printed just before the test step runs, so a
+# green profiled gate can never read as "the whole suite passed" — and not
+# before the run, so a gate that fails earlier never pays for the collection.
+# No profile at all means today's command, byte for byte.
 #
 # `--print-steps` prints the resolved step commands (`name<TAB>command`) and
 # exits 0 without running a step, taking no lock and listing no tests: what to
@@ -155,6 +157,13 @@ profile_test_timeout() {
   esac
 }
 
+# The known list for a human. PROFILES is padded so the membership test below
+# can match a WHOLE name; that padding is the test's business, not part of the
+# answer the refusal prints.
+known_profiles() {
+  printf '%s' "$PROFILES" | sed 's/^ *//; s/ *$//'
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --lane)
@@ -164,6 +173,12 @@ while [ $# -gt 0 ]; do
       ;;
     --profile)
       [ $# -ge 2 ] || { printf '%s\n' "gate: missing value for --profile" >&2; exit 2; }
+      # An EMPTY value is refused here, at the flag, rather than downstream:
+      # every check after this loop reads an empty PROFILE as "no profile was
+      # asked for", so `--profile ''` would run the DEFAULT gate — filtering
+      # nothing, enforcing coverage — under a flag that promised a profile. The
+      # refusal is the same one an unnameable value gets, and says so.
+      [ -n "$2" ] || { printf '%s\n' "gate: invalid profile name: (empty) — must match ^[A-Za-z0-9_-]+\$" >&2; exit 2; }
       PROFILE="$2"
       shift 2
       ;;
@@ -195,7 +210,7 @@ if [ -n "$PROFILE" ]; then
       PROFILE_TEST_TIMEOUT=$(profile_test_timeout "$PROFILE")
       ;;
     *)
-      printf '%s\n' "gate: unknown profile: $PROFILE — known profiles:$PROFILES" >&2
+      printf '%s\n' "gate: unknown profile: $PROFILE — known profiles: $(known_profiles)" >&2
       exit 2
       ;;
   esac
@@ -403,12 +418,12 @@ run_test_cov() {
   return "$code"
 }
 
-# The tests a profiled run leaves OUT, named before it starts. A green profiled
-# gate that never said what it skipped is a green gate a reader cannot trust,
-# and the filter's own names are not the names of the tests. Injectable for the
-# same reason the nitro guard is — collecting the suite is not free — and
-# deliberately non-fatal: a listing that cannot run must not fail a gate whose
-# real steps have not started yet.
+# The tests a profiled run leaves OUT, named just before it starts. A green
+# profiled gate that never said what it skipped is a green gate a reader cannot
+# trust, and the filter's own names are not the names of the tests. Injectable
+# for the same reason the nitro guard is — collecting the suite is not free —
+# and deliberately non-fatal: a listing that cannot run must not fail the test
+# step it introduces, which would fail for the wrong reason.
 gate_excluded_tests() {
   LIST="${CF_GATE_LIST_EXCLUDED:-yarn vitest list --tagsFilter 'golden-bytes || cpu-bound'}"
   eval "$LIST" 2>&1 || printf '%s\n' "gate: could not list the tests this profile excludes (see above)"
@@ -419,11 +434,6 @@ printf '%s\n' "gate: lane $LANE, $total steps — 'yarn install --immutable' is 
 # real-Postgres concurrency suites skip themselves when it is absent, so a
 # local gate — and a local test:cov — has not exercised them. Say so.
 printf '%s\n' "gate: the two real-Postgres concurrency suites run only when TEST_DATABASE_URL is set — CI sets it; locally they skip themselves"
-if [ -n "$PROFILE" ]; then
-  printf '%s\n' "gate: profile $PROFILE — coverage thresholds are not enforced under a profile; GitHub CI enforces 100% on the full run"
-  printf '%s\n' "gate: the tests this profile EXCLUDES (it ran everything else):"
-  gate_excluded_tests
-fi
 
 step_no=0
 while IFS="$TAB" read -r name cmd; do
@@ -457,6 +467,17 @@ while IFS="$TAB" read -r name cmd; do
   cov_failed=0
   case "$name" in
     test:cov)
+      # The profile's two lines print HERE, immediately before the tests, and
+      # not at the top of the run: naming the exclusions means collecting the
+      # suite, and a gate that fails at `build` must not pay a full collection
+      # (measured 18.5 s and about 10 cores on this host) for a test step it
+      # never reaches. Still before the run it describes, which is all the
+      # reader needs to know what this step is not running.
+      if [ -n "$PROFILE" ]; then
+        printf '%s\n' "gate: profile $PROFILE — coverage thresholds are not enforced under a profile; GitHub CI enforces 100% on the full run"
+        printf '%s\n' "gate: the tests this profile EXCLUDES (it runs everything else):"
+        gate_excluded_tests
+      fi
       run_test_cov "$cmd"
       code=$?
       ;;

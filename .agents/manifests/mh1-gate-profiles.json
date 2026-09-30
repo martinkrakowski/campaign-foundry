@@ -4,7 +4,7 @@
   "mutations": [
     {
       "file": "scripts/gate.sh",
-      "before": "    *)\n      printf '%s\\n' \"gate: unknown profile: $PROFILE — known profiles:$PROFILES\" >&2\n      exit 2\n      ;;",
+      "before": "    *)\n      printf '%s\\n' \"gate: unknown profile: $PROFILE — known profiles: $(known_profiles)\" >&2\n      exit 2\n      ;;",
       "after": "    *)\n      PROFILE=\"\"\n      ;;",
       "because": "the refusal of an unknown profile name. Answered by running the default gate instead, a caller who typed `--profile midnigth` gets a run that filtered nothing, at vitest's default 5s timeout, with coverage thresholds ENFORCED rather than the caveat a profile prints — a green gate under a name that promised a filtered one, and the promise is the only thing the host had to go on. Nothing downstream can notice: the step list is built from `[ -n \"$PROFILE\" ]`, so clearing the variable is invisible downstream and the run is byte-for-byte the default gate. The test asserts exit 2, that the refusal names midnight so it is an answer rather than a shrug, and that the injected step never ran (CF_GATE_STEPS is a single `true`), which is what turns a fall-through from a slow real-suite failure into a fast assertion failure",
       "command": [
@@ -16,6 +16,23 @@
         "tools/gate/__tests__/gate.test.ts",
         "-t",
         "an unknown profile is refused, not run as the default gate"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate.sh",
+      "before": "      [ -n \"$2\" ] || { printf '%s\\n' \"gate: invalid profile name: (empty) — must match ^[A-Za-z0-9_-]+\\$\" >&2; exit 2; }\n      PROFILE=\"$2\"",
+      "after": "      PROFILE=\"$2\"",
+      "because": "the refusal of an EMPTY --profile value. Answered by accepting it, which is the same fall-through the unknown-profile refusal exists to stop: every check after the parse loop reads an empty PROFILE as no profile at all, so `--profile ''` runs the DEFAULT gate — filtering nothing, at vitest's default 5s timeout, with coverage thresholds ENFORCED instead of the caveat a profile prints — and `--profile midnight --profile ''` resets a real profile to that, because the last flag is the one that counts. The empty string is not exotic input, it is what an unset shell variable interpolates to (`--profile \"$PROFILE_NAME\"`, a CI matrix cell, a wrapper script), and nothing on the way there says a profile was dropped. The test asserts exit 2, that the refusal says `invalid profile name`, and that the injected step never ran (CF_GATE_STEPS is a single `true`) — for the bare empty value AND for a real profile overridden by an empty one, so a mutant that silently resets to the default gate fails in about a second on an assertion instead of on a 13-step real suite",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate.test.ts",
+        "-t",
+        "a --profile without a value, and one that is not a name, are refused"
       ],
       "verdict": "caught"
     }
