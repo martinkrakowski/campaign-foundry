@@ -32,6 +32,14 @@
 # protected steps instead of running them beside whoever holds the name. The
 # between-steps window is testable via CF_GATE_TEST_PAUSE_BEFORE_STEP.
 #
+# The lock is one slot of a per-host semaphore: CF_GATE_SLOTS (default 1) says
+# how many, and this gate takes the first free one, so two gates on one host no
+# longer refuse each other when the host has room for both. CF_GATE_SLOTS is set
+# HOST-WIDE and never per seat, and there is still ONE GATE PER WORKTREE: the
+# slots are per host, and `verify-manifests` mutates the tree it verifies, so two
+# gates in two worktrees would each be handed a slot and each would write
+# manifests the other is reading.
+#
 # A coverage threshold failure fails the gate even when vitest exits 0: the
 # test:cov step's output is captured, replayed for the human, and scanned for
 # `ERROR: Coverage` — a piped read (M3) reported exit 0 while coverage failed,
@@ -322,6 +330,13 @@ fi
 LOCK_HELD=0
 HEARTBEAT_PID=""
 HB_FAILED="${TMPDIR:-/tmp}/cf-gate.hbfailed.$$"
+# The slot this gate holds, and the file its acquire recorded that slot in. Both
+# are empty until the acquire succeeds; from then on every call below is PINNED to
+# LOCK_SLOT_PATH rather than left to find the gate's own lock by searching for one
+# carrying its pid — the lock parent may be 1777, and a directory planted there
+# with this gate's pid in it can answer that search.
+LOCK_SLOT_PATH=""
+LOCK_SLOT_FILE=""
 COVLOG=""
 cov_failed=0
 release_failed=0
@@ -339,12 +354,19 @@ release_lock() {
     LOCK_HELD=0
     # The release's status and diagnostics are not discarded: a release that
     # failed (or was refused — see gate-lock.sh) must be reported, never
-    # announced as released.
-    if CF_GATE_CALLER_PID=$$ sh "$LOCK_SCRIPT" release "$LANE"; then
+    # announced as released. It is pinned to the slot this gate took, so a
+    # release can only ever act on the lock this gate is actually holding.
+    if CF_GATE_CALLER_PID=$$ CF_GATE_SLOT_PATH="$LOCK_SLOT_PATH" sh "$LOCK_SCRIPT" release "$LANE"; then
       printf '%s\n' "gate: lock released, heartbeat stopped"
     else
       release_failed=1
-      printf '%s\n' "gate: FAILED to release the lock — it may still be held at ${TMPDIR:-/tmp}/cf-gate.lock" >&2
+      # This gate's OWN slot, which it is PINNED to rather than asked for: with
+      # CF_GATE_SLOTS>1 the fixed cf-gate.lock path is a slot this gate may never
+      # have held, and a failure message pointing at the wrong slot sends the
+      # reader looking at an empty directory. Nothing here searches for it —
+      # asking the lock script which slot this gate holds is the same scan, one
+      # process further away, and the answer is a path this gate can lose.
+      printf '%s\n' "gate: FAILED to release the lock — it may still be held at ${LOCK_SLOT_PATH:-${TMPDIR:-/tmp}/cf-gate.lock}" >&2
     fi
   fi
 }
@@ -355,12 +377,31 @@ release_lock() {
 # not as $? mid-command, which could be 0 on a Ctrl-C between steps).
 cleanup() {
   status=$?
-  trap - INT TERM EXIT
+  # Ignore a second signal until the release has run, clearing the EXIT trap
+  # first. The order is the fix: `trap - INT TERM EXIT` restored the DEFAULT
+  # disposition, so a TERM arriving while the release was in flight killed this
+  # gate outright — the release is a child that outlives it and removes the lock
+  # anyway, which is why lock absence alone proves nothing here and why this line
+  # prints nothing at all. Measured on main: exit 143, no "gate: lock released,
+  # heartbeat stopped", under /bin/dash on the first attempt and under bash-as-sh
+  # within two. Parking the heartbeat cannot pin that window open — this gate's
+  # loop has TERM at default and dies at once — so the pause that holds it is
+  # inside the release itself (CF_GATE_TEST_PAUSE_BEFORE_RELEASE).
+  trap - EXIT
+  trap '' INT TERM
   release_lock
   if [ -n "$COVLOG" ]; then
     rm -f "$COVLOG"
   fi
   rm -f "$HB_FAILED"
+  # The file the acquire recorded this gate's slot in goes on every exit path,
+  # the refused acquire included: it is this gate's own scratch file under
+  # ${TMPDIR:-/tmp} (which may be a 1777 parent, so it is mktemp's name and never
+  # a predictable one), and nothing else will ever clean it up.
+  if [ -n "$LOCK_SLOT_FILE" ]; then
+    rm -f "$LOCK_SLOT_FILE"
+    LOCK_SLOT_FILE=""
+  fi
   exit "$status"
 }
 trap cleanup EXIT
@@ -384,10 +425,14 @@ start_heartbeat() {
       # The heartbeat is ownership-checked on the lock side too: it refreshes
       # only a lock that still names THIS gate's pid ($$ is this shell's even
       # inside the subshell), so after a reclaim the loop fails and dies
-      # instead of refreshing whoever replaced us. Its failure is recorded in
+      # instead of refreshing whoever replaced us. It is PINNED to the slot this
+      # gate took as well, so the refresh cannot land on some other lock that
+      # happens to carry this pid — at CF_GATE_SLOTS>1 a pid can appear in more
+      # than one, and the lock parent may be 1777. Its failure is recorded in
       # a marker file the foreground gate checks at every locked-step boundary
       # — a dead loop is a zombie its parent's kill -0 cannot see.
-      CF_GATE_CALLER_PID=$$ sh "$LOCK_SCRIPT" heartbeat >/dev/null 2>&1 || {
+      CF_GATE_CALLER_PID=$$ CF_GATE_SLOT_PATH="$LOCK_SLOT_PATH" \
+        sh "$LOCK_SCRIPT" heartbeat >/dev/null 2>&1 || {
         printf '%s\n' "lost" > "$HB_FAILED" 2>/dev/null
         exit 1
       }
@@ -411,7 +456,7 @@ check_lock_intact() {
   if [ -z "$HEARTBEAT_PID" ] || ! kill -0 "$HEARTBEAT_PID" 2>/dev/null; then
     return 1
   fi
-  CF_GATE_CALLER_PID=$$ sh "$LOCK_SCRIPT" verify "$LANE" >/dev/null 2>&1
+  CF_GATE_CALLER_PID=$$ CF_GATE_SLOT_PATH="$LOCK_SLOT_PATH" sh "$LOCK_SCRIPT" verify "$LANE" >/dev/null 2>&1
 }
 
 # The test:cov step runs with its output captured, replayed for the human, and
@@ -465,13 +510,43 @@ while IFS="$TAB" read -r name cmd; do
   if is_locked_step "$name" && [ "$LOCK_HELD" -eq 0 ]; then
     # The caller's pid travels in CF_GATE_CALLER_PID: the lock must outlive
     # this acquire call, so it names this shell, not the gate-lock child.
-    CF_GATE_CALLER_PID=$$ sh "$LOCK_SCRIPT" acquire "$LANE"
+    #
+    # CF_GATE_SLOT_OUT is where the slot the acquire took is recorded, and this
+    # gate is PINNED to it from here on — its heartbeat, its step-boundary
+    # verifies and its release all name that one path, and none of them search
+    # for a lock carrying this gate's pid. The file is mktemp's, not a name this
+    # script invented: the lock parent is ${TMPDIR:-/tmp} and /tmp is 1777, so a
+    # predictable `cf-gate.slot.$$` would be a file a second user could have
+    # written before this gate got there. cleanup removes it on every exit.
+    LOCK_SLOT_FILE=$(mktemp "${TMPDIR:-/tmp}/cf-gate.slot.XXXXXX")
+    CF_GATE_SLOT_OUT="$LOCK_SLOT_FILE" CF_GATE_CALLER_PID=$$ sh "$LOCK_SCRIPT" acquire "$LANE"
     acq=$?
     if [ "$acq" -ne 0 ]; then
+      # Nothing to release — LOCK_HELD is still 0 — and cleanup drops the file.
       printf '%s\n' "gate: could not acquire the gate lock (exit $acq) — 75 means busy: sleep and retry" >&2
       exit "$acq"
     fi
+    LOCK_SLOT_PATH=$(cat "$LOCK_SLOT_FILE" 2>/dev/null)
+    # Test hook (CF_GATE_TEST_NO_SLOT_RECORDED): act as though the acquire
+    # recorded no slot, so a test can reach the refusal below and prove the lock
+    # this gate took is still given back.
+    if [ -n "${CF_GATE_TEST_NO_SLOT_RECORDED:-}" ]; then
+      LOCK_SLOT_PATH=""
+    fi
+    # The gate holds a lock from the successful acquire onward, and it is marked
+    # here — ABOVE the check for a recorded slot, deliberately. A lock the acquire
+    # took and this gate cannot name is still a lock: with LOCK_HELD left 0 the
+    # cleanup skips release_lock entirely, and the name then sits there until some
+    # later acquire judges it abandoned — which is a reclaim, not a release.
     LOCK_HELD=1
+    if [ -z "$LOCK_SLOT_PATH" ]; then
+      # The acquire took a lock and did not say which one. Refused loudly rather
+      # than unpinned: the cleanup's release then scans for this gate's own lock
+      # (the only fallback left), which is right for a gate giving one back and
+      # wrong for a gate carrying on without knowing what it holds.
+      printf '%s\n' "gate: FAILED — the lock was acquired but no slot was recorded in $LOCK_SLOT_FILE; the gate cannot name the lock it holds, so it will not carry on holding it" >&2
+      exit 1
+    fi
     start_heartbeat
   fi
   if [ "$LOCK_HELD" -eq 1 ]; then

@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1063,6 +1064,64 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     }
   }, 60_000);
 
+  test("a second signal while the release is waiting on the loop still releases the lock", async () => {
+    // The one-TERM case above parks a heartbeat refresh and sends one signal;
+    // the cleanup then blocks in `wait` for the loop that owns it, which is the
+    // only window in which a SECOND signal can do damage. It did: run_cleanup
+    // reset INT/TERM to their DEFAULT action (`trap - INT TERM EXIT`) before doing
+    // anything else, so a TERM arriving there killed the shell outright — exit
+    // 143, no "released by", and the lock left at the name with all four of its
+    // files and a heartbeat grandchild still refreshing it. Measured on both
+    // shells before the fix, and this is the test that holds the order in place.
+    //
+    // 500ms is not a guess about how long the first signal takes: both answers
+    // are safe. If cleanup has started, TERM is already ignored; if the run is
+    // still inside forward_signal, TERM was ignored there before the first
+    // signal was answered. Either way the second one has nothing to kill.
+    for (const shell of SIGNAL_SHELLS) {
+      const dir = scratch();
+      const marker = join(dir, "paused-before-beat-mv");
+      const { child, done } = startLockIn(
+        dir,
+        ["run", "lane-a", "--", "sleep", "30"],
+        { CF_GATE_HEARTBEAT_SECONDS: "1", CF_GATE_TEST_PAUSE_BEFORE_BEAT_MV: marker },
+        shell,
+      );
+      await waitForLock(dir);
+      await waitForFile(marker);
+      expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
+      process.kill(child.pid as number, "SIGTERM");
+      // What a CI timeout does: TERM, then TERM again half a second later.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      process.kill(child.pid as number, "SIGTERM");
+      // …and `survived` is read AFTER that wait, not on the line below the kill.
+      // A process told to die needs a moment, and reading it the instant the
+      // signal was sent is reading scheduling luck: a run that the second TERM
+      // killed would still be alive at that instant and pass this line, and the
+      // three assertions that follow — the release line, the lock's absence, the
+      // heartbeat's death — are what actually catch it. gate-signals.test.ts
+      // reads its `survived` the same way, and for the same reason.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const survived = isAlive(child.pid as number);
+      // The lock is still there — the run is inside its cleanup, not gone.
+      expect(existsSync(lockDir(dir))).toBe(true);
+
+      rmSync(marker);
+      const result = await done;
+      // Survived the second signal, released the lock, and said so: the release
+      // line is the proof, because a run killed mid-cleanup cannot print it.
+      expect({ shell, survived, stderr: result.stderr, status: result.status }).toEqual({
+        shell,
+        survived: true,
+        stderr: "",
+        status: 143,
+      });
+      expect(result.stdout).toContain("released by lane-a");
+      expect(existsSync(lockDir(dir))).toBe(false);
+      await waitForDead(heartbeatPidOf(result.stdout));
+    }
+  }, 60_000);
+
   test("a lock deleted under it fails the run too, though the release has nothing to remove", () => {
     const dir = scratch();
     const result = runLockIn(dir, [
@@ -1216,5 +1275,701 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     // Refused before the acquire, not after: a run that took the lock and then
     // died on its own validation would leave a lock with no holder to release it.
     expect(existsSync(lockDir(dir))).toBe(false);
+  });
+});
+
+// D188 (lane MH2-gate-lock-slots) — the lock is a per-host semaphore of
+// CF_GATE_SLOTS slots. Slot 0 keeps the unsuffixed name, so every test above runs
+// unchanged at the default; these are the cases that only exist with more than
+// one, and the one that proves a slot's own transients are not slots.
+describe("gate-lock.sh CF_GATE_SLOTS", () => {
+  /** Slot n's directory: slot 0 is the historical unsuffixed lock. */
+  function slotDir(dir: string, n: number): string {
+    return n === 0 ? lockDir(dir) : join(dir, `cf-gate.lock.${n}`);
+  }
+
+  /** seedLock, for a name of this test's choosing — a slot's name, or one that is not. */
+  function seedNamed(
+    dir: string,
+    name: string,
+    holder: { owner?: string; pid?: number; started?: number; beat?: number },
+  ): string {
+    const slot = join(dir, name);
+    mkdirSync(slot, { recursive: true });
+    const now = Math.floor(Date.now() / 1000);
+    writeFileSync(join(slot, "owner"), `${holder.owner ?? "other-lane"}\n`);
+    writeFileSync(join(slot, "started"), `${holder.started ?? now}\n`);
+    writeFileSync(join(slot, "pid"), `${holder.pid ?? process.pid}\n`);
+    writeFileSync(join(slot, "beat"), `${holder.beat ?? now}\n`);
+    return slot;
+  }
+
+  /** seedLock, for a numbered slot instead of slot 0. */
+  function seedSlot(
+    dir: string,
+    n: number,
+    holder: { owner?: string; pid?: number; started?: number; beat?: number },
+  ): string {
+    return seedNamed(dir, n === 0 ? "cf-gate.lock" : `cf-gate.lock.${n}`, holder);
+  }
+
+  function slotFile(slot: string, name: string): string {
+    return readFileSync(join(slot, name), "utf8");
+  }
+
+  test("a busy acquire leaves nothing inside the holder's lock, however often it retries", () => {
+    // acquire always tries the create first, and `mv cand lock` onto an existing
+    // directory nests the candidate INSIDE it and exits 0. Each refused attempt
+    // must take its own candidate back out, or a lane retrying on 75 grows a
+    // directory per retry in someone else's lock — one per busy slot per try.
+    const dir = scratch();
+    const holders = [0, 1].map((n) => seedSlot(dir, n, { owner: `holder-${n}` }));
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const busy = runLockIn(dir, ["acquire", "lane-late"], {
+        CF_GATE_CALLER_PID: String(424242 + attempt),
+        CF_GATE_SLOTS: "2",
+      });
+      expect(busy.status).toBe(75);
+    }
+    for (const [n, slot] of holders.entries()) {
+      expect(readdirSync(slot).sort()).toEqual(["beat", "owner", "pid", "started"]);
+      expect(slotFile(slot, "owner").trim()).toBe(`holder-${n}`);
+    }
+  });
+
+  test("a slot count that is not a count, or is zero, is refused before any lock is taken", () => {
+    // Validated exactly like CF_GATE_STALE_SECONDS, on the same grounds: a value
+    // that cannot be a count is a broken invocation whichever subcommand it
+    // arrived on, and it is reported as itself.
+    const dir = scratch();
+    const nonNumeric = runLockIn(dir, ["acquire", "lane-a"], {
+      CF_GATE_CALLER_PID: "424242",
+      CF_GATE_SLOTS: "many",
+    });
+    expect(nonNumeric.status).toBe(2);
+    expect(nonNumeric.stderr).toContain("CF_GATE_SLOTS");
+    expect(existsSync(lockDir(dir))).toBe(false);
+
+    // Zero is not a host with no gates; it is a host where every caller is
+    // silently unprotected, so it is refused like an interval of zero seconds.
+    const none = runLockIn(dir, ["acquire", "lane-a"], {
+      CF_GATE_CALLER_PID: "424242",
+      CF_GATE_SLOTS: "0",
+    });
+    expect(none.status).toBe(2);
+    expect(none.stderr).toContain("at least one slot");
+    expect(existsSync(lockDir(dir))).toBe(false);
+  });
+
+  test("a slot count past the ceiling is a broken invocation, and is never reported as busy", () => {
+    const dir = scratch();
+    // The ceiling is 64, and a value over it is refused as what it is: a
+    // misconfiguration. Busy is a claim about the host — something else holds
+    // something — and a caller told busy sleeps and retries, so a seat with a
+    // count of 99999999999999999999 in its environment would retry an idle host
+    // for ever and never find out why.
+    //
+    // The last two are the values that motivated the ceiling, and the reason the
+    // check is made on DIGITS rather than by arithmetic: a shell's `[` cannot
+    // compare 99999999999999999999 with 64 (it answers false and complains), so
+    // a range test on that value does not bound it — it falls through into the
+    // slot loop, and an idle host is reported busy.
+    for (const tooMany of ["65", "065", "99999999999999999999", "123456789012345678901234567890"]) {
+      const refused = runLockIn(dir, ["acquire", "lane-a"], {
+        CF_GATE_CALLER_PID: "424242",
+        CF_GATE_SLOTS: tooMany,
+      });
+      expect({ tooMany, status: refused.status, stderr: refused.stderr }).toEqual({
+        tooMany,
+        status: 2,
+        // No busy line and no shell arithmetic diagnostic: both of those are
+        // answers this host must not give. And the value is named AS GIVEN —
+        // the caller's environment holds `065`, and a message about `65` sends
+        // it looking for a spelling it never set.
+        stderr: `gate-lock: CF_GATE_SLOTS must be at most 64 slots: ${tooMany}\n`,
+      });
+      // Refused before the acquire, like every other invalid count.
+      expect(existsSync(lockDir(dir))).toBe(false);
+    }
+
+    // The boundary itself is a legal host, and takes its slot like any other.
+    const ceiling = runLockIn(dir, ["acquire", "lane-a"], {
+      CF_GATE_CALLER_PID: "424242",
+      CF_GATE_SLOTS: "64",
+    });
+    expect(ceiling.status).toBe(0);
+    expect(ceiling.stdout).toContain("acquired by lane-a");
+    expect(slotFile(lockDir(dir), "pid").trim()).toBe("424242");
+
+    // Leading zeros are a spelling, not a count, and are stripped before the
+    // ceiling is judged: `064` is sixty-four slots and must be accepted, where
+    // the digit-length test alone would read it as the three-digit value it
+    // refuses. That it is accepted AS sixty-four and not merely as "some
+    // number" is the slot 1 below: slot 0 is held by a live holder here, so a
+    // caller that read this as one slot would answer busy and a caller that read
+    // it as any count above one takes the next slot.
+    const padded = scratch();
+    seedSlot(padded, 0, { owner: "lane-live", pid: process.pid });
+    const paddedCount = runLockIn(padded, ["acquire", "lane-a"], {
+      CF_GATE_CALLER_PID: "424242",
+      CF_GATE_SLOTS: "064",
+    });
+    expect(paddedCount.status).toBe(0);
+    expect(slotFile(slotDir(padded, 1), "pid").trim()).toBe("424242");
+    expect(slotFile(slotDir(padded, 0), "owner").trim()).toBe("lane-live");
+
+    // And zero, however it is spelled, is the "at least one slot" refusal rather
+    // than an empty string no `[` can compare — named as given.
+    for (const none of ["0", "00"]) {
+      const refused = runLockIn(scratch(), ["acquire", "lane-a"], {
+        CF_GATE_CALLER_PID: "424242",
+        CF_GATE_SLOTS: none,
+      });
+      expect({ none, status: refused.status, stderr: refused.stderr }).toEqual({
+        none,
+        status: 2,
+        stderr: `gate-lock: CF_GATE_SLOTS must be at least one slot: ${none}\n`,
+      });
+    }
+  });
+
+  test("three runs hold three slots at once, and a fourth is busy", async () => {
+    const dir = scratch();
+    // Each command waits for a file of its own, so all three are provably parked
+    // at once — three locks on the host at the same moment, not three runs that
+    // happened to overlap.
+    const lanes = ["lane-a", "lane-b", "lane-c"];
+    const started = lanes.map((lane) =>
+      startLockIn(
+        dir,
+        ["run", lane, "--", "sh", "-c", `while [ ! -f "$TMPDIR/go-${lane}" ]; do sleep 1; done`],
+        { CF_GATE_SLOTS: "3" },
+      ),
+    );
+    try {
+      for (let n = 0; n < lanes.length; n++) {
+        await waitForFile(join(slotDir(dir, n), "pid"));
+      }
+      // WHICH run wins which slot is a race — three acquirers are three
+      // concurrent mkdirs, and spawn order decides nothing — so the claim is
+      // about the set of holders and about each slot naming the pid of the run
+      // that owns it, not about which lane landed where.
+      const owners = lanes.map((_, n) => slotFile(slotDir(dir, n), "owner").trim());
+      expect([...owners].sort()).toEqual([...lanes].sort());
+      for (let n = 0; n < lanes.length; n++) {
+        const holder = started[lanes.indexOf(owners[n])];
+        // The holder is the run itself, exactly as at SLOTS=1.
+        expect(slotFile(slotDir(dir, n), "pid").trim()).toBe(String(holder.child.pid));
+      }
+
+      // A fourth caller, with the host's full three slots busy.
+      const fourth = runLockIn(dir, ["run", "lane-d", "--", "true"], { CF_GATE_SLOTS: "3" });
+      expect(fourth.status).toBe(75);
+      expect(fourth.stderr).toContain("busy");
+      // It names the first holder, which is the one a retrying caller waits for
+      // — and the first slot is whichever run happened to win it.
+      expect(fourth.stderr).toContain(slotFile(slotDir(dir, 0), "owner").trim());
+      // Refused, not damaging: all three locks are intact and no fourth appeared.
+      expect(existsSync(join(dir, "cf-gate.lock.3"))).toBe(false);
+      for (let n = 0; n < lanes.length; n++) {
+        expect(slotFile(slotDir(dir, n), "owner").trim()).toBe(owners[n]);
+      }
+
+      for (const lane of lanes) writeFileSync(join(dir, `go-${lane}`), "");
+      for (const run of started) {
+        const result = await run.done;
+        expect(result.status).toBe(0);
+      }
+      // Each holder gave back its own slot and nobody else's.
+      for (let n = 0; n < lanes.length; n++) {
+        expect(existsSync(slotDir(dir, n))).toBe(false);
+      }
+    } finally {
+      // A failed assertion must not leave three runs parked on files in a TMPDIR
+      // the afterEach has already removed — they would loop forever with nobody
+      // left to release their slots. Releasing again is harmless: the go files
+      // are writes, and `done` is one promise however many callers await it.
+      for (const lane of lanes) writeFileSync(join(dir, `go-${lane}`), "");
+      await Promise.all(started.map((run) => run.done));
+    }
+  }, 30_000);
+
+  test("a dead holder's slot is reclaimed, and the live slot beside it is left alone", () => {
+    const dir = scratch();
+    // Slot 0 is held by a live holder, so the acquirer must move on; slot 1's
+    // holder is a reaped pid, so that slot is reclaimed. The point of both facts
+    // is the same claim: the judgement is per slot.
+    seedSlot(dir, 0, { owner: "lane-live", pid: process.pid });
+    const dead = reapedPid();
+    seedSlot(dir, 1, { owner: "lane-dead", pid: dead });
+
+    const result = runLockIn(dir, ["acquire", "lane-new"], {
+      CF_GATE_CALLER_PID: "424242",
+      CF_GATE_SLOTS: "3",
+    });
+    expect(result.status).toBe(0);
+    // It says which slot it judged and why, before it takes it.
+    expect(result.stdout).toContain("reclaiming");
+    expect(result.stdout).toContain("not alive");
+    expect(result.stdout).toContain("cf-gate.lock.1");
+    // The dead holder's slot is the acquirer's now…
+    expect(slotFile(slotDir(dir, 1), "owner").trim()).toBe("lane-new");
+    expect(slotFile(slotDir(dir, 1), "pid").trim()).toBe("424242");
+    // …and the live holder's slot is untouched, still naming its own holder.
+    expect(slotFile(slotDir(dir, 0), "owner").trim()).toBe("lane-live");
+    expect(slotFile(slotDir(dir, 0), "pid").trim()).toBe(String(process.pid));
+    // The third slot was free and was not needed: slots are tried in order.
+    expect(existsSync(slotDir(dir, 2))).toBe(false);
+  });
+
+  test("status lists every slot that exists, and no transient", () => {
+    const dir = scratch();
+    seedSlot(dir, 0, { owner: "lane-a", pid: process.pid });
+    seedSlot(dir, 1, { owner: "lane-b", pid: process.pid });
+    // Four transients, planted as real directories holding all four lock files,
+    // because that is what a paused creator, a paused reclaim and an interrupted
+    // holder actually leave behind. Two of them start with a DIGIT after the
+    // base name, so a `cf-gate.lock.[0-9]*` glob would list them as slots.
+    const transients = [
+      "cf-gate.lock.cand.999",
+      "cf-gate.lock.reclaim.999.x",
+      "cf-gate.lock.1.cand.999",
+      "cf-gate.lock.1.reclaim.999.x",
+    ];
+    for (const name of transients) {
+      const dirPath = join(dir, name);
+      mkdirSync(dirPath, { recursive: true });
+      writeFileSync(join(dirPath, "owner"), "lane-transient\n");
+      writeFileSync(join(dirPath, "pid"), "999\n");
+      writeFileSync(join(dirPath, "started"), "1\n");
+      writeFileSync(join(dirPath, "beat"), "1\n");
+    }
+
+    // Deliberately at the DEFAULT slot count: a status that only looked at slot 0
+    // would report a host with one holder on it, and one that globbed would
+    // report four more.
+    const result = runLockIn(dir, ["status"], { CF_GATE_SLOTS: "1" });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`${slotDir(dir, 0)} held by lane-a`);
+    expect(result.stdout).toContain(`${slotDir(dir, 1)} held by lane-b`);
+    for (const name of transients) {
+      expect({ name, listed: result.stdout.includes(`${join(dir, name)} `) }).toEqual({
+        name,
+        listed: false,
+      });
+    }
+    // Nothing was touched on the way past: a status is a read.
+    expect(existsSync(join(dir, "cf-gate.lock.1.cand.999"))).toBe(true);
+  });
+
+  test("release, verify and heartbeat act on the caller's own slot only", () => {
+    const dir = scratch();
+    seedSlot(dir, 0, { owner: "lane-other", pid: 515151, beat: 1000 });
+    seedSlot(dir, 1, { owner: "lane-a", pid: 424242, beat: 1000 });
+
+    // verify: each holder finds its own slot and is refused on the other's.
+    const mine = runLockIn(dir, ["verify", "lane-a"], { CF_GATE_CALLER_PID: "424242" });
+    expect(mine.status).toBe(0);
+    const theirs = runLockIn(dir, ["verify", "lane-other"], {
+      CF_GATE_CALLER_PID: "515151",
+    });
+    expect(theirs.status).toBe(0);
+    // A caller whose pid names no slot at all cannot verify through another
+    // holder's lock, whichever slot that lock is in.
+    const stranger = runLockIn(dir, ["verify", "lane-other"], {
+      CF_GATE_CALLER_PID: "616161",
+    });
+    expect(stranger.status).not.toBe(0);
+    expect(stranger.stderr).toContain("verify failed");
+
+    // heartbeat takes no lane, so it scans by pid: the beat that moves is the
+    // caller's own slot's, and the other holder's is left exactly as it was.
+    const beat = runLockIn(dir, ["heartbeat"], { CF_GATE_CALLER_PID: "424242" });
+    expect(beat.status).toBe(0);
+    expect(Number(slotFile(slotDir(dir, 1), "beat"))).toBeGreaterThan(1000);
+    expect(slotFile(slotDir(dir, 0), "beat").trim()).toBe("1000");
+
+    // release removes the caller's slot and names it, leaving the other holder's.
+    const released = runLockIn(dir, ["release", "lane-a"], { CF_GATE_CALLER_PID: "424242" });
+    expect(released.status).toBe(0);
+    expect(released.stdout).toContain("released by lane-a");
+    expect(released.stdout).toContain(slotDir(dir, 1));
+    expect(existsSync(slotDir(dir, 1))).toBe(false);
+    expect(existsSync(slotDir(dir, 0))).toBe(true);
+    expect(slotFile(slotDir(dir, 0), "pid").trim()).toBe("515151");
+
+    // And a release from a pid that names no slot is refused, not satisfied by
+    // another holder's lock being there to delete.
+    const refused = runLockIn(dir, ["release", "lane-other"], {
+      CF_GATE_CALLER_PID: "717171",
+    });
+    expect(refused.status).not.toBe(0);
+    expect(refused.stderr).toContain("release refused");
+    expect(existsSync(slotDir(dir, 0))).toBe(true);
+  });
+
+  test("a SLOTS=1 caller never sees or touches a numbered slot", () => {
+    // The disagreement this refuses to have: a seat that believes in one slot
+    // while the host has three. Slot 0 is free here, so the single-slot caller
+    // takes it — and a lock in slot 1 must not make it answer busy, because
+    // status would then be the only place that lock is visible.
+    const dir = scratch();
+    seedSlot(dir, 1, { owner: "lane-b", pid: process.pid });
+    const taken = runLockIn(dir, ["acquire", "lane-a"], {
+      CF_GATE_CALLER_PID: "424242",
+      CF_GATE_SLOTS: "1",
+    });
+    expect(taken.status).toBe(0);
+    expect(slotFile(lockDir(dir), "owner").trim()).toBe("lane-a");
+    expect(slotFile(slotDir(dir, 1), "owner").trim()).toBe("lane-b");
+
+    // Its release drops slot 0 and only slot 0.
+    const released = runLockIn(dir, ["release", "lane-a"], { CF_GATE_CALLER_PID: "424242" });
+    expect(released.status).toBe(0);
+    expect(existsSync(lockDir(dir))).toBe(false);
+    expect(existsSync(slotDir(dir, 1))).toBe(true);
+  });
+});
+
+// The lock parent is ${TMPDIR:-/tmp}, and /tmp is 1777 — so at SLOTS>1 the set of
+// directories that LOOK like a caller's own slot is a set somebody else can write
+// to. Two filters and one pin close that, and each is held in place by its own
+// test below:
+//
+//   canonical  a slot is `cf-gate.lock` or `cf-gate.lock.<n>` for 1 <= n <= 64.
+//              `.0`, `.007` and `.64` are not slot names — and neither is a slot's
+//              own `.cand.` / `.reclaim.` transient, which the earlier round
+//              already refused;
+//   provenance a slot must be a directory this user owns, and NOT a symlink
+//              (`find` on a symlink start point reports the LINK's owner, so a
+//              symlink into another user's tree passes a uid test);
+//   the pin    a holder that came from an acquire is TOLD which slot it took and
+//              acts on that one path, never on a scan — so a planted directory
+//              cannot answer on its behalf however it is named.
+describe("gate-lock.sh slots: what a caller will act on", () => {
+  /** Slot n's directory: slot 0 is the historical unsuffixed lock. */
+  function slotDir(dir: string, n: number): string {
+    return n === 0 ? join(dir, "cf-gate.lock") : join(dir, `cf-gate.lock.${n}`);
+  }
+
+  /** A lock directory under a name of this test's choosing. */
+  function seedNamed(
+    dir: string,
+    name: string,
+    holder: { owner?: string; pid?: number; started?: number; beat?: number },
+  ): string {
+    const slot = join(dir, name);
+    mkdirSync(slot, { recursive: true });
+    const now = Math.floor(Date.now() / 1000);
+    writeFileSync(join(slot, "owner"), `${holder.owner ?? "other-lane"}\n`);
+    writeFileSync(join(slot, "started"), `${holder.started ?? now}\n`);
+    writeFileSync(join(slot, "pid"), `${holder.pid ?? process.pid}\n`);
+    writeFileSync(join(slot, "beat"), `${holder.beat ?? now}\n`);
+    return slot;
+  }
+
+  /** seedNamed, for slot n. */
+  function seedSlot(
+    dir: string,
+    n: number,
+    holder: { owner?: string; pid?: number; started?: number; beat?: number },
+  ): string {
+    return seedNamed(dir, n === 0 ? "cf-gate.lock" : `cf-gate.lock.${n}`, holder);
+  }
+
+  function fileIn(slot: string, name: string): string {
+    return readFileSync(join(slot, name), "utf8").trim();
+  }
+
+  /**
+   * A uid that is definitely not ours: CF_GATE_TEST_EXPECT_UID overrides the uid
+   * a slot must be owned by, and a test that judged its own planted slots by an
+   * unknown uid would prove nothing. `nobody` where this host runs as root (0
+   * being the wrong answer there), root everywhere else.
+   */
+  const notOurUid = process.getuid?.() === 0 ? 65534 : 0;
+
+  test("a planted slot name that is not canonical is invisible to status and to an unpinned caller", () => {
+    const dir = scratch();
+    // Two names that look like slots and are not: `.0` is not slot 0 (that is the
+    // unsuffixed name) and `.007` is not slot 7. Both carry the REAL holder's
+    // owner and pid, because a forgery that did not match would never get far —
+    // the point is that the name alone is what stops it. Both sort before slot 1,
+    // which is what a scan takes first.
+    const planted0 = seedNamed(dir, "cf-gate.lock.0", {
+      owner: "lane-a",
+      pid: process.pid,
+      beat: 1000,
+    });
+    const planted007 = seedNamed(dir, "cf-gate.lock.007", {
+      owner: "lane-a",
+      pid: process.pid,
+      beat: 1000,
+    });
+    const mine = seedSlot(dir, 1, { owner: "lane-a", pid: process.pid, beat: 1000 });
+
+    // Deliberately unpinned — CF_GATE_CALLER_PID only, which is what every caller
+    // that did not come from an acquire looks like — and at the default slot
+    // count, so the only thing that can surface a numbered path is the scan's own
+    // filters.
+    const status = runLockIn(dir, ["status"]);
+    expect(status.status).toBe(0);
+    expect(status.stdout).toContain(`${mine} held by lane-a`);
+    for (const planted of [planted0, planted007]) {
+      expect({ planted, listed: status.stdout.includes(`${planted} `) }).toEqual({
+        planted,
+        listed: false,
+      });
+    }
+
+    // An unpinned heartbeat refreshes the real slot: with the planted names read
+    // as slots, the scan takes `.0` (it sorts first), its beat moves instead and
+    // the holder's own lock goes stale.
+    const beat = runLockIn(dir, ["heartbeat"], { CF_GATE_CALLER_PID: String(process.pid) });
+    expect(beat.status).toBe(0);
+    expect(Number(fileIn(mine, "beat"))).toBeGreaterThan(1000);
+    expect(fileIn(planted0, "beat")).toBe("1000");
+    expect(fileIn(planted007, "beat")).toBe("1000");
+
+    // And an unpinned verify answers about the real slot. It would pass either way
+    // — the planted names carry the same owner and pid — so it is the beat above
+    // that is the claim about which slot was chosen.
+    const verify = runLockIn(dir, ["verify", "lane-a"], {
+      CF_GATE_CALLER_PID: String(process.pid),
+    });
+    expect(verify.status).toBe(0);
+    // Nothing was removed or rewritten on the way past.
+    for (const planted of [planted0, planted007]) expect(existsSync(planted)).toBe(true);
+  });
+
+  test("a symlinked slot is invisible to status and to an unpinned caller", () => {
+    const dir = scratch();
+    // A symlink AT a canonical slot name, pointing at a directory this user owns
+    // and that holds a lock nobody wrote — the cheapest forgery there is, because
+    // `find` on a symlink start point reports the LINK's owner and never looks at
+    // what it points at. The symlink test has to come first for that reason.
+    const behind = seedNamed(dir, "not-a-slot", { owner: "lane-a", pid: process.pid, beat: 1000 });
+    const link = join(dir, "cf-gate.lock.1");
+    symlinkSync(behind, link);
+    const real = seedSlot(dir, 2, { owner: "lane-a", pid: process.pid, beat: 1000 });
+
+    const status = runLockIn(dir, ["status"]);
+    expect(status.status).toBe(0);
+    expect(status.stdout).toContain(`${real} held by lane-a`);
+    expect(status.stdout).not.toContain(`${link} `);
+
+    const beat = runLockIn(dir, ["heartbeat"], { CF_GATE_CALLER_PID: String(process.pid) });
+    expect(beat.status).toBe(0);
+    expect(Number(fileIn(real, "beat"))).toBeGreaterThan(1000);
+    // The directory behind the link is not a lock and was not touched by it.
+    expect(fileIn(behind, "beat")).toBe("1000");
+  });
+
+  test("a slot that is not owned by the expected uid is invisible", () => {
+    const dir = scratch();
+    const one = seedSlot(dir, 1, { owner: "lane-a", pid: process.pid, beat: 1000 });
+    const two = seedSlot(dir, 2, { owner: "lane-b", pid: process.pid, beat: 1000 });
+    // Both slots are this user's, and the seam says the expected owner is
+    // somebody else: neither may be read as a holder's lock. Provenance is what
+    // makes a planted directory unusable, and a planted directory this user owns
+    // passes every test except that one.
+    const underSeam = runLockIn(dir, ["status"], { CF_GATE_TEST_EXPECT_UID: String(notOurUid) });
+    expect(underSeam.status).toBe(0);
+    expect(underSeam.stdout).toContain("free");
+    for (const slot of [one, two]) expect(underSeam.stdout).not.toContain(`${slot} `);
+
+    // A heartbeat that finds nothing refuses rather than reaching for one of them.
+    const beat = runLockIn(dir, ["heartbeat"], {
+      CF_GATE_CALLER_PID: String(process.pid),
+      CF_GATE_TEST_EXPECT_UID: String(notOurUid),
+    });
+    expect(beat.status).not.toBe(0);
+    expect(beat.stderr).toContain("no lock");
+    expect(fileIn(one, "beat")).toBe("1000");
+    expect(fileIn(two, "beat")).toBe("1000");
+
+    // With no seam set, the same two slots are plainly visible — the seam is what
+    // removed them, not a filter that removed everything.
+    const plain = runLockIn(dir, ["status"]);
+    expect(plain.stdout).toContain(`${one} held by lane-a`);
+    expect(plain.stdout).toContain(`${two} held by lane-b`);
+  });
+
+  test("a pinned heartbeat refreshes its own slot, not a decoy that names the same owner and pid", () => {
+    const dir = scratch();
+    // The attack this closes, planted rather than described. A holder's slot is 1;
+    // slot 0 — which sorts first, and is a perfectly canonical name — carries the
+    // same owner and the same pid with a beat nobody refreshes, and slot 2 does
+    // too. A scan takes whichever it meets first, so the real slot's beat goes
+    // stale, the next acquire reclaims it, and the holder carries on against a
+    // lock nobody holds. The pin takes slot 1 because slot 1 is what it was given.
+    const decoyFirst = seedSlot(dir, 0, { owner: "lane-a", pid: process.pid, beat: 1000 });
+    const mine = seedSlot(dir, 1, { owner: "lane-a", pid: process.pid, beat: 1000 });
+    const decoyLast = seedSlot(dir, 2, { owner: "lane-a", pid: process.pid, beat: 1000 });
+
+    const beat = runLockIn(dir, ["heartbeat"], {
+      CF_GATE_CALLER_PID: String(process.pid),
+      CF_GATE_SLOT_PATH: mine,
+    });
+    expect(beat.status).toBe(0);
+    expect(Number(fileIn(mine, "beat"))).toBeGreaterThan(1000);
+    expect(fileIn(decoyFirst, "beat")).toBe("1000");
+    expect(fileIn(decoyLast, "beat")).toBe("1000");
+  });
+
+  test("a pin that is not a slot, or not this user's lock, is refused by name", () => {
+    const dir = scratch();
+    const mine = seedSlot(dir, 1, { owner: "lane-a", pid: process.pid, beat: 1000 });
+    const behind = seedNamed(dir, "not-a-slot", { owner: "lane-a", pid: process.pid, beat: 1000 });
+    symlinkSync(behind, join(dir, "cf-gate.lock.2"));
+    // A pin is a path in the environment, so it is a claim and not a fact. Each of
+    // these is refused the same way — exit 2, naming the path — and NONE of the
+    // three subcommands may act on one: the refusal is the whole answer, so a
+    // release that deleted through a pin nobody could vouch for would be the worst
+    // outcome available.
+    const refused = [
+      { why: "not a slot name", pin: join(dir, "cf-gate.lock.0") },
+      { why: "not a slot name", pin: join(dir, "cf-gate.lock.64") },
+      { why: "not ours (a symlink)", pin: join(dir, "cf-gate.lock.2") },
+      { why: "not ours (the uid seam)", pin: mine, seam: String(notOurUid) },
+    ];
+    for (const { why, pin, seam } of refused) {
+      for (const args of [["verify", "lane-a"], ["heartbeat"], ["release", "lane-a"]]) {
+        const result = runLockIn(dir, args, {
+          CF_GATE_CALLER_PID: String(process.pid),
+          CF_GATE_SLOT_PATH: pin,
+          ...(seam ? { CF_GATE_TEST_EXPECT_UID: seam } : {}),
+        });
+        expect({
+          why,
+          subcommand: args[0],
+          status: result.status,
+          namesThePin: result.stderr.includes(pin),
+        }).toEqual({
+          why,
+          subcommand: args[0],
+          status: 2,
+          namesThePin: true,
+        });
+      }
+      // Untouched, whichever subcommand asked: the real slot is still there with
+      // the beat it was seeded with, and the directory behind the symlink is
+      // still there too.
+      expect(fileIn(mine, "beat")).toBe("1000");
+      expect(existsSync(mine)).toBe(true);
+      expect(existsSync(behind)).toBe(true);
+    }
+  });
+
+  test("the command under the lock inherits no pin, and the run keeps its own", () => {
+    const dir = scratch();
+    // A launcher with CF_GATE_SLOT_PATH in its EXPORTED environment — a previous
+    // holder's gate, or a seat's own export — hands `run` a pin it did not earn.
+    // `run` clears it before its acquire and sets its own afterwards, and that
+    // second assignment must not re-export it: a variable that arrives exported
+    // KEEPS the attribute when it is assigned to, so `CF_GATE_SLOT_PATH=""`
+    // followed by `CF_GATE_SLOT_PATH="$LOCK"` published this run's slot to the
+    // command under the lock and to everything that command starts. A claim to
+    // somebody's lock that the holder of it cannot police is exactly what the
+    // pin exists to prevent, so it must not travel out of here at all.
+    const inherited = join(dir, "cf-gate.lock.1");
+    const seen = join(dir, "seen");
+    const result = runLockIn(
+      dir,
+      [
+        "run",
+        "lane-a",
+        "--",
+        "sh",
+        "-c",
+        'printf "%s\\n" "${CF_GATE_SLOT_PATH-unset}" > "$TMPDIR/seen"',
+      ],
+      // SLOTS=3 so the inherited path is a name this host really has slots for,
+      // and the acquire below is free to take a different one.
+      { CF_GATE_SLOT_PATH: inherited, CF_GATE_SLOTS: "3" },
+    );
+    expect(result.status).toBe(0);
+    // The command sees no pin at all — not the inherited one, and not this run's.
+    expect(readFileSync(seen, "utf8").trim()).toBe("unset");
+    // The slot it took is its own, slot 0, and the inherited path was never one.
+    expect(result.stdout).toContain(`at ${lockDir(dir)}`);
+    expect(existsSync(join(dir, "cf-gate.lock.1"))).toBe(false);
+    // Released on the way out, so nothing here is left holding anything.
+    expect(existsSync(lockDir(dir))).toBe(false);
+  });
+
+  test("a uid seam that is set but empty is inert, not a filter that hides every slot", () => {
+    const dir = scratch();
+    const mine = seedSlot(dir, 1, { owner: "lane-a", pid: process.pid, beat: 1000 });
+    // An exported-but-empty override is what a wrapper that always sets the
+    // variable produces on a host where it has nothing to say. With `-` rather
+    // than `:-` the expansion handed `find` an empty uid, `-user ""` matched
+    // nothing, and every slot on the host read as invisible — a free host, on a
+    // host with a holder in it. Set-but-empty must mean what never-set means.
+    const status = runLockIn(dir, ["status"], { CF_GATE_TEST_EXPECT_UID: "" });
+    expect(status.status).toBe(0);
+    expect(status.stdout).toContain(`${mine} held by lane-a`);
+  });
+
+  test("a heartbeat on a pid that holds two slots refreshes only the pinned one", () => {
+    const dir = scratch();
+    // One pid, two lock directories, one of them the holder's own. Nothing in the
+    // filesystem stops this — a pid is a recycled number, a forged directory can
+    // carry any pid at all — and a scan by pid has no way to choose, so it takes
+    // the name that sorts first and refreshes THAT. The pin is the answer, and it
+    // is the same answer for `run`'s heartbeat loop, which is pinned to the slot
+    // its own acquire took.
+    const first = seedSlot(dir, 0, { owner: "lane-a", pid: process.pid, beat: 1000 });
+    const mine = seedSlot(dir, 1, { owner: "lane-a", pid: process.pid, beat: 1000 });
+
+    const beat = runLockIn(dir, ["heartbeat"], {
+      CF_GATE_CALLER_PID: String(process.pid),
+      CF_GATE_SLOT_PATH: mine,
+    });
+    expect(beat.status).toBe(0);
+    expect(Number(fileIn(mine, "beat"))).toBeGreaterThan(1000);
+    expect(fileIn(first, "beat")).toBe("1000");
+  });
+
+  test("an acquire from a pid that already holds a live, fresh slot is refused, and that slot is untouched", () => {
+    const dir = scratch();
+    // One pid holds one slot, and this pid already holds one: a live holder with a
+    // beat that says it is still answering for it. Acquiring again would leave the
+    // first with nothing to refresh it, so the next acquire would reclaim it and
+    // this caller would carry on against a lock nobody holds. Exit 2 and not 75:
+    // the host is not busy, this caller is.
+    const held = seedSlot(dir, 0, { owner: "lane-a", pid: process.pid });
+    const refused = runLockIn(dir, ["acquire", "lane-a"], {
+      CF_GATE_CALLER_PID: String(process.pid),
+      CF_GATE_SLOTS: "3",
+    });
+    expect(refused.status).toBe(2);
+    expect(refused.stderr).toContain("already holds");
+    expect(refused.stderr).toContain(held);
+    // Nothing was taken — not slot 0, and not the free slot 1 either: the refusal
+    // happens before the slot loop, which is what makes it cheap and total.
+    expect(fileIn(held, "owner")).toBe("lane-a");
+    expect(fileIn(held, "pid")).toBe(String(process.pid));
+    expect(existsSync(slotDir(dir, 1))).toBe(false);
+    expect(existsSync(slotDir(dir, 2))).toBe(false);
+  });
+
+  test("the same pid's slot with a stale beat is reclaimed instead", () => {
+    const dir = scratch();
+    // The other half of that refusal, and the reason it is not written as "this
+    // pid already has a slot": a slot with a STALE beat is a holder that has
+    // stopped answering for it, which is exactly what a recycled pid looks like
+    // from the outside. Refusing there would deadlock the new holder into waiting
+    // for a lock of its own that nobody is going to refresh.
+    const stale = Math.floor(Date.now() / 1000) - 700;
+    seedSlot(dir, 0, { owner: "lane-a", pid: process.pid, beat: stale });
+    const reclaimed = runLockIn(dir, ["acquire", "lane-a"], {
+      CF_GATE_CALLER_PID: String(process.pid),
+    });
+    expect(reclaimed.status).toBe(0);
+    expect(reclaimed.stdout).toContain("reclaiming");
+    expect(reclaimed.stdout).toContain("stale");
+    expect(fileIn(slotDir(dir, 0), "owner")).toBe("lane-a");
+    expect(Number(fileIn(slotDir(dir, 0), "beat"))).toBeGreaterThan(stale);
   });
 });
