@@ -14,7 +14,6 @@
 #   gate-lock.sh status           print who holds each slot and whether they look
 #                                 alive
 #   gate-lock.sh heartbeat        refresh the beat — only on the caller's own lock
-#   gate-lock.sh slot <lane>      print the caller's own slot's path
 #
 # There is one host-wide lock per SLOT, and CF_GATE_SLOTS says how many there are
 # (default 1, which is every behaviour below as it was before slots existed).
@@ -38,6 +37,22 @@
 # per checkout: `verify-manifests` mutates the tree it is verifying, so two
 # lanes in two worktrees on one host would each be handed a different slot and
 # each would then write manifests the other is reading.
+#
+# A HOLDER PINS ITS SLOT, and only acts on the pinned path. `acquire` writes the
+# slot it took into the file named by CF_GATE_SLOT_OUT, the caller reads it back,
+# and everything afterwards — the beat, the verify, the release — is handed that
+# one path in CF_GATE_SLOT_PATH and asks nobody to search for it. The reason is
+# the lock parent: it is ${TMPDIR:-/tmp}, and /tmp is 1777. A scan cannot
+# distinguish a real slot from a directory somebody else planted there, and a
+# planted one sorts first whenever its name does — at SLOTS>1, a forged
+# canonical `cf-gate.lock.1` carrying a slot-2 holder's owner and pid is enough
+# to have that holder's callers verify and heartbeat the forgery while its real
+# slot goes stale and is reclaimed underneath it. A pin has no such ambiguity:
+# it is the path the acquire itself took, and it is checked for PROVENANCE
+# before it is touched (a slot must be a directory, NOT a symlink, owned by this
+# user) and never for anything else. Callers with no pin — anything that did not
+# come from an acquire — still scan, but only over slots that pass those same
+# two filters.
 #
 # The lock is a directory at ${TMPDIR:-/tmp}/cf-gate.lock — mkdir is the
 # atomic test-and-set, there is nothing else in POSIX sh — holding four files:
@@ -149,6 +164,16 @@ esac
 #                is over the ceiling whatever it is, and is answered before any
 #                `[` sees it; only a one- or two-digit value (at most 99) is
 #                handed to the tests below.
+#
+# Leading zeros are a SPELLING, not a count, and they are stripped before any of
+# that: `064` is sixty-four slots and must be accepted, not read as the
+# three-digit value the ceiling test below exists to refuse. Stripping also
+# keeps the ceiling test honest for a padded value — `00000000000000065` is
+# sixty-five slots, not a number no shell can compare — and the loop keeps at
+# least one digit, so `0` and `00` are the "at least one slot" refusal rather
+# than an empty string that `[` cannot compare with anything. The refusals name
+# the value AS GIVEN (`065`, not `65`): the caller has to be able to find the
+# spelling it set wrong in the message about it.
 MAX_SLOTS=64
 SLOTS="${CF_GATE_SLOTS:-1}"
 case "$SLOTS" in
@@ -157,6 +182,13 @@ case "$SLOTS" in
     exit 2
     ;;
 esac
+SLOTS_GIVEN="$SLOTS"
+while :; do
+  case "$SLOTS" in
+    0?*) SLOTS="${SLOTS#0}" ;;
+    *) break ;;
+  esac
+done
 case "$SLOTS" in
   [0-9][0-9][0-9]*) slots_over_cap=yes ;;
   *)
@@ -167,11 +199,11 @@ case "$SLOTS" in
     ;;
 esac
 if [ "$slots_over_cap" = yes ]; then
-  printf '%s\n' "gate-lock: CF_GATE_SLOTS must be at most $MAX_SLOTS slots: $SLOTS" >&2
+  printf '%s\n' "gate-lock: CF_GATE_SLOTS must be at most $MAX_SLOTS slots: $SLOTS_GIVEN" >&2
   exit 2
 fi
 if [ "$SLOTS" -lt 1 ]; then
-  printf '%s\n' "gate-lock: CF_GATE_SLOTS must be at least one slot: $SLOTS" >&2
+  printf '%s\n' "gate-lock: CF_GATE_SLOTS must be at least one slot: $SLOTS_GIVEN" >&2
   exit 2
 fi
 
@@ -185,13 +217,25 @@ slot_path() {
   fi
 }
 
-# Is this path one of the slots? A slot is exactly `cf-gate.lock`, or
-# `cf-gate.lock.` followed by DIGITS AND NOTHING ELSE. The digits-only suffix is
-# what keeps a slot's own transients out of the slot set: `cf-gate.lock.1.cand.999`
-# and `cf-gate.lock.1.reclaim.999.x` both start with a digit, so a
-# `cf-gate.lock.[0-9]*` glob would read them as slots 1 and 1 — a status that
-# listed a candidate directory as a holder, and a scan that would happily
-# release or heartbeat one.
+# Is this path one of the slots? A slot is `cf-gate.lock`, or `cf-gate.lock.<n>`
+# where `<n>` is 1..MAX_SLOTS-1 — that is, ONE or TWO digits with no leading
+# zero, and no greater than the last slot.
+#
+# Both halves of that are load-bearing, and neither is "digits and nothing else":
+#   the shape      is what keeps a slot's own transients out of the slot set:
+#                  `cf-gate.lock.1.cand.999` and `cf-gate.lock.1.reclaim.999.x`
+#                  both start with a digit, so a `cf-gate.lock.[0-9]*` glob
+#                  would read them as slots 1 and 1 — a status that listed a
+#                  candidate directory as a holder, and a scan that would
+#                  happily release or heartbeat one;
+#   below MAX_SLOTS is what keeps a name nobody could have taken from being acted
+#                  on. MAX_SLOTS is a COUNT, so the slots are 0..MAX_SLOTS-1 and
+#                  `cf-gate.lock.64` is not one of them even at
+#                  CF_GATE_SLOTS=64; `.0` is not slot 0 either (that is the
+#                  unsuffixed name), and `.007` is not slot 7. A directory that
+#                  is not a slot is not this lock, and a forged one in a 1777
+#                  lock parent is exactly what must never be read as a holder's
+#                  own.
 is_slot_path() {
   case "$1" in
     "$LOCK_BASE")
@@ -205,30 +249,97 @@ is_slot_path() {
   esac
   slot_suffix=${1#"$LOCK_BASE".}
   case "$slot_suffix" in
-    ''|*[!0-9]*)
+    [1-9]|[1-9][0-9])
+      ;;
+    *)
       return 1
       ;;
   esac
-  return 0
+  [ "$slot_suffix" -lt "$MAX_SLOTS" ]
+}
+
+# The uid a slot must be owned by before anything here will read it as a
+# holder's lock. CF_GATE_TEST_EXPECT_UID overrides it, and is INERT unless set:
+# it has no default to fall back to, so a caller that never set it gets this
+# user's own id and nothing else can stand in for it.
+slot_uid=""
+
+# Provenance: is this a lock directory this user actually took? A directory, not
+# a symlink, owned by the expected uid — and nothing else counts.
+#
+# The symlink test comes FIRST and on its own line, because `find` on a symlink
+# start point reports the LINK's own owner and never descends: a symlink to a
+# directory we own passes `-user` while the thing at the name is somebody else's
+# — and a symlink into another user's tree is the cheapest forgery there is,
+# since it needs no write access to the lock parent at all beyond the link.
+#
+# `-prune` is the POSIX spelling of "do not go below this", and it works on GNU
+# and BSD find alike: the point is to read the directory's own uid without
+# walking a holder's four files (or anything else it may since have grown).
+slot_is_provenance() {
+  [ ! -L "$1" ] || return 1
+  [ -d "$1" ] || return 1
+  if [ -z "$slot_uid" ]; then
+    slot_uid="${CF_GATE_TEST_EXPECT_UID-$(id -u)}"
+  fi
+  find "$1" -prune -user "$slot_uid" -print 2>/dev/null | grep -q .
 }
 
 # Every slot that EXISTS, whatever CF_GATE_SLOTS says — a host whose slots were
 # lowered underneath a holder still has that holder's lock, and a caller that
 # only looked at 0..N-1 would report the host free while a slot is taken. The
-# numbered ones are found by glob and then filtered by is_slot_path, because a
-# glob cannot express "digits and nothing else".
+# numbered ones are found by glob and then filtered, because a glob cannot
+# express "a slot number and nothing else" and because the lock parent may hold
+# anything at all: is_slot_path keeps out the transients and the names no
+# acquirer could have produced, and slot_is_provenance keeps out a directory
+# that is not this user's lock. Both filters apply to the PINNED path as well
+# (see require_trusted_slot), so a scan and a pin agree about what a slot is.
 existing_slots() {
   for slot_candidate in "$LOCK_BASE" "$LOCK_BASE".[0-9]*; do
     [ -d "$slot_candidate" ] || continue
     is_slot_path "$slot_candidate" || continue
+    slot_is_provenance "$slot_candidate" || continue
     printf '%s\n' "$slot_candidate"
   done
+}
+
+# The pinned slot, checked before anything is done to it. A caller that was told
+# which slot it took gets THAT one and never a scan (see the header: the lock
+# parent may be 1777, and a scan answers whoever planted a name that sorts
+# first). The pin is still checked — it is a path in the environment, so it is
+# a claim, not a fact: it must be a slot name and it must be a lock directory
+# this user owns. A pin that is not exits 2, naming itself, because that is a
+# broken invocation rather than a lost lock, and answering it as a lost lock
+# would send a live holder's gate down the "lock lost" path.
+require_trusted_slot() {
+  if ! is_slot_path "$1"; then
+    printf '%s\n' "gate-lock: CF_GATE_SLOT_PATH is not a slot on this host: $1" >&2
+    exit 2
+  fi
+  # A pin that is GONE is not a forgery: it is a lock this caller has lost, and
+  # the subcommand's own "no lock at …" refusal — exit 1, which every caller
+  # above this one already reads as lock lost — is the honest answer for it.
+  # Judging provenance of a path that is not there would report a broken
+  # invocation for a lock that was simply deleted, and hide the message the
+  # holder's cleanup is looking for.
+  [ -e "$1" ] || return 0
+  if ! slot_is_provenance "$1"; then
+    printf '%s\n' "gate-lock: CF_GATE_SLOT_PATH is not a lock directory this user owns: $1 (a slot must be a directory, not a symlink, owned by this user); it was left alone" >&2
+    exit 2
+  fi
+  return 0
 }
 
 # The caller's own slot, found by scanning for the owner AND the pid — the same
 # pair release demands before deleting anything, so a stale holder whose lock was
 # reclaimed finds nothing and no stranger's slot is ever touched. Empty when the
 # caller holds no slot.
+#
+# This is the UNPINNED fallback: a caller that came from an acquire names its
+# slot instead (CF_GATE_SLOT_PATH) and never scans, because a scan over a 1777
+# lock parent can be answered by a directory somebody planted. It still sees only
+# slots that pass both filters, because a forged directory this user owns would
+# pass a uid test and a name test just as well as a real one.
 caller_slot() {
   slot_found=""
   while IFS= read -r slot_candidate; do
@@ -247,6 +358,12 @@ EOF
 # The same scan by pid alone, for `heartbeat`: it takes no lane, so the owner is
 # not available to match on, and the pid — the holder's own — is what the beat
 # belongs to. One pid holds one slot, so the first match is the only match.
+#
+# "One pid holds one slot" is an invariant this scan CANNOT enforce and acquire
+# now enforces instead (see acquire): nothing stops a pid from appearing in two
+# lock directories, and when it does, a scan picks whichever sorts first — which
+# is precisely how a planted forgery gets itself refreshed. A caller that knows
+# its slot pins it; this is only for callers that do not.
 pid_slot() {
   slot_found=""
   while IFS= read -r slot_candidate; do
@@ -261,6 +378,36 @@ EOF
   return 0
 }
 
+# Does this caller's own pid already hold a slot that is ALIVE and FRESH? One
+# slot, printed, or 1. `acquire` refuses on this (see below): one pid holds one
+# slot, and a holder that took a second would leave the first with nothing
+# refreshing its beat — so the next acquire would reclaim it and this caller
+# would carry on running against a lock nobody holds.
+#
+# Alive AND fresh, both, and not either on its own. A slot whose pid is dead is
+# a crashed holder's and the reclaim path is right; a slot whose beat is stale is
+# a holder that has stopped answering for it, and the normal reclaim path takes
+# it. The third case is the one this exists for: a LIVE holder with a FRESH beat
+# and this pid is not a leftover at all, it is this same caller — usually a pid
+# the kernel has handed to a new process while the seat that had it was still
+# running the old one — and taking another slot on top of it would strand the
+# first.
+self_held_slot() {
+  while IFS= read -r slot_candidate; do
+    [ -n "$slot_candidate" ] || continue
+    slot_seen_pid=$(cat "$slot_candidate/pid" 2>/dev/null)
+    [ "$slot_seen_pid" = "$recorded_pid" ] || continue
+    pid_alive "$slot_seen_pid" || continue
+    slot_seen_beat=$(cat "$slot_candidate/beat" 2>/dev/null)
+    beat_is_stale "$slot_seen_beat" && continue
+    printf '%s\n' "$slot_candidate"
+    return 0
+  done <<EOF
+$(existing_slots)
+EOF
+  return 1
+}
+
 # The pid recorded in the lock: the caller's when it says so (gate.sh does,
 # and run sets the variable to its own $$ for the sub-commands below), otherwise
 # this process. Only acquire can WRITE a lock, and it refuses to do so without
@@ -269,7 +416,7 @@ EOF
 recorded_pid="${CF_GATE_CALLER_PID:-$$}"
 
 usage() {
-  printf '%s\n' "usage: $0 run <lane> -- <command...> | acquire <lane> | release <lane> | verify <lane> | status | heartbeat | slot <lane>" >&2
+  printf '%s\n' "usage: $0 run <lane> -- <command...> | acquire <lane> | release <lane> | verify <lane> | status | heartbeat" >&2
   exit 2
 }
 
@@ -329,6 +476,16 @@ try_create() {
     # Read-back: the name holds OUR metadata — a rename cannot have replaced
     # a non-empty directory, so nothing could have taken the name in between.
     [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$recorded_pid" ] || return 1
+    # …and our candidate is not INSIDE the lock, which is the other thing that
+    # `mv` does here and exits 0 for: given an existing directory as the target
+    # it moves the candidate INTO it rather than renaming over it, leaving the
+    # old lock's files exactly where they were with ours nested under them. The
+    # read-back above cannot see the difference when the lock already names our
+    # own pid, and that is exactly the caller's situation when a recycled pid
+    # takes back its own stale slot — so the acquire would announce a lock it
+    # never won, with a candidate directory left inside it. A rename has no
+    # nested anything, and a finished lock holds four files and nothing else.
+    [ ! -d "$LOCK/${cand##*/}" ] || return 1
     return 0
   fi
   rm -rf "$cand"
@@ -417,8 +574,28 @@ require_caller_pid() {
 # by`. Nothing consumes a whole line of those — the tests match the part before
 # the path — and a message that says which slot it means is worth more at
 # SLOTS>1 than byte-equality with a message that could only ever be about slot 0.
+#
+# Before the slot loop, one refusal that is not about the host at all: a call
+# whose own pid already holds a live, fresh slot (self_held_slot above). That is
+# a caller that would end up holding two, and the first one's beat has nothing
+# left to refresh it, so it is reclaimed from under it while it works. Exit 2,
+# not 75 — the host is not busy, this caller is (see the header on which answer
+# belongs where). A same-pid slot with a STALE beat is left to the normal path,
+# which reclaims it: that is a pid the kernel has since handed to somebody else,
+# and refusing on it would deadlock its own owner into waiting for a holder that
+# is not answering.
+#
+# On success the slot taken is written to CF_GATE_SLOT_OUT, when that is set. It
+# is how the caller learns which slot it got instead of guessing it, and it is
+# what its heartbeat, verify and release are pinned to (see the header). A
+# caller that cannot be told is given nothing: the lock is given back rather
+# than left held by a holder nobody can pin.
 acquire() {
   lane=$1
+  if self_held=$(self_held_slot); then
+    printf '%s\n' "gate-lock: acquire refused — pid $recorded_pid already holds $self_held with a live holder and a fresh heartbeat (beat $(cat "$self_held/beat" 2>/dev/null)); one pid holds one slot, and a second would leave the first unrefreshed and reclaimable under this caller" >&2
+    exit 2
+  fi
   slot_no=0
   busy_owner=""
   busy_pid=""
@@ -431,6 +608,13 @@ acquire() {
       pass=$((pass + 1))
       if try_create "$lane"; then
         printf '%s\n' "gate-lock: acquired by $lane (pid $recorded_pid) at $LOCK"
+        if [ -n "${CF_GATE_SLOT_OUT:-}" ]; then
+          if ! printf '%s\n' "$LOCK" > "$CF_GATE_SLOT_OUT" 2>/dev/null; then
+            rm -rf "$LOCK" 2>/dev/null
+            printf '%s\n' "gate-lock: acquire — cannot record the slot taken in $CF_GATE_SLOT_OUT; the lock is given back rather than left held by a caller that cannot pin it" >&2
+            exit 2
+          fi
+        fi
         return 0
       fi
       pid=$(cat "$LOCK/pid" 2>/dev/null)
@@ -682,6 +866,10 @@ run_locked() {
   cmd_pid=""
   lock_held=0
   lock_lost=0
+  # An inherited pin belongs to whatever launched this script — a previous
+  # holder's, or a stranger's — and `run` is about to take its own slot. Cleared
+  # before the acquire so nothing here can act on a pin this run did not earn.
+  CF_GATE_SLOT_PATH=""
   # Empty until the heartbeat has a marker to write; `set -u` is on, and the
   # cleanup below reads it on every exit, including the ones that happen before
   # the heartbeat exists.
@@ -690,6 +878,15 @@ run_locked() {
   trap 'forward_signal INT 130' INT
   trap 'forward_signal TERM 143' TERM
   acquire "$lane"
+  # The slot this run holds IS the path acquire left in $LOCK — it is not searched
+  # for again, and nothing here asks. That is the whole point of pinning: at
+  # SLOTS>1 the holder's own heartbeat, verify and release would otherwise scan a
+  # lock parent that may be 1777, and a directory planted there with this run's
+  # pid in it can be answered by whichever name sorts first. This variable is
+  # what the heartbeat child below is given and what this run's own verify and
+  # release act on; it is deliberately NOT exported, so the command under the lock
+  # does not inherit a claim to somebody's lock.
+  CF_GATE_SLOT_PATH="$LOCK"
   # A busy acquire exits here, before the command exists at all.
   # Test hook (CF_GATE_TEST_PAUSE_AFTER_ACQUIRE): between the acquire that
   # created the lock and the assignment that records it as held, so a test can
@@ -741,8 +938,11 @@ run_locked() {
       # Ownership-checked on the lock side: the heartbeat refreshes only a lock
       # that still names this pid ($$ is this shell's even inside the subshell),
       # so a lock reclaimed under us is never refreshed on its way past, and
-      # the loop dies rather than keeping someone else's lock alive.
-      if ! CF_GATE_CALLER_PID=$$ sh "$HERE/gate-lock.sh" heartbeat >/dev/null 2>&1; then
+      # the loop dies rather than keeping someone else's lock alive. It is also
+      # PINNED to the slot this run took, so the refresh cannot land on a
+      # different lock that happens to carry the same pid.
+      if ! CF_GATE_CALLER_PID=$$ CF_GATE_SLOT_PATH="$CF_GATE_SLOT_PATH" \
+        sh "$HERE/gate-lock.sh" heartbeat >/dev/null 2>&1; then
         # A failed refresh means the lock is GONE or is someone else's — the
         # refresh is ownership-checked, so it fails after a reclaim, never
         # before one. Either way the command is now running with no lock behind
@@ -783,10 +983,20 @@ run_locked() {
 # is tidying up after itself needs to know whether there is anything of ITS OWN
 # to drop, and asking must not print a refusal about a lock that belongs to a run
 # still going somewhere else. With slots there is more than one lock on the host,
-# so the answer is a scan for the caller's own slot and the answer's VALUE is
-# that slot's path — `LOCK` moves to it, and every message and removal below
-# names the slot this caller actually holds.
+# so the answer is the caller's own slot — the pinned one where there is one, a
+# scan where there is not — and the answer's VALUE is that slot's path: `LOCK`
+# moves to it, and every message and removal below names the slot this caller
+# actually holds.
+#
+# Existence is all this answers, and that is deliberate: `release` itself
+# re-reads owner and pid before it removes anything, so a pin that no longer
+# names this caller is refused there rather than here.
 lock_is_ours() {
+  if [ -n "${CF_GATE_SLOT_PATH:-}" ]; then
+    [ -d "$CF_GATE_SLOT_PATH" ] || return 1
+    LOCK="$CF_GATE_SLOT_PATH"
+    return 0
+  fi
   own=$(caller_slot "$1") || return 1
   LOCK="$own"
   return 0
@@ -797,13 +1007,19 @@ lock_is_ours() {
 # happens only when the lock still names this owner AND this caller's pid.
 # Anything else warns and fails, and leaves the lock alone.
 #
-# The caller's slot is found by scanning for owner AND pid, so with slots on the
-# host this removes the caller's own lock and not another holder's — and a
-# caller that holds nothing at all still answers on the slot it would have used,
-# which is what makes the "nothing to release" and "refused" lines name a path a
-# reader can go and look at.
+# WITH a pin (CF_GATE_SLOT_PATH) that pin is the only slot considered and no
+# scan happens at all; WITHOUT one the caller's slot is found by scanning for
+# owner AND pid, so with slots on the host this still removes the caller's own
+# lock and not another holder's — and a caller that holds nothing at all still
+# answers on the slot it would have used, which is what makes the "nothing to
+# release" and "refused" lines name a path a reader can go and look at.
 release() {
-  own=$(caller_slot "$1") && LOCK="$own"
+  if [ -n "${CF_GATE_SLOT_PATH:-}" ]; then
+    require_trusted_slot "$CF_GATE_SLOT_PATH"
+    LOCK="$CF_GATE_SLOT_PATH"
+  else
+    own=$(caller_slot "$1") && LOCK="$own"
+  fi
   if [ ! -d "$LOCK" ]; then
     printf '%s\n' "gate-lock: nothing to release — no lock at $LOCK"
     return 0
@@ -838,9 +1054,15 @@ release() {
 # locked-step boundary, so a gate whose lock was reclaimed (or whose loop
 # could no longer vouch for it) fails as lock lost instead of continuing
 # unprotected. This holder is the lane AND the caller's pid, exactly what
-# release requires, found by the same scan — with slots, by which slot names it.
+# release requires, found by the same means: the pinned slot where there is one,
+# a scan by owner AND pid where there is not.
 verify() {
-  own=$(caller_slot "$1") && LOCK="$own"
+  if [ -n "${CF_GATE_SLOT_PATH:-}" ]; then
+    require_trusted_slot "$CF_GATE_SLOT_PATH"
+    LOCK="$CF_GATE_SLOT_PATH"
+  else
+    own=$(caller_slot "$1") && LOCK="$own"
+  fi
   if [ ! -d "$LOCK" ]; then
     printf '%s\n' "gate-lock: verify — no lock at $LOCK" >&2
     return 1
@@ -851,21 +1073,6 @@ verify() {
     printf '%s\n' "gate-lock: verify failed — the lock at $LOCK names ${owner:-unknown} (pid ${pid:-?}), not $1 (pid $recorded_pid)" >&2
     return 1
   fi
-  return 0
-}
-
-# Where is the caller's own slot? The one place in the script that answers that
-# for somebody else: gate.sh reports a failed release against a path, and with
-# slots the honest path is this caller's slot and not the historical
-# `cf-gate.lock`. Nothing is written and nothing is judged, so a caller that
-# holds nothing is told the slot it would have used — the question a failure
-# message needs answered, and nothing more.
-slot() {
-  if own=$(caller_slot "$1"); then
-    printf '%s\n' "$own"
-    return 0
-  fi
-  printf '%s\n' "$LOCK_BASE"
   return 0
 }
 
@@ -908,8 +1115,20 @@ EOF
 # written only when the lock still names this pid, and the refusal is what
 # tells the holder's loop (and the gate, at its next step boundary) that the
 # lock is lost.
+#
+# Which lock that is comes from the pin when there is one. Heartbeat is the
+# subcommand a scan is most dangerous for: it takes no lane, so it has only the
+# pid to match on, and at SLOTS>1 a pid can appear in more than one lock
+# directory — including a planted one, since the lock parent may be 1777. The
+# scan would take whichever name sorts first; the pin takes the slot this holder
+# was given.
 heartbeat() {
-  own=$(pid_slot "$recorded_pid") && LOCK="$own"
+  if [ -n "${CF_GATE_SLOT_PATH:-}" ]; then
+    require_trusted_slot "$CF_GATE_SLOT_PATH"
+    LOCK="$CF_GATE_SLOT_PATH"
+  else
+    own=$(pid_slot "$recorded_pid") && LOCK="$own"
+  fi
   if [ ! -d "$LOCK" ]; then
     printf '%s\n' "gate-lock: heartbeat — no lock at $LOCK; nothing to refresh" >&2
     return 1
@@ -998,10 +1217,6 @@ case "${1:-}" in
   heartbeat)
     [ $# -eq 1 ] || usage
     heartbeat
-    ;;
-  slot)
-    [ $# -ge 2 ] || usage
-    slot "$2"
     ;;
   *)
     usage

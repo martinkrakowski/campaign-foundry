@@ -21,9 +21,9 @@
     },
     {
       "file": "scripts/gate-lock.sh",
-      "before": "  slot_suffix=${1#\"$LOCK_BASE\".}\n  case \"$slot_suffix\" in\n    ''|*[!0-9]*)\n      return 1\n      ;;\n  esac",
-      "after": "  slot_suffix=${1#\"$LOCK_BASE\".}\n  case \"$slot_suffix\" in\n    [0-9]*)\n      ;;\n    *)\n      return 1\n      ;;\n  esac",
-      "because": "accepting any suffix that STARTS with a digit is the `cf-gate.lock.[0-9]*` glob this function exists to replace: a slot's own transients are named after the slot, so `cf-gate.lock.1.cand.<pid>` and `cf-gate.lock.1.reclaim.<pid>.<x>` both begin with a digit and would be listed as slots 1 — twice. That is not a cosmetic listing: caller_slot and pid_slot scan the same set, so a paused creator's or reclaimer's directory would be a candidate lock to release or heartbeat. The status test plants all four transient names as real directories holding all four lock files and asserts that status names every real slot and none of them, and it runs at CF_GATE_SLOTS=1 so the glob is the only thing that can surface a numbered path.",
+      "before": "  case \"$slot_suffix\" in\n    [1-9]|[1-9][0-9])\n      ;;\n    *)\n      return 1\n      ;;\n  esac\n  [ \"$slot_suffix\" -lt \"$MAX_SLOTS\" ]\n",
+      "after": "  case \"$slot_suffix\" in\n    [0-9]*)\n      ;;\n    *)\n      return 1\n      ;;\n  esac\n  return 0\n",
+      "because": "is_slot_path is the whole of what a slot NAME is: `cf-gate.lock`, or `cf-gate.lock.<n>` with n matching [1-9] or [1-9][0-9] and BELOW MAX_SLOTS (0..63 at a ceiling of 64). This mutation restores the rule it replaced — any suffix starting with a digit — which is the `cf-gate.lock.[0-9]*` glob the function exists to replace, and a slot's own transients are named after the slot, so `cf-gate.lock.1.cand.999` and `cf-gate.lock.1.reclaim.999.x` both begin with a digit and become slots 1, twice over. That is not a cosmetic listing: existing_slots feeds caller_slot, pid_slot and self_held_slot as well as status, so a paused creator's or reclaimer's directory becomes a candidate lock to release, heartbeat or refuse an acquire over. The status test plants all four transient names as real directories holding all four lock files and asserts that status names every real slot and none of them, at CF_GATE_SLOTS=1 so a numbered path can only surface through the scan's own filter. Both halves of the rule are in the replaced text and both have to go: `[ \"1.cand.999\" -lt 64 ]` is not a comparison any shell can make, it answers false, and a false answer there is a REFUSAL — so relaxing only the shape leaves the transients rejected and this claim does not reproduce. Measured, this round: with the shape alone mutated the status test still passed (verdict: survived).",
       "command": [
         "yarn",
         "vitest",
@@ -48,6 +48,57 @@
         "--project",
         "tools",
         "tools/gate/__tests__/gate-signals.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "    [ -d \"$slot_candidate\" ] || continue\n    is_slot_path \"$slot_candidate\" || continue\n    slot_is_provenance \"$slot_candidate\" || continue\n",
+      "after": "    [ -d \"$slot_candidate\" ] || continue\n    slot_is_provenance \"$slot_candidate\" || continue\n",
+      "because": "Dropping is_slot_path from existing_slots removes the canonical-name rule from the SCAN, leaving only \"it is a directory\" and \"this user owns it\" — and both of those pass for a name no acquirer could ever have produced. The test plants `cf-gate.lock.0` and `cf-gate.lock.007`, each holding the real holder's owner and pid (a forgery that did not match would never get that far) and each sorting BEFORE the real slot 1, and asserts that an unpinned status does not list them, that an unpinned heartbeat refreshes slot 1 rather than `.0`, and that neither planted directory is touched. This is the unpinned caller: only CF_GATE_CALLER_PID, no CF_GATE_SLOT_PATH — the same shape as a caller that did not come from an acquire. `/tmp` is 1777, so at SLOTS>1 a directory that sorts before a real slot is something any local user can write.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "a planted slot name that is not canonical"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "slot_is_provenance() {\n  [ ! -L \"$1\" ] || return 1\n  [ -d \"$1\" ] || return 1\n  if [ -z \"$slot_uid\" ]; then\n    slot_uid=\"${CF_GATE_TEST_EXPECT_UID-$(id -u)}\"\n  fi\n  find \"$1\" -prune -user \"$slot_uid\" -print 2>/dev/null | grep -q .\n}\n",
+      "after": "slot_is_provenance() {\n  [ -d \"$1\" ]\n}\n",
+      "because": "Provenance is what makes a planted directory unusable, and `[ -d \"$1\" ]` is what is left without it: a symlink to a directory passes -d (it follows the link), and the uid test cannot see the difference because `find` on a symlink start point reports the LINK's owner and never descends. The test plants exactly that — a symlink at the canonical slot name `cf-gate.lock.1` pointing at a directory this user owns that holds a lock nobody wrote — and asserts that status does not list it, that an unpinned heartbeat refreshes the real slot 2 instead, and that the directory behind the link is left alone. The uid seam (CF_GATE_TEST_EXPECT_UID) is the same filter seen from the other side: a slot this user owns is not a lock once the expected uid is somebody else's, and the pinned path answers exit 2 for a pin that fails it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "a symlinked slot is invisible"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "  if [ -n \"${CF_GATE_SLOT_PATH:-}\" ]; then\n    require_trusted_slot \"$CF_GATE_SLOT_PATH\"\n    LOCK=\"$CF_GATE_SLOT_PATH\"\n  else\n    own=$(pid_slot \"$recorded_pid\") && LOCK=\"$own\"\n  fi\n",
+      "after": "  own=$(pid_slot \"$recorded_pid\") && LOCK=\"$own\"\n",
+      "because": "heartbeat is the subcommand a pid scan is most dangerous for: it takes no lane, so the pid is all it has to match on, and at SLOTS>1 one pid can appear in more than one lock directory — including a planted one, because the lock parent may be 1777. With CF_GATE_SLOT_PATH ignored, pid_slot takes whichever slot sorts first, so the test that seeds slots 0 and 1 with the SAME pid and pins slot 1 sees slot 0's beat move and slot 1's stay at 1000: the holder's real lock goes stale, the next acquire reclaims it, and the holder carries on against a lock nobody holds. A pin is the whole fix — the slot the acquire took, handed back to the loop that refreshes it — and `run` pins in-process for exactly this call, the same way gate.sh does for its own.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "a heartbeat on a pid that holds two slots refreshes only the pinned one"
       ],
       "verdict": "caught"
     }
