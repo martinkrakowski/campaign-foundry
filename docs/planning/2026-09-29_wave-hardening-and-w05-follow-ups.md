@@ -130,3 +130,13 @@ Lanes dispatched after HX3 merges run `yarn gate`, whose lock covers only `test:
 - Re-running the M2 scenario (a docs push behind a running `main` run) leaves the earlier run to finish.
 - A dead-PID lock is reclaimed by `yarn gate` without a human.
 - Staging runs the HX merges, with `0014` and `0015` confirmed. The owner has exercised drafts and last-opened, and the session log records it.
+
+---
+
+## 6. Follow-up lanes (wave `hardening-followups-w01`, 2026-09-30)
+
+These are drawn from the shipped note's follow-up list. **HXF1 is also the first lane run on midnight** (`--agent lane`, through the loopback opencode server). The lane commits only; the orchestrator fetches, pushes and opens the PR. Its wall time is the first Mac-versus-midnight data point.
+
+| Lane | Risk | Delivers | Owns | Must not |
+|---|---|---|---|---|
+| **HXF1-redirect-recheck-mutation** | normal | **Fable NIT on #629 (round 4).** `.agents/manifests/hx7-fs-id-index.json` has no mutation that isolates the redirect's own re-check in `FsBriefStore.rewriteBrief` (`apps/api/server/lib/ports/fs-brief-store.ts:773`, `if (target !== undefined && misdeclares(target)) target = undefined;`). Mutation 11 flips the shared `misdeclares` predicate, so the test "a rewrite refuses a replacement that stopped declaring the id while the scan ran" (`fs-brief-store.test.ts:1502`) fails through the FIRST arm (`:750`), not through the re-check. Enumerated:<br>(1) Add ONE mutation to `hx7-fs-id-index.json` that deletes line `:773` alone (`before` = that exact line, `after` = empty or a comment), with `-t` naming the test at `:1502`. The `because` states that the test must then patch the other campaign's file and fail on `rejects`.<br>(2) Prove it through `yarn mutate` (verdict `caught`), and check that it is non-equivalent: with the line deleted, the other campaign's bytes change.<br>(3) `verify-manifests` replays the manifest and reproduces every verdict (14 mutations).<br>**No source change.** If the mutation SURVIVES, stop and report: the test would then not pin the re-check, and that is a finding, not something to fix here. | `.agents/manifests/hx7-fs-id-index.json` | change `fs-brief-store.ts` or its tests; push; open a PR |
