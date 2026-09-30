@@ -1,10 +1,11 @@
 import { describe, test, expect, afterEach } from "vitest";
 import { betterAuth } from "better-auth";
 import { authOptions } from "../../auth/options.js";
-import { LogMailer } from "../../auth/log-mailer.js";
 import { loadMigrations, migrate, type Migration } from "../migrate.js";
+import { pgClient } from "../pg-client.js";
 import { authDatabase, emptyDatabase, migratedDatabase } from "./pglite-client.js";
 import {
+  cloneConfig,
   drop,
   ensureTemplate,
   maintenanceConfig,
@@ -90,11 +91,13 @@ describe.skipIf(!server)("the template (D186)", () => {
   });
 
   test("a build killed before it was marked a template is dropped and built again", async () => {
-    const migrations = await loadMigrations();
+    // A synthetic migration set, so this template is one nothing else touches.
+    // The shared one is a template the rest of this suite is cloning from while
+    // this file runs, and dropping it out from under them is a race, not a test.
+    const migrations = [m("0001_only", "create table only_this (x int);")];
     const name = templateName(migrations);
     // Exactly what a killed build leaves behind: the database exists, and it is
     // not a template. Reusing it would clone an empty schema into every test.
-    await drop(name).catch(() => undefined);
     await createDatabase(name);
     created.push(name);
 
@@ -107,6 +110,13 @@ describe.skipIf(!server)("the template (D186)", () => {
         [name],
       );
       expect(rows).toEqual([{ datistemplate: true }]);
+      // And it is a real migration run, not just a flag: the table is in it.
+      const build = pgClient(cloneConfig(name));
+      try {
+        await build.query("insert into only_this values (1)");
+      } finally {
+        await build.end();
+      }
     } finally {
       await session.end();
     }
@@ -183,12 +193,13 @@ describe.skipIf(!server)("authDatabase (D186)", () => {
       expect(before.rows[0]!.t).toBeNull();
 
       await migrate(sql, await loadMigrations());
+      const sent: string[] = [];
       const instance = betterAuth(
         authOptions({
           database: pool,
           secret: "a".repeat(32),
           baseURL: "http://127.0.0.1:3001",
-          mailer: new LogMailer(),
+          mailer: { send: async ({ to }) => void sent.push(to) },
         }),
       );
       await instance.api.signInMagicLink({
@@ -197,9 +208,16 @@ describe.skipIf(!server)("authDatabase (D186)", () => {
       });
 
       // `sql` is the SAME pool Better Auth wrote through, which is the proof
-      // `schema-agreement.test.ts` needs from the PGlite side too.
-      const rows = await sql.query<{ email: string }>(`select email from "user"`);
-      expect(rows.rows.map((r) => r.email)).toEqual(["person@example.com"]);
+      // `schema-agreement.test.ts` needs from the PGlite side too. Signing in by
+      // magic link writes the verification row, not a user — the user is
+      // created when the link is followed.
+      const rows = await sql.query<{ identifier: string; value: string }>(
+        "select identifier, value from verification",
+      );
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0]!.identifier).toEqual(expect.any(String));
+      expect(rows.rows[0]!.value).toContain("person@example.com");
+      expect(sent).toEqual(["person@example.com"]);
     } finally {
       await end();
     }
