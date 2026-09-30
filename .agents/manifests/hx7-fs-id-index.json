@@ -222,6 +222,23 @@
         "a rewrite refuses a cached JSON brief whose bytes stopped parsing"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-brief-store.ts",
+      "before": "      if (target !== undefined && misdeclares(target)) target = undefined;",
+      "after": "      // the replacement is taken on trust: no re-check",
+      "because": "the redirect's OWN re-check, and the one comparison the scan cannot cover: the map returned a file that declared the id when it was read, and the patch reads it again a moment later, so a writer that moves the id on in between is a clobber with the re-derivation already done. Deleting the line alone leaves the predicate itself intact, so every other claim in this manifest still holds and the shared half of the repair is untouched — this is the line that reads the bytes the write is ABOUT to patch, and nothing else in rewriteBrief compares them. Mutation 11 above flips that shared predicate, which is why the test it names fails through the FIRST arm at :750 and this re-check is never what caught it; with the line gone the test below patches the OTHER campaign's file, and must then fail on `rejects` with that campaign's bytes no longer intact",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-brief-store.test.ts",
+        "-t",
+        "a rewrite refuses a replacement that stopped declaring the id while the scan ran"
+      ],
+      "verdict": "caught"
     }
   ]
 }
