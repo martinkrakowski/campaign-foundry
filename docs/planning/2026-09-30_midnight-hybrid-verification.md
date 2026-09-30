@@ -66,3 +66,12 @@ Every lane inherits the pipeline and skill rules. The seat is **space-bunny**. M
 - `yarn gate --profile midnight` passes 13/13 on midnight, with its wall time recorded.
 - Three concurrent gates run on midnight without interference, demonstrated once.
 - `ci.yml` and `REQUIRED_CHECK` are unchanged; a test asserts that `^Build` still matches the CI job name (MH1 (4), `required-check.test.ts`).
+
+---
+
+## 5. Follow-up lanes, split out of MH2 (proposed; not yet reviewed or scheduled)
+
+| Lane | Risk | Delivers | Owns | Must not |
+|---|---|---|---|---|
+| **MH4-one-gate-per-worktree** | high | **Qodo #2 on PR #636.** With `CF_GATE_SLOTS>1`, a second gate in the same checkout takes another slot, and both run `verify-manifests` (which mutates the tree) at once. "One gate per worktree" is only documented. Enforce it: each slot records the caller's worktree (`git rev-parse --show-toplevel`, else `pwd -P`) at `try_create`, and **the check runs AFTER a slot is won**, so the rule is deterministic under a race: if a LIVE same-worktree holder sits in a LOWER slot, release your own and exit 75 naming it. A slot with no `worktree` file never blocks. The existing SLOTS=3 tests spawn each run from its own `git init` scratch dir (`startLockIn`/`runLockIn` gain a `cwd` option). At SLOTS=1 behaviour is unchanged, except that a caller matching a live numbered-slot holder's worktree now gets 75. One mutation, where dropping the check makes the same-worktree test fail. | `scripts/gate-lock.sh`, `tools/gate/__tests__/gate-lock.test.ts`, a manifest | change the pinned-slot or provenance rules from MH2's fix round 2 |
+| **MH5-gate-acquire-window** | high | **A pre-existing leak, found by the MH2 lane (reproduced 25/25).** A TERM between `gate.sh`'s acquire rename and `LOCK_HELD=1` exits 143 with nothing released. The next acquirer's liveness check reclaims it, so it is a leak, not a permanent hold. Fable's fix: `release_lock` falls back like `run_cleanup`, releasing the slot `acquire` reported when `LOCK_HELD=0` and that slot is ours. | `scripts/gate.sh` (`release_lock`), `tools/gate/__tests__/gate-signals.test.ts` | — |
