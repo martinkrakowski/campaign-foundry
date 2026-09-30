@@ -11,8 +11,30 @@
 #                                  caller pid in CF_GATE_CALLER_PID
 #   gate-lock.sh release <lane>   drop it — only the lock's own owner and pid may
 #   gate-lock.sh verify <lane>    exit 0 only while the lock still names this holder
-#   gate-lock.sh status           print who holds it and whether they look alive
+#   gate-lock.sh status           print who holds each slot and whether they look
+#                                 alive
 #   gate-lock.sh heartbeat        refresh the beat — only on the caller's own lock
+#   gate-lock.sh slot <lane>      print the caller's own slot's path
+#
+# There is one host-wide lock per SLOT, and CF_GATE_SLOTS says how many there are
+# (default 1, which is every behaviour below as it was before slots existed).
+# Slot 0 keeps the unsuffixed name and slots 1..N-1 are `cf-gate.lock.<n>`, so at
+# SLOTS=1 the lock is byte-identical to the one every caller, message and test
+# already names, and a slot's transients (`cf-gate.lock.<n>.cand.<pid>`,
+# `cf-gate.lock.<n>.reclaim.<pid>.<x>`) are derived from that slot's own path and
+# are never slots themselves.
+#
+# CF_GATE_SLOTS IS SET HOST-WIDE — /etc/environment on the midnight host, not in
+# one seat's environment — because the number of slots is a property of the host
+# and a disagreement between two seats is not a smaller number of gates: a
+# caller that believes in one slot takes slot 0 while the others are busy, and
+# the holder it cannot see is the one it just ran beside. A seat may raise it
+# only while it holds nothing, and never to disagree with a holder.
+#
+# ONE GATE PER WORKTREE, even at SLOTS>1, because the lock is per host and not
+# per checkout: `verify-manifests` mutates the tree it is verifying, so two
+# lanes in two worktrees on one host would each be handed a different slot and
+# each would then write manifests the other is reading.
 #
 # The lock is a directory at ${TMPDIR:-/tmp}/cf-gate.lock — mkdir is the
 # atomic test-and-set, there is nothing else in POSIX sh — holding four files:
@@ -87,8 +109,14 @@ set -u
 # directory must not be able to take those invocations with it.
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-LOCK="${TMPDIR:-/tmp}/cf-gate.lock"
+LOCK_BASE="${TMPDIR:-/tmp}/cf-gate.lock"
 BUSY=75
+
+# The slot this invocation is working on. It is slot 0's path until an acquire
+# takes another one, and from then on the caller's OWN slot: every read, write
+# and message below names this variable, so a holder with SLOTS>1 touches its own
+# slot and nothing else.
+LOCK="$LOCK_BASE"
 
 STALE_SECONDS="${CF_GATE_STALE_SECONDS:-600}"
 case "$STALE_SECONDS" in
@@ -98,6 +126,108 @@ case "$STALE_SECONDS" in
     ;;
 esac
 
+# How many slots this host has. Validated exactly like CF_GATE_STALE_SECONDS —
+# a value that cannot be a count is a broken invocation whichever subcommand it
+# arrived on — and then for a minimum, because zero slots is not a host with no
+# gates, it is a host where every caller is silently unprotected.
+SLOTS="${CF_GATE_SLOTS:-1}"
+case "$SLOTS" in
+  ''|*[!0-9]*)
+    printf '%s\n' "gate-lock: CF_GATE_SLOTS must be a number of slots: $SLOTS" >&2
+    exit 2
+    ;;
+esac
+if [ "$SLOTS" -lt 1 ]; then
+  printf '%s\n' "gate-lock: CF_GATE_SLOTS must be at least one slot: $SLOTS" >&2
+  exit 2
+fi
+
+# A slot's path. Slot 0 is unsuffixed so that SLOTS=1 leaves the historical name
+# exactly as it was; every later slot is the base plus its number.
+slot_path() {
+  if [ "$1" -eq 0 ]; then
+    printf '%s\n' "$LOCK_BASE"
+  else
+    printf '%s\n' "$LOCK_BASE.$1"
+  fi
+}
+
+# Is this path one of the slots? A slot is exactly `cf-gate.lock`, or
+# `cf-gate.lock.` followed by DIGITS AND NOTHING ELSE. The digits-only suffix is
+# what keeps a slot's own transients out of the slot set: `cf-gate.lock.1.cand.999`
+# and `cf-gate.lock.1.reclaim.999.x` both start with a digit, so a
+# `cf-gate.lock.[0-9]*` glob would read them as slots 1 and 1 — a status that
+# listed a candidate directory as a holder, and a scan that would happily
+# release or heartbeat one.
+is_slot_path() {
+  case "$1" in
+    "$LOCK_BASE")
+      return 0
+      ;;
+    "$LOCK_BASE".*)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  slot_suffix=${1#"$LOCK_BASE".}
+  case "$slot_suffix" in
+    ''|*[!0-9]*)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+# Every slot that EXISTS, whatever CF_GATE_SLOTS says — a host whose slots were
+# lowered underneath a holder still has that holder's lock, and a caller that
+# only looked at 0..N-1 would report the host free while a slot is taken. The
+# numbered ones are found by glob and then filtered by is_slot_path, because a
+# glob cannot express "digits and nothing else".
+existing_slots() {
+  for slot_candidate in "$LOCK_BASE" "$LOCK_BASE".[0-9]*; do
+    [ -d "$slot_candidate" ] || continue
+    is_slot_path "$slot_candidate" || continue
+    printf '%s\n' "$slot_candidate"
+  done
+}
+
+# The caller's own slot, found by scanning for the owner AND the pid — the same
+# pair release demands before deleting anything, so a stale holder whose lock was
+# reclaimed finds nothing and no stranger's slot is ever touched. Empty when the
+# caller holds no slot.
+caller_slot() {
+  slot_found=""
+  while IFS= read -r slot_candidate; do
+    [ "$(cat "$slot_candidate/owner" 2>/dev/null)" = "$1" ] || continue
+    [ "$(cat "$slot_candidate/pid" 2>/dev/null)" = "$recorded_pid" ] || continue
+    slot_found="$slot_candidate"
+    break
+  done <<EOF
+$(existing_slots)
+EOF
+  [ -n "$slot_found" ] || return 1
+  printf '%s\n' "$slot_found"
+  return 0
+}
+
+# The same scan by pid alone, for `heartbeat`: it takes no lane, so the owner is
+# not available to match on, and the pid — the holder's own — is what the beat
+# belongs to. One pid holds one slot, so the first match is the only match.
+pid_slot() {
+  slot_found=""
+  while IFS= read -r slot_candidate; do
+    [ "$(cat "$slot_candidate/pid" 2>/dev/null)" = "$1" ] || continue
+    slot_found="$slot_candidate"
+    break
+  done <<EOF
+$(existing_slots)
+EOF
+  [ -n "$slot_found" ] || return 1
+  printf '%s\n' "$slot_found"
+  return 0
+}
+
 # The pid recorded in the lock: the caller's when it says so (gate.sh does,
 # and run sets the variable to its own $$ for the sub-commands below), otherwise
 # this process. Only acquire can WRITE a lock, and it refuses to do so without
@@ -106,7 +236,7 @@ esac
 recorded_pid="${CF_GATE_CALLER_PID:-$$}"
 
 usage() {
-  printf '%s\n' "usage: $0 run <lane> -- <command...> | acquire <lane> | release <lane> | verify <lane> | status | heartbeat" >&2
+  printf '%s\n' "usage: $0 run <lane> -- <command...> | acquire <lane> | release <lane> | verify <lane> | status | heartbeat | slot <lane>" >&2
   exit 2
 }
 
@@ -217,7 +347,7 @@ take_stale() {
 }
 
 busy_exit() {
-  printf '%s\n' "gate-lock: busy — held by ${1:-unknown} (pid ${2:-?}, beat ${3:-?}); 75 means busy: sleep and retry, never remove the lock by hand" >&2
+  printf '%s\n' "gate-lock: busy — held by ${1:-unknown} (pid ${2:-?}, beat ${3:-?}) at ${4:-$LOCK}; 75 means busy: sleep and retry, never remove the lock by hand" >&2
   exit $BUSY
 }
 
@@ -237,52 +367,91 @@ require_caller_pid() {
   exit 2
 }
 
+# Take ONE slot, trying them in order: the first free one wins, and a slot whose
+# holder is alive and fresh is not this caller's business — it hands over to the
+# next slot rather than exiting, which is the whole difference between a
+# semaphore and a mutex. Only a caller that has run out of slots is busy.
+#
+# Everything the judgement needs is per slot: the pass counter (so five passes
+# without winning a NAME is still five passes on that slot, not five spread over
+# the host), the reclaim, and the pause hook the reclaim races through. With
+# SLOTS=1 the outer loop runs once and every message is the one a single-slot
+# host produced before slots existed.
 acquire() {
   lane=$1
-  pass=0
-  while :; do
-    pass=$((pass + 1))
-    if try_create "$lane"; then
-      printf '%s\n' "gate-lock: acquired by $lane (pid $recorded_pid)"
-      return 0
-    fi
-    pid=$(cat "$LOCK/pid" 2>/dev/null)
-    beat=$(cat "$LOCK/beat" 2>/dev/null)
-    owner=$(cat "$LOCK/owner" 2>/dev/null)
-    # Creation is atomic, so a lock without pid or beat cannot be mid-write —
-    # it is abandoned (or the filesystem is failing). Re-read instead of
-    # judging on the first pass anyway, bounded: an abandoned one is reclaimed
-    # at pass 3. The second wait covers a pid present but beat missing — a
-    # live holder always has a beat, so that too reads as abandoned.
-    if [ -z "$pid" ] && [ -z "$beat" ] && [ "$pass" -lt 3 ]; then
-      sleep 1
-      continue
-    fi
-    if [ -n "$pid" ] && pid_alive "$pid" && [ -z "$beat" ] && [ "$pass" -lt 3 ]; then
-      sleep 1
-      continue
-    fi
-    if [ -n "$pid" ] && pid_alive "$pid" && ! beat_is_stale "$beat"; then
-      busy_exit "$owner" "$pid" "$beat"
-    fi
-    if [ "$pass" -ge 5 ]; then
-      # Five passes without winning the name: someone else is reclaiming it.
-      busy_exit "$owner" "${pid:-none}" "${beat:-none}"
-    fi
-    if [ -n "$pid" ] && pid_alive "$pid"; then
-      printf '%s\n' "gate-lock: reclaiming — owner ${owner:-unknown} (pid $pid) has a stale or missing heartbeat (beat ${beat:-missing}, threshold ${STALE_SECONDS}s)"
-    else
-      printf '%s\n' "gate-lock: reclaiming — owner ${owner:-unknown} (pid ${pid:-none}) is not alive"
-    fi
-    # Test hook (CF_GATE_TEST_PAUSE_AFTER_INSPECT): a pause between judging
-    # the lock stale and moving it, so a test can replace the lock in that
-    # window and prove the reclaimer never deletes a lock it did not judge.
-    if [ -n "${CF_GATE_TEST_PAUSE_AFTER_INSPECT:-}" ]; then
-      touch "$CF_GATE_TEST_PAUSE_AFTER_INSPECT" 2>/dev/null
-      while [ -f "$CF_GATE_TEST_PAUSE_AFTER_INSPECT" ]; do sleep 1; done
-    fi
-    take_stale "$owner" "${pid:-}" "${beat:-}" "$pass"
+  slot_no=0
+  busy_owner=""
+  busy_pid=""
+  busy_beat=""
+  busy_slot=""
+  while [ "$slot_no" -lt "$SLOTS" ]; do
+    LOCK=$(slot_path "$slot_no")
+    pass=0
+    while :; do
+      pass=$((pass + 1))
+      if try_create "$lane"; then
+        printf '%s\n' "gate-lock: acquired by $lane (pid $recorded_pid) at $LOCK"
+        return 0
+      fi
+      pid=$(cat "$LOCK/pid" 2>/dev/null)
+      beat=$(cat "$LOCK/beat" 2>/dev/null)
+      owner=$(cat "$LOCK/owner" 2>/dev/null)
+      # Creation is atomic, so a lock without pid or beat cannot be mid-write —
+      # it is abandoned (or the filesystem is failing). Re-read instead of
+      # judging on the first pass anyway, bounded: an abandoned one is reclaimed
+      # at pass 3. The second wait covers a pid present but beat missing — a
+      # live holder always has a beat, so that too reads as abandoned.
+      if [ -z "$pid" ] && [ -z "$beat" ] && [ "$pass" -lt 3 ]; then
+        sleep 1
+        continue
+      fi
+      if [ -n "$pid" ] && pid_alive "$pid" && [ -z "$beat" ] && [ "$pass" -lt 3 ]; then
+        sleep 1
+        continue
+      fi
+      if [ -n "$pid" ] && pid_alive "$pid" && ! beat_is_stale "$beat"; then
+        # Remember the FIRST busy holder, which is the one a caller retrying
+        # wants named, and try the next slot.
+        if [ -z "$busy_slot" ]; then
+          busy_owner="$owner"
+          busy_pid="$pid"
+          busy_beat="$beat"
+          busy_slot="$LOCK"
+        fi
+        break
+      fi
+      if [ "$pass" -ge 5 ]; then
+        # Five passes without winning the name: someone else is reclaiming it.
+        # This slot is not available to us either — try the next one.
+        if [ -z "$busy_slot" ]; then
+          busy_owner="$owner"
+          busy_pid="${pid:-none}"
+          busy_beat="${beat:-none}"
+          busy_slot="$LOCK"
+        fi
+        break
+      fi
+      if [ -n "$pid" ] && pid_alive "$pid"; then
+        printf '%s\n' "gate-lock: reclaiming — owner ${owner:-unknown} (pid $pid) has a stale or missing heartbeat (beat ${beat:-missing}, threshold ${STALE_SECONDS}s) at $LOCK"
+      else
+        printf '%s\n' "gate-lock: reclaiming — owner ${owner:-unknown} (pid ${pid:-none}) is not alive at $LOCK"
+      fi
+      # Test hook (CF_GATE_TEST_PAUSE_AFTER_INSPECT): a pause between judging
+      # the lock stale and moving it, so a test can replace the lock in that
+      # window and prove the reclaimer never deletes a lock it did not judge.
+      if [ -n "${CF_GATE_TEST_PAUSE_AFTER_INSPECT:-}" ]; then
+        touch "$CF_GATE_TEST_PAUSE_AFTER_INSPECT" 2>/dev/null
+        while [ -f "$CF_GATE_TEST_PAUSE_AFTER_INSPECT" ]; do sleep 1; done
+      fi
+      take_stale "$owner" "${pid:-}" "${beat:-}" "$pass"
+    done
+    slot_no=$((slot_no + 1))
   done
+  # Every slot is held by a live, fresh holder. That is the one answer that is
+  # 75: the host has no room left, and the first holder found is the one to wait
+  # for — the last slot tried would be a worse answer, because it is the newest
+  # and least likely to be the one that frees up first.
+  busy_exit "$busy_owner" "$busy_pid" "$busy_beat" "$busy_slot"
 }
 
 # Hand a signal to the command and leave through the EXIT trap, which is what
@@ -367,7 +536,20 @@ forward_signal() {
 # nobody can prove was dropped is not a run that succeeded.
 run_cleanup() {
   status=$?
-  trap - INT TERM EXIT
+  # Ignore a second signal until the lock has been released, and clear the EXIT
+  # trap FIRST so nothing re-enters this function while it runs. The order is
+  # the whole fix, and the previous order (`trap - INT TERM EXIT`) was a bug: it
+  # restored the DEFAULT disposition, undoing the `trap '' INT TERM` that
+  # forward_signal had just installed, so a second TERM arriving during the
+  # cleanup killed this shell outright — before `release`, with the lock still at
+  # the name. Measured here with one refresh parked in
+  # CF_GATE_TEST_PAUSE_BEFORE_BEAT_MV, a TERM, and a second TERM 0.5s later:
+  # exit 143, no "released by" line, and the lock left at the name with all four
+  # of its files, under /bin/sh AND /bin/dash. A CI timeout that sends TERM
+  # twice is exactly that. Nothing outside can break the cleanup any more, and
+  # `kill -9` on this pid remains the way out of a command that will not stop.
+  trap - EXIT
+  trap '' INT TERM
   if [ -n "$run_hb_pid" ]; then
     # Kill the heartbeat loop and reap it, so nothing outlives `run` by even
     # a moment. Its stdio was detached when it started, so the `sleep` it is
@@ -556,15 +738,17 @@ run_locked() {
   exit "$status"
 }
 
-# Does the lock at the name still name this caller, as its lane and its pid?
-# The question `release` answers before deleting, asked on its own and quietly:
-# a caller that is tidying up after itself needs to know whether there is
-# anything of ITS OWN to drop, and asking must not print a refusal about a lock
-# that belongs to a run still going somewhere else.
+# Does a slot still name this caller, as its lane and its pid? The question
+# `release` answers before deleting, asked on its own and quietly: a caller that
+# is tidying up after itself needs to know whether there is anything of ITS OWN
+# to drop, and asking must not print a refusal about a lock that belongs to a run
+# still going somewhere else. With slots there is more than one lock on the host,
+# so the answer is a scan for the caller's own slot and the answer's VALUE is
+# that slot's path — `LOCK` moves to it, and every message and removal below
+# names the slot this caller actually holds.
 lock_is_ours() {
-  [ -d "$LOCK" ] || return 1
-  [ "$(cat "$LOCK/owner" 2>/dev/null)" = "$1" ] || return 1
-  [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$recorded_pid" ] || return 1
+  own=$(caller_slot "$1") || return 1
+  LOCK="$own"
   return 0
 }
 
@@ -572,7 +756,14 @@ lock_is_ours() {
 # holder's cleanup must not delete the lock that replaced it: the removal
 # happens only when the lock still names this owner AND this caller's pid.
 # Anything else warns and fails, and leaves the lock alone.
+#
+# The caller's slot is found by scanning for owner AND pid, so with slots on the
+# host this removes the caller's own lock and not another holder's — and a
+# caller that holds nothing at all still answers on the slot it would have used,
+# which is what makes the "nothing to release" and "refused" lines name a path a
+# reader can go and look at.
 release() {
+  own=$(caller_slot "$1") && LOCK="$own"
   if [ ! -d "$LOCK" ]; then
     printf '%s\n' "gate-lock: nothing to release — no lock at $LOCK"
     return 0
@@ -583,6 +774,15 @@ release() {
     printf '%s\n' "gate-lock: release refused — the lock at $LOCK names ${owner:-unknown} (pid ${pid:-?}), not $1 (pid $recorded_pid); it was left alone" >&2
     return 1
   fi
+  # Test hook (CF_GATE_TEST_PAUSE_BEFORE_RELEASE): after the owner/pid check and
+  # before the removal — the window in which a SECOND signal used to kill this
+  # process (or its parent, in gate.sh) and leave the lock on disk. Parking the
+  # heartbeat does not open it: gate.sh's loop has TERM at default and dies at
+  # once, so nothing blocks there for a signal to land in.
+  if [ -n "${CF_GATE_TEST_PAUSE_BEFORE_RELEASE:-}" ]; then
+    touch "$CF_GATE_TEST_PAUSE_BEFORE_RELEASE" 2>/dev/null
+    while [ -f "$CF_GATE_TEST_PAUSE_BEFORE_RELEASE" ]; do sleep 1; done
+  fi
   # The removal's status is the release's status: a removal that failed on
   # permissions or I/O must be reported, not announced as released — the lock
   # would linger until a liveness reclaim picked it up.
@@ -590,7 +790,7 @@ release() {
     printf '%s\n' "gate-lock: release failed — could not remove $LOCK" >&2
     return 1
   fi
-  printf '%s\n' "gate-lock: released by $1 (pid $recorded_pid)"
+  printf '%s\n' "gate-lock: released by $1 (pid $recorded_pid) from $LOCK"
   return 0
 }
 
@@ -598,8 +798,9 @@ release() {
 # locked-step boundary, so a gate whose lock was reclaimed (or whose loop
 # could no longer vouch for it) fails as lock lost instead of continuing
 # unprotected. This holder is the lane AND the caller's pid, exactly what
-# release requires.
+# release requires, found by the same scan — with slots, by which slot names it.
 verify() {
+  own=$(caller_slot "$1") && LOCK="$own"
   if [ ! -d "$LOCK" ]; then
     printf '%s\n' "gate-lock: verify — no lock at $LOCK" >&2
     return 1
@@ -613,26 +814,52 @@ verify() {
   return 0
 }
 
-status() {
-  if [ ! -d "$LOCK" ]; then
-    printf '%s\n' "gate-lock: free (no lock at $LOCK)"
+# Where is the caller's own slot? The one place in the script that answers that
+# for somebody else: gate.sh reports a failed release against a path, and with
+# slots the honest path is this caller's slot and not the historical
+# `cf-gate.lock`. Nothing is written and nothing is judged, so a caller that
+# holds nothing is told the slot it would have used — the question a failure
+# message needs answered, and nothing more.
+slot() {
+  if own=$(caller_slot "$1"); then
+    printf '%s\n' "$own"
     return 0
   fi
-  owner=$(cat "$LOCK/owner" 2>/dev/null)
-  pid=$(cat "$LOCK/pid" 2>/dev/null)
-  started=$(cat "$LOCK/started" 2>/dev/null)
-  beat=$(cat "$LOCK/beat" 2>/dev/null)
-  if pid_alive "$pid"; then
-    life="pid $pid alive"
-  else
-    life="pid ${pid:-none} not alive"
+  printf '%s\n' "$LOCK_BASE"
+  return 0
+}
+
+# Every slot that exists, whatever CF_GATE_SLOTS says — a status that only looked
+# at 0..N-1 would report a host free while a slot is taken, which is the one
+# answer an operator must never be given. Slot 0 keeps its unsuffixed name, so a
+# single-slot host prints the same line it always did with the slot named.
+status() {
+  slots_listed=0
+  while IFS= read -r slot_path_seen; do
+    [ -n "$slot_path_seen" ] || continue
+    slots_listed=1
+    LOCK="$slot_path_seen"
+    owner=$(cat "$LOCK/owner" 2>/dev/null)
+    pid=$(cat "$LOCK/pid" 2>/dev/null)
+    started=$(cat "$LOCK/started" 2>/dev/null)
+    beat=$(cat "$LOCK/beat" 2>/dev/null)
+    if pid_alive "$pid"; then
+      life="pid $pid alive"
+    else
+      life="pid ${pid:-none} not alive"
+    fi
+    if beat_is_stale "$beat"; then
+      heart="heartbeat stale or missing (threshold ${STALE_SECONDS}s)"
+    else
+      heart="heartbeat fresh (beat $beat)"
+    fi
+    printf '%s\n' "gate-lock: slot $LOCK held by ${owner:-unknown} (started ${started:-?}, $life, $heart)"
+  done <<EOF
+$(existing_slots)
+EOF
+  if [ "$slots_listed" -eq 0 ]; then
+    printf '%s\n' "gate-lock: free (no lock at $LOCK_BASE)"
   fi
-  if beat_is_stale "$beat"; then
-    heart="heartbeat stale or missing (threshold ${STALE_SECONDS}s)"
-  else
-    heart="heartbeat fresh (beat $beat)"
-  fi
-  printf '%s\n' "gate-lock: held by ${owner:-unknown} (started ${started:-?}, $life, $heart)"
   return 0
 }
 
@@ -642,6 +869,7 @@ status() {
 # tells the holder's loop (and the gate, at its next step boundary) that the
 # lock is lost.
 heartbeat() {
+  own=$(pid_slot "$recorded_pid") && LOCK="$own"
   if [ ! -d "$LOCK" ]; then
     printf '%s\n' "gate-lock: heartbeat — no lock at $LOCK; nothing to refresh" >&2
     return 1
@@ -730,6 +958,10 @@ case "${1:-}" in
   heartbeat)
     [ $# -eq 1 ] || usage
     heartbeat
+    ;;
+  slot)
+    [ $# -ge 2 ] || usage
+    slot "$2"
     ;;
   *)
     usage

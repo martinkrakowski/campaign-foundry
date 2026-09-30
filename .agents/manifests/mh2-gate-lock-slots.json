@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "lane": "MH2-gate-lock-slots",
+  "mutations": [
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "  trap - EXIT\n  trap '' INT TERM\n  if [ -n \"$run_hb_pid\" ]; then",
+      "after": "  trap - INT TERM EXIT\n  if [ -n \"$run_hb_pid\" ]; then",
+      "because": "the old order in run_cleanup: `trap - INT TERM EXIT` restores the DEFAULT disposition and so undoes the `trap '' INT TERM` forward_signal had installed, which leaves a second TERM free to kill the shell at any point in the cleanup — before release, with the lock still at the name. The window is the cleanup's `wait` for the heartbeat loop, and a refresh parked in CF_GATE_TEST_PAUSE_BEFORE_BEAT_MV keeps that loop from exiting until the test removes the marker, so the second signal can be sent there rather than hoping to hit a race: one TERM, 500ms, a second TERM, and the lock must still be released. Without the ordering the shell is gone before the release runs — exit 143, no `released by` line, and the lock left behind with all four of its files while a heartbeat grandchild keeps refreshing a dead holder's beat. Measured on /bin/sh and /bin/dash before the fix.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "a second signal while the release is waiting on the loop"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "  slot_suffix=${1#\"$LOCK_BASE\".}\n  case \"$slot_suffix\" in\n    ''|*[!0-9]*)\n      return 1\n      ;;\n  esac",
+      "after": "  slot_suffix=${1#\"$LOCK_BASE\".}\n  case \"$slot_suffix\" in\n    [0-9]*)\n      ;;\n    *)\n      return 1\n      ;;\n  esac",
+      "because": "accepting any suffix that STARTS with a digit is the `cf-gate.lock.[0-9]*` glob this function exists to replace: a slot's own transients are named after the slot, so `cf-gate.lock.1.cand.<pid>` and `cf-gate.lock.1.reclaim.<pid>.<x>` both begin with a digit and would be listed as slots 1 — twice. That is not a cosmetic listing: caller_slot and pid_slot scan the same set, so a paused creator's or reclaimer's directory would be a candidate lock to release or heartbeat. The status test plants all four transient names as real directories holding all four lock files and asserts that status names every real slot and none of them, and it runs at CF_GATE_SLOTS=1 so the glob is the only thing that can surface a numbered path.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "status lists every slot that exists"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate.sh",
+      "before": "  trap - EXIT\n  trap '' INT TERM\n  release_lock",
+      "after": "  trap - INT TERM EXIT\n  release_lock",
+      "because": "the same defect in gate.sh's cleanup, and the reason the gate's own line is the assertion rather than the lock's absence: release_lock's release is a CHILD process, and a child outlives a parent that is signal-killed. With the default TERM action restored, a second TERM during the release killed the gate before it printed `gate: lock released, heartbeat stopped`, and the orphaned child then removed the lock anyway — a gate that reported neither the release nor its failure. The test parks that release between its owner/pid check and the removal (CF_GATE_TEST_PAUSE_BEFORE_RELEASE), sends the second TERM there, and asserts exit 143 with the line printed; parking the heartbeat cannot hold this window open because gate.sh's loop has TERM at default and dies at once.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-signals.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

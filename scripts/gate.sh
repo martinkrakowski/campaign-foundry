@@ -31,6 +31,14 @@
 # protected steps instead of running them beside whoever holds the name. The
 # between-steps window is testable via CF_GATE_TEST_PAUSE_BEFORE_STEP.
 #
+# The lock is one slot of a per-host semaphore: CF_GATE_SLOTS (default 1) says
+# how many, and this gate takes the first free one, so two gates on one host no
+# longer refuse each other when the host has room for both. CF_GATE_SLOTS is set
+# HOST-WIDE and never per seat, and there is still ONE GATE PER WORKTREE: the
+# slots are per host, and `verify-manifests` mutates the tree it verifies, so two
+# gates in two worktrees would each be handed a slot and each would write
+# manifests the other is reading.
+#
 # A coverage threshold failure fails the gate even when vitest exits 0: the
 # test:cov step's output is captured, replayed for the human, and scanned for
 # `ERROR: Coverage` — a piped read (M3) reported exit 0 while coverage failed,
@@ -219,7 +227,17 @@ release_lock() {
       printf '%s\n' "gate: lock released, heartbeat stopped"
     else
       release_failed=1
-      printf '%s\n' "gate: FAILED to release the lock — it may still be held at ${TMPDIR:-/tmp}/cf-gate.lock" >&2
+      # This gate's OWN slot, asked of the script that keeps the slots: with
+      # CF_GATE_SLOTS>1 the fixed cf-gate.lock path is a slot this gate may never
+      # have held, and a failure message pointing at the wrong slot sends the
+      # reader looking at an empty directory. gate-lock.sh falls back to slot 0
+      # when it cannot find the caller holding one — a gate whose lock was
+      # reclaimed holds nothing, and "somewhere under here" is the honest answer.
+      own_slot=$(CF_GATE_CALLER_PID=$$ sh "$LOCK_SCRIPT" slot "$LANE" 2>/dev/null)
+      if [ -z "$own_slot" ]; then
+        own_slot="${TMPDIR:-/tmp}/cf-gate.lock"
+      fi
+      printf '%s\n' "gate: FAILED to release the lock — it may still be held at $own_slot" >&2
     fi
   fi
 }
@@ -230,7 +248,18 @@ release_lock() {
 # not as $? mid-command, which could be 0 on a Ctrl-C between steps).
 cleanup() {
   status=$?
-  trap - INT TERM EXIT
+  # Ignore a second signal until the release has run, clearing the EXIT trap
+  # first. The order is the fix: `trap - INT TERM EXIT` restored the DEFAULT
+  # disposition, so a TERM arriving while the release was in flight killed this
+  # gate outright — the release is a child that outlives it and removes the lock
+  # anyway, which is why lock absence alone proves nothing here and why this line
+  # prints nothing at all. Measured on main: exit 143, no "gate: lock released,
+  # heartbeat stopped", under /bin/dash on the first attempt and under bash-as-sh
+  # within two. Parking the heartbeat cannot pin that window open — this gate's
+  # loop has TERM at default and dies at once — so the pause that holds it is
+  # inside the release itself (CF_GATE_TEST_PAUSE_BEFORE_RELEASE).
+  trap - EXIT
+  trap '' INT TERM
   release_lock
   if [ -n "$COVLOG" ]; then
     rm -f "$COVLOG"
