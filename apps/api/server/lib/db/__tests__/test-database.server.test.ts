@@ -126,7 +126,14 @@ describe.skipIf(!server)("the template (D186)", () => {
       const { rows } = await session.query<{ datname: string; datistemplate: boolean }>(
         "select datname, datistemplate from pg_database where datname like 'cf\\_tpl\\_%'",
       );
-      expect(rows.filter((r) => r.datistemplate)).toEqual([{ datname: name, datistemplate: true }]);
+      // Exactly one database for THIS migration set, and it is a template. Not
+      // one template on the whole server: a second run of the suite, a second
+      // worktree, or a branch whose migrations hash elsewhere all leave templates
+      // here that are none of this test's business, and asserting they are absent
+      // makes the test fail on the second run of a server rather than on the bug.
+      expect(rows.filter((r) => r.datname === name)).toEqual([
+        { datname: name, datistemplate: true },
+      ]);
     } finally {
       await session.end();
     }
