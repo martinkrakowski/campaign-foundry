@@ -149,7 +149,7 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
   test.skipIf(!recording && !ffmpegOk)(
     (!recording ? skipReason : undefined) ??
       "the canonical timeline's encoded MP4 matches the committed byte golden for this platform (D10)",
-    { timeout: 60_000 },
+    { timeout: 60_000, tags: ["golden-bytes"] },
     async () => {
       if (!ffmpegOk) throw new Error(skipReason);
       if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
