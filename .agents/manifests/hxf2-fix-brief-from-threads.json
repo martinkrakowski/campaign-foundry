@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "HXF2-fix-brief-from-threads",
+  "mutations": [
+    {
+      "file": "tools/fix-brief/lib/template.ts",
+      "before": "  return \"`\".repeat(Math.max(3, longest + 1));",
+      "after": "  return \"`\".repeat(3);",
+      "because": "the fence is what keeps a quoted comment from writing the brief: the block is rendered verbatim between two fences, and a comment that carries its own ``` or ```` closes a three-backtick fence early. Everything after the first inner fence then reads as the brief's own instructions — a quoted 'disregard the disposition above' becomes the disposition — which is the attack the untrusted-data quoting exists to close, and the only test that can see it is the one that opens the item by structure and asserts the fence line is EXACTLY five backticks and that the lines between it and the first later run of at least that length are the processed body. The floor of three is untouched by this mutation, so a body with no backticks still renders correctly and the drift test, the header, the omission line and every other item test still pass: only the fence test fails, which is the point of anchoring here rather than on the bare 3",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/fix-brief/__tests__/render.test.ts",
+        "-t",
+        "a body carrying triple and quadruple backtick runs opens with exactly five backticks"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
