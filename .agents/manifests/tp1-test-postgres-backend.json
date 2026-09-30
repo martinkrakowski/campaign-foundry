@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "TP1-test-postgres-backend",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/db/__tests__/test-database.ts",
+      "before": "  const shape = migrations.map((m) => ({ id: m.id, checksum: checksum(m.sql) }));",
+      "after": "  const shape = migrations.map((m) => ({ id: m.id, checksum: m.id }));",
+      "because": "The template name is the identity of the migration set, and the set includes each migration's SQL checksum, not only its id: migrate() refuses a migration edited after it ran and insists it ship as a new one, so an edited migration is a different set. Hash the ids alone and every run after an edit reuses the template built from the pre-edit SQL, so every test that clones it gets a schema that no longer matches what migrate() would apply — and the failure surfaces as a migration refusing an applied migration, in whichever test happens to hit it first, hours from the edit. This mutation is server-FREE on purpose: the test it must be caught by feeds templateName() synthetic migrations with the same ids and different SQL and expects a different name, so verify-manifests catches it in the local gate, where the Mac has no TEST_PG_URL and a server-only mutation would read as survived.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/test-database.test.ts",
+        "-t",
+        "changes when a migration's SQL changes"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

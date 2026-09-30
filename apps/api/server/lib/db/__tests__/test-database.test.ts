@@ -1,5 +1,6 @@
 import { describe, test, expect, afterEach } from "vitest";
 import type { Migration } from "../migrate.js";
+import { main as pgClean } from "./pg-clean.js";
 import { processAlive, probeServer, templateName, testDatabaseBackend } from "./test-database.js";
 
 /**
@@ -92,5 +93,16 @@ describe("processAlive", () => {
     // 2^22 is above Linux's default pid_max and above any macOS pid this host
     // has issued, so `kill(pid, 0)` reports ESRCH rather than EPERM.
     expect(processAlive(4_194_304)).toBe(false);
+  });
+});
+
+describe("yarn test:pg-clean", () => {
+  test("says so and drops nothing when TEST_PG_URL is unset", async () => {
+    delete process.env["TEST_PG_URL"];
+    const lines: string[] = [];
+    await pgClean((line) => lines.push(line));
+    expect(lines).toEqual([
+      "TEST_PG_URL is not set — nothing to clean. Set it to the test server to drop its databases.",
+    ]);
   });
 });

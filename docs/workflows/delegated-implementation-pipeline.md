@@ -309,6 +309,10 @@ Rules:
   take the SAME host lock, so never wrap one in the other: a nested `run` exits 75 (busy) and
   `yarn gate` inside a `run` exits 75 the same way.
 - Tests live <WHERE>, one behaviour per test, no real clock/network/filesystem in unit tests.
+- The database tests run on PGlite unless `TEST_PG_URL` is set, and on a loaded host you should set
+  it: `TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres`. Every migrated test database is then
+  a copy of one migrated template (110 ms) instead of a fresh PGlite (5.2–6.5 s), and the
+  server-only tests stop skipping themselves.
 - Never hand-edit generated files; change the generator/manifest and regenerate.
 - Do not reference paths that do not exist. If the plan and the code disagree, implement the
   smallest faithful interpretation and record it under Deviations — never improvise silently.

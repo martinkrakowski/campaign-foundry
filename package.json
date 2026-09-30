@@ -26,6 +26,7 @@
     "test": "vitest run",
     "test:cov": "vitest run --coverage",
     "test:watch": "vitest",
+    "test:pg-clean": "tsx apps/api/server/lib/db/__tests__/pg-clean.ts",
     "clean": "turbo clean",
     "sync": "hexagen sync",
     "sync:dry": "hexagen sync --dry-run",

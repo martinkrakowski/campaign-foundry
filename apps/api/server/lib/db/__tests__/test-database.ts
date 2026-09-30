@@ -162,7 +162,7 @@ export function requireServerReachable(
  * `CREATE`/`DROP`/`ALTER DATABASE` also cannot run inside a transaction, which
  * this is not.
  */
-async function maintenanceSession(): Promise<pg.Client> {
+export async function maintenanceSession(): Promise<pg.Client> {
   const client = new pg.Client(poolOptions(maintenanceConfig()));
   await client.connect();
   return client;
@@ -200,6 +200,28 @@ export function processAlive(pid: number): boolean {
  * template for migrations this branch no longer ships expires.
  */
 export async function dropOrphans(currentTemplate: string): Promise<string[]> {
+  return dropHarnessDatabases(currentTemplate, false);
+}
+
+/**
+ * Every `cf_t_*` the server holds, and every stale `cf_tpl_*` — what
+ * `yarn test:pg-clean` runs when automatic cleanup's bounds are the wrong
+ * bounds, because a run was killed hard enough to leave a database younger than
+ * an hour and somebody has said out loud that nothing is using that server.
+ */
+export async function dropEveryTestDatabase(): Promise<string[]> {
+  return dropHarnessDatabases("", true);
+}
+
+/**
+ * `everyClone` is the difference between the two callers: automatic cleanup
+ * respects the age and pid bounds below, because it runs unattended against a
+ * server other runs may be using, and the on-demand script does not.
+ */
+async function dropHarnessDatabases(
+  currentTemplate: string,
+  everyClone: boolean,
+): Promise<string[]> {
   const session = await maintenanceSession();
   const dropped: string[] = [];
   try {
@@ -213,8 +235,10 @@ export async function dropOrphans(currentTemplate: string): Promise<string[]> {
       if (datname === currentTemplate) continue;
       const clone = CLONE_NAME.exec(datname);
       if (clone) {
-        if (now - Number(clone[2]) <= ORPHAN_MAX_AGE_S) continue;
-        if (processAlive(Number(clone[1]))) continue;
+        if (!everyClone) {
+          if (now - Number(clone[2]) <= ORPHAN_MAX_AGE_S) continue;
+          if (processAlive(Number(clone[1]))) continue;
+        }
       } else if (!datname.startsWith(TEMPLATE_PREFIX)) {
         continue;
       } else {

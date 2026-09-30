@@ -236,9 +236,23 @@ jobs:
         run: "yarn test:cov"
         env:
           NODE_ENV: test
-          # The PT-6a concurrency test is skipped unless this is set; every other
-          # database test runs on PGlite and never touches this service.
+          # The PT-6a concurrency tests are skipped unless this is set. Nothing
+          # else reads it: TEST_PG_URL is the harness's variable, and the step
+          # below is the only one that sets it. This run is on PGlite.
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+      # D186: the same API project, with TEST_PG_URL set, so every database test
+      # runs against a real server instead of PGlite. PGlite is a real Postgres
+      # compiled to WebAssembly, but it is one connection and 5.2-6.5s to start
+      # on an older host, where 245 of 8,308 tests time out. The Test step above
+      # stays the coverage gate, unchanged and on PGlite; this step is the
+      # evidence that the server path works, and has no --coverage because the
+      # 100% thresholds are the full run's.
+      - name: Test (real Postgres backend)
+        run: "yarn vitest run --project api"
+        env:
+          NODE_ENV: test
+          TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
 
       # Tests live in __tests__/ next to their modules, but Nitro scans apps/api/server/
       # recursively. A *.test.ts file landing there gets registered as a route and crashes
