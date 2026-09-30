@@ -72,6 +72,9 @@ function nextCloneName(): string {
 /** `cf_t_<pid>_<epoch>_<counter>`, or undefined for anything this harness did not name. */
 const CLONE_NAME = /^cf_t_(\d+)_(\d+)_(\d+)$/;
 
+/** A template name, and only one this harness built — cleanup drops nothing else. */
+const TEMPLATE_NAME = /^cf_tpl_[0-9a-f]{12}$/;
+
 /**
  * The template's name: the identity of the migration set, and nothing else.
  *
@@ -239,10 +242,16 @@ async function dropHarnessDatabases(
           if (now - Number(clone[2]) <= ORPHAN_MAX_AGE_S) continue;
           if (processAlive(Number(clone[1]))) continue;
         }
-      } else if (!datname.startsWith(TEMPLATE_PREFIX)) {
+      } else if (!TEMPLATE_NAME.test(datname)) {
+        // Not a name this harness builds. Left alone rather than interpolated
+        // into a DROP it has no business running.
         continue;
       } else {
-        const built = Number(description);
+        // A template this harness built always carries the epoch it was built
+        // at. One with no comment is from something else, or from a build that
+        // was killed before it could record itself — and a build cannot be in
+        // flight here, because this runs under the same lock that builds one.
+        const built = description === null || description === "" ? 0 : Number(description);
         if (!Number.isFinite(built) || now - built <= STALE_TEMPLATE_MAX_AGE_S) continue;
       }
       await session.query(`drop database ${identifier(datname)} with (force)`);
