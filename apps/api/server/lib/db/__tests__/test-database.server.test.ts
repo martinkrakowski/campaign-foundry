@@ -122,11 +122,23 @@ afterEach(async () => {
 
 describe.skipIf(!server)("the template (D186)", () => {
   test("two concurrent builds make exactly one template", async () => {
-    const migrations = await loadMigrations();
+    // A synthetic set, so this build is one nothing else on the server is
+    // cloning from and the afterEach below can take it away again.
+    const migrations = [m("0001_twice", "create table twice_only (x int);")];
     const name = templateName(migrations);
-    // The advisory lock is what makes this exactly one: the loser's build finds
-    // the winner's database already marked a template and stops.
-    await Promise.all([ensureTemplate(migrations), ensureTemplate(migrations)]);
+    created.push(name);
+    // Two sessions on the lock, not two calls answered from one map: the second
+    // caller here is a real build, and the first to be given the lock is the
+    // one that creates the database. `ensureTemplate` alone would not do —
+    // within a process the second call for a name is handed the first call's
+    // in-flight promise and never reaches the lock at all, so that pair proves
+    // the cache rather than the lock.
+    const [built, waited] = await Promise.all([
+      whileBuilding((build) => build(name, migrations)),
+      ensureTemplate(migrations),
+    ]);
+    expect(built).toBe(name);
+    expect(waited).toBe(name);
 
     const session = await maintenanceSession();
     try {
@@ -138,6 +150,8 @@ describe.skipIf(!server)("the template (D186)", () => {
       // worktree, or a branch whose migrations hash elsewhere all leave templates
       // here that are none of this test's business, and asserting they are absent
       // makes the test fail on the second run of a server rather than on the bug.
+      // The filter is what the synthetic set earns its keep for — the other
+      // tests in this file build templates too.
       expect(rows.filter((r) => r.datname === name)).toEqual([
         { datname: name, datistemplate: true },
       ]);
