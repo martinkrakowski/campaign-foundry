@@ -1841,6 +1841,56 @@ describe("gate-lock.sh slots: what a caller will act on", () => {
     }
   });
 
+  test("the command under the lock inherits no pin, and the run keeps its own", () => {
+    const dir = scratch();
+    // A launcher with CF_GATE_SLOT_PATH in its EXPORTED environment — a previous
+    // holder's gate, or a seat's own export — hands `run` a pin it did not earn.
+    // `run` clears it before its acquire and sets its own afterwards, and that
+    // second assignment must not re-export it: a variable that arrives exported
+    // KEEPS the attribute when it is assigned to, so `CF_GATE_SLOT_PATH=""`
+    // followed by `CF_GATE_SLOT_PATH="$LOCK"` published this run's slot to the
+    // command under the lock and to everything that command starts. A claim to
+    // somebody's lock that the holder of it cannot police is exactly what the
+    // pin exists to prevent, so it must not travel out of here at all.
+    const inherited = join(dir, "cf-gate.lock.1");
+    const seen = join(dir, "seen");
+    const result = runLockIn(
+      dir,
+      [
+        "run",
+        "lane-a",
+        "--",
+        "sh",
+        "-c",
+        'printf "%s\\n" "${CF_GATE_SLOT_PATH-unset}" > "$TMPDIR/seen"',
+      ],
+      // SLOTS=3 so the inherited path is a name this host really has slots for,
+      // and the acquire below is free to take a different one.
+      { CF_GATE_SLOT_PATH: inherited, CF_GATE_SLOTS: "3" },
+    );
+    expect(result.status).toBe(0);
+    // The command sees no pin at all — not the inherited one, and not this run's.
+    expect(readFileSync(seen, "utf8").trim()).toBe("unset");
+    // The slot it took is its own, slot 0, and the inherited path was never one.
+    expect(result.stdout).toContain(`at ${lockDir(dir)}`);
+    expect(existsSync(join(dir, "cf-gate.lock.1"))).toBe(false);
+    // Released on the way out, so nothing here is left holding anything.
+    expect(existsSync(lockDir(dir))).toBe(false);
+  });
+
+  test("a uid seam that is set but empty is inert, not a filter that hides every slot", () => {
+    const dir = scratch();
+    const mine = seedSlot(dir, 1, { owner: "lane-a", pid: process.pid, beat: 1000 });
+    // An exported-but-empty override is what a wrapper that always sets the
+    // variable produces on a host where it has nothing to say. With `-` rather
+    // than `:-` the expansion handed `find` an empty uid, `-user ""` matched
+    // nothing, and every slot on the host read as invisible — a free host, on a
+    // host with a holder in it. Set-but-empty must mean what never-set means.
+    const status = runLockIn(dir, ["status"], { CF_GATE_TEST_EXPECT_UID: "" });
+    expect(status.status).toBe(0);
+    expect(status.stdout).toContain(`${mine} held by lane-a`);
+  });
+
   test("a heartbeat on a pid that holds two slots refreshes only the pinned one", () => {
     const dir = scratch();
     // One pid, two lock directories, one of them the holder's own. Nothing in the

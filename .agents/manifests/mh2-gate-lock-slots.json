@@ -70,7 +70,7 @@
     },
     {
       "file": "scripts/gate-lock.sh",
-      "before": "slot_is_provenance() {\n  [ ! -L \"$1\" ] || return 1\n  [ -d \"$1\" ] || return 1\n  if [ -z \"$slot_uid\" ]; then\n    slot_uid=\"${CF_GATE_TEST_EXPECT_UID-$(id -u)}\"\n  fi\n  find \"$1\" -prune -user \"$slot_uid\" -print 2>/dev/null | grep -q .\n}\n",
+      "before": "slot_is_provenance() {\n  [ ! -L \"$1\" ] || return 1\n  [ -d \"$1\" ] || return 1\n  if [ -z \"$slot_uid\" ]; then\n    slot_uid=\"${CF_GATE_TEST_EXPECT_UID:-$(id -u)}\"\n  fi\n  find \"$1\" -prune -user \"$slot_uid\" -print 2>/dev/null | grep -q .\n}\n",
       "after": "slot_is_provenance() {\n  [ -d \"$1\" ]\n}\n",
       "because": "Provenance is what makes a planted directory unusable, and `[ -d \"$1\" ]` is what is left without it: a symlink to a directory passes -d (it follows the link), and the uid test cannot see the difference because `find` on a symlink start point reports the LINK's owner and never descends. The test plants exactly that — a symlink at the canonical slot name `cf-gate.lock.1` pointing at a directory this user owns that holds a lock nobody wrote — and asserts that status does not list it, that an unpinned heartbeat refreshes the real slot 2 instead, and that the directory behind the link is left alone. The uid seam (CF_GATE_TEST_EXPECT_UID) is the same filter seen from the other side: a slot this user owns is not a lock once the expected uid is somebody else's, and the pinned path answers exit 2 for a pin that fails it.",
       "command": [
