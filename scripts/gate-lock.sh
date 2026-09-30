@@ -259,9 +259,11 @@ is_slot_path() {
 }
 
 # The uid a slot must be owned by before anything here will read it as a
-# holder's lock. CF_GATE_TEST_EXPECT_UID overrides it, and is INERT unless set:
-# it has no default to fall back to, so a caller that never set it gets this
-# user's own id and nothing else can stand in for it.
+# holder's lock. CF_GATE_TEST_EXPECT_UID overrides it, and is INERT unless it
+# carries a value: the expansion is `:-` rather than `-`, so an override that is
+# set but EMPTY falls back to this user's own id like one that was never set —
+# `find -user ""` matches nothing at all, which would make every slot invisible
+# and read as a free host rather than as the seam the caller asked for.
 slot_uid=""
 
 # Provenance: is this a lock directory this user actually took? A directory, not
@@ -280,7 +282,7 @@ slot_is_provenance() {
   [ ! -L "$1" ] || return 1
   [ -d "$1" ] || return 1
   if [ -z "$slot_uid" ]; then
-    slot_uid="${CF_GATE_TEST_EXPECT_UID-$(id -u)}"
+    slot_uid="${CF_GATE_TEST_EXPECT_UID:-$(id -u)}"
   fi
   find "$1" -prune -user "$slot_uid" -print 2>/dev/null | grep -q .
 }
@@ -869,7 +871,13 @@ run_locked() {
   # An inherited pin belongs to whatever launched this script — a previous
   # holder's, or a stranger's — and `run` is about to take its own slot. Cleared
   # before the acquire so nothing here can act on a pin this run did not earn.
-  CF_GATE_SLOT_PATH=""
+  #
+  # `unset`, not an assignment to "": an EXPORTED CF_GATE_SLOT_PATH stays exported
+  # when it is assigned to, so `run`'s own slot — set below — would travel into
+  # the command under the lock, and every process that command starts with it.
+  # Unsetting drops the export attribute as well as the value, which is what
+  # "deliberately NOT exported" below actually takes.
+  unset CF_GATE_SLOT_PATH
   # Empty until the heartbeat has a marker to write; `set -u` is on, and the
   # cleanup below reads it on every exit, including the ones that happen before
   # the heartbeat exists.

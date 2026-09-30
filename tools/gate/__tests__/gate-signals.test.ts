@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,16 +22,37 @@ import { afterEach, describe, expect, test } from "vitest";
 // gate-lock.sh's release between the owner/pid check and the removal. Parking
 // the heartbeat cannot do it: this gate's heartbeat loop has TERM at default
 // (gate.sh), so it dies at once and nothing blocks in the cleanup for a signal
-// to land in. The step itself is `sleep 1` because a trap on a foreground child
+// to land in. The step itself is `sleep 3` because a trap on a foreground child
 // does not run until that child exits — the first TERM is deferred by exactly
 // that, which is what puts the release in a state a second signal can find.
 //
 // Both shells: CI's /bin/sh IS dash, and a behaviour that differs between them is
-// the whole risk in a script that forwards signals.
+// the whole risk in a script that forwards signals. bash is on the list wherever
+// it exists because a macOS host's /bin/sh is bash in POSIX mode, and this case
+// was measured FAILING 13 runs out of 27 under bash-as-sh before the step it
+// signals during was changed (see the test's own comment). Without a bash on the
+// host the case still runs under the shells it has, rather than skipping.
+//
+// The second describe here is not about signals: it is the other gate.sh finding
+// of this round, and gate.test.ts belongs to MH1, so this file — already the
+// lane's own file for driving scripts/gate.sh as a process — carries it.
 
 const gateSh = fileURLToPath(new URL("../../../scripts/gate.sh", import.meta.url));
 
-const SIGNAL_SHELLS: string[] = existsSync("/bin/dash") ? ["sh", "/bin/dash"] : ["sh"];
+/**
+ * The shells every case here is driven under. CI's /bin/sh IS dash; a macOS
+ * host's is bash in POSIX mode, which is where the swallowed-line failure below
+ * was found. So: `sh` whatever it is, `/bin/dash` where it exists, and `bash`
+ * where it exists — a shell that cannot be found is left out of the list rather
+ * than failing the run, since nothing here is about a shell being present.
+ */
+const HAS_BASH = ["/bin/bash", "/usr/bin/bash"].some((path) => existsSync(path));
+
+const SIGNAL_SHELLS: string[] = [
+  "sh",
+  ...(existsSync("/bin/dash") ? ["/bin/dash"] : []),
+  ...(HAS_BASH ? ["bash"] : []),
+];
 
 const dirs: string[] = [];
 
@@ -85,16 +106,16 @@ async function waitForFile(path: string, timeoutMs = 10_000): Promise<void> {
  * Poll until the gate has printed the line that starts its heartbeat loop. That
  * line is the only safe place from which to signal: gate.sh prints it once the
  * acquire has returned AND `LOCK_HELD` is 1, immediately before the locked step's
- * command runs, and the `sleep 1` step then buys a whole second of "cleanup has
- * not started yet".
+ * command runs, and the `sleep 3` step then buys three whole seconds of "cleanup
+ * has not started yet".
  *
  * Neither of the two earlier candidates works, and both were measured here.
  * Waiting for the lock DIRECTORY to appear is too early: it lands at the
  * acquire's rename, while the gate is still inside that child with LOCK_HELD
  * still 0, so a signal there runs `exit 143` with nothing to release — 25 runs
  * in 25, each leaving the lock behind with no release attempted. Waiting for the
- * step's own `==> [1/1] test:cov` line is too EARLY for the same reason: gate.sh
- * prints it at the top of the loop, before it acquires.
+ * step's own `==> [1/1] verify-manifests` line is too EARLY for the same reason:
+ * gate.sh prints it at the top of the loop, before it acquires.
  */
 async function waitForOutput(
   stdout: () => string,
@@ -115,15 +136,23 @@ describe("gate.sh signals", () => {
     for (const shell of SIGNAL_SHELLS) {
       const dir = scratch();
       const releaseMarker = join(dir, "paused-before-release");
-      // test:cov is a LOCKED step, so the gate takes the lock, runs the step
-      // under it, and releases afterwards. Three seconds, not one: the first
-      // TERM is deferred until the step exits, and a step that ended inside a
-      // second of the heartbeat line could have that TERM land after the whole
-      // gate was gone, which is a failure of the test's timing, not of the fix.
+      // verify-manifests is a LOCKED step, so the gate takes the lock, runs the
+      // step under it, and releases afterwards — and it is the OTHER of the two
+      // locked steps on purpose. The first TERM below is deferred until the step
+      // exits, and under bash the trap then runs while the step's redirections
+      // are still in effect, so EVERYTHING cleanup prints — including the release
+      // line this test asserts — goes into whatever the step captured, which
+      // cleanup then deletes. test:cov captures its output into $COVLOG and this
+      // case lost the line 13 runs out of 27 under bash-as-sh for exactly that
+      // reason, against 0 in 7 under dash, which is why it looked deterministic
+      // on a dash host and was not: the lost message was never about the second
+      // signal at all. Three seconds, not one: a step that ended inside a second
+      // of the heartbeat line could have that TERM land after the whole gate was
+      // gone, which is a failure of the test's timing, not of the fix.
       const { child, stdoutSoFar, done } = startGate(
         dir,
         {
-          CF_GATE_STEPS: "test:cov\tsleep 3",
+          CF_GATE_STEPS: "verify-manifests\tsleep 3",
           CF_GATE_TEST_PAUSE_BEFORE_RELEASE: releaseMarker,
         },
         shell,
@@ -161,6 +190,59 @@ describe("gate.sh signals", () => {
       // The proof that matters, and the one lock absence cannot stand in for.
       expect(result.stdout).toContain("gate: lock released, heartbeat stopped");
       // And the lock is genuinely gone, now because the gate said so.
+      expect(existsSync(join(dir, "cf-gate.lock"))).toBe(false);
+    }
+  }, 60_000);
+});
+
+describe("gate.sh lock", () => {
+  /** Run the gate to completion, the way the cases that send no signal do. */
+  function runGate(
+    dir: string,
+    env: Record<string, string>,
+    shell: string,
+    timeout = 15_000,
+  ): { status: number; stdout: string; stderr: string } {
+    const result = spawnSync(shell, [gateSh, "--lane", "lane-a"], {
+      encoding: "utf8",
+      env: { ...process.env, TMPDIR: dir, ...env },
+      timeout,
+    });
+    return {
+      status: result.status ?? -1,
+      stdout: result.stdout ?? "",
+      stderr: result.stderr ?? "",
+    };
+  }
+
+  test("a lock it took but could not name is released anyway", () => {
+    // The acquire succeeded and recorded nothing — a gate that cannot say which
+    // slot it holds refuses to carry on, and that refusal is right. What it must
+    // NOT do is walk away holding the lock: with LOCK_HELD still 0 at the exit,
+    // cleanup's release_lock did nothing at all and the name sat there until some
+    // later acquire judged it abandoned. The comment beside the check already
+    // promised the opposite — that the cleanup's release falls back to scanning
+    // for this gate's own lock — and the promise is only true once LOCK_HELD is
+    // set above the check, which is what this asserts.
+    for (const shell of SIGNAL_SHELLS) {
+      const dir = scratch();
+      const result = runGate(
+        dir,
+        {
+          // The gate exits before running any step, so this one never executes; it
+          // is here because a gate with no locked step takes no lock at all.
+          CF_GATE_STEPS: "verify-manifests\tsleep 1",
+          CF_GATE_TEST_NO_SLOT_RECORDED: "1",
+        },
+        shell,
+      );
+      // The refusal is unchanged: exit 1, naming the file that came back empty.
+      expect({ shell, status: result.status }).toEqual({ shell, status: 1 });
+      expect(result.stderr).toContain("no slot was recorded");
+      // Unpinned now — the pin is empty — so the release scans for the owner and
+      // pid this gate acquired under, finds its own slot and drops it.
+      expect(result.stdout).toContain("gate-lock: released by lane-a");
+      expect(result.stdout).toContain("gate: lock released, heartbeat stopped");
       expect(existsSync(join(dir, "cf-gate.lock"))).toBe(false);
     }
   }, 60_000);

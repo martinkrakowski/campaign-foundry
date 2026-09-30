@@ -527,6 +527,18 @@ while IFS="$TAB" read -r name cmd; do
       exit "$acq"
     fi
     LOCK_SLOT_PATH=$(cat "$LOCK_SLOT_FILE" 2>/dev/null)
+    # Test hook (CF_GATE_TEST_NO_SLOT_RECORDED): act as though the acquire
+    # recorded no slot, so a test can reach the refusal below and prove the lock
+    # this gate took is still given back.
+    if [ -n "${CF_GATE_TEST_NO_SLOT_RECORDED:-}" ]; then
+      LOCK_SLOT_PATH=""
+    fi
+    # The gate holds a lock from the successful acquire onward, and it is marked
+    # here — ABOVE the check for a recorded slot, deliberately. A lock the acquire
+    # took and this gate cannot name is still a lock: with LOCK_HELD left 0 the
+    # cleanup skips release_lock entirely, and the name then sits there until some
+    # later acquire judges it abandoned — which is a reclaim, not a release.
+    LOCK_HELD=1
     if [ -z "$LOCK_SLOT_PATH" ]; then
       # The acquire took a lock and did not say which one. Refused loudly rather
       # than unpinned: the cleanup's release then scans for this gate's own lock
@@ -535,7 +547,6 @@ while IFS="$TAB" read -r name cmd; do
       printf '%s\n' "gate: FAILED — the lock was acquired but no slot was recorded in $LOCK_SLOT_FILE; the gate cannot name the lock it holds, so it will not carry on holding it" >&2
       exit 1
     fi
-    LOCK_HELD=1
     start_heartbeat
   fi
   if [ "$LOCK_HELD" -eq 1 ]; then
