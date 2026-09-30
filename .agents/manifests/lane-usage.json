@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "lane-usage",
+  "mutations": [
+    {
+      "file": "scripts/lane-usage.sh",
+      "before": "    *[!A-Za-z0-9._/-]*)",
+      "after": "    __lane_usage_never_matches__)",
+      "because": "The directory is interpolated into the SQL between single quotes, so its character check is the only thing standing between a crafted path and the query. With the check never matching, a path carrying a quote reaches opencode db; the refusal test expects exit 2 and no call recorded, and must fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/lane-usage/__tests__/lane-usage.test.ts",
+        "-t",
+        "a quote in the directory"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
