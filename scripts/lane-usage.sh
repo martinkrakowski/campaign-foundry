@@ -2,6 +2,7 @@
 # lane-usage.sh — a lane's wall time and tokens, read from opencode's own database.
 #
 #   sh scripts/lane-usage.sh [--host <ssh-host>] [--json] <worktree-dir>…
+#   (--json takes exactly one directory, so its output is one JSON document)
 #
 # One row per worktree directory: every opencode session whose directory is
 # exactly that path (a lane's worktree names its sessions). Columns:
@@ -27,6 +28,9 @@
 # Exit: 0 rows printed · 1 no session for a directory · 2 usage · 3 query failed.
 
 set -u
+# Byte-exact character ranges in the checks below, whatever the caller's locale.
+LC_ALL=C
+export LC_ALL
 
 usage() {
   echo "usage: sh scripts/lane-usage.sh [--host <ssh-host>] [--json] <worktree-dir>…" >&2
@@ -38,7 +42,8 @@ format="tsv"
 while [ $# -gt 0 ]; do
   case "$1" in
     --host)
-      [ $# -ge 2 ] || usage
+      # An empty host would silently query the LOCAL database instead.
+      [ $# -ge 2 ] && [ -n "$2" ] || usage
       host="$2"
       shift 2
       ;;
@@ -55,13 +60,18 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ $# -ge 1 ] || usage
+# One JSON document per directory would not parse as one; ask one at a time.
+if [ "$format" = "json" ] && [ $# -gt 1 ]; then
+  echo "lane-usage: --json takes one directory (several would print several JSON arrays)" >&2
+  exit 2
+fi
 
 # The directory is interpolated into SQL and the host into an ssh argv, so
 # both are held to a character set with no quote, space or shell meaning.
 if [ -n "$host" ]; then
   case "$host" in
     -* | *[!A-Za-z0-9._-]*)
-      echo "lane-usage: refusing host '$host' (allowed: A-Z a-z 0-9 . _ -)" >&2
+      printf '%s\n' "lane-usage: refusing host '$host' (allowed: A-Z a-z 0-9 . _ -)" >&2
       exit 2
       ;;
   esac
@@ -79,13 +89,13 @@ for dir in "$@"; do
   case "$dir" in
     /*) ;;
     *)
-      echo "lane-usage: refusing '$dir': the directory must be absolute" >&2
+      printf '%s\n' "lane-usage: refusing '$dir': the directory must be absolute" >&2
       exit 2
       ;;
   esac
   case "$dir" in
     *[!A-Za-z0-9._/-]*)
-      echo "lane-usage: refusing '$dir' (allowed: A-Z a-z 0-9 . _ - /)" >&2
+      printf '%s\n' "lane-usage: refusing '$dir' (allowed: A-Z a-z 0-9 . _ - /)" >&2
       exit 2
       ;;
   esac
@@ -107,13 +117,14 @@ for dir in "$@"; do
  FROM session WHERE directory = '$dir' GROUP BY directory"
   if [ -n "$host" ]; then
     remote_path="${LANE_USAGE_REMOTE_PATH:-\$HOME/.opencode/bin}"
-    out=$(ssh "$host" "PATH=$remote_path:\$PATH opencode db \"$sql\" --format $format")
+    # -n: never read the caller's stdin; BatchMode: fail rather than prompt.
+    out=$(ssh -n -o BatchMode=yes "$host" "PATH=$remote_path:\$PATH opencode db \"$sql\" --format $format")
   else
     out=$(opencode db "$sql" --format "$format")
   fi
   rc=$?
   if [ "$rc" -ne 0 ]; then
-    echo "lane-usage: unknown — opencode db exited $rc for '$dir' (schema changed, or opencode missing?)" >&2
+    echo "lane-usage: unknown — ${host:+ssh/}opencode db exited $rc for '$dir' (schema changed, or opencode missing?)" >&2
     exit 3
   fi
   if [ -z "$out" ] || [ "$out" = "[]" ]; then

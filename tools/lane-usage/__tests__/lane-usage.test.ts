@@ -18,7 +18,8 @@ import { fileURLToPath } from "node:url";
  * database. `opencode` and `ssh` are stubbed on PATH: each call appends its
  * name and argv to calls.log (fields end in US, records in RS, because the
  * SQL argument spans lines), prints out.<n> for the n-th call if that file
- * exists, and exits with exit.<n> (default 0). No test here reads a real database or reaches a host.
+ * exists, and exits with exit.<n> (default 0). No test here reads a real
+ * database or reaches a host.
  */
 
 const script = fileURLToPath(new URL("../../../scripts/lane-usage.sh", import.meta.url));
@@ -154,17 +155,44 @@ describe("lane-usage.sh", () => {
     expect(r.stderr).toContain("no opencode session for '/w/cf-b'");
   });
 
+  test("the header survives a FIRST directory with no rows", () => {
+    stubCall(2, `${HEADER}\n/w/cf-a\t1\tlane`);
+    const r = run(["/w/none", "/w/cf-a"]);
+    expect(r.status).toBe(1);
+    expect(r.stdout).toBe(`${HEADER}\n/w/cf-a\t1\tlane\n`);
+  });
+
   describe("--host", () => {
     test("runs the query over ssh with opencode's bin dir on the remote PATH", () => {
       stubCall(1, `${HEADER}\n/w/cf-a\t1\tlane`);
       const r = run(["--host", "m", "/w/cf-a"]);
       expect(r.status).toBe(0);
       const [call] = calls();
-      expect(call?.[0]).toBe("ssh");
-      expect(call?.[1]).toBe("m");
-      expect(call?.[2]).toMatch(/^PATH=\$HOME\/\.opencode\/bin:\$PATH opencode db "SELECT /);
-      expect(call?.[2]).toContain("directory = '/w/cf-a' GROUP BY directory\" --format tsv");
-      expect(call).toHaveLength(3);
+      expect(call?.slice(0, 5)).toEqual(["ssh", "-n", "-o", "BatchMode=yes", "m"]);
+      expect(call?.[5]).toMatch(/^PATH=\$HOME\/\.opencode\/bin:\$PATH opencode db "SELECT /);
+      expect(call?.[5]).toContain("directory = '/w/cf-a' GROUP BY directory\" --format tsv");
+      expect(call).toHaveLength(6);
+    });
+
+    test("the remote shell hands opencode the SQL as ONE argument, quotes and '$.id' intact", () => {
+      // This ssh stub runs its command string the way the remote login shell
+      // would, so the opencode stub records the argv AFTER shell parsing. The
+      // remote PATH is the stub dir: the default $HOME/.opencode/bin would let a
+      // real opencode on this machine shadow the stub and read a real database.
+      writeFileSync(
+        join(binDir, "ssh"),
+        ["#!/bin/sh", 'eval "last=\\${$#}"', 'exec sh -c "$last"', ""].join("\n"),
+      );
+      stubCall(1, `${HEADER}\n/w/cf-a\t1\tlane`);
+      const r = run(["--host", "m", "/w/cf-a"], { LANE_USAGE_REMOTE_PATH: binDir });
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe(`${HEADER}\n/w/cf-a\t1\tlane\n`);
+      const [call] = calls();
+      expect(call).toHaveLength(5);
+      expect(call?.slice(0, 2)).toEqual(["opencode", "db"]);
+      expect(call?.[2]).toContain("json_extract(model, '$.id')");
+      expect(call?.[2]).toContain("FROM session WHERE directory = '/w/cf-a' GROUP BY directory");
+      expect(call?.slice(3)).toEqual(["--format", "tsv"]);
     });
 
     test("names the host when a directory has no session there", () => {
@@ -175,7 +203,7 @@ describe("lane-usage.sh", () => {
     test("LANE_USAGE_REMOTE_PATH replaces the remote bin dir", () => {
       stubCall(1, `${HEADER}\n`);
       run(["--host", "m", "/w/cf-a"], { LANE_USAGE_REMOTE_PATH: "$HOME/bin:/opt/oc" });
-      expect(calls()[0]?.[2]).toMatch(/^PATH=\$HOME\/bin:\/opt\/oc:\$PATH opencode db /);
+      expect(calls()[0]?.[5]).toMatch(/^PATH=\$HOME\/bin:\/opt\/oc:\$PATH opencode db /);
     });
 
     test.each([["$(id)"], ["a b"], ["`id`"], ["a;id"], ["${HOME}"], ["'x'"]])(
@@ -204,6 +232,17 @@ describe("lane-usage.sh", () => {
       ["a dollar in the directory", ["/w/$HOME"], "refusing"],
       ["no directory", [], "usage:"],
       ["--host with no value", ["--host"], "usage:"],
+      [
+        "--host with an empty value, which would query the LOCAL database",
+        ["--host", "", "/w/cf-a"],
+        "usage:",
+      ],
+      [
+        "--json with several directories",
+        ["--json", "/w/cf-a", "/w/cf-b"],
+        "--json takes one directory",
+      ],
+      ["a dash-directory after --", ["--", "-x"], "must be absolute"],
       ["an unknown flag", ["--csv", "/w/cf-a"], "usage:"],
     ])("%s", (_name, args, message) => {
       const r = run(args);

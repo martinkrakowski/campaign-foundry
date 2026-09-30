@@ -22,7 +22,7 @@
     "build": "turbo build",
     "dev": "turbo dev",
     "lint": "turbo lint",
-    "typecheck": "turbo typecheck && tsc -p tools/wave-status --noEmit && tsc -p tools/mutate --noEmit && tsc -p tools/plan-verify --noEmit && tsc -p tools/plan-review --noEmit && tsc -p tools/mutate-manifest --noEmit && tsc -p tools/handoff-check --noEmit && tsc -p tools/sweep --noEmit && tsc -p tools/arch-inventory --noEmit && tsc -p tools/control-bytes --noEmit && tsc -p tools/gate --noEmit && tsc -p tools/merge-prs --noEmit",
+    "typecheck": "turbo typecheck && tsc -p tools/wave-status --noEmit && tsc -p tools/mutate --noEmit && tsc -p tools/plan-verify --noEmit && tsc -p tools/plan-review --noEmit && tsc -p tools/mutate-manifest --noEmit && tsc -p tools/handoff-check --noEmit && tsc -p tools/sweep --noEmit && tsc -p tools/arch-inventory --noEmit && tsc -p tools/control-bytes --noEmit && tsc -p tools/gate --noEmit && tsc -p tools/merge-prs --noEmit && tsc -p tools/lane-usage --noEmit",
     "test": "vitest run",
     "test:cov": "vitest run --coverage",
     "test:watch": "vitest",
