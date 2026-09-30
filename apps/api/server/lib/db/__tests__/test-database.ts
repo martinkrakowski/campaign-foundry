@@ -217,6 +217,16 @@ export async function dropEveryTestDatabase(): Promise<string[]> {
 }
 
 /**
+ * Take the template flag off, which is the only way a template can be dropped at
+ * all: `with (force)` overrides the connected-sessions check and nothing else, so
+ * `drop database` on a `datistemplate` database is refused (42809) whether
+ * anything is connected to it or not.
+ */
+async function untemplate(session: pg.Client, name: string): Promise<void> {
+  await session.query(`alter database ${identifier(name)} is_template false`);
+}
+
+/**
  * `everyClone` is the difference between the two callers: automatic cleanup
  * respects the age and pid bounds below, because it runs unattended against a
  * server other runs may be using, and the on-demand script does not.
@@ -253,6 +263,13 @@ async function dropHarnessDatabases(
         // flight here, because this runs under the same lock that builds one.
         const built = description === null || description === "" ? 0 : Number(description);
         if (!Number.isFinite(built) || now - built <= STALE_TEMPLATE_MAX_AGE_S) continue;
+        // Then the flag has to come off before the drop: `with (force)` overrides
+        // the connected-sessions check and nothing else, and a template
+        // database cannot be dropped at all (42809). Without this the cleanup
+        // below throws, and since it runs on every template step it takes every
+        // later test in the run with it — including `yarn test:pg-clean`, which
+        // is the way a person gets out of exactly that state.
+        await untemplate(session, datname);
       }
       await session.query(`drop database ${identifier(datname)} with (force)`);
       dropped.push(datname);
@@ -261,6 +278,23 @@ async function dropHarnessDatabases(
     await session.end();
   }
   return dropped;
+}
+
+/**
+ * Drop one name this harness built, whatever it is — the teardown a test that
+ * planted a fixture of its own uses. The flag comes off first for the reason
+ * `untemplate` gives, so a fixture that is a template (because a test built one,
+ * or because a test marked one) is dropped like any other; the clone teardown
+ * below knows its databases can only be clones and skips the extra statement.
+ */
+export async function dropHarnessDatabase(name: string): Promise<void> {
+  const session = await maintenanceSession();
+  try {
+    await untemplate(session, name);
+    await session.query(`drop database ${identifier(name)} with (force)`);
+  } finally {
+    await session.end();
+  }
 }
 
 /**
@@ -283,11 +317,22 @@ export async function ensureTemplate(migrations?: readonly Migration[]): Promise
   try {
     await session.query("select pg_advisory_lock($1)", [TEMPLATE_LOCK]);
     await dropOrphans(name);
-    const existing = await session.query<{ datistemplate: boolean }>(
-      "select datistemplate from pg_database where datname = $1",
+    const existing = await session.query<{ datistemplate: boolean; description: string | null }>(
+      "select d.datistemplate, s.description from pg_database d left join pg_shdescription s" +
+        " on s.objoid = d.oid and s.classoid = 'pg_database'::regclass where d.datname = $1",
       [name],
     );
-    if (existing.rows[0]?.datistemplate === true) return name;
+    if (existing.rows[0]?.datistemplate === true) {
+      // A build killed between the `ALTER` below and its `COMMENT` leaves a
+      // finished template that no cleanup can date: no comment reads as built at
+      // zero, so it is stale to every other run the moment it is 24 h old, and
+      // would be dropped out from under the tests copying it. It is the same
+      // build, so it is stamped now.
+      if (!existing.rows[0].description) {
+        await session.query(`comment on database ${identifier(name)} is '${epochSeconds()}'`);
+      }
+      return name;
+    }
     if (existing.rows.length > 0) {
       await session.query(`drop database ${identifier(name)} with (force)`);
     }

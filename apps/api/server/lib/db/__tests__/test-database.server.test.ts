@@ -6,7 +6,7 @@ import { pgClient } from "../pg-client.js";
 import { authDatabase, emptyDatabase, migratedDatabase } from "./pglite-client.js";
 import {
   cloneConfig,
-  drop,
+  dropHarnessDatabase,
   ensureTemplate,
   maintenanceConfig,
   maintenanceSession,
@@ -51,6 +51,40 @@ async function commentOn(name: string, text: string): Promise<void> {
   }
 }
 
+/** What a finished build leaves: the flag, and then the epoch. */
+async function markAsTemplate(name: string): Promise<void> {
+  const session = await maintenanceSession();
+  try {
+    await session.query(`alter database "${name}" is_template true`);
+  } finally {
+    await session.end();
+  }
+}
+
+/** A build killed before it could record itself: the flag, and no epoch. */
+async function clearComment(name: string): Promise<void> {
+  const session = await maintenanceSession();
+  try {
+    await session.query(`comment on database "${name}" is null`);
+  } finally {
+    await session.end();
+  }
+}
+
+async function commentOf(name: string): Promise<string | null> {
+  const session = await maintenanceSession();
+  try {
+    const { rows } = await session.query<{ description: string | null }>(
+      "select s.description from pg_database d left join pg_shdescription s" +
+        " on s.objoid = d.oid and s.classoid = 'pg_database'::regclass where d.datname = $1",
+      [name],
+    );
+    return rows[0]?.description ?? null;
+  } finally {
+    await session.end();
+  }
+}
+
 async function names(): Promise<string[]> {
   const session = await maintenanceSession();
   try {
@@ -67,7 +101,15 @@ const created: string[] = [];
 
 afterEach(async () => {
   for (const name of created.splice(0)) {
-    await drop(name).catch(() => undefined);
+    // Through the harness's own drop, which takes the template flag off first —
+    // a test that planted a template (a build this file makes, or a stale one)
+    // cannot be cleaned up any other way. Only "already gone" is forgiven: a
+    // cleanup that took the fixture first is this file's own doing, while a
+    // REFUSED drop is the bug an earlier blanket `.catch()` here was hiding, and
+    // it has to fail the run that hit it.
+    await dropHarnessDatabase(name).catch((error: unknown) => {
+      if ((error as { code?: string }).code !== "3D000") throw error;
+    });
   }
 });
 
@@ -88,6 +130,26 @@ describe.skipIf(!server)("the template (D186)", () => {
     } finally {
       await session.end();
     }
+  });
+
+  test("a build killed between the flag and the comment is dated, not read as ancient", async () => {
+    const migrations = [m("0001_stamped", "create table stamped (x int);")];
+    const name = await ensureTemplate(migrations);
+    created.push(name);
+    // The other way a build is killed: the `ALTER` landed and the `COMMENT` after
+    // it did not. The template is finished, but with nothing to date it, and the
+    // cleanup rule for an undated template is "older than a day" — which reads as
+    // true at once, so the next worker's sweep would take it out from under
+    // every test copying it. Being the current template is what saves it from
+    // THAT, and only from that.
+    await clearComment(name);
+    expect(await commentOf(name)).toBeNull();
+
+    expect(await ensureTemplate(migrations)).toBe(name);
+
+    // A real epoch, not merely something: `Number(null)` is 0, so an undated
+    // template fails this as "expected 0 to be greater than 0".
+    expect(Number(await commentOf(name))).toBeGreaterThan(0);
   });
 
   test("a build killed before it was marked a template is dropped and built again", async () => {
@@ -159,12 +221,17 @@ describe.skipIf(!server)("orphan cleanup (D186)", () => {
     const old = cloneName(DEAD_PID, 7_200);
     const live = cloneName(process.pid, 7_200, 1);
     const young = cloneName(DEAD_PID, 60, 2);
-    // A template a day old, for migrations this run does not ship.
+    // A template a day old, for migrations this run does not ship. Marked as a
+    // template, because a template is what the harness builds and what cleanup
+    // has to be able to drop — a plain database with the same name would pass
+    // this test while the real case went on failing, because Postgres refuses
+    // to drop a template at all and `with (force)` does not override that.
     const stale = `cf_tpl_${"0".repeat(12)}`;
     for (const name of [old, live, young, stale]) {
       await createDatabase(name);
       created.push(name);
     }
+    await markAsTemplate(stale);
     await commentOn(stale, `${Math.floor(Date.now() / 1000) - 90_000}`);
 
     await ensureTemplate();
