@@ -475,19 +475,21 @@ try_create() {
     while [ -f "$CF_GATE_TEST_PAUSE_BEFORE_MV" ]; do sleep 1; done
   fi
   if mv "$cand" "$LOCK" 2>/dev/null; then
+    # `mv` onto an EXISTING directory does not rename over it: it moves the
+    # candidate INTO it and exits 0. That happens on every attempt at a busy
+    # slot (acquire always tries the create first), so it is checked before
+    # anything else, and our candidate — this caller's own `.cand.<pid>` name,
+    # never a contender's — is taken back out of the holder's lock. Left there,
+    # every busy retry would add one more directory to someone else's lock. It
+    # is also the only way to tell this apart from a win when the lock already
+    # names our own pid (a recycled pid taking back its own stale slot).
+    if [ -d "$LOCK/${cand##*/}" ]; then
+      rm -rf "${LOCK:?}/${cand##*/}" 2>/dev/null
+      return 1
+    fi
     # Read-back: the name holds OUR metadata — a rename cannot have replaced
     # a non-empty directory, so nothing could have taken the name in between.
     [ "$(cat "$LOCK/pid" 2>/dev/null)" = "$recorded_pid" ] || return 1
-    # …and our candidate is not INSIDE the lock, which is the other thing that
-    # `mv` does here and exits 0 for: given an existing directory as the target
-    # it moves the candidate INTO it rather than renaming over it, leaving the
-    # old lock's files exactly where they were with ours nested under them. The
-    # read-back above cannot see the difference when the lock already names our
-    # own pid, and that is exactly the caller's situation when a recycled pid
-    # takes back its own stale slot — so the acquire would announce a lock it
-    # never won, with a candidate directory left inside it. A rename has no
-    # nested anything, and a finished lock holds four files and nothing else.
-    [ ! -d "$LOCK/${cand##*/}" ] || return 1
     return 0
   fi
   rm -rf "$cand"

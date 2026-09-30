@@ -101,6 +101,23 @@
         "a heartbeat on a pid that holds two slots refreshes only the pinned one"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "    if [ -d \"$LOCK/${cand##*/}\" ]; then\n      rm -rf \"${LOCK:?}/${cand##*/}\" 2>/dev/null\n      return 1\n    fi",
+      "after": "    [ -d \"$LOCK/${cand##*/}\" ] && return 1",
+      "because": "A busy acquire's mv nests its candidate inside the holder's lock (acquire always tries the create first). Without taking it back out, each refused attempt leaves a cf-gate.lock.cand.<pid> directory inside the live lock, so the holder's listing is no longer exactly its four files and the test fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "a busy acquire leaves nothing inside the holder"
+      ],
+      "verdict": "caught"
     }
   ]
 }

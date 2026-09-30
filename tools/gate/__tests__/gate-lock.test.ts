@@ -1317,6 +1317,26 @@ describe("gate-lock.sh CF_GATE_SLOTS", () => {
     return readFileSync(join(slot, name), "utf8");
   }
 
+  test("a busy acquire leaves nothing inside the holder's lock, however often it retries", () => {
+    // acquire always tries the create first, and `mv cand lock` onto an existing
+    // directory nests the candidate INSIDE it and exits 0. Each refused attempt
+    // must take its own candidate back out, or a lane retrying on 75 grows a
+    // directory per retry in someone else's lock — one per busy slot per try.
+    const dir = scratch();
+    const holders = [0, 1].map((n) => seedSlot(dir, n, { owner: `holder-${n}` }));
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const busy = runLockIn(dir, ["acquire", "lane-late"], {
+        CF_GATE_CALLER_PID: String(424242 + attempt),
+        CF_GATE_SLOTS: "2",
+      });
+      expect(busy.status).toBe(75);
+    }
+    for (const [n, slot] of holders.entries()) {
+      expect(readdirSync(slot).sort()).toEqual(["beat", "owner", "pid", "started"]);
+      expect(slotFile(slot, "owner").trim()).toBe(`holder-${n}`);
+    }
+  });
+
   test("a slot count that is not a count, or is zero, is refused before any lock is taken", () => {
     // Validated exactly like CF_GATE_STALE_SECONDS, on the same grounds: a value
     // that cannot be a count is a broken invocation whichever subcommand it
