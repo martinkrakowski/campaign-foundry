@@ -297,15 +297,29 @@ describe.skipIf(!server)("orphan cleanup (D186)", () => {
     // this test while the real case went on failing, because Postgres refuses
     // to drop a template at all and `with (force)` does not override that.
     const stale = `cf_tpl_${"0".repeat(12)}`;
-    for (const name of [old, live, young, stale]) {
-      await createDatabase(name);
-      created.push(name);
-    }
-    await markAsTemplate(stale);
-    await commentOn(stale, `${Math.floor(Date.now() / 1000) - 90_000}`);
+    // Every one of these is planted under the build lock, which is the only
+    // thing a foreign worker's sweep also takes. `stale` is in particular a
+    // fixture any other worker's sweep may take, from three statements here:
+    // it is stale the moment `CREATE` returns (no comment reads as built at
+    // zero) and stale again once the comment dates it 90,000 s back. Planted
+    // outside the lock, it loses all three ways — its own `ALTER`/`COMMENT`
+    // answer 3D000 once the sweep has dropped it, answer 55000 while the drop
+    // is still in flight, and an `ALTER … IS_TEMPLATE true` landing between a
+    // sweep's untemplate and its drop answers 42809 and fails a worker in
+    // another file.
+    await whileBuilding(async () => {
+      for (const name of [old, live, young, stale]) {
+        await createDatabase(name);
+        created.push(name);
+      }
+      await markAsTemplate(stale);
+      await commentOn(stale, `${Math.floor(Date.now() / 1000) - 90_000}`);
+    });
 
     // The sweep itself, not the template step that carries it: this is a test of
     // the bounds, and the template step only runs them once per process now.
+    // Outside the lock above, and so racing every worker on the server — which
+    // is why its assertions are about what survives, not about who did it.
     await dropOrphans(templateName(await loadMigrations()));
 
     const left = await names();
@@ -322,20 +336,27 @@ describe.skipIf(!server)("orphan cleanup (D186)", () => {
     // the build lock reads a half-built template as ancient and drops it. The
     // `afterEach` here plants the fixture, which makes it a template a day old.
     const stale = `cf_tpl_${"1".repeat(12)}`;
-    await createDatabase(stale);
-    created.push(stale);
-    await markAsTemplate(stale);
-    await commentOn(stale, `${Math.floor(Date.now() / 1000) - 90_000}`);
-
     const current = templateName(await loadMigrations());
+
     const building = await maintenanceSession();
     await building.query("select pg_advisory_lock($1)", [TEMPLATE_LOCK]);
     try {
+      // Queued before the fixture exists, so it is the first waiter on the lock
+      // and this test is measuring the wait rather than the queue order.
       let swept = false;
       const sweeping = dropOrphans(current).then((dropped) => {
         swept = true;
         return dropped;
       });
+      // Planted under the lock this test holds, which is the one window a
+      // foreign worker's sweep cannot get into. This fixture is stale to every
+      // sweep on the server, not only this test's, and a plant outside the lock
+      // is a coin toss with all of them.
+      await createDatabase(stale);
+      created.push(stale);
+      await markAsTemplate(stale);
+      await commentOn(stale, `${Math.floor(Date.now() / 1000) - 90_000}`);
+
       // Long enough for an unlocked sweep to have finished and dropped it.
       await new Promise((resolve) => setTimeout(resolve, 250));
       expect(swept).toBe(false);
