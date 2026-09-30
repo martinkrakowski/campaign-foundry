@@ -345,7 +345,23 @@ describe.skipIf(!server)("the maintenance connection", () => {
     const saved = process.env["TEST_PG_URL"];
     process.env["TEST_PG_URL"] = "postgres://me@db.example.com:5432/cf";
     try {
-      expect(() => maintenanceConfig()).toThrow(/DATABASE_CA_PATH is not set/);
+      // Named for the variable the reader set, not the one `databaseConfig` was
+      // given: a message about `DATABASE_CA_PATH` here sends somebody to change
+      // the application's database to fix a test server.
+      expect(() => maintenanceConfig()).toThrow(
+        /TEST_PG_URL names a remote database, and the test harness only reaches a local test server/,
+      );
+    } finally {
+      if (saved === undefined) delete process.env["TEST_PG_URL"];
+      else process.env["TEST_PG_URL"] = saved;
+    }
+  });
+
+  test("names TEST_PG_URL when it is not a URL at all", () => {
+    const saved = process.env["TEST_PG_URL"];
+    process.env["TEST_PG_URL"] = "not a url";
+    try {
+      expect(() => maintenanceConfig()).toThrow(/^TEST_PG_URL is not a URL\.$/);
     } finally {
       if (saved === undefined) delete process.env["TEST_PG_URL"];
       else process.env["TEST_PG_URL"] = saved;

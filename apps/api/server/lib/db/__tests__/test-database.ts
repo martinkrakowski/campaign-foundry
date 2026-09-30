@@ -31,8 +31,8 @@ export function testDatabaseBackend(): "server" | "pglite" {
 
 /**
  * A probe's own connect timeout, well under `pg-client.ts`'s `CONNECT_TIMEOUT_MS`
- * (10 s): a set-but-unreachable `TEST_PG_URL` must say so in seconds, once, not
- * once per test file.
+ * (10 s): a set-but-unreachable `TEST_PG_URL` must say so in seconds, once per
+ * test file, not once per test.
  */
 const PROBE_TIMEOUT_MS = 2_000;
 
@@ -103,12 +103,34 @@ function identifier(name: string): string {
  * reached over plain TCP, and `databaseConfig` calls this only for a CA path. A
  * REMOTE `TEST_PG_URL` is refused by `databaseConfig` itself, which is the point:
  * the harness must never be pointed at a hosted database.
+ *
+ * What it says when it refuses is re-pointed, because it can only name the
+ * settings it was given: `DATABASE_URL` and `DATABASE_CA_PATH`, which the
+ * harness never reads. Told to fix those, a reader would go and change the
+ * application's database to fix a test server — and there is no CA setting here
+ * to point at anything, so a remote host is refused outright rather than with
+ * advice about certificates.
  */
 export function maintenanceConfig(): DatabaseConfig {
-  return databaseConfig({ url: process.env["TEST_PG_URL"] }, () => {
-    throw new Error("a local TEST_PG_URL needs no CA");
-  });
+  let config: DatabaseConfig;
+  try {
+    config = databaseConfig({ url: process.env["TEST_PG_URL"] }, () => {
+      throw new Error("a local TEST_PG_URL needs no CA");
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      REMOTE_HOST.test(message)
+        ? "TEST_PG_URL names a remote database, and the test harness only reaches a local test server."
+        : message.replaceAll("DATABASE_URL", "TEST_PG_URL"),
+      { cause: error },
+    );
+  }
+  return config;
 }
+
+/** `databaseConfig`'s own way of saying the URL named a host it will not reach. */
+const REMOTE_HOST = /^DATABASE_CA_PATH is not set/;
 
 /** The same server, pointed at one named database, over one connection. */
 export function cloneConfig(database: string): DatabaseConfig {
@@ -141,10 +163,16 @@ export async function probeServer(config: DatabaseConfig = maintenanceConfig()):
 const probes = new Map<string, Promise<void>>();
 
 /**
- * The first use of the server path probes; later uses reuse that answer, so a
- * server that is down is reported once per process rather than once per test
- * file. Keyed by the server probed, so pointing the harness somewhere else
- * earns its own verdict rather than inheriting one.
+ * The first use of the server path in a test file probes; later uses in that
+ * file reuse the answer, so a server that is down is reported once rather than
+ * on every test. Keyed by the server probed, so pointing the harness somewhere
+ * else earns its own verdict rather than inheriting one.
+ *
+ * Once per FILE, not once per process: vitest runs files in isolated forks
+ * (`isolate` defaults to true and this config does not override it), so this map
+ * starts empty in each one. An unreachable `TEST_PG_URL` costs two seconds per
+ * file that reaches the server — which is seconds, not the ten a connect timeout
+ * would cost per test.
  */
 export function requireServerReachable(
   config: DatabaseConfig = maintenanceConfig(),
