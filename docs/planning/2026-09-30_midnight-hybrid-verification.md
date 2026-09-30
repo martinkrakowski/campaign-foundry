@@ -82,8 +82,8 @@ Every lane inherits the pipeline and skill rules. The seat is **space-bunny**. M
 
 | Lane | PR → main | Rounds | Result |
 |---|---|---|---|
-| **MH1-gate-profiles** | #637 → 8ae711c3 | 1 + 2 fix rounds | **`yarn gate --profile midnight`: 13/13 on midnight, 603 s, 8,354 passed, 0 failed.** This is the first fully green gate midnight has produced for this repo. |
-| **MH2-gate-lock-slots** | #636 → b7bb9ce6 | 1 + 3 lane fix rounds + 1 orchestrator fix | `CF_GATE_SLOTS` semaphore (≤ 64); the pinned slot; canonical, owned slots only; the second-signal release; busy acquires leave nothing in the holder's lock. 7 mutations. |
+| MH1-gate-profiles (shipped) | #637 → 8ae711c3 | 1 + 2 fix rounds | **`yarn gate --profile midnight`: 13/13 on midnight, 603 s, 8,354 passed, 0 failed.** This is the first fully green gate midnight has produced for this repo. |
+| MH2-gate-lock-slots (shipped) | #636 → b7bb9ce6 | 1 + 3 lane fix rounds + 1 orchestrator fix | `CF_GATE_SLOTS` semaphore (≤ 64); the pinned slot; canonical, owned slots only; the second-signal release; busy acquires leave nothing in the holder's lock. 7 mutations. |
 
 **Both lanes ran on midnight** (space-bunny, `--agent lane`, briefs in `.agents/briefs/`). The orchestrator verified every round on the Mac before any PR.
 
