@@ -328,6 +328,14 @@ EOF
 fi
 
 LOCK_HELD=0
+# The caller's own stdout and stderr, saved ONCE and here — before the traps
+# exist, and before any step can be signalled. The trap below can fire while a
+# step's redirections are still in effect (a signal arriving during the test:cov
+# step runs the trap inside run_test_cov's `> "$COVLOG" 2>&1`, under bash), and
+# everything the gate then reports would land in that file — which cleanup
+# deletes. These are what the release messages go to instead, so the report is
+# on the caller's stdout whatever the interrupted command was doing with its own.
+exec 3>&1 4>&2
 HEARTBEAT_PID=""
 HB_FAILED="${TMPDIR:-/tmp}/cf-gate.hbfailed.$$"
 # The slot this gate holds, and the file its acquire recorded that slot in. Both
@@ -340,8 +348,41 @@ LOCK_SLOT_FILE=""
 COVLOG=""
 cov_failed=0
 release_failed=0
+release_attempted=0
 
 release_lock() {
+  # At most one release per gate, whatever asks for it. Two callers can: the
+  # end-of-run release below and cleanup's, and with the acquire-window recovery
+  # in between the second one would find the slot file still naming the slot the
+  # first already gave back — printing a second "released", or worse, naming a
+  # slot some other gate has since taken and reporting a REFUSAL on a gate that
+  # did nothing wrong. Set on any attempt, so the flag covers the refused and the
+  # busy ones too.
+  if [ "$release_attempted" -eq 1 ]; then
+    return 0
+  fi
+  release_attempted=1
+  # The acquire window: a lock this gate WON before it knew it held one. A signal
+  # delivered while the acquire child runs is deferred by dash and by bash alike
+  # until that child exits, and the child is not signalled — it completes its
+  # rename and writes the slot it took into LOCK_SLOT_FILE. Only then does
+  # `exit 143` run, with LOCK_HELD still 0 and the line that reads that file back
+  # never reached, so there was nothing to give back and the lock sat there
+  # naming a pid about to be gone: a leak until the next acquirer judged it
+  # abandoned.
+  #
+  # The slot file's CONTENT is the exact shape of that window, and it is the only
+  # evidence needed: gate-lock.sh's acquire writes it only after try_create has
+  # WON, so a non-empty file names a slot this gate's own acquire took. It is
+  # released PINNED to that path, and release re-reads owner and pid before it
+  # removes anything, so no other gate's lock is reachable from here — an
+  # EMPTY file (a busy or a refused acquire) leaves LOCK_HELD at 0 and prints
+  # nothing, which is what keeps the busy exit's output exactly as it was.
+  if [ "$LOCK_HELD" -eq 0 ]; then
+    LOCK_SLOT_PATH=$(cat "$LOCK_SLOT_FILE" 2>/dev/null)
+    [ -n "$LOCK_SLOT_PATH" ] || return 0
+    LOCK_HELD=1
+  fi
   if [ "$LOCK_HELD" -eq 1 ]; then
     if [ -n "$HEARTBEAT_PID" ]; then
       # Kill the heartbeat loop and reap it, so no heartbeat process survives
@@ -355,9 +396,16 @@ release_lock() {
     # The release's status and diagnostics are not discarded: a release that
     # failed (or was refused — see gate-lock.sh) must be reported, never
     # announced as released. It is pinned to the slot this gate took, so a
-    # release can only ever act on the lock this gate is actually holding.
-    if CF_GATE_CALLER_PID=$$ CF_GATE_SLOT_PATH="$LOCK_SLOT_PATH" sh "$LOCK_SCRIPT" release "$LANE"; then
-      printf '%s\n' "gate: lock released, heartbeat stopped"
+    # release can only ever act on the lock this gate is actually holding. Its
+    # stdio is the CALLER's, saved above: this can run inside a step's
+    # redirections (see exec 3>&1 4>&2), and a line written to fd 1 there would
+    # be captured — and, for the test:cov step, deleted — instead of reported.
+    if CF_GATE_CALLER_PID=$$ CF_GATE_SLOT_PATH="$LOCK_SLOT_PATH" sh "$LOCK_SCRIPT" release "$LANE" >&3 2>&4; then
+      # Byte-identical whether the lock was released after a step or recovered
+      # from the acquire window: this is the gate's one line saying the lock is
+      # gone and nothing of it is still running, and a reader must not have to
+      # know which of the two paths produced it.
+      printf '%s\n' "gate: lock released, heartbeat stopped" >&3
     else
       release_failed=1
       # This gate's OWN slot, which it is PINNED to rather than asked for: with
@@ -366,7 +414,7 @@ release_lock() {
       # reader looking at an empty directory. Nothing here searches for it —
       # asking the lock script which slot this gate holds is the same scan, one
       # process further away, and the answer is a path this gate can lose.
-      printf '%s\n' "gate: FAILED to release the lock — it may still be held at ${LOCK_SLOT_PATH:-${TMPDIR:-/tmp}/cf-gate.lock}" >&2
+      printf '%s\n' "gate: FAILED to release the lock — it may still be held at ${LOCK_SLOT_PATH:-${TMPDIR:-/tmp}/cf-gate.lock}" >&4
     fi
   fi
 }
@@ -375,6 +423,12 @@ release_lock() {
 # failing step, on a signal, on any exit. It preserves the exit status that
 # was pending when it fired (an INT arrives as `exit 130` from the trap below,
 # not as $? mid-command, which could be 0 on a Ctrl-C between steps).
+#
+# Everything it reports goes out on the CALLER's saved stdout and stderr (see
+# exec 3>&1 4>&2), never on fd 1 and fd 2 as they happen to be: this trap can
+# fire inside an interrupted step's redirections, where fd 1 is a file cleanup is
+# about to delete. release_lock is where the wording lives, and where the second
+# signal's answer is produced.
 cleanup() {
   status=$?
   # Ignore a second signal until the release has run, clearing the EXIT trap
@@ -419,6 +473,11 @@ start_heartbeat() {
   # on its own within one interval, and the heartbeat pid itself — what the
   # tests check and what `wait` reaps — is the subshell's.
   (
+    # First, and before anything else: give the caller's saved stdout and stderr
+    # (fds 3 and 4) straight back. The orphaned `sleep` above would otherwise
+    # keep them open for the rest of the interval — the same pipe hazard, one fd
+    # wider, and it outlives the gate that already said it was gone.
+    exec 3>&- 4>&-
     trap - INT TERM EXIT
     while :; do
       sleep "$HB_SECONDS"

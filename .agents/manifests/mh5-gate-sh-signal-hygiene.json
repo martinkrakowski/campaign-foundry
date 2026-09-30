@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "MH5-gate-sh-signal-hygiene",
+  "mutations": [
+    {
+      "file": "scripts/gate.sh",
+      "before": "  if [ \"$LOCK_HELD\" -eq 0 ]; then\n    LOCK_SLOT_PATH=$(cat \"$LOCK_SLOT_FILE\" 2>/dev/null)\n    [ -n \"$LOCK_SLOT_PATH\" ] || return 0\n    LOCK_HELD=1\n  fi\n",
+      "after": "  if [ \"$LOCK_HELD\" -eq 0 ]; then\n    return 0\n  fi\n",
+      "because": "the acquire-window recovery itself. With it dropped, a TERM delivered while the acquire child runs leaves the lock behind naming a pid that is about to be gone: the signal is deferred until that foreground child exits and the child is NOT signalled, so it finishes its rename and writes the slot it won, and LOCK_HELD is still 0 when the deferred exit 143 runs, which means release_lock had nothing to give back. The name survives until some later acquire judges it abandoned - a leak, not a permanent hold. This fails on EVERY shell in the list rather than on one of them, because the deferral is POSIX and not a quirk of a particular /bin/sh: the test signs the parent pid only, and parks that child inside the existing CF_GATE_TEST_PAUSE_BEFORE_MV hook (inherited by the acquire child) so the window is deterministic instead of a race. Measured against the unfixed script before the lane started: exit 143 with no release line and a cf-gate.lock left naming the dead gate, 1 run in 1, under both dash and bash.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-signals.test.ts",
+        "-t",
+        "a TERM while the acquire child runs still releases the lock that child won"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate.sh",
+      "before": "      printf '%s\\n' \"gate: lock released, heartbeat stopped\" >&3\n",
+      "after": "      printf '%s\\n' \"gate: lock released, heartbeat stopped\"\n",
+      "because": "the gate own release line goes back onto fd 1, and there the report becomes whatever the interrupted command was doing with fd 1. For the test:cov step that is the COVLOG capture run_test_cov wraps its command in, and under bash the trap runs with that capture still in effect, so the line lands in the coverage log and cleanup deletes it with the rest of the log: the lock IS released and the gate says nothing. The SHELL decides this one, and it is recorded here because no other field of a manifest is read as one: measured 3 lines lost under bash-as-sh and 0 under dash in the same second, so the command below catches it only on a host whose shell list contains bash (this one does), and on a dash-only host it would survive. The test waits for a trace its step writes from inside that capture before it signals, because signalling at the heartbeat line instead lands in the few milliseconds before the redirect exists - where the line reaches the caller anyway - and then this case passes against the very script it is meant to catch (measured: 3 shells out of 3). The release child own stdio, the gate-lock: released by line, is a second and separate claim, pinned by the other assertion in the same test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-signals.test.ts",
+        "-t",
+        "a TERM during the test:cov step reports the release on the caller's stdout"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
