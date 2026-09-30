@@ -302,34 +302,54 @@ async function sweep(
   );
   const now = epochSeconds();
   for (const { datname, description } of rows) {
-    if (datname === currentTemplate) continue;
-    const clone = CLONE_NAME.exec(datname);
-    if (clone) {
-      if (!everyClone) {
-        if (now - Number(clone[2]) <= ORPHAN_MAX_AGE_S) continue;
-        if (processAlive(Number(clone[1]))) continue;
+    // Holding the lock stops a sweep from racing a BUILD. It cannot stop a
+    // teardown that never asked for it: a test dropping its own fixture goes
+    // through `dropHarnessDatabase`, which takes no lock, because a test's
+    // teardown behind a global build lock would serialise the suite's own
+    // workers behind each other's cleanups. So a name this sweep has just listed
+    // can be gone — or on its way out — by the time the sweep reaches it.
+    //
+    // Forgiving that here is the same forgiveness the caller of
+    // `dropHarnessDatabase` applies, not a swallow: the only statements a row
+    // runs below are the untemplate and the drop, the row's own fate was
+    // decided before the sweep listed it, and everything else still throws. The
+    // alternative is this sweep throwing inside a `buildTemplate` on some other
+    // file's worker — taking out a build over a database that worker never
+    // wanted, in a file that is not even the one that dropped it.
+    try {
+      if (datname === currentTemplate) continue;
+      const clone = CLONE_NAME.exec(datname);
+      if (clone) {
+        if (!everyClone) {
+          if (now - Number(clone[2]) <= ORPHAN_MAX_AGE_S) continue;
+          if (processAlive(Number(clone[1]))) continue;
+        }
+      } else if (!TEMPLATE_NAME.test(datname)) {
+        // Not a name this harness builds. Left alone rather than interpolated
+        // into a DROP it has no business running.
+        continue;
+      } else {
+        // A template this harness built always carries the epoch it was built at.
+        // One with no comment is from something else, or from a build that was
+        // killed before it could record itself — and a build cannot be in flight
+        // here, because the lock is held across every build and every sweep.
+        const built = description === null || description === "" ? 0 : Number(description);
+        if (!Number.isFinite(built) || now - built <= STALE_TEMPLATE_MAX_AGE_S) continue;
+        // Then the flag has to come off before the drop: `with (force)` overrides
+        // the connected-sessions check and nothing else, and a template database
+        // cannot be dropped at all (42809). Without this the cleanup below throws,
+        // and since it runs on every template step it takes every later test in the
+        // run with it — including `yarn test:pg-clean`, which is the way a person
+        // gets out of exactly that state.
+        await untemplate(session, datname);
       }
-    } else if (!TEMPLATE_NAME.test(datname)) {
-      // Not a name this harness builds. Left alone rather than interpolated
-      // into a DROP it has no business running.
-      continue;
-    } else {
-      // A template this harness built always carries the epoch it was built at.
-      // One with no comment is from something else, or from a build that was
-      // killed before it could record itself — and a build cannot be in flight
-      // here, because the lock is held across every build and every sweep.
-      const built = description === null || description === "" ? 0 : Number(description);
-      if (!Number.isFinite(built) || now - built <= STALE_TEMPLATE_MAX_AGE_S) continue;
-      // Then the flag has to come off before the drop: `with (force)` overrides
-      // the connected-sessions check and nothing else, and a template database
-      // cannot be dropped at all (42809). Without this the cleanup below throws,
-      // and since it runs on every template step it takes every later test in the
-      // run with it — including `yarn test:pg-clean`, which is the way a person
-      // gets out of exactly that state.
-      await untemplate(session, datname);
+      await session.query(`drop database ${identifier(datname)} with (force)`);
+      dropped.push(datname);
+    } catch (error) {
+      // Somebody without this lock has it, and what they are doing is the drop
+      // this sweep wanted. Not reported as this sweep's own — it did not do it.
+      if (!isGoneOrGoing(error)) throw error;
     }
-    await session.query(`drop database ${identifier(datname)} with (force)`);
-    dropped.push(datname);
   }
   return dropped;
 }
@@ -482,6 +502,32 @@ export async function whileBuilding<T>(
 /** True when a statement failed because the database it named does not exist. */
 function isMissingDatabase(error: unknown): boolean {
   return (error as { code?: string }).code === "3D000";
+}
+
+/**
+ * Postgres's own wording for a row a drop has already claimed: the row is gone
+ * or on its way out, and there is nothing left to alter or to drop.
+ *
+ * Paired with `isMissingDatabase` because the two are one event at two moments.
+ * A name taken by a worker that took no lock reads 3D000 once the drop has
+ * committed and 55000 while it is still in flight, and forgiving only the first
+ * just moves the failure to whichever side of the commit the sweep lands on —
+ * measured, not assumed: with 3D000 alone, the same race still failed the sweep
+ * on 55000.
+ *
+ * The code AND the wording are both tested because 55000 is not only this: a
+ * database in use reads 55006, and a reworded message would have to fail this
+ * sweep loudly rather than be swallowed.
+ */
+const INVALID_DATABASE = /invalid database/;
+
+/** True when the database a statement named is gone, or already on its way out. */
+function isGoneOrGoing(error: unknown): boolean {
+  if (isMissingDatabase(error)) return true;
+  return (
+    (error as { code?: string }).code === "55000" &&
+    INVALID_DATABASE.test(error instanceof Error ? error.message : String(error))
+  );
 }
 
 /** Drop a database, from the maintenance connection: a database cannot drop itself. */
