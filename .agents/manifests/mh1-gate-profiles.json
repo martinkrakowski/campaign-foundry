@@ -35,6 +35,23 @@
         "a --profile without a value, and one that is not a name, are refused"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate.sh",
+      "before": "  LIST=\"${CF_GATE_LIST_EXCLUDED:-yarn vitest list --tagsFilter '$PROFILE_EXCLUDED_FILTER'}\"",
+      "after": "  LIST=\"${CF_GATE_LIST_EXCLUDED:-yarn vitest list --tagsFilter 'golden-bytes || cpu-bound'}\"",
+      "because": "the exclusion listing's filter, back to a hand-written literal. The listing is the one line that tells a reader which tests a green run did NOT run, and it is derived from the profile's own filter — negated as a group, `!(!golden-bytes && !cpu-bound)` — precisely so it cannot name a different set than the one the test step runs. Restored to its own `'golden-bytes || cpu-bound'`, the two become independent again, and the next host fact breaks the banner silently: midnight gains a third tag (a slower rasterizer, another fixed internal deadline) and the gate filters it out correctly — the step's filter is the one vitest applies, so the RUN is right and stays green — while the \"EXCLUDES\" block keeps listing only the two old tests. The reader is then told this run skipped five tests when it skipped six, and the tests the new tag covers do not appear anywhere in the output that exists to name them. Nothing fails today, and nothing would fail later: the literal happens to select the same five tests now, the listing is deliberately non-fatal so a collection problem cannot fail a test step, and every profiled case injects CF_GATE_LIST_EXCLUDED, so no existing test ever resolved the default command this mutation restores. The test resolves that default through the profile itself (CF_GATE_TEST_PRINT_LISTING reports the command instead of running it), reads the test step's own `--tagsFilter` out of `--print-steps`, and asserts the listing is the exact complement of it — same tag set, one negated as a group — for every profile the script knows, read from its PROFILES list so a second profile is covered without editing the test. So the mutant is a one-line string mismatch, in about a second, on a `true` step: no collection, no lock, no suite.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate.test.ts",
+        "-t",
+        "the exclusion listing is derived from the profile's own filter, not a second list of tags"
+      ],
+      "verdict": "caught"
     }
   ]
 }

@@ -150,6 +150,23 @@ function printedSteps(args: string[], env: Record<string, string> = {}): string[
   return r.stdout.replace(/\n$/, "").split("\n");
 }
 
+/** The `--tagsFilter` expression a step command carries, or "" if it has none. */
+function tagsFilterOf(step: string): string {
+  return /--tagsFilter '([^']*)'/.exec(step)?.[1] ?? "";
+}
+
+/** The tag names a `--tagsFilter` expression mentions, with the `!` markers dropped. */
+function tagsInFilter(expression: string): string[] {
+  return (expression.match(/!?[A-Za-z][\w-]*/g) ?? []).map((tag) => tag.replace(/^!/, ""));
+}
+
+/** The profile names the gate knows, read from the script's own PROFILES list. */
+function knownProfiles(): string[] {
+  return (/^PROFILES="([^"]*)"/m.exec(readFileSync(gateSh, "utf8"))?.[1] ?? "")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
 describe("yarn gate", () => {
   test("parses as POSIX sh", () => {
     const result = spawnSync("sh", ["-n", gateSh], { encoding: "utf8" });
@@ -592,6 +609,49 @@ describe("yarn gate --profile", () => {
     expect(plain.stdout).not.toContain("not enforced under a profile");
   });
 
+  test("the exclusion listing is derived from the profile's own filter, not a second list of tags", () => {
+    // The banner has to name the tests the run actually skips. Spelled out as its
+    // own `'golden-bytes || cpu-bound'`, it is a second list to forget: add a tag
+    // to the profile's filter, or a second profile, and the run stays green while
+    // the "excluded" line names tests this run did not skip — the one drift a
+    // reader cannot detect, because they are reading the run's own output.
+    // CF_GATE_TEST_PRINT_LISTING reports the resolved command instead of running
+    // it, so the derived filter is readable without a collection.
+    const listingOf = (profile: string): string => {
+      const r = runGate(["--profile", profile], {
+        ...stepsEnv([["test:cov", "true"]]),
+        CF_GATE_TEST_PRINT_LISTING: "1",
+      });
+      expect(r.status).toBe(0);
+      return tagsFilterOf(/yarn vitest list --tagsFilter '[^']*'/.exec(r.stdout)?.[0] ?? "");
+    };
+    const runFilterOf = (profile: string): string =>
+      tagsFilterOf(
+        printedSteps(["--profile", profile]).find((line) => line.startsWith("test:cov\t")) ?? "",
+      );
+
+    // The profiles come from the script's own PROFILES list, so one added later is
+    // covered without touching this test — and midnight is asserted to be in it,
+    // so a reworded PROFILES line fails here rather than skipping the sweep.
+    const profiles = knownProfiles();
+    expect(profiles).toContain("midnight");
+    for (const profile of profiles) {
+      const listed = listingOf(profile);
+      const runs = runFilterOf(profile);
+      // The exact complement of what the test step runs — derived where the
+      // profile is, not written out again here or in the script.
+      expect(listed).toBe(`!(${runs})`);
+      // The same tag set on both sides, so the listing and the run cannot have
+      // parted company even if the negation were ever rewritten by hand.
+      expect(tagsInFilter(listed).sort()).toEqual(tagsInFilter(runs).sort());
+    }
+    // What that means today, pinned on the profile that exists. The `!( … )` is
+    // vitest's own grammar, not an approximation of it: parseUnaryExpression
+    // takes a NOT over parsePrimaryExpression's parenthesised group.
+    expect(runFilterOf("midnight")).toBe("!golden-bytes && !cpu-bound");
+    expect(listingOf("midnight")).toBe("!(!golden-bytes && !cpu-bound)");
+  });
+
   test("a profiled run that fails before the test step never pays for the collection", () => {
     // Naming the exclusions means collecting the suite, which measured 18.5 s
     // and about 10 cores on this host. A gate that fails at build must not pay
@@ -657,14 +717,12 @@ describe("the tags the midnight profile filters", () => {
 
   test("every tag the gate's filter names is declared in the config", () => {
     // The filter lives in gate.sh and the declarations here: a tag added to one
-    // and not the other would filter a name vitest refuses to run under.
+    // and not the other would filter a name vitest refuses to run under. The
+    // exclusion listing is the same filter negated, so one check covers both.
     const step = printedSteps(["--profile", "midnight"]).find((line) =>
       line.startsWith("test:cov\t"),
     );
-    const expression = /--tagsFilter '([^']*)'/.exec(step ?? "")?.[1] ?? "";
-    const filtered = (expression.match(/!?[A-Za-z][\w-]*/g) ?? []).map((tag) =>
-      tag.replace(/^!/, ""),
-    );
+    const filtered = tagsInFilter(tagsFilterOf(step ?? ""));
     expect(filtered).toEqual(["golden-bytes", "cpu-bound"]);
     for (const tag of filtered) {
       expect(tags.map((declared) => declared.name)).toContain(tag);

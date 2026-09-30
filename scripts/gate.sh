@@ -49,6 +49,10 @@
 # names of the excluded tests are printed just before the test step runs, so a
 # green profiled gate can never read as "the whole suite passed" — and not
 # before the run, so a gate that fails earlier never pays for the collection.
+# That listing is filtered by the profile's OWN filter, negated as a group —
+# `!(<filter>)`, its exact complement — never by a second list of tag names that
+# can fall behind the one the test step runs: a banner that names tests the run
+# did not skip is worse than no banner, because a reader trusts it.
 # No profile at all means today's command, byte for byte.
 #
 # `--print-steps` prints the resolved step commands (`name<TAB>command`) and
@@ -63,7 +67,9 @@
 # locked, whichever command it carries. The nitro guard's prepare command and
 # manifest path are injectable the same way (CF_GATE_NITRO_PREPARE,
 # CF_GATE_NITRO_MANIFEST) so a test can fail preparation without touching the
-# workspace.
+# workspace, and CF_GATE_TEST_PRINT_LISTING makes the exclusion listing print
+# the command it WOULD run instead of running it, so a test can read the
+# profile's derived filter without collecting the suite to do it.
 #
 # POSIX sh (not zsh): GitHub Linux runners do not ship zsh. Like wave-event.sh
 # and verify-manifests.sh, this file parses under the runners' /bin/sh —
@@ -140,6 +146,7 @@ PROFILES=" midnight "
 PROFILE=""
 PROFILE_FILTER=""
 PROFILE_TEST_TIMEOUT=""
+PROFILE_EXCLUDED_FILTER=""
 PRINT_STEPS=0
 LANE=""
 
@@ -208,6 +215,13 @@ if [ -n "$PROFILE" ]; then
     *" $PROFILE "*)
       PROFILE_FILTER=$(profile_filter "$PROFILE")
       PROFILE_TEST_TIMEOUT=$(profile_test_timeout "$PROFILE")
+      # What the run SKIPS is the filter the run uses, negated as a group — the
+      # exact complement, so a profile that gains a tag (or a second profile
+      # appears) cannot leave the exclusion banner naming a different set. A
+      # hand-written second list of tags is a second thing to forget to update.
+      # vitest's tag grammar takes a parenthesised group under `!`
+      # (@vitest/runner: parseUnaryExpression -> parsePrimaryExpression).
+      PROFILE_EXCLUDED_FILTER="!($PROFILE_FILTER)"
       ;;
     *)
       printf '%s\n' "gate: unknown profile: $PROFILE — known profiles: $(known_profiles)" >&2
@@ -420,12 +434,20 @@ run_test_cov() {
 
 # The tests a profiled run leaves OUT, named just before it starts. A green
 # profiled gate that never said what it skipped is a green gate a reader cannot
-# trust, and the filter's own names are not the names of the tests. Injectable
-# for the same reason the nitro guard is — collecting the suite is not free —
-# and deliberately non-fatal: a listing that cannot run must not fail the test
-# step it introduces, which would fail for the wrong reason.
+# trust, and the filter's own names are not the names of the tests. The filter
+# is the profile's own, negated as a group (PROFILE_EXCLUDED_FILTER) — derived
+# where the profile is, so the banner and the run cannot name different tests.
+# Injectable for the same reason the nitro guard is — collecting the suite is not
+# free — and deliberately non-fatal: a listing that cannot run must not fail the
+# test step it introduces, which would fail for the wrong reason.
 gate_excluded_tests() {
-  LIST="${CF_GATE_LIST_EXCLUDED:-yarn vitest list --tagsFilter 'golden-bytes || cpu-bound'}"
+  LIST="${CF_GATE_LIST_EXCLUDED:-yarn vitest list --tagsFilter '$PROFILE_EXCLUDED_FILTER'}"
+  # Test hook: report the resolved command rather than running it, so what the
+  # banner would filter on is readable without a collection.
+  if [ -n "${CF_GATE_TEST_PRINT_LISTING:-}" ]; then
+    printf '%s\n' "$LIST"
+    return 0
+  fi
   eval "$LIST" 2>&1 || printf '%s\n' "gate: could not list the tests this profile excludes (see above)"
 }
 
