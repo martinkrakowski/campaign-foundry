@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "MH4-one-gate-per-worktree",
+  "mutations": [
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "        if same_worktree_slot=$(worktree_holder); then\n          rm -rf \"$LOCK\" 2>/dev/null\n          same_worktree_exit \"$same_worktree_slot\"\n        fi\n        printf '%s\\n' \"gate-lock: acquired by $lane (pid $recorded_pid) at $LOCK\"\n",
+      "after": "        printf '%s\\n' \"gate-lock: acquired by $lane (pid $recorded_pid) at $LOCK\"\n",
+      "because": "the whole of one gate per worktree: with this check gone the acquire wins a slot, announces it on stdout and returns 0 while a live holder is gating the very tree it is standing in, so two verify-manifests runs mutate one worktree at once — the defect Qodo raised on gate-lock.sh:650. The test acquires for real from a git worktree root, so the holder's slot carries the worktree file try_create wrote, then acquires again from a SUBDIRECTORY of that same repository, which `git rev-parse --show-toplevel` resolves to the same root: it expects 75 and the words 'same worktree', and without the check the second acquire simply takes slot 1 and succeeds. Dropping the check is the only way this line can fail, so the claim is the whole block rather than any one line of it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "a second acquire in the same worktree is refused"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
