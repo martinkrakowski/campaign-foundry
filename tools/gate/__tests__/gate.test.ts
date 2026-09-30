@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
+import vitestConfig from "../../../vitest.config";
 
 // D183 (lane HX3-gate-in-repo) — `yarn gate`. Every test drives the real
 // script with CF_GATE_STEPS (one name<TAB>command line per step) and a fresh
@@ -23,6 +24,28 @@ import { afterEach, describe, expect, test } from "vitest";
 
 const gateSh = fileURLToPath(new URL("../../../scripts/gate.sh", import.meta.url));
 const packageJson = fileURLToPath(new URL("../../../package.json", import.meta.url));
+
+/**
+ * Today's steps, pinned here so a profile can be shown to change one cell and
+ * nothing else. This is the list the default gate builds from scratch — the one
+ * CI's own steps, in CI's order — and `--print-steps` is how a test reads it
+ * without running any of it.
+ */
+const DEFAULT_STEPS = [
+  "check:env\tgate_check_env",
+  "build\tyarn build",
+  "typecheck\tyarn typecheck",
+  "lint\tyarn lint",
+  "format:check\tyarn format:check",
+  "lint:arch\tyarn lint:arch",
+  "sync:check\tyarn sync:check",
+  "lint:bytes\tyarn lint:bytes",
+  "plan:verify\tyarn plan:verify",
+  "arch:inventory\tyarn arch:inventory",
+  "nitro-route-scan\tgate_nitro_guard",
+  "test:cov\tyarn test:cov",
+  'verify-manifests\tsh "$HERE/verify-manifests.sh"',
+];
 
 const dirs: string[] = [];
 
@@ -116,6 +139,32 @@ function heartbeatPidOf(stdout: string): number {
   const match = /gate: heartbeat pid (\d+)/.exec(stdout);
   if (!match) throw new Error(`no heartbeat pid line in:\n${stdout}`);
   return Number(match[1]);
+}
+
+/** The step lines `--print-steps` resolved, as an array. */
+function printedSteps(args: string[], env: Record<string, string> = {}): string[] {
+  const r = runGate([...args, "--print-steps"], env);
+  if (r.status !== 0) {
+    throw new Error(`--print-steps exited ${r.status}: ${r.stderr}`);
+  }
+  return r.stdout.replace(/\n$/, "").split("\n");
+}
+
+/** The `--tagsFilter` expression a step command carries, or "" if it has none. */
+function tagsFilterOf(step: string): string {
+  return /--tagsFilter '([^']*)'/.exec(step)?.[1] ?? "";
+}
+
+/** The tag names a `--tagsFilter` expression mentions, with the `!` markers dropped. */
+function tagsInFilter(expression: string): string[] {
+  return (expression.match(/!?[A-Za-z][\w-]*/g) ?? []).map((tag) => tag.replace(/^!/, ""));
+}
+
+/** The profile names the gate knows, read from the script's own PROFILES list. */
+function knownProfiles(): string[] {
+  return (/^PROFILES="([^"]*)"/m.exec(readFileSync(gateSh, "utf8"))?.[1] ?? "")
+    .split(/\s+/)
+    .filter(Boolean);
 }
 
 describe("yarn gate", () => {
@@ -441,5 +490,242 @@ describe("yarn gate", () => {
     });
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("CF_GATE_HEARTBEAT_SECONDS");
+  });
+});
+
+/**
+ * D187 (lane MH1-gate-profiles) — `yarn gate --profile <name>` and
+ * `--print-steps`. A profile is for a host whose suite cannot be all green: it
+ * swaps the test step's command for one that filters the host-sensitive tests
+ * by tag, and it names what it left out. What it must NOT do is change anything
+ * else quietly, so the default list is pinned whole and the profiled list is
+ * pinned as that same list with exactly one cell replaced. The tag
+ * declarations are read from the config OBJECT rather than from its text, so a
+ * declaration that exists only in a comment cannot satisfy this.
+ */
+describe("yarn gate --profile", () => {
+  test("no profile runs today's steps, unchanged", () => {
+    expect(printedSteps([])).toEqual(DEFAULT_STEPS);
+  });
+
+  test("the midnight profile replaces exactly one step, and runs no coverage", () => {
+    const profiled = printedSteps(["--profile", "midnight"]);
+    expect(profiled).toEqual(
+      DEFAULT_STEPS.map((line) =>
+        line.startsWith("test:cov\t")
+          ? "test:cov\tyarn vitest run --tagsFilter '!golden-bytes && !cpu-bound' --testTimeout 20000"
+          : line,
+      ),
+    );
+    // No --coverage under a profile: a filtered suite cannot cover what it did
+    // not run, so a local threshold would be a number this run did not earn.
+    // GitHub CI enforces 100% on the full run, with nothing filtered.
+    expect(profiled.join("\n")).not.toContain("--coverage");
+  });
+
+  test("an unknown profile is refused, not run as the default gate", () => {
+    // CF_GATE_STEPS is injected as every other case here does, so a mutant that
+    // falls through to the default gate runs one `true` step rather than the
+    // real suite — and still fails this test, which is the whole point.
+    const r = runGate(["--profile", "no-such-profile"], stepsEnv([["build", "true"]]));
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("unknown profile: no-such-profile");
+    // It names the profile it does know, so the refusal is an answer.
+    expect(r.stderr).toContain("midnight");
+    expect(r.stdout).not.toContain("==> [1/1] build");
+  });
+
+  test("a --profile without a value, and one that is not a name, are refused", () => {
+    const missing = runGate(["--profile"], stepsEnv([["build", "true"]]));
+    expect(missing.status).toBe(2);
+    expect(missing.stderr).toContain("missing value for --profile");
+
+    // The name is matched as a shell pattern, so `*` would otherwise match any
+    // profile at all — a typo silently resolving to a run the caller did not ask
+    // for is the failure the refusal exists to prevent.
+    const glob = runGate(["--profile", "*"], stepsEnv([["build", "true"]]));
+    expect(glob.status).toBe(2);
+    expect(glob.stderr).toContain("invalid profile name");
+
+    // An EMPTY value is the same fall-through wearing a profile's clothes: every
+    // check downstream reads an empty PROFILE as no profile at all, so
+    // `--profile ''` ran the DEFAULT gate — filtering nothing, enforcing
+    // coverage — under a flag that promised a filtered, timeout-carrying run.
+    const empty = runGate(["--profile", ""], stepsEnv([["build", "true"]]));
+    expect(empty.status).toBe(2);
+    expect(empty.stderr).toContain("invalid profile name");
+    expect(empty.stdout).not.toContain("==> [1/1] build");
+
+    // And it is refused even when a real profile came first: the flag's meaning
+    // is whatever came LAST, so `--profile midnight --profile ''` is an empty
+    // profile asked for, not a profile named by the pair.
+    const reset = runGate(
+      ["--profile", "midnight", "--profile", ""],
+      stepsEnv([["build", "true"]]),
+    );
+    expect(reset.status).toBe(2);
+    expect(reset.stderr).toContain("invalid profile name");
+    expect(reset.stdout).not.toContain("==> [1/1] build");
+  });
+
+  test("--print-steps prints the resolved steps and runs nothing", () => {
+    const dir = scratch();
+    const stepMarker = join(dir, "step-ran");
+    const listMarker = join(dir, "list-ran");
+    const r = runGate(["--profile", "midnight", "--print-steps"], {
+      TMPDIR: dir,
+      CF_GATE_LIST_EXCLUDED: `touch ${listMarker}`,
+      ...stepsEnv([["build", `touch ${stepMarker}`]]),
+    });
+    expect(r.status).toBe(0);
+    // It reports the step that WOULD run — the injected one, whatever it is.
+    expect(r.stdout).toBe(`build\ttouch ${stepMarker}\n`);
+    // And it neither ran a step nor listed a test: asking what runs must not
+    // cost a collection, and must not take the lock.
+    expect(existsSync(stepMarker)).toBe(false);
+    expect(existsSync(listMarker)).toBe(false);
+    expect(existsSync(join(dir, "cf-gate.lock"))).toBe(false);
+  });
+
+  test("a profiled run says coverage is not enforced, and names what it excluded", () => {
+    const r = runGate(["--profile", "midnight"], {
+      ...stepsEnv([["test:cov", 'printf "the tests ran\\n"']]),
+      CF_GATE_LIST_EXCLUDED: 'printf "excluded: one golden\\n"',
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(
+      "coverage thresholds are not enforced under a profile; GitHub CI enforces 100% on the full run",
+    );
+    expect(r.stdout).toContain("EXCLUDES");
+    expect(r.stdout).toContain("excluded: one golden");
+    // Before the tests, not after: the names describe the run about to happen,
+    // which is the only moment a reader is still in time to want them.
+    expect(r.stdout.indexOf("excluded: one golden")).toBeLessThan(
+      r.stdout.indexOf("the tests ran"),
+    );
+    // The caveat is the PROFILE's to carry: the default gate says neither,
+    // because it does enforce coverage.
+    const plain = runGate(["--lane", "lane-b"], stepsEnv([["test:cov", "true"]]));
+    expect(plain.stdout).not.toContain("not enforced under a profile");
+  });
+
+  test("the exclusion listing is derived from the profile's own filter, not a second list of tags", () => {
+    // The banner has to name the tests the run actually skips. Spelled out as its
+    // own `'golden-bytes || cpu-bound'`, it is a second list to forget: add a tag
+    // to the profile's filter, or a second profile, and the run stays green while
+    // the "excluded" line names tests this run did not skip — the one drift a
+    // reader cannot detect, because they are reading the run's own output.
+    // CF_GATE_TEST_PRINT_LISTING reports the resolved command instead of running
+    // it, so the derived filter is readable without a collection.
+    const listingOf = (profile: string): string => {
+      const r = runGate(["--profile", profile], {
+        ...stepsEnv([["test:cov", "true"]]),
+        CF_GATE_TEST_PRINT_LISTING: "1",
+      });
+      expect(r.status).toBe(0);
+      return tagsFilterOf(/yarn vitest list --tagsFilter '[^']*'/.exec(r.stdout)?.[0] ?? "");
+    };
+    const runFilterOf = (profile: string): string =>
+      tagsFilterOf(
+        printedSteps(["--profile", profile]).find((line) => line.startsWith("test:cov\t")) ?? "",
+      );
+
+    // The profiles come from the script's own PROFILES list, so one added later is
+    // covered without touching this test — and midnight is asserted to be in it,
+    // so a reworded PROFILES line fails here rather than skipping the sweep.
+    const profiles = knownProfiles();
+    expect(profiles).toContain("midnight");
+    for (const profile of profiles) {
+      const listed = listingOf(profile);
+      const runs = runFilterOf(profile);
+      // The exact complement of what the test step runs — derived where the
+      // profile is, not written out again here or in the script.
+      expect(listed).toBe(`!(${runs})`);
+      // The same tag set on both sides, so the listing and the run cannot have
+      // parted company even if the negation were ever rewritten by hand.
+      expect(tagsInFilter(listed).sort()).toEqual(tagsInFilter(runs).sort());
+    }
+    // What that means today, pinned on the profile that exists. The `!( … )` is
+    // vitest's own grammar, not an approximation of it: parseUnaryExpression
+    // takes a NOT over parsePrimaryExpression's parenthesised group.
+    expect(runFilterOf("midnight")).toBe("!golden-bytes && !cpu-bound");
+    expect(listingOf("midnight")).toBe("!(!golden-bytes && !cpu-bound)");
+  });
+
+  test("a profiled run that fails before the test step never pays for the collection", () => {
+    // Naming the exclusions means collecting the suite, which measured 18.5 s
+    // and about 10 cores on this host. A gate that fails at build must not pay
+    // it for a test step it never reaches — so the listing belongs inside the
+    // test step, not at the top of the run.
+    const dir = scratch();
+    const listMarker = join(dir, "list-ran");
+    const r = runGate(["--profile", "midnight"], {
+      TMPDIR: dir,
+      ...stepsEnv([
+        ["build", 'sh -c "exit 1"'],
+        ["test:cov", "true"],
+      ]),
+      CF_GATE_LIST_EXCLUDED: `touch ${listMarker}`,
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("FAILED at step 'build' (exit 1)");
+    expect(existsSync(listMarker)).toBe(false);
+    expect(r.stdout).not.toContain("EXCLUDES");
+  });
+
+  test("a listing that cannot run does not fail a profiled gate", () => {
+    // Informational output must not become a step: a gate whose test step fails
+    // on the naming of its exclusions fails for the wrong reason, and the
+    // exclusion names are a courtesy, not a result.
+    const r = runGate(["--profile", "midnight"], {
+      ...stepsEnv([["test:cov", "true"]]),
+      CF_GATE_LIST_EXCLUDED: 'sh -c "exit 3"',
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("could not list the tests this profile excludes");
+  });
+});
+
+describe("the tags the midnight profile filters", () => {
+  const tags = vitestConfig.test?.tags ?? [];
+
+  test("golden-bytes and cpu-bound are declared, each naming the host fact", () => {
+    // The descriptions are the record of WHY a host needs a profile: which
+    // instruction set the bytes depend on, and which deadline is internal.
+    expect(tags.map((tag) => tag.name)).toEqual(["golden-bytes", "cpu-bound"]);
+    const byName = new Map(tags.map((tag) => [tag.name, tag.description ?? ""]));
+    expect(byName.get("golden-bytes")).toContain("AVX2");
+    expect(byName.get("golden-bytes")).toContain("BYTES");
+    expect(byName.get("cpu-bound")).toContain("deadline");
+    expect(byName.get("cpu-bound")).toContain("--testTimeout");
+  });
+
+  test("no config turns strictTags off", () => {
+    // strictTags defaults to TRUE, and that default is the only thing making an
+    // undeclared tag a failure rather than a name that quietly means nothing.
+    // Checked on the root AND on every project block, because a project
+    // inherits the rest of the config and can lose this one key on its own.
+    const blocks = [vitestConfig.test, ...(vitestConfig.test?.projects ?? [])];
+    for (const block of blocks) {
+      const turnedOff =
+        typeof block === "object" &&
+        block !== null &&
+        (block as { strictTags?: unknown }).strictTags;
+      expect(turnedOff).toBeUndefined();
+    }
+  });
+
+  test("every tag the gate's filter names is declared in the config", () => {
+    // The filter lives in gate.sh and the declarations here: a tag added to one
+    // and not the other would filter a name vitest refuses to run under. The
+    // exclusion listing is the same filter negated, so one check covers both.
+    const step = printedSteps(["--profile", "midnight"]).find((line) =>
+      line.startsWith("test:cov\t"),
+    );
+    const filtered = tagsInFilter(tagsFilterOf(step ?? ""));
+    expect(filtered).toEqual(["golden-bytes", "cpu-bound"]);
+    for (const tag of filtered) {
+      expect(tags.map((declared) => declared.name)).toContain(tag);
+    }
   });
 });

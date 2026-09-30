@@ -153,17 +153,24 @@ describe("run paths vs the capability boot race", () => {
     expect(body.variants.some((v) => v.motion !== undefined)).toBe(true);
   });
 
-  test("a motion generate that lands in the boot window waits and is accepted", async () => {
-    const pending = callGenerate(motionBrief());
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    setCapabilities({ motion: true });
-    const res = await pending;
-    // Register the run before asserting: a failed check must not leave it running.
-    const { jobId } = (await res.json()) as { jobId?: string };
-    if (typeof jobId === "string") started.push(jobId);
-    expect(res.status).toBe(202);
-    expect(jobId).toEqual(expect.any(String));
-  });
+  test(
+    "a motion generate that lands in the boot window waits and is accepted",
+    // cpu-bound: this is the one test on the owner's midnight host that its own
+    // settle() deadline (9s above, in afterEach) beats, not vitest's timeout.
+    // So --testTimeout cannot save it; the profile filters it out instead.
+    { tags: ["cpu-bound"] },
+    async () => {
+      const pending = callGenerate(motionBrief());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      setCapabilities({ motion: true });
+      const res = await pending;
+      // Register the run before asserting: a failed check must not leave it running.
+      const { jobId } = (await res.json()) as { jobId?: string };
+      if (typeof jobId === "string") started.push(jobId);
+      expect(res.status).toBe(202);
+      expect(jobId).toEqual(expect.any(String));
+    },
+  );
 
   test("a motion run on a host that cannot encode video is still refused, naming the probe reason", async () => {
     setCapabilities({ motion: false, reason: "ffmpeg-static binary is not available" });

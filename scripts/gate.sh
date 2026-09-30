@@ -1,5 +1,6 @@
 #!/bin/sh
-# The in-repo gate (plan D183, lane HX3-gate-in-repo): `yarn gate [--lane <id>]`.
+# The in-repo gate (plan D183, lane HX3-gate-in-repo):
+# `yarn gate [--lane <id>] [--profile <name>] [--print-steps]`.
 #
 # Runs CI's gate steps in the foreground, one after another, and prints each
 # step's real exit code, stopping at the first failure by name. The default
@@ -44,6 +45,28 @@
 # `ERROR: Coverage` — a piped read (M3) reported exit 0 while coverage failed,
 # and the scan is what stops the same failure arriving through a pipe.
 #
+# `--profile <name>` is for a host whose tests cannot all be green (D187). It
+# replaces ONE cell — the test:cov step's command — with a `yarn vitest run`
+# that filters host-sensitive tests by tag and carries the timeout that host
+# needs, and it keeps the step's NAME, so the lock still covers it and the
+# coverage scan still wraps it. Nothing else moves: the arch checks, the guard
+# and the manifest replay are the same commands in the same order. A profile
+# does NOT enforce coverage, and says so on every run: a filtered suite cannot
+# cover what it did not run, so a local number would be a number it did not
+# earn — GitHub CI enforces 100% on the full run, with nothing filtered. The
+# names of the excluded tests are printed just before the test step runs, so a
+# green profiled gate can never read as "the whole suite passed" — and not
+# before the run, so a gate that fails earlier never pays for the collection.
+# That listing is filtered by the profile's OWN filter, negated as a group —
+# `!(<filter>)`, its exact complement — never by a second list of tag names that
+# can fall behind the one the test step runs: a banner that names tests the run
+# did not skip is worse than no banner, because a reader trusts it.
+# No profile at all means today's command, byte for byte.
+#
+# `--print-steps` prints the resolved step commands (`name<TAB>command`) and
+# exits 0 without running a step, taking no lock and listing no tests: what to
+# run is answerable without running it.
+#
 # For tests the step list is injectable: CF_GATE_STEPS overrides it, one
 # `name<TAB>command` line per step, run in the given order — so a test runs
 # fake steps (`true`, `sh -c "exit 3"`, a step that prints `ERROR: Coverage`
@@ -52,7 +75,9 @@
 # locked, whichever command it carries. The nitro guard's prepare command and
 # manifest path are injectable the same way (CF_GATE_NITRO_PREPARE,
 # CF_GATE_NITRO_MANIFEST) so a test can fail preparation without touching the
-# workspace.
+# workspace, and CF_GATE_TEST_PRINT_LISTING makes the exclusion listing print
+# the command it WOULD run instead of running it, so a test can read the
+# profile's derived filter without collecting the suite to do it.
 #
 # POSIX sh (not zsh): GitHub Linux runners do not ship zsh. Like wave-event.sh
 # and verify-manifests.sh, this file parses under the runners' /bin/sh —
@@ -120,7 +145,40 @@ gate_nitro_guard() {
   echo "Nitro route manifest is free of test files."
 }
 
+# The profiles this gate knows, and what each one is for. A profile is a vitest
+# tags filter plus the timeout that host needs; `midnight` is the owner's slow
+# CPU with no AVX2, where the byte goldens hash different pixels and one test's
+# own settle() deadline expires (both facts are declared in vitest.config.ts's
+# `test.tags`, with the descriptions this filter names).
+PROFILES=" midnight "
+PROFILE=""
+PROFILE_FILTER=""
+PROFILE_TEST_TIMEOUT=""
+PROFILE_EXCLUDED_FILTER=""
+PRINT_STEPS=0
 LANE=""
+
+profile_filter() {
+  case "$1" in
+    midnight) printf '%s\n' '!golden-bytes && !cpu-bound' ;;
+    *) return 1 ;;
+  esac
+}
+
+profile_test_timeout() {
+  case "$1" in
+    midnight) printf '%s\n' '20000' ;;
+    *) return 1 ;;
+  esac
+}
+
+# The known list for a human. PROFILES is padded so the membership test below
+# can match a WHOLE name; that padding is the test's business, not part of the
+# answer the refusal prints.
+known_profiles() {
+  printf '%s' "$PROFILES" | sed 's/^ *//; s/ *$//'
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --lane)
@@ -128,12 +186,57 @@ while [ $# -gt 0 ]; do
       LANE="$2"
       shift 2
       ;;
+    --profile)
+      [ $# -ge 2 ] || { printf '%s\n' "gate: missing value for --profile" >&2; exit 2; }
+      # An EMPTY value is refused here, at the flag, rather than downstream:
+      # every check after this loop reads an empty PROFILE as "no profile was
+      # asked for", so `--profile ''` would run the DEFAULT gate — filtering
+      # nothing, enforcing coverage — under a flag that promised a profile. The
+      # refusal is the same one an unnameable value gets, and says so.
+      [ -n "$2" ] || { printf '%s\n' "gate: invalid profile name: (empty) — must match ^[A-Za-z0-9_-]+\$" >&2; exit 2; }
+      PROFILE="$2"
+      shift 2
+      ;;
+    --print-steps)
+      PRINT_STEPS=1
+      shift
+      ;;
     *)
-      printf '%s\n' "usage: yarn gate [--lane <id>]" >&2
+      printf '%s\n' "usage: yarn gate [--lane <id>] [--profile <name>] [--print-steps]" >&2
       exit 2
       ;;
   esac
 done
+# An unknown profile is refused rather than ignored: silently falling through to
+# the default gate would hand back a run that filtered nothing, under a name
+# that promised it had. The name is validated first, as the lane id below is —
+# the `case` below matches it as a SHELL PATTERN, so a name carrying `*` would
+# match any profile at all.
+if [ -n "$PROFILE" ]; then
+  case "$PROFILE" in
+    *[!A-Za-z0-9_-]*)
+      printf '%s\n' "gate: invalid profile name: $PROFILE — must match ^[A-Za-z0-9_-]+\$" >&2
+      exit 2
+      ;;
+  esac
+  case "$PROFILES" in
+    *" $PROFILE "*)
+      PROFILE_FILTER=$(profile_filter "$PROFILE")
+      PROFILE_TEST_TIMEOUT=$(profile_test_timeout "$PROFILE")
+      # What the run SKIPS is the filter the run uses, negated as a group — the
+      # exact complement, so a profile that gains a tag (or a second profile
+      # appears) cannot leave the exclusion banner naming a different set. A
+      # hand-written second list of tags is a second thing to forget to update.
+      # vitest's tag grammar takes a parenthesised group under `!`
+      # (@vitest/runner: parseUnaryExpression -> parsePrimaryExpression).
+      PROFILE_EXCLUDED_FILTER="!($PROFILE_FILTER)"
+      ;;
+    *)
+      printf '%s\n' "gate: unknown profile: $PROFILE — known profiles: $(known_profiles)" >&2
+      exit 2
+      ;;
+  esac
+fi
 [ -n "$LANE" ] || LANE="gate"
 case "$LANE" in
   *[!A-Za-z0-9_-]*)
@@ -176,7 +279,15 @@ else
   add_step "plan:verify" "yarn plan:verify"
   add_step "arch:inventory" "yarn arch:inventory"
   add_step "nitro-route-scan" "gate_nitro_guard"
-  add_step "test:cov" "yarn test:cov"
+  if [ -n "$PROFILE" ]; then
+    # The step keeps its NAME, so the lock still covers it and run_test_cov
+    # still wraps it. Only the command changes: no --coverage, because a
+    # filtered suite cannot cover what it did not run, and a local threshold
+    # would be a number this run did not earn.
+    add_step "test:cov" "yarn vitest run --tagsFilter '$PROFILE_FILTER' --testTimeout $PROFILE_TEST_TIMEOUT"
+  else
+    add_step "test:cov" "yarn test:cov"
+  fi
   add_step "verify-manifests" "sh \"\$HERE/verify-manifests.sh\""
 fi
 
@@ -200,6 +311,20 @@ EOF
 if [ "$total" -eq 0 ]; then
   printf '%s\n' "gate: no steps to run — CF_GATE_STEPS, when set, must hold at least one name<TAB>command line" >&2
   exit 2
+fi
+
+# Answering what WOULD run, without running any of it: the resolved list is
+# printed after it is validated (so a malformed or empty one is refused here
+# too) and before the traps, the lock and the first step exist. It lists no
+# tests either — a caller asking what runs must not pay for a collection.
+if [ "$PRINT_STEPS" -eq 1 ]; then
+  while IFS="$TAB" read -r name cmd; do
+    [ -n "$name" ] || continue
+    printf '%s\t%s\n' "$name" "$cmd"
+  done <<EOF
+$STEPS
+EOF
+  exit 0
 fi
 
 LOCK_HELD=0
@@ -352,6 +477,25 @@ run_test_cov() {
   return "$code"
 }
 
+# The tests a profiled run leaves OUT, named just before it starts. A green
+# profiled gate that never said what it skipped is a green gate a reader cannot
+# trust, and the filter's own names are not the names of the tests. The filter
+# is the profile's own, negated as a group (PROFILE_EXCLUDED_FILTER) — derived
+# where the profile is, so the banner and the run cannot name different tests.
+# Injectable for the same reason the nitro guard is — collecting the suite is not
+# free — and deliberately non-fatal: a listing that cannot run must not fail the
+# test step it introduces, which would fail for the wrong reason.
+gate_excluded_tests() {
+  LIST="${CF_GATE_LIST_EXCLUDED:-yarn vitest list --tagsFilter '$PROFILE_EXCLUDED_FILTER'}"
+  # Test hook: report the resolved command rather than running it, so what the
+  # banner would filter on is readable without a collection.
+  if [ -n "${CF_GATE_TEST_PRINT_LISTING:-}" ]; then
+    printf '%s\n' "$LIST"
+    return 0
+  fi
+  eval "$LIST" 2>&1 || printf '%s\n' "gate: could not list the tests this profile excludes (see above)"
+}
+
 printf '%s\n' "gate: lane $LANE, $total steps — 'yarn install --immutable' is the one CI step the gate does not run"
 # CI's Test step sets TEST_DATABASE_URL (postgres service); the two
 # real-Postgres concurrency suites skip themselves when it is absent, so a
@@ -409,6 +553,17 @@ while IFS="$TAB" read -r name cmd; do
   cov_failed=0
   case "$name" in
     test:cov)
+      # The profile's two lines print HERE, immediately before the tests, and
+      # not at the top of the run: naming the exclusions means collecting the
+      # suite, and a gate that fails at `build` must not pay a full collection
+      # (measured 18.5 s and about 10 cores on this host) for a test step it
+      # never reaches. Still before the run it describes, which is all the
+      # reader needs to know what this step is not running.
+      if [ -n "$PROFILE" ]; then
+        printf '%s\n' "gate: profile $PROFILE — coverage thresholds are not enforced under a profile; GitHub CI enforces 100% on the full run"
+        printf '%s\n' "gate: the tests this profile EXCLUDES (it runs everything else):"
+        gate_excluded_tests
+      fi
       run_test_cov "$cmd"
       code=$?
       ;;

@@ -11,8 +11,26 @@ const webSrc = fileURLToPath(new URL("./apps/web/src", import.meta.url));
 //   - "tools": the dev tools under tools/ (outside the workspaces, inside the
 //              gate — D102), plain node env.
 // Coverage is a global concern (configured here) and aggregates across all of them.
+//
+// `tags` is declared HERE, at the root, so it reaches every `extends: true`
+// project below: an undeclared tag fails a run (strictTags defaults to true),
+// and a declaration that only existed in the node project would leave the same
+// tag name undeclared in the api project. See `scripts/gate.sh`'s profiles for
+// the consumer — `yarn gate --profile midnight` filters on these two names.
 export default defineConfig({
   test: {
+    tags: [
+      {
+        name: "golden-bytes",
+        description:
+          "Host-sensitive: asserts rendered or encoded BYTES against a committed sha256 golden, so the answer depends on the rasterizer and encoder build rather than on the code. On the owner's midnight host (no AVX2) node-canvas and ffmpeg produce different pixels, and the golden mismatches for a reason that is not a regression. GitHub CI's linux runner has AVX2 and runs these; `yarn gate --profile midnight` filters them out.",
+      },
+      {
+        name: "cpu-bound",
+        description:
+          "Host-sensitive: fails on its own FIXED INTERNAL deadline (a settle() window or an await), not on vitest's timeout, so no --testTimeout can save it. On the owner's midnight host the generate run takes longer than that deadline to settle. GitHub CI runs these; `yarn gate --profile midnight` filters them out.",
+      },
+    ],
     projects: [
       {
         extends: true,

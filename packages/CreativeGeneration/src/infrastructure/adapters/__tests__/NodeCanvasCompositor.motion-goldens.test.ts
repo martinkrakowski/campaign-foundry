@@ -119,7 +119,7 @@ describe("NodeCanvasCompositor motion goldens (C1)", () => {
   test(
     "the timeline path's motion frames match the committed matrix, per kind and t (D10/R-D6)",
     // 2 layouts × 4 kinds × 6 full-size rasters: comfortably over the 5 s default.
-    { timeout: 120_000 },
+    { timeout: 120_000, tags: ["golden-bytes"] },
     async () => {
       const run = goldenRun(goldens, recording, missingMessage);
       const backgrounds = new ProceduralBackgroundGenerator();
