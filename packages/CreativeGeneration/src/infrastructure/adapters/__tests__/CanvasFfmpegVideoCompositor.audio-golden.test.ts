@@ -170,7 +170,7 @@ describe("CanvasFfmpegVideoCompositor audio byte golden (VE3b1)", () => {
   test.skipIf(!recording && !ffmpegOk)(
     (!recording ? skipReason : undefined) ??
       "the canonical timeline with a music bed matches the committed audio byte golden for this platform",
-    { timeout: 60_000 },
+    { timeout: 60_000, tags: ["golden-bytes"] },
     async () => {
       if (!ffmpegOk) throw new Error(skipReason);
       if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");

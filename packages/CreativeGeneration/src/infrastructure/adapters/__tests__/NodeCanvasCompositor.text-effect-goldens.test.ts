@@ -210,23 +210,27 @@ describe("NodeCanvasCompositor text-effect goldens (K3 gap)", () => {
     cellsHint: `${TEXT_EFFECT_GOLDEN_CELL_COUNT} sha256 cells (four text effects × two draw paths × an entrance and a settled frame)`,
   });
 
-  test("each text effect's entrance and settled frames match the committed matrix, per path (K3)", async () => {
-    const run = goldenRun(goldens, recording, missingMessage);
-    const observed: Record<string, string> = {};
-    for (const effect of TEXT_EFFECT_VALUES) {
-      observed[cellKey(effect, "legacy", "entrance")] = sha256(
-        await legacyFrame(effect, LOCAL_ENTRANCE),
-      );
-      observed[cellKey(effect, "legacy", "settled")] = sha256(
-        await legacyFrame(effect, LOCAL_SETTLED),
-      );
-      observed[cellKey(effect, "timeline", "entrance")] = sha256(
-        await timelineFrame(effect, LOCAL_ENTRANCE),
-      );
-      observed[cellKey(effect, "timeline", "settled")] = sha256(
-        await timelineFrame(effect, LOCAL_SETTLED),
-      );
-    }
-    finishGolden(key, observed, run);
-  });
+  test(
+    "each text effect's entrance and settled frames match the committed matrix, per path (K3)",
+    { tags: ["golden-bytes"] },
+    async () => {
+      const run = goldenRun(goldens, recording, missingMessage);
+      const observed: Record<string, string> = {};
+      for (const effect of TEXT_EFFECT_VALUES) {
+        observed[cellKey(effect, "legacy", "entrance")] = sha256(
+          await legacyFrame(effect, LOCAL_ENTRANCE),
+        );
+        observed[cellKey(effect, "legacy", "settled")] = sha256(
+          await legacyFrame(effect, LOCAL_SETTLED),
+        );
+        observed[cellKey(effect, "timeline", "entrance")] = sha256(
+          await timelineFrame(effect, LOCAL_ENTRANCE),
+        );
+        observed[cellKey(effect, "timeline", "settled")] = sha256(
+          await timelineFrame(effect, LOCAL_SETTLED),
+        );
+      }
+      finishGolden(key, observed, run);
+    },
+  );
 });
