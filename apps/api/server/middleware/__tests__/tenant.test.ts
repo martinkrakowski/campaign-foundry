@@ -56,7 +56,10 @@ describe("tenant middleware (PT-1a item 3)", () => {
     getSessionMock.mockReset();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Closes the database `beforeEach` opened: on a real server that is a
+    // `cf_t_*` database, not an instance the collector reclaims.
+    await db.end();
     if (savedAuthMode === undefined) delete process.env.AUTH_MODE;
     else process.env.AUTH_MODE = savedAuthMode;
   });

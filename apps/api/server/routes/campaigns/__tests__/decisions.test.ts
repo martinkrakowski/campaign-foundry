@@ -199,24 +199,30 @@ describe("GET / PUT /campaigns/decisions (D173)", () => {
 
 describe("GET / PUT /campaigns/decisions on Postgres (PT-3)", () => {
   let dir: string;
+  let db: Awaited<ReturnType<typeof migratedDatabase>> | undefined;
   const origOut = process.env.OUTPUT_DIR;
   const origBackend = process.env.STORE_BACKEND;
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "cf-decisions-pg-"));
     process.env.OUTPUT_DIR = dir;
     process.env.STORE_BACKEND = "postgres";
-    setDatabase(await migratedDatabase());
+    db = await migratedDatabase();
+    setDatabase(db);
     resetDecisionStore();
     resetReportStore();
     resetBriefStore();
     await getBriefStore(LOCAL_TENANT).createBrief(sampleBrief);
     await getReportStore(LOCAL_TENANT).writeReport("camp", JSON.stringify({ assets: [] }));
   });
-  afterEach(() => {
+  afterEach(async () => {
     resetDecisionStore();
     resetReportStore();
     resetBriefStore();
     resetDatabase();
+    // Closes the database `beforeEach` opened: on a real server that is a
+    // `cf_t_*` database, not an instance the collector reclaims.
+    await db?.end();
+    db = undefined;
     if (origBackend === undefined) delete process.env.STORE_BACKEND;
     else process.env.STORE_BACKEND = origBackend;
     if (origOut === undefined) delete process.env.OUTPUT_DIR;

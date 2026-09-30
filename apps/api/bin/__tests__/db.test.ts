@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { USAGE, connect, main } from "../db.js";
-import { pgliteClient } from "../../server/lib/db/__tests__/pglite-client.js";
+import { emptyDatabase } from "../../server/lib/db/__tests__/pglite-client.js";
 import type { SqlClient } from "../../server/lib/db/sql-client.js";
 import { loadMigrations } from "../../server/lib/db/migrate.js";
 
@@ -15,7 +15,7 @@ describe("db CLI (PT-3)", () => {
   });
 
   test("ping reports the server and closes its connection", async () => {
-    const db = pgliteClient();
+    const db = await emptyDatabase();
     const end = vi.spyOn(db, "end");
     await main("ping", () => db, log);
     expect(lines[0]).toMatch(/^ {2}Connected: PostgreSQL /);
@@ -23,7 +23,7 @@ describe("db CLI (PT-3)", () => {
   });
 
   test("migrate applies the shipped migrations, then reports the database up to date", async () => {
-    const db = pgliteClient();
+    const db = await emptyDatabase();
     const keepOpen: SqlClient = { ...db, end: async () => undefined };
     await main("migrate", () => keepOpen, log);
     await main("migrate", () => keepOpen, log);
@@ -63,7 +63,8 @@ describe("db CLI (PT-3)", () => {
       writeFileSync(join(dir, "ca.pem"), "PEM");
       process.env.DATABASE_URL = "postgres://me@db.example.com:5432/cf";
       process.env.DATABASE_CA_PATH = join(dir, "ca.pem");
-      const build = vi.fn(() => pgliteClient());
+      const db = await emptyDatabase();
+      const build = vi.fn(() => db);
       await connect(build).end();
       expect(build).toHaveBeenCalledWith(
         expect.objectContaining({

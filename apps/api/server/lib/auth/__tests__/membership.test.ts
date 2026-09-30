@@ -1,10 +1,8 @@
-import { describe, test, expect } from "vitest";
-import { PGlite } from "@electric-sql/pglite";
+import { describe, test, expect, afterEach } from "vitest";
 import { betterAuth } from "better-auth";
-import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
+import { authDatabase, migratedDatabase } from "../../db/__tests__/pglite-client.js";
+import type { SqlClient } from "../../db/sql-client.js";
 import { loadMigrations, migrate } from "../../db/migrate.js";
-import { pgClient } from "../../db/pg-client.js";
-import { pglitePgPool } from "../../db/__tests__/pglite-pg-pool.js";
 import { authOptions } from "../options.js";
 import { memberTenant } from "../membership.js";
 
@@ -20,15 +18,28 @@ async function insertUser(
 }
 
 describe("memberTenant (PT-1a item 3)", () => {
+  // Every test here opens its own database; on a real server (TEST_PG_URL) that
+  // is a `cf_t_*` database on disk, not an instance the collector reclaims, so
+  // it is closed here rather than left for `pglite-client.ts`'s leak assertion
+  // to fail the file.
+  let db: SqlClient | undefined;
+  let auth: Awaited<ReturnType<typeof authDatabase>> | undefined;
+  afterEach(async () => {
+    await db?.end();
+    db = undefined;
+    await auth?.end();
+    auth = undefined;
+  });
+
   test("undefined when the user has no membership at all", async () => {
-    const db = await migratedDatabase();
+    db = await migratedDatabase();
     await insertUser(db, "u1", "u1@example.com");
 
     expect(await memberTenant(db, "u1")).toBeUndefined();
   });
 
   test("a member's tenant carries its org, user, roles and teams", async () => {
-    const db = await migratedDatabase();
+    db = await migratedDatabase();
     await insertUser(db, "u1", "u1@example.com");
     await db.query(
       "insert into member (id, org_id, user_id, role, created_at) values ($1, 'local', $2, 'owner,admin', now())",
@@ -52,7 +63,7 @@ describe("memberTenant (PT-1a item 3)", () => {
   });
 
   test("no teams reads as an empty list, not a missing one", async () => {
-    const db = await migratedDatabase();
+    db = await migratedDatabase();
     await insertUser(db, "u1", "u1@example.com");
     await db.query(
       "insert into member (id, org_id, user_id, role, created_at) values ($1, 'local', $2, 'viewer', now())",
@@ -68,7 +79,7 @@ describe("memberTenant (PT-1a item 3)", () => {
   });
 
   test("more than one org resolves deterministically, by org id", async () => {
-    const db = await migratedDatabase();
+    db = await migratedDatabase();
     await insertUser(db, "u1", "u1@example.com");
     await db.query(
       "insert into org (id, name, slug, created_at) values ('zeta', 'Zeta', 'zeta', now())",
@@ -87,7 +98,7 @@ describe("memberTenant (PT-1a item 3)", () => {
 
   describe("activeOrganizationId (PT-1b1 item 2)", () => {
     test("an active org the user belongs to wins", async () => {
-      const db = await migratedDatabase();
+      db = await migratedDatabase();
       await insertUser(db, "u1", "u1@example.com");
       await db.query(
         "insert into org (id, name, slug, created_at) values ('zeta', 'Zeta', 'zeta', now())",
@@ -119,7 +130,7 @@ describe("memberTenant (PT-1a item 3)", () => {
     });
 
     test("a non-member active org falls back", async () => {
-      const db = await migratedDatabase();
+      db = await migratedDatabase();
       await insertUser(db, "u1", "u1@example.com");
       await db.query(
         "insert into org (id, name, slug, created_at) values ('zeta', 'Zeta', 'zeta', now())",
@@ -139,7 +150,7 @@ describe("memberTenant (PT-1a item 3)", () => {
     });
 
     test("an existing org the user is not a member of cannot be made active", async () => {
-      const db = await migratedDatabase();
+      db = await migratedDatabase();
       await insertUser(db, "u1", "u1@example.com");
       await insertUser(db, "u2", "u2@example.com");
       await db.query(
@@ -160,7 +171,7 @@ describe("memberTenant (PT-1a item 3)", () => {
     });
 
     test("no active org falls back", async () => {
-      const db = await migratedDatabase();
+      db = await migratedDatabase();
       await insertUser(db, "u1", "u1@example.com");
       await db.query(
         "insert into org (id, name, slug, created_at) values ('zeta', 'Zeta', 'zeta', now())",
@@ -178,20 +189,11 @@ describe("memberTenant (PT-1a item 3)", () => {
       expect((await memberTenant(db, "u1", null))?.orgId).toBe("local");
     });
 
-    test("proves Better Auth session carries activeOrganizationId against PGlite", async () => {
-      const raw = new PGlite();
-      const sql = pgClient(
-        {
-          host: "localhost",
-          port: 5432,
-          user: "test",
-          password: "test",
-          database: "test",
-          ssl: false,
-          max: 1,
-        },
-        () => pglitePgPool(raw),
-      );
+    test("proves Better Auth session carries activeOrganizationId", async () => {
+      // Tracked before the migration, so a rejected one cannot leave the
+      // database behind on a server backend.
+      auth = await authDatabase();
+      const { pool, sql } = auth;
       await migrate(sql, await loadMigrations());
 
       let magicUrl = "";
@@ -204,7 +206,7 @@ describe("memberTenant (PT-1a item 3)", () => {
 
       const instance = betterAuth(
         authOptions({
-          database: pglitePgPool(raw),
+          database: pool,
           secret: "a".repeat(32),
           baseURL: "http://127.0.0.1:3001",
           mailer,
@@ -262,8 +264,6 @@ describe("memberTenant (PT-1a item 3)", () => {
       const tenant = await memberTenant(sql, session!.user.id, activeOrgId);
       expect(tenant?.orgId).toBe("zeta");
       expect(tenant?.roles).toEqual(["owner"]);
-
-      await sql.end();
     });
   });
 });
