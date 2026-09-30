@@ -1,47 +1,32 @@
 import { describe, test, expect } from "vitest";
-import { PGlite } from "@electric-sql/pglite";
 import { betterAuth } from "better-auth";
 import { getMigrations } from "better-auth/db/migration";
 import { loadMigrations, migrate } from "../../db/migrate.js";
-import { pgClient } from "../../db/pg-client.js";
-import type { DatabaseConfig } from "../../db/database-config.js";
-import type { SqlClient } from "../../db/sql-client.js";
-import { pglitePgPool } from "../../db/__tests__/pglite-pg-pool.js";
+import { authDatabase } from "../../db/__tests__/pglite-client.js";
 import { authOptions } from "../options.js";
 import { LogMailer } from "../log-mailer.js";
 import type { Mail, MailerPort } from "../mailer.port.js";
 
-// Never used to connect: `pgClient`'s `makePool` override replaces the real
-// `pg.Pool` this would otherwise build with the PGlite double, but `pgClient`
-// still destructures the config's shape.
-const DUMMY_CONFIG: DatabaseConfig = {
-  host: "localhost",
-  port: 5432,
-  user: "test",
-  password: "test",
-  database: "test",
-  ssl: false,
-  max: 1,
-};
-
 /**
- * A fresh PGlite database with 0001-0008 applied, plus a `SqlClient` over it
- * built through the exact same `pgClient()`/`pglitePgPool()` pair Better Auth's
- * `database` option uses below — so migrating and querying it afterwards go
- * through the identical PGlite-as-Postgres-pool translation this test is
- * proving works, not a second, parallel path (`pglite-client.ts`'s own
- * `pgliteClient()`) that could hide a difference.
+ * An empty database with 0001-0008 applied, plus the `SqlClient` over the very
+ * pool Better Auth's `database` option is given below — so migrating and then
+ * querying it goes through the identical client-as-Postgres-pool translation
+ * this test is proving works, not a second, parallel path that could hide a
+ * difference.
+ *
+ * `authDatabase()` answers an EMPTY database on either backend (PGlite, or a
+ * fresh `CREATE DATABASE` on the server `TEST_PG_URL` names), which is what
+ * these tests need: each applies its own migrations.
  */
-async function migratedPglite(): Promise<{ raw: PGlite; sql: SqlClient }> {
-  const raw = new PGlite();
-  const sql = pgClient(DUMMY_CONFIG, () => pglitePgPool(raw));
-  await migrate(sql, await loadMigrations());
-  return { raw, sql };
+async function migratedAuthDatabase(): Promise<Awaited<ReturnType<typeof authDatabase>>> {
+  const database = await authDatabase();
+  await migrate(database.sql, await loadMigrations());
+  return database;
 }
 
-describe("Better Auth against PGlite (PT-1a, D174b(2))", () => {
+describe("Better Auth against the test database (PT-1a, D174b(2))", () => {
   test("a real operation runs through the double: magic-link sign-in writes a verification row and sends mail", async () => {
-    const { raw, sql } = await migratedPglite();
+    const { pool, sql, end } = await migratedAuthDatabase();
     const sent: Mail[] = [];
     const mailer: MailerPort = {
       send: async (mail) => {
@@ -50,7 +35,7 @@ describe("Better Auth against PGlite (PT-1a, D174b(2))", () => {
     };
     const instance = betterAuth(
       authOptions({
-        database: pglitePgPool(raw),
+        database: pool,
         secret: "a".repeat(32),
         baseURL: "http://127.0.0.1:3001",
         mailer,
@@ -73,7 +58,7 @@ describe("Better Auth against PGlite (PT-1a, D174b(2))", () => {
     );
     expect(rows.rows).toHaveLength(1);
     expect(rows.rows[0]!.identifier).toEqual(expect.any(String));
-    await sql.end();
+    await end();
   });
 
   /**
@@ -85,10 +70,10 @@ describe("Better Auth against PGlite (PT-1a, D174b(2))", () => {
    * first time a route touches the missing piece.
    */
   test("0008_auth leaves nothing for Better Auth's own migration inspection to create", async () => {
-    const { raw, sql } = await migratedPglite();
+    const { pool, end } = await migratedAuthDatabase();
     const instance = betterAuth(
       authOptions({
-        database: pglitePgPool(raw),
+        database: pool,
         secret: "a".repeat(32),
         baseURL: "http://127.0.0.1:3001",
         mailer: new LogMailer(),
@@ -101,11 +86,11 @@ describe("Better Auth against PGlite (PT-1a, D174b(2))", () => {
     expect(plan.toBeAdded).toEqual([]);
     expect(plan.toBeAddedIndexes).toEqual([]);
     expect(plan.unsafeChanges).toEqual([]);
-    await sql.end();
+    await end();
   });
 
   test("0008_auth refuses a second account row for the same provider identity", async () => {
-    const { sql } = await migratedPglite();
+    const { sql, end } = await migratedAuthDatabase();
     await sql.exec(
       "insert into \"user\" (id, name, email, email_verified, updated_at) values ('u1', 'U', 'u1@example.com', false, now())",
     );
@@ -117,12 +102,11 @@ describe("Better Auth against PGlite (PT-1a, D174b(2))", () => {
 
     await link("a1");
     await expect(link("a2")).rejects.toThrow(/account_provider_id_account_id_uidx/);
-    await sql.end();
+    await end();
   });
 
   test("0008_auth is additive: applies on top of an existing org column from 0007 without assuming 0005-0007 exist", async () => {
-    const raw = new PGlite();
-    const sql = pgClient(DUMMY_CONFIG, () => pglitePgPool(raw));
+    const { pool, sql, end } = await authDatabase();
     const all = await loadMigrations();
     const prior = all.filter((m) => m.id < "0008_auth");
     await migrate(sql, prior);
@@ -143,7 +127,7 @@ describe("Better Auth against PGlite (PT-1a, D174b(2))", () => {
 
     const instance = betterAuth(
       authOptions({
-        database: pglitePgPool(raw),
+        database: pool,
         secret: "a".repeat(32),
         baseURL: "http://127.0.0.1:3001",
         mailer: new LogMailer(),
@@ -154,6 +138,6 @@ describe("Better Auth against PGlite (PT-1a, D174b(2))", () => {
     expect(plan.toBeAdded).toEqual([]);
     expect(plan.toBeAddedIndexes).toEqual([]);
     expect(plan.unsafeChanges).toEqual([]);
-    await sql.end();
+    await end();
   });
 });

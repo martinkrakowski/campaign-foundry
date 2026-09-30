@@ -1,10 +1,7 @@
 import { describe, test, expect } from "vitest";
-import { PGlite } from "@electric-sql/pglite";
 import { betterAuth } from "better-auth";
-import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
+import { authDatabase, migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import { loadMigrations, migrate } from "../../db/migrate.js";
-import { pgClient } from "../../db/pg-client.js";
-import { pglitePgPool } from "../../db/__tests__/pglite-pg-pool.js";
 import { authOptions } from "../options.js";
 import { memberTenant } from "../membership.js";
 
@@ -178,20 +175,8 @@ describe("memberTenant (PT-1a item 3)", () => {
       expect((await memberTenant(db, "u1", null))?.orgId).toBe("local");
     });
 
-    test("proves Better Auth session carries activeOrganizationId against PGlite", async () => {
-      const raw = new PGlite();
-      const sql = pgClient(
-        {
-          host: "localhost",
-          port: 5432,
-          user: "test",
-          password: "test",
-          database: "test",
-          ssl: false,
-          max: 1,
-        },
-        () => pglitePgPool(raw),
-      );
+    test("proves Better Auth session carries activeOrganizationId", async () => {
+      const { pool, sql, end } = await authDatabase();
       await migrate(sql, await loadMigrations());
 
       let magicUrl = "";
@@ -204,7 +189,7 @@ describe("memberTenant (PT-1a item 3)", () => {
 
       const instance = betterAuth(
         authOptions({
-          database: pglitePgPool(raw),
+          database: pool,
           secret: "a".repeat(32),
           baseURL: "http://127.0.0.1:3001",
           mailer,
@@ -263,7 +248,7 @@ describe("memberTenant (PT-1a item 3)", () => {
       expect(tenant?.orgId).toBe("zeta");
       expect(tenant?.roles).toEqual(["owner"]);
 
-      await sql.end();
+      await end();
     });
   });
 });
