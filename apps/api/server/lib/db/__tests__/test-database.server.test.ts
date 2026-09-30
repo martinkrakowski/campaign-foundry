@@ -11,8 +11,10 @@ import {
   ensureTemplate,
   maintenanceConfig,
   maintenanceSession,
+  migratedFromTemplate,
   testDatabaseBackend,
   templateName,
+  whileBuilding,
 } from "./test-database.js";
 
 /**
@@ -76,6 +78,19 @@ async function commentOf(name: string): Promise<string | null> {
   }
 }
 
+/** Whether a migration in some set has been applied to a named database. */
+async function hasTable(name: string, table: string): Promise<boolean> {
+  const client = pgClient(cloneConfig(name));
+  try {
+    const { rows } = await client.query<{ t: string | null }>("select to_regclass($1)::text as t", [
+      `public.${table}`,
+    ]);
+    return rows[0]!.t !== null;
+  } finally {
+    await client.end();
+  }
+}
+
 async function names(): Promise<string[]> {
   const session = await maintenanceSession();
   try {
@@ -133,23 +148,25 @@ describe.skipIf(!server)("the template (D186)", () => {
   test("a build killed between the flag and the comment is dated, not read as ancient", async () => {
     const migrations = [m("0001_stamped", "create table stamped (x int);")];
     const name = templateName(migrations);
-    // Planted rather than built, because the point is a build this process knows
-    // nothing about: a build killed between `ALTER … IS_TEMPLATE true` and its
-    // `COMMENT` leaves a finished template with nothing to date it, and the
-    // cleanup rule for an undated template is "older than a day" — true of it at
-    // once, so the next worker's sweep would take it out from under every test
-    // copying it. Being this run's current template is all that saves it, and
-    // only until the next run, when it is not.
-    await createDatabase(name);
     created.push(name);
-    await markAsTemplate(name);
-    expect(await commentOf(name)).toBeNull();
-
+    // Planted rather than built, because the point is a template this process
+    // knows nothing about: a build killed between `ALTER … IS_TEMPLATE true` and
+    // its `COMMENT` leaves a finished template with nothing to date it. The
+    // cleanup rule for an undated template is "older than a day", which is true of
+    // it at once, so any other worker's sweep on this shared server takes it —
+    // which is why the plant and the adoption happen under one lock, exactly as a
+    // build holds that lock across its own two statements.
+    await whileBuilding(async (build) => {
+      await createDatabase(name);
+      await markAsTemplate(name);
+      return build(name, migrations);
+    });
     expect(await ensureTemplate(migrations)).toBe(name);
 
-    // A real epoch, not merely something: `Number(null)` is 0, so an undated
-    // template fails this as "expected 0 to be greater than 0".
+    // Dated, and still the database that was planted: no migration ran, so the
+    // build adopted it rather than building over it.
     expect(Number(await commentOf(name))).toBeGreaterThan(0);
+    expect(await hasTable(name, "stamped")).toBe(false);
   });
 
   test("the template is built once per process, not once per clone", async () => {
@@ -177,7 +194,10 @@ describe.skipIf(!server)("the template (D186)", () => {
     const name = templateName(migrations);
     // Exactly what a killed build leaves behind: the database exists, and it is
     // not a template. Reusing it would clone an empty schema into every test.
-    await createDatabase(name);
+    // Planted under the lock, since an undated `cf_tpl_*` is stale to every other
+    // worker's sweep from the moment it exists — including the window between
+    // the two statements here.
+    await whileBuilding(async () => createDatabase(name));
     created.push(name);
 
     expect(await ensureTemplate(migrations)).toBe(name);
@@ -222,31 +242,42 @@ describe.skipIf(!server)("migrated and empty databases (D186)", () => {
   });
 
   test("a clone whose template was cleaned up underneath it rebuilds and copies", async () => {
-    // What makes remembering the template name safe. Without forgetting it on
-    // 3D000, the second `CREATE … TEMPLATE` would fail the same way and the run
-    // would be over: the name this process remembers is exactly the one that
-    // stopped existing.
-    const name = await ensureTemplate();
-    await dropHarnessDatabase(name);
-    expect(await names()).not.toContain(name);
+    // A synthetic set, so the template this drops is one nothing else is using.
+    // The shared template is dropped by no test ever: fifty workers clone from it
+    // at once, and a test that took it away from them would be a fault in the
+    // suite, not evidence about the harness.
+    const migrations = [m("0001_raced", "create table raced (x int);")];
+    const template = await ensureTemplate(migrations);
+    created.push(template);
+    // What a sweep that won the race leaves behind: a name this process
+    // remembers, and a server that no longer has it. Without forgetting the name
+    // on 3D000, the retry would be handed the same missing template and the run
+    // would be over.
+    await dropHarnessDatabase(template);
+    expect(await names()).not.toContain(template);
 
-    const db = await migratedDatabase();
+    const db = await migratedFromTemplate(template, migrations);
     try {
       const applied = await db.query<{ id: string }>(
         "select id from schema_migrations order by id",
       );
-      expect(applied.rows.map((r) => r.id)).toEqual((await loadMigrations()).map((x) => x.id));
+      expect(applied.rows.map((r) => r.id)).toEqual(migrations.map((x) => x.id));
     } finally {
       await db.end();
     }
-    expect(await names()).toContain(name);
+    expect(await names()).toContain(template);
   });
 
   test("end() drops the database it was opened against", async () => {
-    const before = await names();
+    // Scoped to this process. The suite runs many workers against one server,
+    // and every one of them is creating and dropping `cf_t_*` at the same time,
+    // so a difference over the whole list is not evidence of anything — the
+    // first name that appeared is as likely to be a worker's as this test's.
+    const mine = (list: string[]) => list.filter((n) => n.startsWith(`cf_t_${process.pid}_`));
+    const before = mine(await names());
     const db = await emptyDatabase();
-    const [name] = (await names()).filter((n) => !before.includes(n));
-    expect(name).toMatch(new RegExp(`^cf_t_${process.pid}_`));
+    const [name] = mine(await names()).filter((n) => !before.includes(n));
+    expect(name).toMatch(new RegExp(`^cf_t_${process.pid}_\\d+_\\d+$`));
 
     await db.end();
 

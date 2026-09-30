@@ -328,51 +328,60 @@ export async function dropHarnessDatabase(name: string): Promise<void> {
 /**
  * The one migrated template every test copies, built once per migration set.
  *
- * Held under a session-level advisory lock for the WHOLE build, so N workers
- * arriving together build it exactly once and the rest find it finished. The
- * lock is released only after the template is marked, because a second worker
- * arriving in the middle would otherwise see a plain database and — correctly,
- * for a killed build — drop the one being built.
+ * Runs on a session that already holds the build lock, and holds it for the
+ * WHOLE build, so N workers arriving together build it exactly once and the rest
+ * find it finished. The lock is released only after the template is marked,
+ * because a second worker arriving in the middle would otherwise see a plain
+ * database and — correctly, for a killed build — drop the one being built.
  *
  * A database of the right name that is NOT a template is a build killed between
  * `CREATE` and `ALTER`: drop it and build again.
  */
-async function buildTemplate(name: string, shipped: readonly Migration[]): Promise<string> {
+async function buildTemplate(
+  session: pg.Client,
+  name: string,
+  shipped: readonly Migration[],
+): Promise<string> {
+  await dropOrphans(name);
+  const existing = await session.query<{ datistemplate: boolean; description: string | null }>(
+    "select d.datistemplate, s.description from pg_database d left join pg_shdescription s" +
+      " on s.objoid = d.oid and s.classoid = 'pg_database'::regclass where d.datname = $1",
+    [name],
+  );
+  if (existing.rows[0]?.datistemplate === true) {
+    // A build killed between the `ALTER` below and its `COMMENT` leaves a
+    // finished template that no cleanup can date: no comment reads as built at
+    // zero, so it is stale to every other run the moment it is 24 h old, and
+    // would be dropped out from under the tests copying it. It is the same
+    // build, so it is stamped now.
+    if (!existing.rows[0].description) {
+      await session.query(`comment on database ${identifier(name)} is '${epochSeconds()}'`);
+    }
+    return name;
+  }
+  if (existing.rows.length > 0) {
+    await session.query(`drop database ${identifier(name)} with (force)`);
+  }
+  await session.query(`create database ${identifier(name)}`);
+  const build = pgClient(cloneConfig(name));
+  try {
+    await migrate(build, shipped);
+  } finally {
+    // A database cannot be marked a template while a session is connected to
+    // it — and the next test's clone copies it.
+    await build.end();
+  }
+  await session.query(`alter database ${identifier(name)} is_template true`);
+  await session.query(`comment on database ${identifier(name)} is '${epochSeconds()}'`);
+  return name;
+}
+
+/** `buildTemplate` with the lock and the session it needs, which is the whole of a build. */
+async function build(name: string, shipped: readonly Migration[]): Promise<string> {
   const session = await maintenanceSession();
   try {
     await session.query("select pg_advisory_lock($1)", [TEMPLATE_LOCK]);
-    await dropOrphans(name);
-    const existing = await session.query<{ datistemplate: boolean; description: string | null }>(
-      "select d.datistemplate, s.description from pg_database d left join pg_shdescription s" +
-        " on s.objoid = d.oid and s.classoid = 'pg_database'::regclass where d.datname = $1",
-      [name],
-    );
-    if (existing.rows[0]?.datistemplate === true) {
-      // A build killed between the `ALTER` below and its `COMMENT` leaves a
-      // finished template that no cleanup can date: no comment reads as built at
-      // zero, so it is stale to every other run the moment it is 24 h old, and
-      // would be dropped out from under the tests copying it. It is the same
-      // build, so it is stamped now.
-      if (!existing.rows[0].description) {
-        await session.query(`comment on database ${identifier(name)} is '${epochSeconds()}'`);
-      }
-      return name;
-    }
-    if (existing.rows.length > 0) {
-      await session.query(`drop database ${identifier(name)} with (force)`);
-    }
-    await session.query(`create database ${identifier(name)}`);
-    const build = pgClient(cloneConfig(name));
-    try {
-      await migrate(build, shipped);
-    } finally {
-      // A database cannot be marked a template while a session is connected to
-      // it — and the next test's clone copies it.
-      await build.end();
-    }
-    await session.query(`alter database ${identifier(name)} is_template true`);
-    await session.query(`comment on database ${identifier(name)} is '${epochSeconds()}'`);
-    return name;
+    return await buildTemplate(session, name, shipped);
   } finally {
     await session.query("select pg_advisory_unlock($1)", [TEMPLATE_LOCK]).catch(() => undefined);
     await session.end();
@@ -402,7 +411,7 @@ export async function ensureTemplate(migrations?: readonly Migration[]): Promise
   const name = templateName(shipped);
   const remembered = builtTemplates.get(name);
   if (remembered) return remembered;
-  const building = buildTemplate(name, shipped);
+  const building = build(name, shipped);
   builtTemplates.set(name, building);
   // A build that failed is not an answer to hand the next test: the server was
   // down for a moment, it is not down forever.
@@ -413,6 +422,35 @@ export async function ensureTemplate(migrations?: readonly Migration[]): Promise
 /** Stop believing this process built a template, so the next caller builds it again. */
 function forgetTemplate(name: string): void {
   builtTemplates.delete(name);
+}
+
+/**
+ * Run something in the window a build has, holding the lock every build and
+ * every cleanup takes, with the build step itself handed in.
+ *
+ * This is how a test plants what a killed build leaves and then has the harness
+ * adopt it: those two together are what a build does, and holding one lock
+ * across both is what keeps another worker's sweep from taking the fixture in
+ * between. It has to be that way in the product too — a template that is built
+ * but not yet dated reads as built at zero, so it is stale to every other run
+ * from the moment the build's lock is released, which is why a real build holds
+ * that lock across its `ALTER` and its `COMMENT` together.
+ *
+ * The build step is handed in already bound to that session, because a build is
+ * statements on the session holding the lock and `pg_advisory_lock` is
+ * re-entrant per session and only there.
+ */
+export async function whileBuilding<T>(
+  work: (build: (name: string, migrations: readonly Migration[]) => Promise<string>) => Promise<T>,
+): Promise<T> {
+  const session = await maintenanceSession();
+  try {
+    await session.query("select pg_advisory_lock($1)", [TEMPLATE_LOCK]);
+    return await work((name, shipped) => buildTemplate(session, name, shipped));
+  } finally {
+    await session.query("select pg_advisory_unlock($1)", [TEMPLATE_LOCK]).catch(() => undefined);
+    await session.end();
+  }
 }
 
 /** True when a statement failed because the database it named does not exist. */
@@ -444,7 +482,22 @@ async function owning(config: DatabaseConfig): Promise<SqlClient> {
  * migrated database wants the same one.
  */
 export async function migratedServerDatabase(): Promise<SqlClient> {
-  const template = await ensureTemplate();
+  return migratedFromTemplate(await ensureTemplate());
+}
+
+/**
+ * A copy of one named template, and what happens when that name is not there.
+ *
+ * Split out from the two lines above so the race can be tested without touching
+ * the template the whole suite is cloning from: a template dropped out from
+ * under a live suite is a fault in whoever dropped it, and this is a test.
+ * `migrations` is the set that built that template, and it is what the retry
+ * rebuilds — the shipped one for every database test there is.
+ */
+export async function migratedFromTemplate(
+  template: string,
+  migrations?: readonly Migration[],
+): Promise<SqlClient> {
   const name = nextCloneName();
   try {
     await maintenanceStatement(
@@ -457,7 +510,7 @@ export async function migratedServerDatabase(): Promise<SqlClient> {
     // and rebuilt — once, because a template that keeps vanishing is a fault to
     // report, not to spin on.
     forgetTemplate(template);
-    const rebuilt = await ensureTemplate();
+    const rebuilt = await ensureTemplate(migrations);
     await maintenanceStatement(
       `create database ${identifier(name)} template ${identifier(rebuilt)}`,
     );
