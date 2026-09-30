@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MIGRATIONS_DIR, checksum, loadMigrations, migrate, type Migration } from "../migrate.js";
 import type { SqlClient } from "../sql-client.js";
-import { migratedDatabase, pgliteClient } from "./pglite-client.js";
+import { emptyDatabase, migratedDatabase } from "./pglite-client.js";
 
 const m = (id: string, sql: string): Migration => ({ id, sql });
 
@@ -16,7 +16,7 @@ describe("migrate (PT-3)", () => {
   });
 
   test("applies pending migrations in order, records them, and a second run applies nothing", async () => {
-    db = pgliteClient();
+    db = await emptyDatabase();
     const all = [
       m("0001_a", "create table a (x int);"),
       m("0002_b", "create table b (y int); insert into b values (1);"),
@@ -30,7 +30,7 @@ describe("migrate (PT-3)", () => {
   });
 
   test("records each migration's checksum, and refuses one edited after it was applied", async () => {
-    db = pgliteClient();
+    db = await emptyDatabase();
     await migrate(db, [m("0001_a", "create table a (x int);")]);
     const { rows } = await db.query<{ checksum: string }>("select checksum from schema_migrations");
     expect(rows[0]!.checksum).toBe(checksum("create table a (x int);"));
@@ -40,7 +40,7 @@ describe("migrate (PT-3)", () => {
   });
 
   test("a migration that fails applies nothing, not even the ones before it", async () => {
-    db = pgliteClient();
+    db = await emptyDatabase();
     await expect(
       migrate(db, [m("0001_a", "create table a (x int);"), m("0002_bad", "create table nope (;")]),
     ).rejects.toThrow();
@@ -49,7 +49,7 @@ describe("migrate (PT-3)", () => {
   });
 
   test("a database ahead of this code, or missing an earlier migration, is refused", async () => {
-    db = pgliteClient();
+    db = await emptyDatabase();
     await migrate(db, [m("0001_a", "select 1;"), m("0003_c", "select 1;")]);
     await expect(migrate(db, [m("0001_a", "select 1;")])).rejects.toThrow(
       "The database has applied migrations this code does not ship: 0003_c.",

@@ -7,7 +7,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration";
 import { dumpBrief } from "@campaignfoundry/shared";
 import type { SqlClient } from "../../db/sql-client.js";
-import { migratedDatabase, pgliteClient } from "../../db/__tests__/pglite-client.js";
+import { emptyDatabase, migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import { loadMigrations, migrate } from "../../db/migrate.js";
 import { resetDatabase, setDatabase } from "../../db/database.js";
 import { hashBytes } from "../../brief-files.js";
@@ -975,7 +975,7 @@ describe("Team scope on Postgres (D166, PT-2c)", () => {
 
 describe("0011_campaign_team migration (D166, PT-2c)", () => {
   test("an existing null team_id survives the migration; the column becomes text with a team FK", async () => {
-    const db = pgliteClient();
+    const db = await emptyDatabase();
     try {
       const all = await loadMigrations();
       // Everything below 0011: a later migration applied first would make
@@ -1013,7 +1013,7 @@ describe("0011_campaign_team migration (D166, PT-2c)", () => {
 
 describe("0013_campaign_meta migration (PT-5b3, D168, D177)", () => {
   test("adds nullable name and type columns; an existing row gets null for both", async () => {
-    const db = pgliteClient();
+    const db = await emptyDatabase();
     try {
       const all = await loadMigrations();
       // Everything below 0013: a later migration applied first would make

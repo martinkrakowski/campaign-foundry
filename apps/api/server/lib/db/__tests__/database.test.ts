@@ -1,6 +1,6 @@
 import { describe, test, expect, afterEach } from "vitest";
 import { database, resetDatabase, setDatabase } from "../database.js";
-import { pgliteClient } from "./pglite-client.js";
+import { emptyDatabase } from "./pglite-client.js";
 
 describe("database() (PT-3)", () => {
   const saved = { url: process.env.DATABASE_URL, ca: process.env.DATABASE_CA_PATH };
@@ -30,7 +30,7 @@ describe("database() (PT-3)", () => {
   });
 
   test("a set database serves every caller until reset", async () => {
-    const db = pgliteClient();
+    const db = await emptyDatabase();
     setDatabase(db);
     expect(database()).toBe(db);
     resetDatabase();
