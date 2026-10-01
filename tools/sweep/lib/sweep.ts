@@ -13,7 +13,11 @@ import { SweepRefusal } from "./types.js";
  * The first comment of each thread rides along (`mergeGate` names an open
  * thread by its author and an excerpt), so the merge condition and the sweep
  * read the same connection with one request — a second query over the same
- * pages would be a second parser to keep in step.
+ * pages would be a second parser to keep in step. So do the four fields that
+ * say WHERE a thread is (`fix-brief` drafts a fix-round brief from them):
+ * `path`, `line`, `originalLine` and `isOutdated`. They are additive — nothing
+ * above reads them — and a node that omits one parses to its default rather
+ * than to `undefined`, so a fixture written before this query keeps its shape.
  */
 export const THREADS_QUERY = `query SweepThreads($number: Int!, $after: String) {
   repository(owner: "martinkrakowski", name: "campaign-foundry") {
@@ -27,6 +31,10 @@ export const THREADS_QUERY = `query SweepThreads($number: Int!, $after: String) 
         nodes {
           id
           isResolved
+          path
+          line
+          originalLine
+          isOutdated
           comments(first: 1) { nodes { author { login } body } }
         }
       }
@@ -158,6 +166,13 @@ export async function fetchAllThreads(
         author: first?.author?.login ?? "unknown",
         excerpt: excerptOf(body),
         body,
+        // A node that carries none of the four anchor fields parses to the
+        // defaults, never to `undefined`: every caller above treats these as
+        // present, and a fixture that omits them must not make that a question.
+        path: n.path ?? "",
+        line: n.line ?? null,
+        originalLine: n.originalLine ?? null,
+        isOutdated: n.isOutdated === true,
       });
     }
     const pageInfo = threadsPage.pageInfo;
