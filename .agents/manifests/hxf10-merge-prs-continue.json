@@ -103,6 +103,23 @@
         "left by a crashed run"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "    for sweep in {1..20}; do\n      kill -0 -- \"-$group\" 2>/dev/null || break\n      kill -KILL -- \"-$group\" 2>/dev/null\n      sleep 0.1\n    done",
+      "after": "    : # MUTATION: the sweep is gone",
+      "because": "removing the sweep leaves one TERM as the whole of the teardown, and a TERM is only ever enough for a process that handles it. Anything still answering in that group when the signal has been delivered and has done everything a signal can do — a `gh` or a tool that traps or ignores TERM, which is ordinary and not exotic — stays running, and the run then hands back a lock that a process is still sitting under. The next runner is told the host is free, takes the lock, and merges beside it: the exact failure the lock exists to prevent, arrived at from the other end. The loop is bounded and it comes BEFORE release_lock, which is the ordering the test asserts: it asks whether the process is dead at the moment the lock directory disappears, because a process still alive then is a process this run told the next one was not there. The survivor in the test ignores TERM outright, so the assertion cannot pass by luck and does not depend on how fast the signal arrives",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "a process the signal cannot kill"
+      ],
+      "verdict": "caught"
     }
   ]
 }

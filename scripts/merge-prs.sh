@@ -692,10 +692,47 @@ pr_child=""
 # or the run has said so loudly enough.
 forward_signal() {
   trap '' INT TERM
+  local group sweep
   if [[ -n "$pr_child" ]]; then
-    kill -TERM -- "-$pr_child" 2>/dev/null
-    wait "$pr_child" 2>/dev/null
+    group="$pr_child"
+    # The global is cleared HERE, before the sweep and not after it: a second
+    # signal must not re-aim at a group this call is already tearing down, and by
+    # now the body itself is reaped.
     pr_child=""
+    kill -TERM -- "-$group" 2>/dev/null
+    wait "$group" 2>/dev/null
+    # AND THEN SWEEP, because one TERM is not the end of a group. A fork
+    # INHERITS its parent's process group, so the group outlives the body, and a
+    # process that was in the middle of handling the TERM when it arrived can
+    # fork on its way out — after the signal was delivered, which means it was not
+    # in the group the signal named. Measured here before this loop existed: a
+    # `gh` stub whose TERM handler forked a 300s sleeper left that sleeper running
+    # to the end of its sleep, under a lock this run had already released and told
+    # the next run was free.
+    #
+    # SIGKILL to the GROUP, not to the body: the body is already gone and the
+    # sleeper is not under it any more. `kill -0 -- -PGID` is the test for "is it
+    # over", because a process group exists exactly as long as it has a member —
+    # measured: 0 with a member, non-zero once the group is empty, non-zero for a
+    # pgid that never existed.
+    #
+    # Twenty passes at 0.1s is two seconds, which is what init needs to reap a
+    # killed descendant; a group that is still answering after SIGKILL is not
+    # going to be talked down, so the run names it and hands the lock back rather
+    # than leaving the next run to meet it. That is also the one thing here that
+    # can be wrong in the unsafe direction: once the group is empty its id is
+    # free, and a new process group can be given that number — so a straggler
+    # check that runs late enough could aim at a stranger. The window is the
+    # sleep below and the group is empty within a pass or two of the KILL, which
+    # is why the loop stops the moment the group stops answering.
+    for sweep in {1..20}; do
+      kill -0 -- "-$group" 2>/dev/null || break
+      kill -KILL -- "-$group" 2>/dev/null
+      sleep 0.1
+    done
+    if kill -0 -- "-$group" 2>/dev/null; then
+      echo "merge-prs: process group $group survived SIGKILL; check it before re-running" >&2
+    fi
   fi
   release_lock
   exit "$1"
@@ -806,7 +843,10 @@ for spec in "$@"; do
   # shell's own INT and TERM traps until a foreground child is gone, so a
   # foreground body would swallow the signal, carry on to `gh pr merge`, and be
   # reaped by no epilogue at all. `wait` is what makes the trap prompt, and it
-  # leaves the exit status the body's own.
+  # leaves the exit status the body's own. A signal that does arrive mid-body is
+  # forward_signal's: the whole group, then a sweep until it is empty, then the
+  # lock — in that order, so nothing is ever left running under a lock this run
+  # has already given back.
   wait $pr_child
   pr_status=$?
   # Cleared before anything else can signal it: from here on this group is gone,

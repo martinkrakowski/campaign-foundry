@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   chmodSync,
@@ -209,6 +209,14 @@ function makeHarness(): Harness {
     "branch_of() {",
     '  awk -v pr="$1" \'$1 == pr { print $2 }\' "$STUB_STATE/branches"',
     "}",
+    "# The sleeper a STUB_TERMPROOF_OUT test leaves behind. It IGNORES TERM, which",
+    "# is the only way to be certain it is still alive when the group TERM lands:",
+    '# `trap "" TERM` sets SIG_IGN, and SIG_IGN is inherited across exec, so the',
+    "# sleep below cannot be killed by the signal the run sends first. It reports",
+    "# its OWN pid because $$ inside a subshell of the stub would be the stub's.",
+    "spawn_termproof_sleeper() {",
+    '  sh -c \'trap "" TERM; echo $$ >"$1"; exec sleep "$2"\' _ "${STUB_TERMPROOF_OUT:-}" "${STUB_TERMPROOF_SLEEP:-300}"',
+    "}",
     'case "${1:-} ${2:-}" in',
     '  "pr view")',
     '    br=$(branch_of "${3:-}")',
@@ -232,6 +240,19 @@ function makeHarness(): Harness {
     '    if [ -n "${STUB_GH_MERGE_PID_FILE:-}" ]; then',
     '      echo "$$" >"$STUB_GH_MERGE_PID_FILE"',
     '      sleep "${STUB_GH_MERGE_SLEEP:-30}"',
+    "    fi",
+    "    # STUB_TERMPROOF_OUT makes this stub leave a sleeper behind that the run's",
+    "    # SIGTERM provably cannot kill — it ignores TERM — and publish that sleeper's",
+    "    # pid. That is the shape the sweep exists for: a process still in the PR's",
+    "    # group when the signal has been delivered and has done everything a signal",
+    "    # can do to it. Before the sweep existed, one of these outlived the lock the",
+    "    # run had already released, and the next run was told the host was free.",
+    "    # The park is bounded and still BEFORE anything is recorded, so a run that",
+    "    # reaches the end of it has merged and the log can tell the two apart.",
+    '    if [ -n "${STUB_TERMPROOF_OUT:-}" ]; then',
+    '      : >"$STUB_TERMPROOF_OUT.entered"',
+    "      spawn_termproof_sleeper",
+    '      i=0; while [ "$i" -lt "${STUB_PARK_SECONDS:-30}" ]; do sleep 1; i=$((i + 1)); done',
     "    fi",
     '    printf "%s\\n" "${3:-}" >>"$STUB_STATE/merged"',
     "    ;;",
@@ -428,18 +449,123 @@ interface RunResult {
  * the signal. A test that needs the run's output awaits `closed`; a test that
  * needs the run to be GONE awaits `done`.
  */
+/**
+ * Every run this file has started and not yet torn down. The teardown in
+ * afterEach walks it, so a test that fails — or throws before its own `finally` —
+ * still cannot leave a process behind.
+ */
+const liveRuns = new Set<StartedRun>();
+
+interface StartedRun {
+  readonly child: ChildProcess;
+  /** Where the gh stub publishes the PR body's process group, when it gets that far. */
+  readonly bodyPgidFile: string;
+}
+
+/** Best-effort kill of one process group. Never throws; a group that is gone is fine. */
+function killGroup(pgid: number, signal: NodeJS.Signals = "SIGKILL"): void {
+  if (!Number.isInteger(pgid) || pgid <= 1) return;
+  try {
+    process.kill(-pgid, signal);
+  } catch {
+    // No such group, or not ours to signal. Either way there is nothing to do.
+  }
+}
+
+/** The pid a stub published, or undefined if it never wrote one. */
+function readPidFile(path: string): number | undefined {
+  try {
+    const value = Number(readFileSync(path, "utf8").trim());
+    return Number.isInteger(value) && value > 1 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The body-group file each started run publishes, so stopRun can find it by child. */
+const bodyPgidFiles = new WeakMap<ChildProcess, string>();
+
+/**
+ * Stop a run and EVERYTHING under it, and make sure it is gone.
+ *
+ * Killing the run's own process group is not enough, and that is the whole
+ * reason this function exists in this shape: since round 3 each PR body is
+ * launched into a process group of its OWN, so the body — and any `gh` it
+ * exec'd — is not in the run's group at all. A cleanup that signalled only the
+ * run left a body behind, and a body left behind holds the stdio pipes this
+ * process is reading, so the test runner waited on a `close` event no living
+ * process would ever send: one failed test hung a suite for three hours, and the
+ * orphan was still there for the orchestrator to find.
+ *
+ * So: the run's group, the run itself, and the body's group — the last one from
+ * the file the gh stub publishes it in, which is why startMergePrs always sets
+ * that knob and records it here, so every call site gets the whole teardown
+ * without having to know any of this. Waits on `exit`, never on `close`.
+ */
+async function stopRun(child: ChildProcess, bodyPgidFile?: string): Promise<void> {
+  const pgidFile = bodyPgidFile ?? bodyPgidFiles.get(child);
+  const bodyPgid = pgidFile === undefined ? undefined : readPidFile(pgidFile);
+  if (bodyPgid !== undefined) killGroup(bodyPgid);
+  try {
+    process.kill(-(child.pid as number), "SIGKILL");
+  } catch {
+    // Not a group leader, or already gone.
+  }
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    // Already gone, which is the case this wants.
+  }
+  if (child.exitCode === null && child.signalCode === null) {
+    await new Promise<void>((resolve) => {
+      const done = () => resolve();
+      child.once("exit", done);
+      setTimeout(done, 2_000);
+    });
+  }
+  // The body's group gets one more pass AFTER the run is reaped: a body that was
+  // mid-fork, or whose stub published its group a moment before the signal, is
+  // only findable from that file, and by now the file is definitely complete.
+  if (pgidFile !== undefined) {
+    const later = readPidFile(pgidFile);
+    if (later !== undefined) killGroup(later);
+  }
+}
+
+/** Forget a run that has already been torn down by its own test. */
+function forgetRun(run: StartedRun): void {
+  liveRuns.delete(run);
+}
+
+// Belt and braces for every test in this file, including the ones that use
+// spawnSync and so cannot be cleaned up by their own `finally`. A leaked body
+// holds this process's pipes open, so a leak does not fail a test — it hangs the
+// run, and nothing gets reported at all.
+afterEach(async () => {
+  for (const run of [...liveRuns]) {
+    await stopRun(run.child, run.bodyPgidFile);
+    liveRuns.delete(run);
+  }
+});
+
 function startMergePrs(
   harness: Harness,
   args: readonly string[],
   env: Readonly<Record<string, string>> = {},
   detached = false,
 ): { child: ChildProcess; done: Promise<RunResult>; closed: Promise<RunResult> } {
+  // The body's process group, published by the gh stub when it is entered. Set
+  // here rather than per test so that EVERY run this file starts can be torn
+  // down completely, including one that fails before its own cleanup runs.
+  const bodyPgidFile = join(harness.stateDir, "gh-pgid");
   const child = spawn("zsh", [mergePrsSh, ...args], {
     cwd: harness.repoDir,
-    env: mergePrsEnv(harness, env),
+    env: mergePrsEnv(harness, { STUB_GH_PGID_OUT: bodyPgidFile, ...env }),
     detached,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  liveRuns.add({ child, bodyPgidFile });
+  bodyPgidFiles.set(child, bodyPgidFile);
   let stdout = "";
   let stderr = "";
   child.stdout.setEncoding("utf8");
@@ -459,34 +585,6 @@ function startMergePrs(
     child.on("close", (code) => resolve(settle(code)));
   });
   return { child, done, closed };
-}
-
-/**
- * Stop a run started by startMergePrs, and make sure it is gone either way.
- *
- * Waits on `exit`, never on `close`: a run that was killed mid-`gh` leaves an
- * orphaned stub holding the stdio pipes, and a cleanup that waited for those
- * would sit for the rest of the stub's sleep — long enough for the test
- * framework's own timeout to fire over the top of the assertion that actually
- * failed, which is how a real diagnosis turns into "test timed out".
- */
-async function stopRun(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  try {
-    process.kill(-(child.pid as number), "SIGKILL");
-  } catch {
-    // Not a group leader, or already gone.
-  }
-  try {
-    child.kill("SIGKILL");
-  } catch {
-    // Already gone, which is the case this wants.
-  }
-  await new Promise<void>((resolve) => {
-    const done = () => resolve();
-    child.once("exit", done);
-    setTimeout(done, 2_000);
-  });
 }
 
 /**
@@ -1296,4 +1394,73 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       harness.cleanup();
     }
   }, 30_000);
+
+  test("a process the signal cannot kill is swept before the lock is released", async () => {
+    // What the sweep is for: something still in the PR's process group when the
+    // TERM has been delivered and has done everything a TERM can do to it. The
+    // `gh pr merge` stub leaves a sleeper that IGNORES TERM, so its survival
+    // past the signal is certain rather than a race, and it inherits the body's
+    // group — which is the only handle left on it.
+    //
+    // The brief asked for a sleeper forked from inside the stub's own TERM
+    // handler, and that shape cannot be tested against the sweep it asks for:
+    // the handler has to fork before the sweep's first SIGKILL, and the run
+    // reaches that SIGKILL about 1-2ms after the TERM, because `wait` returns
+    // as soon as the body itself is gone. Measured here: with a handler racing
+    // it, the fork never happened. So the subject is a group member that
+    // provably survives the signal instead — which is the property the sweep
+    // actually provides, and which fails deterministically without it.
+    const harness = makeHarness();
+    const termproofOut = join(harness.stateDir, "termproof-pid");
+    const entered = `${termproofOut}.entered`;
+    const { child, done } = startMergePrs(harness, [specOf(PR_ONE)], {
+      STUB_TERMPROOF_OUT: termproofOut,
+      STUB_TERMPROOF_SLEEP: "300",
+      STUB_PARK_SECONDS: "30",
+    });
+    let sleeper = 0;
+    try {
+      // The merge call itself, not the first gh call: this is about a process
+      // left under a merge that is in flight.
+      expect(
+        await waitFor(() => existsSync(entered), 15_000, "the merge call to be in flight"),
+      ).toBe(true);
+      expect(await waitForContent(termproofOut, 5_000), "the stub published no sleeper").toBe(true);
+      sleeper = Number(readFileSync(termproofOut, "utf8").trim());
+      expect(sleeper).toBeGreaterThan(0);
+      expect(pidAlive(sleeper)).toBe(true);
+      expect(existsSync(harness.lockDir)).toBe(true);
+
+      process.kill(child.pid as number, "SIGTERM");
+      const finished = await Promise.race([
+        done.then((result) => ({ kind: "exited" as const, result })),
+        new Promise<{ kind: "deadline" }>((resolve) =>
+          setTimeout(() => resolve({ kind: "deadline" }), 15_000),
+        ),
+      ]);
+      expect(finished.kind, "the run did not answer SIGTERM").toBe("exited");
+
+      // The lock is handed back, and the run said it did.
+      expect(existsSync(harness.lockDir)).toBe(false);
+      // AND the sleeper is already gone by then. The ordering is the claim: the
+      // sweep runs before release_lock, so anything still in the group at the
+      // moment the lock disappears is something this run told the next runner
+      // was not there. The sleeper is 300s long, so without the sweep this does
+      // not pass by luck — it cannot pass at all.
+      expect(
+        pidAlive(sleeper),
+        "a process that ignored SIGTERM outlived the release of the lock",
+      ).toBe(false);
+      // Nothing was merged: the stub never got past its own park.
+      expect(mergedByStub(harness)).toBe("");
+    } finally {
+      await stopRun(child);
+      try {
+        if (sleeper > 0) process.kill(sleeper, "SIGKILL");
+      } catch {
+        // Already gone, which is the case this wants.
+      }
+      harness.cleanup();
+    }
+  }, 60_000);
 });
