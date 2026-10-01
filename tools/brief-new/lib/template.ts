@@ -41,6 +41,25 @@ Environment, for every shell call:
 - **Coverage:** under an agent, vitest's coverage TEXT table hides fully covered files, so read \`coverage/coverage-summary.json\` (\`--coverage.reporter=json-summary\`).
 - Never call the real GitHub API or \`gh\`, and never spawn a CLI under test: call it in-process with injected I/O.
 
+### Concurrency checklist (locks, signals, async setup/cleanup, shared test state)
+
+If this lane touches a lock, a signal, an async setup or a cleanup, or shared test state, walk all
+five before you call it done. Three of them are wave-w01 defects that shipped.
+
+- **(a)** Re-check ownership or staleness **after the LAST \`await\` or \`wait\`**, immediately before
+  you act on the shared state — never on entry. #642 (HXF3) adopted the database before the
+  org-seed \`await\`.
+- **(b)** Set an "attempted" or "done" flag **immediately before the action it records**, never on
+  entry. #641 (MH5) set the release flag before the heartbeat \`wait\`.
+- **(c)** A shell \`wait\` or \`sleep\` is **interrupted by a trapped signal**: the trap runs inside it,
+  not after it. Trace what each trap does at each such point.
+- **(d)** A cleanup can run **twice or late** — a second actor, a timeout, a crash handler — so it
+  must be **read-only on state it does not own**. #639 (MH4) had a refused acquire give back a slot
+  no longer its own.
+- **(e)** For **each** of those points, one test that **stacks a second actor there**. The same path
+  run twice with nothing else changed is not that test, and it is the only thing that catches
+  (a)–(d).
+
 ## Verification
 <VERIFICATION>
 
@@ -67,13 +86,19 @@ Run every verification command in the foreground and read its exit code. A task 
  * a lane there is told not to try and to run its own targeted commands in the
  * foreground instead.
  *
+ * It also carries **midnight's test Postgres**, and that sentence is here rather
+ * than in {@link TEMPLATE_F} for a host reason: `127.0.0.1` on the Mac is the
+ * Mac, so a mac lane told to set the midnight address would select the
+ * server-only path against a database that is not there. The credential is the
+ * operator's `~/.pgpass` and is never written into a URL, a brief or an env line.
+ *
  * The middle line is a placeholder and stays one. `<targeted commands>` is the
  * orchestrator's to fill — the commands are per lane and this tool has no way to
  * know them — and it is NOT one of the seven names `substitute` fills, so it
  * reaches the file as the word the orchestrator will search for.
  */
 export const VERIFICATION_MIDNIGHT =
-  "**Do NOT run `yarn gate` or `yarn test:cov`** (this host cannot pass the full suite; GitHub CI is the gate). Run, in the FOREGROUND, reading each exit code:\n<targeted commands>";
+  "**Do NOT run `yarn gate` or `yarn test:cov`** (this host cannot pass the full suite; GitHub CI is the gate). Run, in the FOREGROUND, reading each exit code:\n<targeted commands>\n\nSet `TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres` — midnight's test Postgres, in the environment block above. The server uses SCRAM, so the credential comes from the operator's `~/.pgpass`, never in a URL, a brief or an env line. Without it every pg test silently ran on PGlite instead: on HXF3's two harness files, 108 s with 22 timeouts, against 11 s and 53/53.";
 
 /**
  * The mac verification block: the same targeted commands, and then the whole
