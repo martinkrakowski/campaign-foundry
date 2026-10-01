@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "HXF11-lane-verify",
+  "mutations": [
+    {
+      "file": "tools/lane-verify/lib/coverage.ts",
+      "before": "const METRICS = [\"lines\", \"branches\", \"functions\", \"statements\"] as const;",
+      "after": "const METRICS = [\"lines\", \"functions\", \"statements\"] as const;",
+      "because": "the row's rule is that a file is under 100 if ANY of the four metrics is, and branches is the one that earns its own entry: it is the only metric that can be under 100 while every LINE of the file was executed, so a file whose one unreachable `||` operand was never taken reports 100/100 lines and is not covered. Dropped from the list, `underHundred` finds nothing in a summary whose only short metric is branches, the coverage row exits 0, and the run reports the whole second-host check as settled on a branch with dead code in it — the exact verdict this tool exists to produce, and the only one an operator reads. The test the row names drives it: a summary whose sole shortfall is `branches: 99.5` must be LISTED and must exit 1, and with the metric gone the list is empty. Every other assertion in the file survives the mutation, which is why the anchor is the whole METRICS list and not a bare \"branches\": the 'Unknown' pct case reads lines, and the two-metric case reads lines and functions, so both still pass and cannot see this",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/lane-verify",
+        "-t",
+        "a file at 99.5% branches is LISTED and exits 1, though every line ran"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
