@@ -334,7 +334,7 @@ at once reports the one it noticed first.
 
 - **The reviewer's model is never the implementer's.** The implementer here is `openrouter/stealth/space-bunny-alpha`, so a Fable pass is an independent read.
 - **A reviewer's finding is a claim, not a verdict.** Verify each one against the code (or by running the built artefact) before sending it to a fix round, and refute it with the mechanism when it is wrong.
-- **If the owner asks for a Gemini pass instead,** it runs ONLY through `agy` (never through opencode or OpenRouter), with the prompt in a FILE and never interpolated into a command string: a double-quoted `agy --print "<diff>"` expands every `$(…)` and backtick in that diff before agy sees it. Use `ssh m 'cd <wt> && agy --print "$(cat .agents/briefs/scratch/review-prompt.txt)" …'`. Never pass `--dangerously-skip-permissions`; and an EMPTY response (headless agy denies shell commands) is a failed review to re-run, never a clean verdict.
+- **If the owner asks for a Gemini pass instead,** it runs ONLY through `agy` (never through opencode or OpenRouter), with the prompt in a FILE that embeds the diff and says: read files only with your file-reading tool; run no shell command, and never interpolated into a command string: a double-quoted `agy --print "<diff>"` expands every `$(…)` and backtick in that diff before agy sees it. Use `ssh m 'cd <wt> && agy --print "$(cat .agents/briefs/scratch/review-prompt.txt)" …'`. Never pass `--dangerously-skip-permissions`; and an EMPTY response (headless agy denies shell commands) is a failed review to re-run, never a clean verdict.
 
 ### Stage 3 — Remediate
 
