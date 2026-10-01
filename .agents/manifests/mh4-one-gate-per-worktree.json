@@ -18,6 +18,23 @@
         "a second acquire in the same worktree is refused"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "    slot_seen_pid=$(cat \"$slot_candidate/pid\" 2>/dev/null)\n    pid_alive \"$slot_seen_pid\" || continue\n    slot_seen_beat=$(cat \"$slot_candidate/beat\" 2>/dev/null)\n    beat_is_stale \"$slot_seen_beat\" && continue\n    printf '%s\\n' \"$slot_candidate\"\n",
+      "after": "    slot_seen_pid=$(cat \"$slot_candidate/pid\" 2>/dev/null)\n    slot_seen_beat=$(cat \"$slot_candidate/beat\" 2>/dev/null)\n    printf '%s\\n' \"$slot_candidate\"\n",
+      "because": "the liveness half of the same-worktree check: with these two filters gone worktree_holder yields to ANY slot naming the caller's worktree, alive or not, so a crashed holder's abandoned lock blocks every acquire in that worktree until something else reclaims it — and over-blocking is its own bug, because refusing on a holder the slot loop would have reclaimed locks a worktree nobody is gating out of gating itself. The test seeds a dead-pid holder and a stale-beat holder in SLOT 1 carrying the acquirer's own worktree, at CF_GATE_SLOTS=2, so the loop wins the free slot 0 without reclaiming or judging anything and only these two lines decide: exit 0 with lane-new at slot 0, and the slot-1 corpse still there, which also pins that the scan reads slots and never reclaims them. SLOT 1 rather than SLOT 0 is the whole claim: seeded at slot 0 the loop reclaims it before try_create wins, the scan then finds only the acquirer's own slot and skips it by path, and this mutation survives — measured, `verdict: survived`, which is what the fix round was raised on. The acquire runs from the seeded worktree, or the seed's worktree file matches nothing and the case passes for the wrong reason. The two halves are separately load-bearing: dropping the beat filter alone is caught by the stale case and dropping the pid filter alone by the dead case.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "in ANOTHER slot does not block"
+      ],
+      "verdict": "caught"
     }
   ]
 }

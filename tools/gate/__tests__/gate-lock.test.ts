@@ -100,6 +100,13 @@ interface RunResult {
  * its own checkout, so a test that gives two acquirers one TMPDIR and one cwd
  * each is a host with two slots and two worktrees; a test that gives them two
  * TMPDIRs is two hosts.
+ *
+ * CF_GATE_SLOTS is pinned HERE, between the inherited environment and the
+ * per-test one, because D188 sets it host-wide (/etc/environment) and most of
+ * these tests are written against the default of one slot: on a host with three,
+ * an acquirer that should have been told busy takes slot 1 instead and the test
+ * is asserting about busy. A test that means more slots says so in its own env,
+ * which is spread last and therefore wins.
  */
 function runLockIn(
   dir: string,
@@ -111,7 +118,7 @@ function runLockIn(
 ): RunResult {
   const result = spawnSync(shell, [gateLockSh, ...args], {
     encoding: "utf8",
-    env: { ...process.env, TMPDIR: dir, ...env },
+    env: { ...process.env, CF_GATE_SLOTS: "1", TMPDIR: dir, ...env },
     timeout,
     cwd,
   });
@@ -175,8 +182,9 @@ function startLockIn(
   shell = "sh",
   cwd?: string,
 ): { child: ChildProcess; done: Promise<RunResult> } {
+  // The same host-wide pin as runLockIn above — see there for why.
   const child = spawn(shell, [gateLockSh, ...args], {
-    env: { ...process.env, TMPDIR: dir, ...env },
+    env: { ...process.env, CF_GATE_SLOTS: "1", TMPDIR: dir, ...env },
     cwd,
   });
   let stdout = "";
@@ -1847,6 +1855,52 @@ describe("gate-lock.sh CF_GATE_SLOTS", () => {
       expect({ why: dead.why, status: taken.status }).toEqual({ why: dead.why, status: 0 });
       // The corpse is reclaimed on the way, and the slot is this caller's.
       expect(slotFile(lockDir(dir), "owner").trim()).toBe("lane-new");
+    }
+  });
+
+  test("a same-worktree holder that is dead or stale in ANOTHER slot does not block, and is left where it is", () => {
+    // The liveness filter itself, and it needs the corpse somewhere the slot
+    // loop will NOT walk over. Seeded at slot 0 — as the test above does — the
+    // loop reclaims slot 0 before try_create wins, and by the time
+    // worktree_holder scans, the only slot left is the acquirer's own, which the
+    // scan skips by path. Every liveness line in worktree_holder can be deleted
+    // and that test stays green: it was measuring the reclaim path, not the
+    // filter. (Measured: the mutation read `survived` before this test existed.)
+    //
+    // So the corpse goes in SLOT 1, which is a slot the loop never looks at
+    // because it wins the free slot 0 first. Nothing is reclaimed, nothing is
+    // judged, and the only thing that can answer this acquire is the pair of
+    // filters: pid alive AND beat not stale, the slot loop's own judgement and
+    // nothing stricter. Over-blocking is its own bug — a crashed holder's
+    // abandoned lock must not lock a worktree nobody is gating out of gating
+    // itself.
+    const worktree = scratch();
+    const staleBeat = Math.floor(Date.now() / 1000) - 700;
+    for (const dead of [
+      { why: "a dead pid", owner: "lane-dead", holder: { pid: reapedPid() } },
+      { why: "a stale beat", owner: "lane-stale", holder: { pid: process.pid, beat: staleBeat } },
+    ]) {
+      const dir = scratch();
+      const corpse = seedSlot(dir, 1, {
+        owner: dead.owner,
+        ...dead.holder,
+        worktree: plainWorktree(worktree),
+      });
+      // From the seeded worktree, or the seed's worktree file matches nothing
+      // and the case passes for the wrong reason.
+      const taken = acquireFrom(dir, worktree, ["acquire", "lane-new"], {
+        CF_GATE_CALLER_PID: "424242",
+        CF_GATE_SLOTS: "2",
+      });
+      expect({ why: dead.why, status: taken.status }).toEqual({ why: dead.why, status: 0 });
+      // It took the free slot 0, which is all the loop had to do.
+      expect(slotFile(lockDir(dir), "owner").trim()).toBe("lane-new");
+      // The corpse is STILL there, untouched: worktree_holder reads slots, it
+      // never reclaims them. Reclaiming is the loop's job and it never saw this
+      // one, which is also what "not reclaiming" in the output says.
+      expect(existsSync(corpse)).toBe(true);
+      expect(slotFile(corpse, "owner").trim()).toBe(dead.owner);
+      expect(taken.stdout).not.toContain("reclaiming");
     }
   });
 

@@ -852,7 +852,7 @@ acquire() {
 #   command has been reaped. `wait` then has no child left (`wait: pid N is not
 #   a child of this shell`) and the `exit 143` runs without ever entering the
 #   EXIT trap. Observed 6 times in 6: exit 143, no "released by", the lock left
-#   at the name with all four of its files, and the heartbeat still looping
+#   at the name with all of its files, and the heartbeat still looping
 #   under a pid that had died — a lock the next acquire reclaims on pid-death
 #   and an orphan refreshing a dead holder's beat. A CI timeout that sends TERM
 #   twice is exactly that.
@@ -906,7 +906,7 @@ run_cleanup() {
   # cleanup killed this shell outright — before `release`, with the lock still at
   # the name. Measured here with one refresh parked in
   # CF_GATE_TEST_PAUSE_BEFORE_BEAT_MV, a TERM, and a second TERM 0.5s later:
-  # exit 143, no "released by" line, and the lock left at the name with all four
+  # exit 143, no "released by" line, and the lock left at the name with all
   # of its files, under /bin/sh AND /bin/dash. A CI timeout that sends TERM
   # twice is exactly that. Nothing outside can break the cleanup any more, and
   # `kill -9` on this pid remains the way out of a command that will not stop.
