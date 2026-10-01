@@ -74,7 +74,12 @@ export async function emit(
   }
   if (result.stderr.trim() !== "") io.logError(`wave-event.sh: ${result.stderr.trim()}`);
   if (result.code === 0) {
-    io.log(`emitted ${args.event} for ${args.lane} at ${args.stage}`);
+    // DIAGNOSTIC, so it goes to stderr and always does. `usage --json` is a
+    // data channel: stdout carries the record and nothing else, so a consumer
+    // can parse it as one JSON value. A confirmation line on stdout would make
+    // `lane:watch usage --json --emit … | jq` fail on a successful run, which
+    // is the one case where nobody expects a parse error.
+    io.logError(`emitted ${args.event} for ${args.lane} at ${args.stage}`);
     return { code: EXIT_OK };
   }
   return { code: result.code };

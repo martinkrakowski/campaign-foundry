@@ -75,7 +75,16 @@ export function source(): Source {
       control?.error(reason);
     },
     close: () => {
-      control?.close();
+      // The stall now CANCELS the reader it is waiting on, which closes the
+      // underlying controller. A test that closes afterwards — as the stall
+      // tests do, so a dropped timer fails fast rather than timing out — is
+      // closing a stream that is already closed, which is a double-close in a
+      // test double, not a condition any test is asserting on.
+      try {
+        control?.close();
+      } catch {
+        // already closed by the stall's cancel()
+      }
     },
   };
 }
@@ -103,7 +112,21 @@ export interface Recorded {
  * which a `Response` cannot do: its body is read once, so a four-reconnect
  * test needs four subscriptions rather than one replayed.
  */
-export type Answer = Response | (() => Response) | { readonly reject: unknown };
+export type Answer =
+  | Response
+  | (() => Response)
+  | { readonly reject: unknown }
+  /**
+   * A connect that never resolves on its own and REJECTS with an AbortError
+   * when the caller's signal fires — what a real `fetch` does.
+   *
+   * This is the shape that proves the get's rejection is folded into a result.
+   * A stub that merely never resolves leaves a pending promise that nothing
+   * ever settles, which cannot distinguish a handled rejection from an ignored
+   * one; this one fails as soon as `runFollow` aborts, so an unfolded promise
+   * becomes an unhandled rejection and fails the run.
+   */
+  | { readonly hangUntilAbort: true };
 
 export interface FetchStub {
   readonly fetch: FetchLike;
@@ -127,10 +150,19 @@ export function fetchStub(answers: readonly Answer[]): FetchStub {
     });
     const at = Math.min(calls.length - 1, answers.length - 1);
     const answer = answers[at];
-    // A stream can fail with anything the runtime hands back, so the reject
-    // form is `unknown`: `lane-watch` has to report a non-Error too.
     if (typeof answer === "object" && answer !== null && "reject" in answer) {
+      // A stream can fail with anything the runtime hands back, so the reject
+      // form is `unknown`: `lane-watch` has to report a non-Error too.
       throw answer.reject;
+    }
+    if (typeof answer === "object" && answer !== null && "hangUntilAbort" in answer) {
+      return await new Promise<Response>((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => {
+          const error = new Error("This operation was aborted");
+          error.name = "AbortError";
+          reject(error);
+        });
+      });
     }
     return typeof answer === "function" ? answer() : answer;
   };

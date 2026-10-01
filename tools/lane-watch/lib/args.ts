@@ -135,9 +135,12 @@ export function parseFollowArgs(argv: readonly string[]): FollowArgs {
       }
       case "--stall": {
         const raw = valueAfter(argv, ++i, flag);
-        if (!/^\d+$/.test(raw)) {
+        // POSITIVE, not merely a whole number. `--stall 0` arms the timer at
+        // 0ms, it fires before any frame can arrive, and every lane — a
+        // perfectly healthy one included — is then reported as stalled.
+        if (!/^[1-9]\d*$/.test(raw)) {
           throw new Error(
-            `--stall wants a whole number of seconds, got '${raw}'\n${LANE_WATCH_USAGE}`,
+            `--stall wants a positive whole number of seconds, got '${raw}'\n${LANE_WATCH_USAGE}`,
           );
         }
         stallSecs = Number(raw);

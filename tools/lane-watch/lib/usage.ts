@@ -85,13 +85,25 @@ export async function readUsage(args: UsageArgs, io: UsageIo): Promise<UsageResu
     return { code: EXIT_FAILED, usage: null };
   }
 
-  let body: SessionShape;
+  let parsed: unknown;
   try {
-    body = (await response.json()) as SessionShape;
+    parsed = await response.json();
   } catch (error) {
     io.logError(`lane:watch: session ${session} did not return JSON: ${errorText(error)}`);
     return { code: EXIT_FAILED, usage: null };
   }
+  // A 200 whose body is JSON but not a session OBJECT is an unusable response,
+  // not an incomplete one. `null` throws on the first property read, and a
+  // number, string or array falls through to the exit-3 branch as though the
+  // server had reported a session with no tokens. Both misattribute the fault:
+  // one reaches the CLI's usage-error arm and exits 2, telling the operator
+  // their command line was wrong when the server was; the other exits 3,
+  // "unreported", when the truth is that there was nothing to report on.
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    io.logError(`lane:watch: session ${session} did not return a session object`);
+    return { code: EXIT_FAILED, usage: null };
+  }
+  const body = parsed as SessionShape;
 
   const tokens = body.tokens;
   const created = body.time?.created;
@@ -113,9 +125,7 @@ export async function readUsage(args: UsageArgs, io: UsageIo): Promise<UsageResu
 
   io.log(args.json ? JSON.stringify(usage) : renderUsage(usage));
 
-  const missing: string[] = [];
-  if (tokens === undefined) missing.push("tokens");
-  if (body.cost === undefined) missing.push("cost");
+  const missing = unreported(body);
   if (missing.length > 0) {
     io.logError(
       `lane:watch: the server did not report ${missing.join(" and ")} for ${session} — printed ` +
@@ -124,4 +134,57 @@ export async function readUsage(args: UsageArgs, io: UsageIo): Promise<UsageResu
     return { code: EXIT_UNKNOWN, usage };
   }
   return { code: EXIT_OK, usage };
+}
+
+/**
+ * The five token counts, named for the message, in the order the row lists them.
+ *
+ * They are read as a LIST rather than tested one at a time so the
+ * completeness decision below has exactly ONE predicate to keep in step with
+ * what is printed: a count that is not a number is unreported, whether it is
+ * absent, `null`, or the wrong type entirely.
+ */
+const TOKEN_COUNTS: readonly (readonly [
+  string,
+  (tokens: NonNullable<SessionShape["tokens"]>) => unknown,
+])[] = [
+  ["input", (tokens) => tokens.input],
+  ["output", (tokens) => tokens.output],
+  ["reasoning", (tokens) => tokens.reasoning],
+  ["cache.read", (tokens) => tokens.cache?.read],
+  ["cache.write", (tokens) => tokens.cache?.write],
+];
+
+/**
+ * What the server did not report, named — and the ONE completeness predicate.
+ *
+ * A reading is complete only when every token count AND `cost` is a number.
+ *
+ * Testing the top-level `tokens` object instead was the bug: `tokens: {}` with
+ * a cost satisfied `tokens !== undefined`, so a record printed with five
+ * `null`s and a real cost exited 0 — and with `--emit` that incomplete reading
+ * was appended to the wave as a clean `settled` event under a success code.
+ * `null` for either field failed the same test the other way round, exiting 0
+ * for a record that said nothing.
+ *
+ * `secs` is deliberately NOT in this list. The row names only tokens and cost
+ * for exit 3, and a session with no `time` is a session whose duration the
+ * server has not published — the totals may still be complete, and refusing to
+ * report them over a missing clock would discard a reading that is mostly
+ * there. `secs` prints as `null` and the exit stays 0.
+ */
+function unreported(body: SessionShape): readonly string[] {
+  const missing: string[] = [];
+  const tokens = body.tokens;
+  if (tokens === undefined || tokens === null) {
+    // The whole object is absent, so the object is what the message names —
+    // not five counts the server was never asked for.
+    missing.push("tokens");
+  } else {
+    for (const [name, read] of TOKEN_COUNTS) {
+      if (typeof read(tokens) !== "number") missing.push(`tokens.${name}`);
+    }
+  }
+  if (typeof body.cost !== "number") missing.push("cost");
+  return missing;
 }

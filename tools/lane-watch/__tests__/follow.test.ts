@@ -565,6 +565,55 @@ describe("lane:watch follow — the concluding frame ends the watch itself", () 
   });
 });
 
+describe("lane:watch follow — a connect that never answers", () => {
+  test("a connect that never resolves is covered by the stall, and is aborted on the way out", async () => {
+    // The stall is armed BEFORE the get, so a tunnel that accepts the
+    // connection and then says nothing is a stall like any other. The stub
+    // REJECTS with an AbortError when the signal fires, which is what a real
+    // fetch does: if the get's rejection were left unfolded this would be an
+    // unhandled rejection, and vitest fails the run on one.
+    vi.useFakeTimers();
+    const h = harness(followArgv(["--stall", "5"]), [{ hangUntilAbort: true }]);
+    const running = runCli(h.io);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0].signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(await running).toBe(3);
+    expect(h.err.join("\n")).toContain(`no event for session ${SESSION} in 5s`);
+    // runFollow's finally aborted the request it never received an answer to.
+    expect(h.calls[0].signal.aborted).toBe(true);
+  });
+
+  test("Promise.race is called once per subscription, however many chunks arrive", async () => {
+    // The structural guard against a reaction leak. The old loop raced a
+    // long-lived `stalled` promise on EVERY read, and `race` attaches to each
+    // input on every call — so a thousand frames meant a thousand retained
+    // reactions on a promise that settles at most once. Nothing in the read
+    // loop races at all now: the timer sets a flag and cancels the reader.
+    vi.useFakeTimers();
+    const race = vi.spyOn(Promise, "race");
+    const { answer, feed } = open();
+    const h = harness(followArgv(["--stall", "600"]), [answer]);
+    const running = runCli(h.io);
+    await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < 1000; i++) {
+      feed.push(
+        frame("message.part.delta", { sessionID: SESSION, part: { type: "text", text: `c${i}` } }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    feed.push(frame("session.idle", { sessionID: SESSION }));
+    await vi.advanceTimersByTimeAsync(0);
+    feed.close();
+    expect(await running).toBe(0);
+    // One: the connect phase. The read loop adds none, so this does not grow
+    // with the length of the lane.
+    expect(race).toHaveBeenCalledTimes(1);
+    race.mockRestore();
+  });
+});
+
 describe("lane:watch follow — the drop", () => {
   test("a reader that reaches done exits 1 after 3 reconnects, over 4 fetches", async () => {
     // A dropped stream is usually a tunnel blip, so it is re-subscribed. Each

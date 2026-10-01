@@ -169,13 +169,16 @@ describe("lane:watch usage", () => {
     expect(JSON.parse(h.log[0]).secs).toBeNull();
   });
 
-  test("a tokens object with no cache block reports the cache counters as null", async () => {
-    // The cache counters are nested, so they can be absent while the tokens
-    // object itself is present and reporting. That is a reading, not a
-    // failure — exit 0 — and the two missing counters are null, not 0.
+  test("a tokens object with no cache block is INCOMPLETE, not a reading", async () => {
+    // This expectation FLIPPED in fix round 2, deliberately. Testing only that
+    // the top-level `tokens` object existed let a record printed with two null
+    // cache counters exit 0 — and with `--emit` that reading was appended to
+    // the wave as a clean `settled` event under a success code. A count the
+    // server did not report is unreported, whatever object it sits in.
     const body = { ...COMPLETE, tokens: { input: 10, output: 20, reasoning: 0 } };
     const h = harness(usageArgv(["--json"]), [json(body)]);
-    expect(await runCli(h.io)).toBe(0);
+    expect(await runCli(h.io)).toBe(3);
+    // What the server DID report still survives on the record.
     expect(JSON.parse(h.log[0])).toMatchObject({
       tokens_in: 10,
       tokens_out: 20,
@@ -184,6 +187,35 @@ describe("lane:watch usage", () => {
       cache_write: null,
       cost: 0.4213,
     });
+    // The message names the counts, not the object, because the object was
+    // there — the two numbers inside it were not.
+    expect(h.err.join("\n")).toContain("did not report tokens.cache.read and tokens.cache.write");
+  });
+
+  test("a missing time leaves secs null but does NOT make the reading incomplete", async () => {
+    // The row names only tokens and cost for exit 3. A session whose clock the
+    // server has not published is a missing DURATION, not a missing total —
+    // refusing to report the totals over it would discard a reading that is
+    // otherwise complete.
+    const body = { ...COMPLETE, time: undefined };
+    const h = harness(usageArgv(["--json"]), [json(body)]);
+    expect(await runCli(h.io)).toBe(0);
+    expect(JSON.parse(h.log[0])).toMatchObject({ secs: null, tokens_in: 1200, cost: 0.4213 });
+    expect(h.err.join("\n")).not.toContain("did not report");
+  });
+
+  test("a null tokens, or a null cost, is unreported rather than a success", async () => {
+    // `=== undefined` did not catch either, so a server sending `null` for
+    // them produced a record printed as null and an exit 0.
+    for (const [field, value, named] of [
+      ["tokens", null, "tokens"],
+      ["cost", null, "cost"],
+    ] as const) {
+      const body: Record<string, unknown> = { ...COMPLETE, [field]: value };
+      const h = harness(usageArgv(["--json"]), [json(body)]);
+      expect(await runCli(h.io), named).toBe(3);
+      expect(h.err.join("\n"), named).toContain(`did not report ${named}`);
+    }
   });
 
   test("a session with no title and no directory reports them as empty, not as text", async () => {
@@ -191,6 +223,24 @@ describe("lane:watch usage", () => {
     const h = harness(usageArgv(["--json"]), [json(body)]);
     expect(await runCli(h.io)).toBe(0);
     expect(JSON.parse(h.log[0])).toMatchObject({ title: "", directory: "" });
+  });
+
+  test("a body that is JSON but not a session object is a failed read", async () => {
+    // Unusable, not incomplete. `null` threw and exited 2, telling the
+    // operator their command line was wrong; a number, string or array fell
+    // through to exit 3 as though the server had reported a tokenless session.
+    // All three are the server's fault and are reported as a failed read.
+    for (const [what, body] of [
+      ["null", null],
+      ["a number", 42],
+      ["a string", "not a session"],
+      ["an array", [1, 2, 3]],
+    ] as const) {
+      const h = harness(usageArgv(), [json(body)]);
+      expect(await runCli(h.io), what).toBe(1);
+      expect(h.log, what).toEqual([]);
+      expect(h.err.join("\n"), what).toContain("did not return a session object");
+    }
   });
 
   test("a read that fails, or a body that is not JSON, exits 1", async () => {
@@ -289,6 +339,17 @@ describe("lane:watch usage --emit", () => {
     // wave-event.sh rejects a --detail carrying spaces, so compactness is a
     // contract with the script rather than a style preference.
     expect(args[7]).not.toMatch(/[:,]\s/);
+  });
+
+  test("--json --emit keeps stdout as exactly one JSON value", async () => {
+    // The confirmation is a diagnostic, so it belongs on stderr. On stdout it
+    // made `lane:watch usage --json --emit … | jq` fail on a SUCCESSFUL run,
+    // which is the one case where nobody expects a parse error.
+    const h = harness(emitArgv(), [json(COMPLETE)]);
+    expect(await runCli(h.io)).toBe(0);
+    expect(() => JSON.parse(h.log.join("\n"))).not.toThrow();
+    expect(h.log).toHaveLength(1);
+    expect(h.err.join("\n")).toContain("emitted settled for HXF4 at implement");
   });
 
   test("--event failed is passed through to the script, which owns that list", async () => {

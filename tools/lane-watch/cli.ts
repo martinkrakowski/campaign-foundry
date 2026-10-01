@@ -145,17 +145,27 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     // mode and the two-path allowlist structural rather than per-caller.
     fetch: (url, init) => fetch(url, init),
     spawn: (command, args) =>
-      new Promise<SpawnResult>((resolve) => {
+      new Promise<SpawnResult>((resolve, reject) => {
         execFile(command, [...args], (error, _stdout, stderr) => {
           if (error === null) {
             resolve({ code: 0, stderr });
             return;
           }
-          // A number is the exit status of a process that ran and failed.
-          // Anything else means it never launched, and the 1 below stands for
-          // "did not run" — it is not a claim that the script refused.
+          // A number is the exit status of a process that ran and failed, and
+          // the script put its own reason on stderr for that case.
+          //
+          // Anything else means it never launched (ENOENT, EACCES), and there
+          // is no stderr to relay: resolving `{ code: 1, stderr }` here would
+          // hand the operator a bare exit code with nothing saying WHY, which
+          // is the launch failure itself. So the launch error is REJECTED with,
+          // and `emit`'s existing catch prints it as the reason the script
+          // could not be run.
           const code = (error as NodeJS.ErrnoException & { code?: number | string }).code;
-          resolve(typeof code === "number" ? { code, stderr } : { code: 1, stderr });
+          if (typeof code === "number") {
+            resolve({ code, stderr });
+            return;
+          }
+          reject(error);
         });
       }),
     setTimer: (fn, ms) => setTimeout(fn, ms),

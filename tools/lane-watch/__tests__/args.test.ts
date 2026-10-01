@@ -115,10 +115,16 @@ describe("parseFollowArgs", () => {
     ).toBe(30);
   });
 
-  test("refuses a stall that is not a whole number of seconds", () => {
-    expect(() =>
-      parseFollowArgs(["--server", SERVER, "--session", SESSION, "--stall", "30s"]),
-    ).toThrow("whole number of seconds");
+  test("refuses a stall that is not a POSITIVE whole number of seconds", () => {
+    // `^\d+$` accepted "0", the timer was armed at 0ms, and it fired before
+    // any frame could arrive — so a perfectly healthy lane was reported as
+    // stalled, exit 3, on every single run.
+    for (const bad of ["0", "30s", "1.5", "-1", "007", ""]) {
+      expect(
+        () => parseFollowArgs(["--server", SERVER, "--session", SESSION, "--stall", bad]),
+        bad,
+      ).toThrow("positive whole number of seconds");
+    }
   });
 
   test("refuses a command line it cannot act on, each with the usage line", () => {

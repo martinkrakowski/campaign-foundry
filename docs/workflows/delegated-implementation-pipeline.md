@@ -116,11 +116,11 @@ opencode server itself, over two read-only GETs.
 ```bash
 # 1. Dispatch with ocm-run, which prints every `opencode run --format json`
 #    event. The FIRST one carrying a sessionID is the one to keep. `-R` reads
-#    each line as raw text and `fromjson?` yields nothing for a line that is
-#    not JSON, so a banner or a blank line in the log is skipped rather than
-#    aborting the whole extraction.
+#    each line as raw text, `fromjson?` yields nothing for a line that is not
+#    JSON, and `-r` is what prints the string bare — without it jq emits a
+#    quoted `"ses_x"`, and `checkSession` refuses the quote marks.
 ocm-run … | tee /tmp/lane.log
-session=$(jq -R 'fromjson? | select(.sessionID?) | .sessionID' /tmp/lane.log | head -1)
+session=$(jq -rR 'fromjson? | select(.sessionID?) | .sessionID' /tmp/lane.log | head -1)
 
 # 2. Follow it. One compact line per tool call, step and retry; heartbeats and
 #    every other lane's events are dropped, and consecutive identical lines

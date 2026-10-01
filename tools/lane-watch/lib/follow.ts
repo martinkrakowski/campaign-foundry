@@ -308,32 +308,6 @@ async function subscribe(
   stallMs: number,
   steps: StepCounter,
 ): Promise<Outcome> {
-  let response: Response;
-  try {
-    response = await io.get(GLOBAL_EVENT_PATH, io.signal);
-  } catch (error) {
-    io.logError(`lane:watch: the event stream could not be opened: ${errorText(error)}`);
-    return "dropped";
-  }
-  if (response.status !== 200) {
-    io.logError(`lane:watch: the event stream answered ${response.status}`);
-    return "dropped";
-  }
-  if (response.body === null) {
-    io.logError("lane:watch: the event stream carried no body");
-    return "dropped";
-  }
-
-  let reader: ReadableStreamDefaultReader<Uint8Array>;
-  try {
-    reader = response.body.getReader();
-  } catch (error) {
-    // A body that cannot be locked is a subscription that cannot be read, so
-    // it is a drop like any other — NOT a command-line error. Letting it
-    // escape would report a valid command as a usage failure.
-    io.logError(`lane:watch: the event stream could not be read: ${errorText(error)}`);
-    return "dropped";
-  }
   // The lane's, not this subscription's: `follow` owns it so step numbering
   // survives a reconnect.
   const decoder = new TextDecoder();
@@ -344,26 +318,44 @@ async function subscribe(
   const renderer = new LineRenderer(io.log);
   const renderIo = { log: (text: string) => renderer.print(text), logError: io.logError };
   let concluded: Outcome | null = null;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let wakeConnect: (() => void) | null = null;
 
-  // One promise for the whole subscription. It resolves at most once, and the
-  // race below re-uses it every iteration, so re-arming the timer is a
-  // clearTimeout + setTimeout and never a new promise.
+  // THE STALL IS A FLAG AND A WAKE, NOT A PROMISE.
   //
-  // It resolves to the literal "stalled" and nothing else, which is why the
-  // race below needs no second test on the outcome: winning that race IS the
-  // stall, and a check for a value the promise cannot hold would be a branch
-  // nothing could ever cover.
-  let fireStall!: () => void;
-  const stalled = new Promise<"stalled">((resolve) => {
-    fireStall = () => {
-      resolve("stalled");
-    };
-  });
+  // A long-lived `stalled` promise that every read races against is a reaction
+  // leak: `Promise.race` attaches to each of its inputs on every call, so at
+  // the ~50 frames a second this stream carries, a multi-hour lane retains
+  // hundreds of thousands of reactions on a promise that settles at most once.
+  // (Re-using one promise does not help — `race` is called per read either
+  // way.) So nothing here is ever raced in the read loop: the timer sets a
+  // flag and wakes whatever is currently blocked, and the loop checks the flag
+  // the moment it unblocks.
+  let stalled = false;
   let timer: unknown;
   const arm = (): void => {
     io.clearTimer(timer);
-    timer = io.setTimer(fireStall, stallMs);
+    stalled = false;
+    timer = io.setTimer(() => {
+      stalled = true;
+      if (reader !== null) {
+        // Cancelling resolves the PENDING read as `done: true`, which unblocks
+        // the loop. The flag is checked before the `done` branch, so a
+        // cancellation this timer caused is never mistaken for a drop.
+        void reader.cancel();
+        return;
+      }
+      // Still connecting: there is no reader to cancel, so the one-shot
+      // deferred the get is raced against is what gets woken.
+      const wake = wakeConnect;
+      wakeConnect = null;
+      wake?.();
+    }, stallMs);
   };
+  // Armed BEFORE the get. A connect that never resolves was previously not
+  // covered by the timer at all, so a tunnel that accepted the TCP connection
+  // and then said nothing left the watch waiting forever — and `runFollow`
+  // never reached its `finally`, so the request was never even aborted.
   arm();
 
   const parser = new SseParser((data) => {
@@ -380,33 +372,74 @@ async function subscribe(
   });
 
   try {
+    // The ONE race in this function. It exists for the connect phase only, and
+    // the get's rejection is folded into its result rather than left to reject:
+    // once the stall wins, `runFollow` aborts the controller, the real fetch
+    // rejects with AbortError, and an unfolded promise would be an unhandled
+    // rejection — which crashes Node, and fails the vitest run.
+    const connect = new Promise<"stalled">((resolve) => {
+      wakeConnect = () => {
+        resolve("stalled");
+      };
+    });
+    let response: Response;
+    try {
+      const opened = await Promise.race([
+        io.get(GLOBAL_EVENT_PATH, io.signal).then(
+          (value) => ({ kind: "opened" as const, value }),
+          (error: unknown) => ({ kind: "failed" as const, error }),
+        ),
+        connect,
+      ]);
+      if (opened === "stalled") return reportStall(args, io);
+      if (opened.kind === "failed") {
+        io.logError(`lane:watch: the event stream could not be opened: ${errorText(opened.error)}`);
+        return "dropped";
+      }
+      response = opened.value;
+    } finally {
+      wakeConnect = null;
+    }
+    if (response.status !== 200) {
+      io.logError(`lane:watch: the event stream answered ${response.status}`);
+      return "dropped";
+    }
+    if (response.body === null) {
+      io.logError("lane:watch: the event stream carried no body");
+      return "dropped";
+    }
+    try {
+      reader = response.body.getReader();
+    } catch (error) {
+      // A body that cannot be locked is a subscription that cannot be read, so
+      // it is a drop like any other — NOT a command-line error. Letting it
+      // escape would report a valid command as a usage failure.
+      io.logError(`lane:watch: the event stream could not be read: ${errorText(error)}`);
+      return "dropped";
+    }
+
     for (;;) {
-      // The read's rejection is folded into its RESULT rather than left to
-      // reject: when the stall wins this race the read is still pending, and
-      // the caller's abort then fails it. An unhandled rejection there would
-      // be reported against a watch that already answered, which is noise
-      // about a decision this code has already made.
-      const read = reader.read().then(
+      // No race here. The read's rejection is folded into its RESULT for the
+      // same reason as the get's: the caller's abort must not surface as an
+      // unhandled rejection after this loop has already answered.
+      const read = await reader.read().then(
         (chunk) => ({ kind: "chunk" as const, chunk }),
         (error: unknown) => ({ kind: "failed" as const, error }),
       );
-      const raced = await Promise.race([read, stalled.then(() => ({ kind: "stall" as const }))]);
-      if (raced.kind === "stall") {
-        io.logError(
-          `lane:watch: no event for session ${args.session} in ${args.stallSecs}s — the ` +
-            `server may well be alive, but this lane is not (exit ${EXIT_UNKNOWN}, investigate)`,
-        );
-        return "stalled";
-      }
-      if (raced.kind === "failed") {
-        io.logError(`lane:watch: the event stream failed mid-read: ${errorText(raced.error)}`);
+      // The order of the four arms is load-bearing. `stalled` is checked
+      // FIRST because the stall's own `cancel()` is what produces the `done`
+      // below: checked second, a stall would be reported as a dropped stream
+      // and re-subscribed forever.
+      if (stalled) return reportStall(args, io);
+      if (read.kind === "failed") {
+        io.logError(`lane:watch: the event stream failed mid-read: ${errorText(read.error)}`);
         return "dropped";
       }
-      if (raced.chunk.done) {
+      if (read.chunk.done) {
         io.logError("lane:watch: the event stream ended (the reader is done)");
         return "dropped";
       }
-      parser.push(decoder.decode(raced.chunk.value, { stream: true }));
+      parser.push(decoder.decode(read.chunk.value, { stream: true }));
       // The conclusion is read HERE, after the chunk that carried it, and not
       // on the way into the next iteration. `/global/event` never closes, so
       // checking before the push means the watch has its answer and then waits
@@ -420,4 +453,13 @@ async function subscribe(
   } finally {
     io.clearTimer(timer);
   }
+}
+
+/** The one sentence a stall gets, from either place it can be seen. */
+function reportStall(args: FollowArgs, io: FollowIo): Outcome {
+  io.logError(
+    `lane:watch: no event for session ${args.session} in ${args.stallSecs}s — the ` +
+      `server may well be alive, but this lane is not (exit ${EXIT_UNKNOWN}, investigate)`,
+  );
+  return "stalled";
 }
