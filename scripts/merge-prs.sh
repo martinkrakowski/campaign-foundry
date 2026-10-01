@@ -115,6 +115,18 @@ PR_BODY_MODE=""
 if [[ "${1:-}" == "__pr_body" ]]; then
   PR_BODY_MODE=1
   shift
+  # Only a run that launched this body sets MERGE_PRS_PARENT, to its own pid, and
+  # it is what makes this entry point safe to expose at all. Without it, anyone who
+  # can type the word runs one PR's body directly: no lock, so two such bodies and
+  # a real run would merge at once, and no epilogue, so nothing is ever cleaned up.
+  # A caller is not a parent; exit 2 is the usage error this is, and it is not the
+  # 1 a refusal uses, so a caller can tell "you may not do that" from "the gate
+  # said no" without reading this file.
+  [[ -n "${MERGE_PRS_PARENT:-}" ]] \
+    || {
+      echo "merge-prs: __pr_body is internal and is refused without MERGE_PRS_PARENT" >&2
+      exit 2
+    }
 fi
 
 # Leading flags, parsed in a loop so their order is not a rule a caller has to
@@ -700,6 +712,20 @@ forward_signal() {
     # now the body itself is reaped.
     pr_child=""
     kill -TERM -- "-$group" 2>/dev/null
+    # The group's LEADER'S PID as well, and the window is why. `&` returns as soon
+    # as the fork is done, and the child is not in a group of its own until perl
+    # has run setpgid — so a TERM that lands in that window finds no group with
+    # that id, the group kill fails silently, and `wait` below then blocks for the
+    # whole PR: the signal is answered only once the merge it was meant to stop
+    # has finished, and the lock is released after it.
+    #
+    # Signalling the pid closes that window from both sides and is safe on both:
+    # before setpgid it kills perl, whose TERM disposition is still the default
+    # (nothing has trapped it yet — the exec that installs zsh's has not run); after
+    # setpgid it kills the body, which the group kill is also doing to the children
+    # it cannot reach any other way. And this pid cannot be recycled: it is an
+    # unreaped child of this shell, so the kernel still has its entry.
+    kill -TERM "$group" 2>/dev/null
     wait "$group" 2>/dev/null
     # AND THEN SWEEP, because one TERM is not the end of a group. A fork
     # INHERITS its parent's process group, so the group outlives the body, and a
@@ -755,6 +781,12 @@ forward_signal() {
 trap 'release_lock' EXIT
 trap 'forward_signal 130' INT
 trap 'forward_signal 143' TERM
+# HUP too, and 129 is its number. A run that is left behind by a closing terminal
+# gets SIGHUP, and a run that ignored it would go on merging with a lock nobody
+# is watching: the terminal is gone, so nobody is reading the run, and the PRs it
+# merges are merged with no one to answer a prompt. The same teardown as INT and
+# TERM, in the same order — group, then pid, then the sweep, then the lock.
+trap 'forward_signal 129' HUP
 acquire_lock
 # Test hook (MERGE_PRS_TEST_RUN_TMP): replace the mktemp with a directory the
 # test chose, so it can make the marker file's directory unwritable and prove
@@ -772,6 +804,17 @@ ERR_FILE="$RUN_TMP/stderr"
 # the lock token is not even exported.
 export REPO MAIN REQUIRED_CHECK REVIEW_SETTLE_SECONDS APPEND_ONLY
 export LOGDIR_OVERRIDE CONTINUE MARK_FILE ERR_FILE RUN_TMP
+# The body runs with no terminal to answer, so neither of these may ever ask.
+# GIT_TERMINAL_PROMPT=0 is git's own switch for refusing a credential prompt, and
+# GH_PROMPT_DISABLED=1 is gh's; without them a body that reaches for a credential
+# blocks on a read from /dev/null (or worse, from a tty this run inherited) rather
+# than failing, so a missing token looks like a hang instead of like an error.
+export GIT_TERMINAL_PROMPT=0 GH_PROMPT_DISABLED=1
+# The pid of the run that launched this body, and the only thing that makes the
+# __pr_body entry point above usable. It is exported rather than passed so it
+# cannot be forged by putting it in a spec: a spec is data, the environment is
+# this run's own.
+export MERGE_PRS_PARENT=$$
 
 # Start one PR's body in a process group of its own, and set pr_child to its pid —
 # which is also that group's id, because the group is made before the exec.
@@ -796,8 +839,20 @@ export LOGDIR_OVERRIDE CONTINUE MARK_FILE ERR_FILE RUN_TMP
 # parent's cwd does not change inside the loop, so a relative path still resolves
 # for the body.
 launch_pr_body() {
-  perl -MPOSIX -e 'POSIX::setpgid(0,0) or die "setpgid: $!"; exec @ARGV' \
-    zsh "$MERGE_PRS_SELF" __pr_body "$@" &
+  # MERGE_PRS_TEST_PRE_SETPGID_SLEEP widens the window between the fork and the
+  # setpgid, so a test can land a signal inside it on purpose. Unset in every real
+  # run, and the sleep is the only thing this one-liner reads from the
+  # environment: a body configurable by whoever launched the run would be a body
+  # whose behaviour the run does not control.
+  #
+  # `</dev/null` because this body runs unattended and must never wait for a
+  # person. It inherits this run's stdin, which on a terminal is a tty, and the
+  # first thing that reads it — a git credential prompt, a `gh` auth question, a
+  # pager — blocks on a human who is not there, holding the lock, with the run
+  # looking exactly like a slow test. Refusing to answer is the point; the
+  # environment below says the same thing to git and gh in words.
+  perl -MPOSIX -e 'sleep $ENV{MERGE_PRS_TEST_PRE_SETPGID_SLEEP} // 0; POSIX::setpgid(0,0) or die "setpgid: $!"; exec @ARGV' \
+    zsh "$MERGE_PRS_SELF" __pr_body "$@" < /dev/null &
   pr_child=$!
 }
 

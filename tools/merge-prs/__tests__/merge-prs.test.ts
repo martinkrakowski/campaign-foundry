@@ -171,13 +171,22 @@ function makeHarness(): Harness {
     "# given. A test that crashes a run needs it to clean up the body afterwards —",
     "# the body is NOT in the run's own group, so killing the run leaves it behind.",
     "#",
-    "# All three happen on the FIRST call only, which is what makes the file a",
-    "# handshake rather than a poll: a test that waits for the pgid file knows the",
+    "# STUB_GH_PGID_OUT is published whenever it is set and is not there yet, on",
+    "# its own and NOT inside the block below. It used to be written only when a",
+    "# test also asked for STUB_GH_CALLED_OUT, which is a trap for teardown: a test",
+    "# that starts a run and never parks it gets no pgid file, so stopRun and the",
+    "# afterEach have no group to kill and the body survives its parent — which is",
+    "# the leak that hung a suite for three hours. A test that needs the run's",
+    "# teardown must not also have to know to ask for a handshake.",
+    'if [ -n "${STUB_GH_PGID_OUT:-}" ] && [ ! -f "$STUB_GH_PGID_OUT" ]; then',
+    '  ps -o pgid= -p "$$" 2>/dev/null | tr -d " " >"$STUB_GH_PGID_OUT"',
+    "fi",
+    "# All three of these happen on the FIRST call only, which is what makes the file",
+    "# a handshake rather than a poll: a test that waits for the pgid file knows the",
     "# stub is parked inside that call, and a run whose body outlives a failed",
     "# cleanup finishes quickly instead of sleeping once per gh call it makes.",
     'if [ -n "${STUB_GH_CALLED_OUT:-}" ] && [ ! -f "$STUB_GH_CALLED_OUT" ]; then',
     '  : >"$STUB_GH_CALLED_OUT"',
-    '  [ -z "${STUB_GH_PGID_OUT:-}" ] || ps -o pgid= -p "$$" 2>/dev/null | tr -d " " >"$STUB_GH_PGID_OUT"',
     '  [ -z "${STUB_GH_SLEEP:-}" ] || sleep "$STUB_GH_SLEEP"',
     "fi",
     "# STUB_MARKER_JUNK makes this stub write a line of noise into the run's",
@@ -227,8 +236,18 @@ function makeHarness(): Harness {
     "    ;;",
     '  "pr checks")',
     "    # stdout only. --continue captures this PR's stderr to find the reason",
-    "    # it was refused, and a stub's noise there would be read as that reason.",
+    "    # it was refused, and a stub's noise there would be read as that refusal reason.",
     "    printf 'Build\\tpass\\t1m0s\\thttps://example.invalid/build/%s\\n' \"${3:-0}\"",
+    "    # STUB_READ_STDIN_OUT makes this stub READ stdin and record the outcome,",
+    "    # which is how the `</dev/null` on the body launch is tested: a body that",
+    "    # inherited a terminal would sit on this read until a person answered it, so",
+    "    # the run would look like a slow test rather than like a failure. With no",
+    "    # terminal the read returns EOF at once and the file says EOF. If the",
+    "    # redirect is ever removed this read BLOCKS, and the run is bounded by",
+    "    # runMergePrs's own timeout, so the failure is a failed test and not a hang.",
+    '    if [ -n "${STUB_READ_STDIN_OUT:-}" ]; then',
+    '      if IFS= read -r _stdin_line <&0; then printf "DATA\\n" >"$STUB_READ_STDIN_OUT"; else printf "EOF\\n" >"$STUB_READ_STDIN_OUT"; fi',
+    "    fi",
     "    ;;",
     '  "pr merge")',
     "    # Park HERE, on the merge call itself rather than on every gh call, so",
@@ -943,16 +962,12 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
     // Parked inside a gh call, which is only reachable once the first PR's body
     // is running: the lock alone is taken too early to mean anything here.
     const parked = parkedRun(harness);
-    const child: ChildProcess = spawn("zsh", [mergePrsSh, specOf(PR_ONE)], {
-      cwd: harness.repoDir,
-      env: mergePrsEnv(harness, parked.env),
-      // Its own process group, so the signal below reaches the gh stub's
-      // `sleep 30` as well. zsh defers an INT trap until its foreground child
-      // is gone, so signalling only the shell would leave the trap waiting out
-      // the whole 30s — and a lock released after 30s is not what this asserts.
-      detached: true,
-      stdio: "ignore",
-    });
+    // startMergePrs, not a raw spawn, even though this one needs `detached` and
+    // `stdio: "ignore"`: a raw spawn is invisible to the liveRuns registry, so the
+    // afterEach cannot tear it down and a failure here leaks a run AND its body —
+    // and this test signals a GROUP, so on the failure path the group it made is
+    // long gone and only the body's group is left. The options are passed through.
+    const { child } = startMergePrs(harness, [specOf(PR_ONE)], parked.env, true);
     try {
       expect(
         await waitFor(() => existsSync(parked.calledOut), 5_000, "the PR to be in flight"),
@@ -965,13 +980,8 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
         await waitFor(() => !existsSync(harness.lockDir), 3_000, "the lock to be released on INT"),
       ).toBe(true);
     } finally {
-      // The run is on its way out; make sure it is gone either way, and reap it
-      // so nothing outlives the test.
-      try {
-        process.kill(-(child.pid as number), "SIGKILL");
-      } catch {
-        // Already gone, which is the case this test wants.
-      }
+      // The run and its body both go, through the same path every other test uses.
+      await stopRun(child);
       harness.cleanup();
     }
   });
@@ -1455,12 +1465,170 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       expect(mergedByStub(harness)).toBe("");
     } finally {
       await stopRun(child);
-      try {
-        if (sleeper > 0) process.kill(sleeper, "SIGKILL");
-      } catch {
-        // Already gone, which is the case this wants.
+      // Re-read the pid from the file rather than trusting the local: a test that
+      // failed BEFORE the stub published it leaves `sleeper` at 0, and 0 is not a
+      // pid — `process.kill(0, …)` signals the caller's own process GROUP, so the
+      // cleanup would have aimed a SIGKILL at this test runner's group. Reading
+      // the file cannot invent a number, and readPidFile refuses anything that is
+      // not a real pid.
+      const leftover = readPidFile(termproofOut);
+      if (leftover !== undefined) {
+        try {
+          process.kill(leftover, "SIGKILL");
+        } catch {
+          // Already gone, which is the case this wants.
+        }
       }
       harness.cleanup();
     }
   }, 60_000);
+
+  test("a TERM inside the window before the body has a process group still stops the PR", async () => {
+    // The window between `&` returning and perl's setpgid. The body's pid is
+    // already known — it is what `$!` gave us — but it is not yet a PROCESS GROUP,
+    // so `kill -TERM -- -$pgid` names a group that does not exist, fails silently,
+    // and `wait` then blocks for the whole PR: the signal is answered only after
+    // the merge it was meant to stop, and the lock is released after that. The
+    // hook widens the window to two seconds so a signal can be aimed at it.
+    const harness = makeHarness();
+    const pgidOut = join(harness.stateDir, "gh-pgid");
+    const { child, done } = startMergePrs(harness, [specOf(PR_ONE)], {
+      MERGE_PRS_TEST_PRE_SETPGID_SLEEP: "3",
+      STUB_GH_PGID_OUT: pgidOut,
+    });
+    try {
+      // The lock is taken before the body is launched, so it is proof the run is
+      // up; the pgid file appearing is proof the window has closed, which is the
+      // one moment this must NOT be signalled in.
+      expect(await waitFor(() => existsSync(harness.lockDir), 5_000, "the lock to be taken")).toBe(
+        true,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      process.kill(child.pid as number, "SIGTERM");
+      const result = await Promise.race([
+        done.then((r) => ({ kind: "exited" as const, result: r })),
+        new Promise<{ kind: "deadline" }>((resolve) =>
+          setTimeout(() => resolve({ kind: "deadline" }), 2_500),
+        ),
+      ]);
+      // Inside the window, the answer has to be prompt. Without the pid kill the
+      // run is still blocked in `wait` when this deadline lands, having swallowed
+      // the signal — and it goes on to merge.
+      expect(result.kind, "the run did not answer SIGTERM inside the fork-to-setpgid window").toBe(
+        "exited",
+      );
+      expect(result.kind === "exited" ? result.result.status : -1).toBe(143);
+      // The PR never got as far as the merge, and the lock was handed back.
+      expect(mergedByStub(harness)).toBe("");
+      expect(existsSync(harness.lockDir)).toBe(false);
+    } finally {
+      await stopRun(child);
+      harness.cleanup();
+    }
+  }, 30_000);
+
+  test("a HUP to the run stops the PR in flight and releases the lock", async () => {
+    // SIGHUP is what a closing terminal sends, and a run that ignored it would go
+    // on merging with nobody watching: the terminal is gone, so the PRs it merges
+    // are merged with no one to answer a prompt.
+    const harness = makeHarness();
+    const parked = parkedRun(harness);
+    const { child, done } = startMergePrs(harness, [specOf(PR_ONE)], parked.env);
+    try {
+      expect(
+        await waitFor(() => existsSync(parked.calledOut), 5_000, "the PR to be in flight"),
+      ).toBe(true);
+      const pgid = readPidFile(join(harness.stateDir, "gh-pgid"));
+      expect(pgid, "the body published no process group").toBeGreaterThan(0 as number);
+
+      process.kill(child.pid as number, "SIGHUP");
+      const finished = await Promise.race([
+        done.then((result) => ({ kind: "exited" as const, result })),
+        new Promise<{ kind: "deadline" }>((resolve) =>
+          setTimeout(() => resolve({ kind: "deadline" }), 5_000),
+        ),
+      ]);
+      expect(finished.kind, "the run did not answer SIGHUP").toBe("exited");
+      // 129 is SIGHUP's number: the signal reached the run and named itself.
+      expect(finished.kind === "exited" ? finished.result.status : -1).toBe(129);
+      // The body's whole group is gone — that is the order forward_signal works in
+      // — and nothing was merged.
+      expect(pgid !== undefined && pidAlive(pgid), "the body's group outlived the lock").toBe(
+        false,
+      );
+      expect(mergedByStub(harness)).toBe("");
+      expect(existsSync(harness.lockDir)).toBe(false);
+    } finally {
+      await stopRun(child);
+      harness.cleanup();
+    }
+  }, 30_000);
+
+  test("a PR body never waits on a terminal for input", () => {
+    // The body inherits this run's stdin. On a terminal that is a tty, and the
+    // first thing to read it — a git credential prompt, a gh auth question, a pager
+    // — blocks on a human who is not there, holding the lock, with the run
+    // looking exactly like a slow test. The stub reads stdin and records what it
+    // got; a body with `</dev/null` gets EOF at once.
+    const harness = makeHarness();
+    try {
+      const stdinOut = join(harness.stateDir, "stdin-read");
+      const result = runMergePrs(harness, [specOf(PR_ONE)], { STUB_READ_STDIN_OUT: stdinOut });
+
+      expect(
+        result.status,
+        `the run did not finish; stdout tail: ${result.stdout.slice(-400)} | stderr tail: ${result.stderr.slice(-400)}`,
+      ).toBe(0);
+      // EOF, and immediately: a body that could block here would have made this
+      // call sit until runMergePrs's own 60s timeout instead of returning.
+      expect(readFileSync(stdinOut, "utf8").trim()).toBe("EOF");
+      expect(result.stdout).toContain("merged #101");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("__pr_body is refused unless a run launched it", () => {
+    // The entry point runs one PR's body with no lock and no epilogue. Anyone who
+    // can type the word would otherwise get that for free, and two such bodies and
+    // a real run would merge at once.
+    const harness = makeHarness();
+    try {
+      const bare = spawnSync("zsh", [mergePrsSh, "__pr_body", "42", "", "feat/x", "", ""], {
+        cwd: harness.repoDir,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${harness.stubBinDir}:${process.env.PATH ?? ""}` },
+      });
+      expect(bare.status).toBe(2);
+      expect(bare.stderr).toContain("__pr_body is internal");
+      // And it did no work on the way out: no banner, no merge, no lock taken.
+      expect(bare.stdout).not.toContain("=== PR #42");
+      expect(mergedByStub(harness)).toBe("");
+      expect(existsSync(harness.lockDir)).toBe(false);
+
+      // A MERGE_PRS_PARENT of the caller's own choosing is enough to get past the
+      // guard, which is why the guard is about the shape of the call and not about
+      // proving anything: it exists to stop a typo or a stray spec, not an attacker.
+      const withParent = spawnSync("zsh", [mergePrsSh, "__pr_body", "42", "", "feat/x", "", ""], {
+        cwd: harness.repoDir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: `${harness.stubBinDir}:${process.env.PATH ?? ""}`,
+          MARKER_FILE: harness.markerFile,
+          REVIEW_SETTLE_SECONDS: "0",
+          STUB_STATE: harness.stateDir,
+          STUB_ORIGIN: harness.originPath,
+          MERGE_PRS_PARENT: String(process.pid),
+        },
+      });
+      // Past the guard it behaves like a body: it runs, and it fails on its own
+      // terms rather than being refused.
+      expect(withParent.status).not.toBe(2);
+      expect(withParent.stdout).toContain("=== PR #42");
+    } finally {
+      harness.cleanup();
+    }
+  });
 });
