@@ -75,7 +75,13 @@ function runGate(args: string[], env: Record<string, string> = {}, timeout = 15_
   const dir = scratch();
   const result = spawnSync("sh", [gateSh, ...args], {
     encoding: "utf8",
-    env: { ...process.env, TMPDIR: dir, ...env },
+    // CF_GATE_SLOTS is pinned HERE, between the inherited environment and the
+    // per-test one, because D188 sets it host-wide (/etc/environment) and these
+    // tests are written against the default of one slot: a host with three hands
+    // this acquirer slot 1 instead of answering busy, and the test is asserting
+    // about busy. A test that means more slots still says so in its own env,
+    // which is spread last and therefore wins.
+    env: { ...process.env, CF_GATE_SLOTS: "1", TMPDIR: dir, ...env },
     timeout,
   });
   return {
@@ -115,7 +121,8 @@ function runGateAsyncIn(
 ): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn("sh", [gateSh, ...args], {
-      env: { ...process.env, TMPDIR: dir, ...env },
+      // The same host-wide pin as runGate above — see there for why.
+      env: { ...process.env, CF_GATE_SLOTS: "1", TMPDIR: dir, ...env },
     });
     let stdout = "";
     let stderr = "";
