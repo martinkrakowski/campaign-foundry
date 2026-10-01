@@ -122,9 +122,13 @@ describe("TEMPLATE_F and the doc", () => {
   });
 
   test("placeholders are filled in ONE pass, so a value that reads like one survives", () => {
-    // Filled one name at a time, `<LANE>`'s replacement would be scanned for
-    // `<PLAN>` and rewritten, and the brief would go out carrying a value nobody
-    // typed. One pass never rescans what it substituted.
+    // `render` is a pure function of a header and is deliberately NOT the parser:
+    // the parser now refuses a lane outside `[A-Za-z0-9_-]+`, so `L<PLAN>Z` cannot
+    // reach it from argv — which is exactly why it is worth calling directly. The
+    // guarantee under test is a property of the REPLACER, not of what argv may
+    // carry: filled one name at a time, `<LANE>`'s replacement would be scanned
+    // for `<PLAN>` and rewritten, and the brief would go out carrying a value
+    // nobody typed. One pass never rescans what it substituted.
     const brief = render({ ...header, lane: "L<PLAN>Z" });
     expect(brief).toContain("# Lane L<PLAN>Z — brief");
     expect(brief).toContain("sh scripts/gate-lock.sh run L<PLAN>Z -- yarn mutate …");

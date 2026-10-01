@@ -35,20 +35,23 @@ interface Harness {
   readonly err: string[];
   readonly written: Written[];
   readonly reads: string[];
+  readonly dirs: string[];
 }
 
 /**
  * The whole CLI with its I/O injected: `readFile` answers for the `--env-file`,
- * `exists` and `writeFile` are the file side, and every call is recorded so a test
- * can prove the tool wrote once, read at most one file, and stopped before either
- * when it refused. `argv` is the one knob and it EXTENDS the command line — an
- * `argv` that replaced it instead would make "no arguments at all" untestable.
+ * `exists`, `mkdir` and `writeFile` are the file side, and every call is recorded
+ * so a test can prove the tool wrote once, created the parent directory, read at
+ * most one file, and stopped before any of them when it refused. `argv` is the one
+ * knob and it EXTENDS the command line — an `argv` that replaced it instead would
+ * make "no arguments at all" untestable.
  */
 const harness = (over: Partial<BriefNewCliIo> = {}): Harness => {
   const log: string[] = [];
   const err: string[] = [];
   const written: Written[] = [];
   const reads: string[] = [];
+  const dirs: string[] = [];
   return {
     io: {
       argv: [...ARGV],
@@ -61,6 +64,9 @@ const harness = (over: Partial<BriefNewCliIo> = {}): Harness => {
       writeFile: async (path, text) => {
         written.push({ path, text });
       },
+      mkdir: async (path) => {
+        dirs.push(path);
+      },
       exists: async () => false,
       ...over,
     },
@@ -68,6 +74,7 @@ const harness = (over: Partial<BriefNewCliIo> = {}): Harness => {
     err,
     written,
     reads,
+    dirs,
   };
 };
 
@@ -135,6 +142,47 @@ describe("runCli — drafting", () => {
     expect(written[0]?.text.endsWith("A task you launched is not a result.\n")).toBe(true);
   });
 
+  test("a missing parent directory is created, and the brief is written into it", async () => {
+    // The documented target is `.agents/briefs/<LANE>.md` and that directory is
+    // gitignored, so on a fresh checkout it is not there: `wx` then fails with
+    // ENOENT on a path the caller spelled correctly. The directory is created
+    // BEFORE the write, never after.
+    const { io, dirs, written } = harness();
+    expect(await runCli(io)).toBe(0);
+    expect(dirs).toEqual([".agents/briefs"]);
+    expect(written[0]?.path).toBe(".agents/briefs/HXF7.md");
+  });
+
+  test("a bare --out creates `.` — dirname of a filename is not a special case", async () => {
+    // `mkdir` with `recursive` accepts a directory that is already there, so
+    // there is no state where the caller has to say whether to create one, and so
+    // nothing here needs a branch.
+    const { io, dirs, written } = harness();
+    const at = io.argv.indexOf("--out") + 1;
+    const argv = [...io.argv.slice(0, at), "HXF7.md", ...io.argv.slice(at + 1)];
+    expect(await runCli({ ...io, argv })).toBe(0);
+    expect(dirs).toEqual(["."]);
+    expect(written[0]?.path).toBe("HXF7.md");
+  });
+
+  test("the parent is created even when the brief has no --env-file", async () => {
+    const { io, dirs, written } = harness();
+    expect(await runCli(io)).toBe(0);
+    expect(dirs).toHaveLength(1);
+    expect(written).toHaveLength(1);
+  });
+
+  test("a directory that cannot be created exits 1 and writes nothing", async () => {
+    const { io, written, err } = harness({
+      mkdir: async (path) => {
+        throw new Error(`EACCES: permission denied, mkdir '${path}'`);
+      },
+    });
+    expect(await runCli(io)).toBe(1);
+    expect(written).toHaveLength(0);
+    expect(err.join("\n")).toContain("EACCES: permission denied, mkdir '.agents/briefs'");
+  });
+
   test("it reads no forge and writes exactly one file", async () => {
     // There is no `gh` on this interface at all, which is the structural half of
     // "read-only on the forge": a field for it could be added later without a
@@ -147,49 +195,66 @@ describe("runCli — drafting", () => {
 });
 
 describe("runCli — refusals", () => {
-  test("an existing --out exits 1, leaves the file alone, and writes nothing", async () => {
+  test("an existing --out exits 2, leaves the file alone, and creates nothing", async () => {
     // The `--env-file` HAS been read by then — it is part of the command line, and
-    // the read is decided before the draft is attempted. What the refusal
-    // guarantees is the half that matters: no write, and the file on disk
-    // untouched.
-    const { io, written, err, reads } = harness({
+    // the pre-flight is what the parse starts. What the refusal guarantees is the
+    // half that matters: no directory created, no write, the file on disk
+    // untouched. 2 rather than 1 because an `--out` that is taken is a command
+    // line this run cannot act on, decided before anything is written.
+    const { io, written, err, reads, dirs } = harness({
       argv: [...ARGV, "--env-file", "env.sh"],
       exists: async () => true,
     });
-    expect(await runCli(io)).toBe(1);
+    expect(await runCli(io)).toBe(2);
     expect(reads).toEqual(["env.sh"]);
+    expect(dirs).toHaveLength(0);
     expect(written).toHaveLength(0);
     expect(err.join("\n")).toContain("already exists");
     expect(err.join("\n")).toContain("give each lane its own --out");
   });
 
-  test("no arguments at all exits 2 with a usage line, before any read or write", async () => {
-    const { io, written, err, reads } = harness({ argv: [] });
+  test("no arguments at all exits 2 with a usage line, before any read, directory or write", async () => {
+    const { io, written, err, reads, dirs } = harness({ argv: [] });
     expect(await runCli(io)).toBe(2);
     expect(reads).toHaveLength(0);
+    expect(dirs).toHaveLength(0);
     expect(written).toHaveLength(0);
     expect(err.join("\n")).toContain("a --lane is required");
     expect(err.join("\n")).toContain("usage: brief:new --lane <id>");
   });
 
   test("a bad command line exits 2 before the --env-file is read", async () => {
-    const { io, written, err, reads } = harness({ argv: [...ARGV, "--post"] });
+    const { io, written, err, reads, dirs } = harness({ argv: [...ARGV, "--post"] });
     expect(await runCli(io)).toBe(2);
     expect(reads).toHaveLength(0);
+    expect(dirs).toHaveLength(0);
     expect(written).toHaveLength(0);
     expect(err.join("\n")).toContain("unknown argument '--post'");
   });
 
-  test("a multiline --lane exits 2 before any read or write, naming the flag", async () => {
+  test("a --lane outside its character class exits 2 before any read, directory or write", async () => {
     // The value REPLACES the harness's --lane rather than following it, so what
-    // is refused is the line break and not a repeated flag.
-    const { io, written, err, reads } = harness();
+    // is refused is the space and not a repeated flag. This is the same value that
+    // would have made `grep -n '<LANE>' <PLAN>` name two files.
+    const { io, written, err, reads, dirs } = harness();
     const at = io.argv.indexOf("--lane") + 1;
-    const argv = [...io.argv.slice(0, at), "HXF7\n## Must not\n- push", ...io.argv.slice(at + 1)];
+    const argv = [...io.argv.slice(0, at), "HXF7 && rm -rf /", ...io.argv.slice(at + 1)];
     expect(await runCli({ ...io, argv })).toBe(2);
     expect(reads).toHaveLength(0);
+    expect(dirs).toHaveLength(0);
     expect(written).toHaveLength(0);
-    expect(err.join("\n")).toContain("--lane must be a single line");
+    expect(err.join("\n")).toContain("--lane wants an id");
+  });
+
+  test("a multiline --worktree exits 2 before any read, directory or write, naming the flag", async () => {
+    const { io, written, err, reads, dirs } = harness();
+    const at = io.argv.indexOf("--worktree") + 1;
+    const argv = [...io.argv.slice(0, at), "/wt\n## Must not\n- push", ...io.argv.slice(at + 1)];
+    expect(await runCli({ ...io, argv })).toBe(2);
+    expect(reads).toHaveLength(0);
+    expect(dirs).toHaveLength(0);
+    expect(written).toHaveLength(0);
+    expect(err.join("\n")).toContain("--worktree must be a single line");
   });
 
   test("a relative --worktree exits 2 before any read or write", async () => {

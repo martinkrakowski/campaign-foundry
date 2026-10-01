@@ -88,24 +88,85 @@ describe("parseBriefNewArgs", () => {
   });
 
   test("a header value carrying a line break is refused, not written into the brief", () => {
-    // These are the values the brief's header carries, and it carries them
-    // verbatim, one per line. A `--lane` with a newline in it is not a lane id
-    // with a newline in it: it is a second line of the brief, and `## Item 4` on
-    // that line would read as an instruction to whoever is dispatched with it.
-    for (const flag of ["--lane", "--plan", "--worktree", "--branch", "--tip"]) {
-      expect(() => parseBriefNewArgs(withFlag(flag, "HXF7\n## Item 4 —"))).toThrow(
-        new RegExp(`${flag} must be a single line`),
-      );
-      expect(() => parseBriefNewArgs(withFlag(flag, "HXF7\u2028## Item 4 —"))).toThrow(
-        new RegExp(`${flag} must be a single line`),
-      );
-      expect(() => parseBriefNewArgs(withFlag(flag, "HXF7\t"))).toThrow(
-        new RegExp(`${flag} must be a single line`),
+    // `--worktree` is the one header value held to "one line": it is written as
+    // plain text, so a value with a newline in it is not a path with a newline in
+    // it — it is a second line of the brief, and `## Item 4` on that line would be
+    // read as an instruction to whoever is dispatched with it.
+    for (const bad of ["HXF7\n## Item 4 —", "HXF7\u2028## Item 4 —", "HXF7\t"]) {
+      expect(() => parseBriefNewArgs(withFlag("--worktree", `/wt${bad}`))).toThrow(
+        /--worktree must be a single line/,
       );
     }
   });
 
-  test("--out, --env-file and --host are NOT held to it: none of the three is written into the brief", () => {
+  test("--lane, --plan and --branch are held to a character class, not merely to one line", () => {
+    // These three land in an unquoted `grep -n '<LANE>' <PLAN>` and in backtick
+    // code spans. A space makes the grep name two files; a `$` starts a shell
+    // expansion in it; a backtick ends the span the value sits in, and whatever
+    // follows is read as the brief's own text. None of them is free text.
+    for (const [flag, bad] of [
+      ["--lane", "HXF 7"],
+      ["--lane", "HXF`7"],
+      ["--lane", "HXF$7"],
+      ["--lane", "HXF/7"],
+      ["--lane", "HXF.7"],
+      ["--plan", "docs/planning/two words.md"],
+      ["--plan", "docs/planning/`whoami`.md"],
+      ["--plan", "docs/planning/$HOME.md"],
+      ["--plan", "docs/planning/*.md"],
+      ["--branch", "feat/brief generator"],
+      ["--branch", "feat/`x`"],
+      ["--branch", "feat/$x"],
+    ] as const) {
+      expect(() => parseBriefNewArgs(withFlag(flag, bad)), `${flag} ${bad}`).toThrow(
+        new RegExp(`${flag} wants (an id|a path)`),
+      );
+    }
+  });
+
+  test("a refusal quotes the value back, so the caller sees what they typed", () => {
+    try {
+      parseBriefNewArgs(withFlag("--plan", "docs/a b.md"));
+      throw new Error("expected a refusal");
+    } catch (error) {
+      expect((error as Error).message).toContain(
+        "--plan wants a path: letters, digits and . _ / -",
+      );
+      expect((error as Error).message).toContain("got 'docs/a b.md'");
+      expect((error as Error).message).toContain(BRIEF_NEW_USAGE);
+    }
+  });
+
+  test("--lane keeps the class wave-event.sh itself accepts", () => {
+    // The lane id a brief carries is the same token `scripts/wave-event.sh` is
+    // handed, so a lane this tool writes is one that script can be told. The
+    // boundary is the script's: `token_re` at scripts/wave-event.sh:152.
+    for (const good of ["HXF7", "hxf-7_b", "A", "0"]) {
+      expect(parseBriefNewArgs(withFlag("--lane", good)).lane, good).toBe(good);
+    }
+  });
+
+  test("--tip is a git sha: hex, and 7 to 40 characters", () => {
+    for (const good of ["9f3c8d2", "9f3c8d2a", "0".repeat(40)]) {
+      expect(parseBriefNewArgs(withFlag("--tip", good)).tip, good).toBe(good);
+    }
+    for (const bad of ["9f3c8d", "9f3c8d2Z", "0".repeat(41), "9f3c8d2 ", "HEAD"]) {
+      expect(() => parseBriefNewArgs(withFlag("--tip", bad)), bad).toThrow(
+        /--tip wants a git sha: 7 to 40 hex digits/,
+      );
+    }
+  });
+
+  test("a control character is refused by the class, which is where it is caught now", () => {
+    // The one-line rule has one value left to apply to, and a class admits no
+    // control character at all — so the refusal names the class, not the line.
+    expect(() => parseBriefNewArgs(withFlag("--lane", "HXF7\n"))).toThrow(/--lane wants an id/);
+    expect(() => parseBriefNewArgs(withFlag("--branch", "feat/\u2028x"))).toThrow(
+      /--branch wants a path/,
+    );
+  });
+
+  test("--out, --env-file and --host are NOT held to any of it: none of the three is written into the brief", () => {
     // `--out` is a writeFile path and a log line, `--env-file` is a readFile path,
     // and `--host` picks one of two constant blocks. Refusing a control character
     // in any of them would stop a call whose output cannot be affected by it —

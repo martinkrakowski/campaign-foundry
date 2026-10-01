@@ -1,3 +1,4 @@
+import { dirname } from "node:path";
 import type { BriefNewArgs, Host } from "./args.js";
 import { render } from "./template.js";
 
@@ -21,38 +22,37 @@ export interface BriefNewRequest extends BriefNewArgs {
   readonly envLines?: readonly string[];
 }
 
-/** Everything this tool touches: at most one read of a file and one write. */
+/**
+ * Everything this tool touches: one directory and one file.
+ *
+ * `mkdir` is injected for the same reason `writeFile` is, so a test can see the
+ * directory this run created without one existing — the whole of item 1 is a
+ * write into a directory that may not be there yet.
+ */
 export interface BriefNewDeps {
   readonly writeFile: (path: string, text: string) => Promise<void>;
-  readonly exists: (path: string) => Promise<boolean>;
+  readonly mkdir: (path: string) => Promise<void>;
 }
 
 /**
- * A refusal: the file this run would be written to already exists. Every reason
- * is listed at once, as in `fix-brief` and `sweep`.
- */
-export class BriefNewRefusal extends Error {
-  readonly reasons: readonly string[];
-
-  constructor(message: string, reasons: readonly string[]) {
-    super(message);
-    this.name = "BriefNewRefusal";
-    this.reasons = reasons;
-  }
-}
-
-/**
- * Render the brief and write it.
+ * Create the brief's parent directory, then render the brief and write it.
  *
- * The `--out` check comes first and is the only refusal there is: a brief is the
- * record of what a lane was told, and overwriting one destroys the record of the
- * run that wrote it. It is refused BEFORE the render rather than after, because a
- * brief whose value is already known to be wrong should not be built at all.
+ * **The directory is created, not assumed.** The documented target is
+ * `.agents/briefs/<LANE>.md` and `.agents/briefs/` is gitignored, so on a fresh
+ * checkout it does not exist: `writeFile` with `wx` then fails with ENOENT on a
+ * path the caller spelled correctly and that the tool advertised. `dirname` of a
+ * bare filename is `.`, and `mkdir` with `recursive` accepts a directory that is
+ * already there, so there is no case to special-case and no branch to test
+ * around.
  *
- * The existence check and the entry's `wx` write are two separate moments, and
- * anything that creates the file between them is refused by the kernel rather
- * than truncated by this tool. The cost is an EEXIST that this entry's catch
- * reports as exit 1, like any other failed write, with the path in the message.
+ * The existence of the FILE is not decided here. It is part of the command line —
+ * an `--out` that is already there is a command line this run cannot act on — and
+ * the entry decides it in its pre-flight, before this function is called. What is
+ * left as the guard here is the entry's `wx` write: the pre-flight check and that
+ * write are two separate moments, and anything that creates the file between them
+ * is refused by the kernel rather than truncated by this tool. The cost is an
+ * EEXIST that this entry's catch reports as exit 1, like any other failed write,
+ * with the path in the message.
  *
  * The newline is added HERE and not in `render`, so `render` still returns
  * Template F's text byte for byte — which is what the drift test compares against
@@ -63,11 +63,7 @@ export async function draftBriefNew(
   request: BriefNewRequest,
   deps: BriefNewDeps,
 ): Promise<BriefNewOutcome> {
-  if (await deps.exists(request.out)) {
-    throw new BriefNewRefusal(`refusing to write ${request.out} — it already exists`, [
-      `${request.out} exists, so this run would overwrite the brief already on disk; give each lane its own --out`,
-    ]);
-  }
+  await deps.mkdir(dirname(request.out));
   await deps.writeFile(request.out, `${render(request, request.envLines)}\n`);
   return {
     out: request.out,
