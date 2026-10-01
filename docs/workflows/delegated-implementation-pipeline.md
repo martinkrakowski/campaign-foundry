@@ -476,6 +476,8 @@ For PR #<N>:
 Never resolve a thread you did not answer, and never claim a fix you have not verified.
 ```
 
+The round that raised these threads is Template E's, below: `yarn fix-brief` drafts that brief from the PR's unresolved threads, and each item's disposition names the fix commit this template replies with.
+
 ### Template E — Fix-round brief for a sandboxed lane (the text `yarn fix-brief` drafts)
 
 Template C is for a lane that pushes. This one is for a lane that only commits (e.g. `--agent lane`
