@@ -27,6 +27,12 @@ Environment, for every shell call:
 
 <ENV>
 
+Midnight runs a test Postgres and lanes run against it: set
+\`TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres\` in the block above. The server uses
+SCRAM, so the credential comes from the operator's \`~/.pgpass\` — never in a URL, a brief or an env
+line. Without it every pg test silently ran on PGlite instead: on HXF3's two harness files, 108 s
+with 22 timeouts, against 11 s and 53/53.
+
 ## First: prove the gap
 
 <gap>
@@ -40,6 +46,25 @@ Environment, for every shell call:
 - **Mutations** go through \`sh scripts/gate-lock.sh run <LANE> -- yarn mutate …\`, writing \`--because\` FIRST. \`command\` is an argv array; see \`.agents/manifests/<LANE>.json\`. Each \`before\` must be a unique anchor.
 - **Coverage:** under an agent, vitest's coverage TEXT table hides fully covered files, so read \`coverage/coverage-summary.json\` (\`--coverage.reporter=json-summary\`).
 - Never call the real GitHub API or \`gh\`, and never spawn a CLI under test: call it in-process with injected I/O.
+
+### Concurrency checklist (locks, signals, async setup/cleanup, shared test state)
+
+If this lane touches a lock, a signal, an async setup or a cleanup, or shared test state, walk all
+five before you call it done. Three of them are wave-w01 defects that shipped.
+
+- **(a)** Re-check ownership or staleness **after the LAST \`await\` or \`wait\`**, immediately before
+  you act on the shared state — never on entry. #642 (HXF3) adopted the database before the
+  org-seed \`await\`.
+- **(b)** Set an "attempted" or "done" flag **immediately before the action it records**, never on
+  entry. #641 (MH5) set the release flag before the heartbeat \`wait\`.
+- **(c)** A shell \`wait\` or \`sleep\` is **interrupted by a trapped signal**: the trap runs inside it,
+  not after it. Trace what each trap does at each such point.
+- **(d)** A cleanup can run **twice or late** — a second actor, a timeout, a crash handler — so it
+  must be **read-only on state it does not own**. #639 (MH4) had a refused acquire give back a slot
+  no longer its own.
+- **(e)** For **each** of those points, one test that **stacks a second actor there**. The same path
+  run twice with nothing else changed is not that test, and it is the only thing that catches
+  (a)–(d).
 
 ## Verification
 <VERIFICATION>

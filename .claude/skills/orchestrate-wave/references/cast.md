@@ -11,7 +11,7 @@ fail with a misleading error rather than "no such model".
   - `openrouter/stealth/space-bunny-alpha` is the PRIMARY implementer and remediates its own lanes.
   - `openrouter/z-ai/glm-5.3-flash --variant max` is the fallback (an outage or a failed dispatch; one attempt per wave).
   - Sonnet 5 (subagent) takes high-risk lanes and a fix round that does not converge.
-  - `agy` is NOT dependable here: its daily quota is shared with the owner's other projects, and HX5's dispatch hit `429 … resets in 31h` at its first turn.
+  - `agy` is NOT dependable here: its daily quota is shared with the owner's other projects, and HX5's dispatch hit `429 … resets in 31h` at its first turn. **On midnight it is not an implementer seat at all** (owner, 2026-10-01) — it is the **second-pass reviewer seat**, below, where that quota buys a read instead of a lane.
 - **opencode runs attach to the owner's shared server:**
   - `opencode run --attach http://127.0.0.1:4096 --dir <ABS worktree> --auto --format json -m <model> "<prompt>" < /dev/null`.
   - The owner runs `opencode serve --port 4096` for all four of their projects. Check `curl -s -o /dev/null -w %{http_code} http://127.0.0.1:4096/doc` answers 200 first. If the server is down, ask the owner to restart it; never start one yourself.
@@ -28,8 +28,22 @@ fail with a misleading error rather than "no such model".
 - **Stage-2 reviewer (always, every PR):** an in-house `Agent` that is **not** the implementer,
   read-only, per the skill's Review stage; this is unchanged, and grok's pre-PR review is
   **in addition** for high-risk lanes, not a replacement.
+- **Second-pass reviewer (owner, 2026-10-01): `gemini-3.1-pro-high` through `agy` ONLY** — never
+  Gemini through opencode or OpenRouter (the owner's plan quota). It runs on midnight, **inside the
+  lane's own worktree**:
+  `ssh m 'cd <wt> && agy --print "<prompt>" --model gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json'`
+  - **The prompt embeds the diff and says "read files only with your file-reading tool; run no
+    shell command."** Headless agy auto-denies any shell command outside its allow-list and then
+    answers **EMPTY** — 5 of the 13 reviews on 2026-09-30 came back that way. **An empty response is
+    a failed review to re-run, never a clean verdict.**
+  - **Never `--dangerously-skip-permissions`.** The *Seat defaults — owner's instruction,
+    2026-09-25* table below carries it for implementers; the reviewer must not copy it.
+  - **The reviewer's model is never the implementer's** — on midnight that is
+    `openrouter/stealth/space-bunny-alpha`, so a Gemini pass is an independent read.
 - **Plan reviewer:** `grok-4.7` read-only (above), or the in-house `Plan` agent when grok's weekly
   quota is spent; required before dispatching any rewritten lane row (SKILL.md, Before you dispatch).
+  **Unchanged by the second-pass seat: `grok-4.7` remains both the plan reviewer and the high-risk
+  pre-PR reviewer** — Gemini took the second pass, not either of those.
 - **Local LM Studio models are not a lane seat.** The 30B at 10.10.0.220 runs on the orchestrator's
   own machine and made it unresponsive under memory pressure. Evaluated 2026-09-28; one-off text
   jobs only.

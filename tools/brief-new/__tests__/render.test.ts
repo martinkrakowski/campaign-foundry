@@ -113,6 +113,47 @@ describe("TEMPLATE_F and the doc", () => {
     }
   });
 
+  test("TEMPLATE_F carries the concurrency checklist, at level 3, between the two headings it belongs between", () => {
+    // The level is the load-bearing part, and it is 3 for two reasons that happen
+    // to agree. The section-order test above collects `/^#{1,2} /` and compares
+    // the result to an exact list, so a `##`-level checklist would have to be
+    // added there — and a lane navigating by `##` would read a working rule as a
+    // peer of `## Verification` rather than as what it is, part of `## Working
+    // rules`. So the assertion below pins the level as well as the two sides.
+    const CHECKLIST =
+      "### Concurrency checklist (locks, signals, async setup/cleanup, shared test state)";
+    const brief = render(header);
+    expect(brief).toContain(CHECKLIST);
+    expect(brief.indexOf(CHECKLIST)).toBeGreaterThan(brief.indexOf("## Working rules"));
+    expect(brief.indexOf(CHECKLIST)).toBeLessThan(brief.indexOf("## Verification"));
+    expect([...brief.matchAll(/^#{1,2} /gm)].map((match) => match[0])).not.toContain(CHECKLIST);
+
+    // The five items are the five, in order, and each of the three that has a
+    // defect behind it still cites it: a checklist that lost a citation would
+    // read as a checklist, and the reason a line exists is the part a lane can
+    // act on. `(c)` and `(e)` have no citation — a shell `wait` a trap interrupts
+    // is a property of the shell, not a defect that shipped.
+    //
+    // Matched against a whitespace-flattened copy, because the citation is prose
+    // and prose wraps: markdown here is outside `format:check`, so a rewrap is a
+    // lawful future edit and it must not be able to fail this test on its own.
+    const flat = brief.replace(/\s+/g, " ");
+    expect([...brief.matchAll(/^- \*\*\(([a-e])\)\*\*/gm)].map((match) => match[1])).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+    ]);
+    for (const line of [
+      "#642 (HXF3) adopted the database before the org-seed `await`.",
+      "#641 (MH5) set the release flag before the heartbeat `wait`.",
+      "#639 (MH4) had a refused acquire give back a slot no longer its own.",
+    ]) {
+      expect(flat, line).toContain(line);
+    }
+  });
+
   test("the two closing lines are the last two lines of the brief", () => {
     const lines = render(header).split("\n");
     expect(lines.slice(-2)).toEqual([
