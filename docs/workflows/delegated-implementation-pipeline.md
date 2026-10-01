@@ -373,6 +373,21 @@ Rules:
   worktree** even at `CF_GATE_SLOTS=3`: the slots are per host, not per checkout, and
   `verify-manifests` mutates the tree it verifies, so two gates in two worktrees would each be
   handed a slot and each would write manifests the other reads.
+- `CF_TEST_MAX_WORKERS` is how many workers ONE vitest run may spawn, and it is set
+  **HOST-WIDE** beside `CF_GATE_SLOTS`, by the same rule and for the same reason: the two are one
+  decision, `CF_GATE_SLOTS × CF_TEST_MAX_WORKERS ≤ the host's threads` (on midnight, 6 × 4 or
+  7 × 3). Vitest's default is `availableParallelism() − 1` per run — ~23 workers on midnight's
+  24 threads — so three slots already ask for ~69, and seven would ask for ~160: tens of
+  gigabytes of RSS against ~40 free, and false timeouts on the CPU-bound tests, which fail on
+  their own internal deadlines and cannot be saved by a larger `--testTimeout`. `vitest.config.ts`
+  passes it as `test.maxWorkers` (parsed by `tools/gate/lib/max-workers.ts`); a value that is not
+  a positive whole number at or below `availableParallelism()` throws at config load, naming the
+  variable. **Unset means unset** — CI and the Mac pass nothing and get vitest's own default,
+  unchanged. Never set it in a repo file, a script or a workflow, and never per seat: a seat that
+  caps its own workers below the host's cap does not get a quieter machine, it gets a lane whose
+  timeout budget nobody else is running under. Do not also set `VITEST_MAX_WORKERS`: vitest applies
+  it over `test.maxWorkers` after the config is resolved, and unvalidated, so it silently wins and
+  the number validated above becomes the one that is ignored.
 - Tests live <WHERE>, one behaviour per test, no real clock/network/filesystem in unit tests.
 - The database tests run on PGlite unless `TEST_PG_URL` is set, and on a loaded host you should set
   it: `TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres`. Every migrated test database is then
