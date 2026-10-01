@@ -1,0 +1,40 @@
+{
+  "refresh": {
+    "captured": "2026-09-30",
+    "note": "GitHub caps __Type.fields at 2 per query; run the three queries below",
+    "trimmed": "IssueComment and PullRequestReviewThread are trimmed to the fields dispositionMutation selects. Every other type below is the FULL field list as introspected, NON_NULL and LIST wrappers unwrapped — a leaf reads as the named type it wraps (String, ID, URI, Boolean).",
+    "queries": [
+      "gh api graphql -f query='{ A: __type(name:\"Mutation\"){ fields { name type { name kind ofType { name kind ofType { name kind ofType { name } } } } } } B: __type(name:\"ResolveReviewThreadPayload\"){ fields { name type { name kind ofType { name kind ofType { name kind ofType { name } } } } } } }'",
+      "gh api graphql -f query='{ A: __type(name:\"AddCommentPayload\"){ fields { name type { name kind ofType { name kind ofType { name kind ofType { name } } } } } } B: __type(name:\"IssueCommentEdge\"){ fields { name type { name kind ofType { name kind ofType { name kind ofType { name } } } } } } }'",
+      "gh api graphql -f query='{ A: __type(name:\"IssueComment\"){ fields { name type { name kind ofType { name kind ofType { name kind ofType { name } } } } } } B: __type(name:\"PullRequestReviewThread\"){ fields { name type { name kind ofType { name kind ofType { name kind ofType { name } } } } } } }'"
+    ]
+  },
+  "types": {
+    "Mutation": {
+      "addComment": "AddCommentPayload",
+      "resolveReviewThread": "ResolveReviewThreadPayload"
+    },
+    "AddCommentPayload": {
+      "clientMutationId": "String",
+      "commentEdge": "IssueCommentEdge",
+      "subject": "Node",
+      "timelineEdge": "IssueTimelineItemEdge"
+    },
+    "IssueCommentEdge": {
+      "cursor": "String",
+      "node": "IssueComment"
+    },
+    "IssueComment": {
+      "id": "ID",
+      "url": "URI"
+    },
+    "ResolveReviewThreadPayload": {
+      "clientMutationId": "String",
+      "thread": "PullRequestReviewThread"
+    },
+    "PullRequestReviewThread": {
+      "id": "ID",
+      "isResolved": "Boolean"
+    }
+  }
+}

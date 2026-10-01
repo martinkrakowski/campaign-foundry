@@ -62,7 +62,9 @@ describe("sweep — preview (hazard: the wrong thread is public and unrecoverabl
   test("--post sends the mutation; the same preview is printed first", async () => {
     const write = JSON.stringify({
       data: {
-        addComment: { comment: { url: "https://github.com/o/r/pull/361#issuecomment-1" } },
+        addComment: {
+          commentEdge: { node: { url: "https://github.com/o/r/pull/361#issuecomment-1" } },
+        },
         resolve0: { thread: { isResolved: true } },
         resolve1: { thread: { isResolved: true } },
       },
@@ -195,7 +197,7 @@ describe("sweep — the mutation carries the whole class", () => {
       if (args.some((a) => a.includes("mutation"))) {
         return JSON.stringify({
           data: {
-            addComment: { comment: { url: "https://gh/c" } },
+            addComment: { commentEdge: { node: { url: "https://gh/c" } } },
             resolve0: { thread: { isResolved: true } },
             resolve1: { thread: { isResolved: true } },
           },
@@ -251,7 +253,7 @@ describe("sweep — the mutation carries the whole class", () => {
       if (args.some((a) => a.includes("mutation"))) {
         return JSON.stringify({
           data: {
-            addComment: { comment: { url: "https://gh/c" } },
+            addComment: { commentEdge: { node: { url: "https://gh/c" } } },
             resolve0: { thread: { isResolved: true } },
           },
           errors: [],
@@ -284,6 +286,34 @@ describe("sweep — the mutation carries the whole class", () => {
     await expect(
       sweep(plan({ requested: ["PRRT_a"] }), true, { gh: r.gh, out: () => undefined }),
     ).rejects.toThrow(/unknown GraphQL error/);
+  });
+
+  test("a payload that stops short of the url reports no url at all", async () => {
+    // Every one of these is a response that leaves the run with nothing to show
+    // for its comment. The old shape is first on purpose: it is what this tool
+    // asked for until 2026-09-30, GitHub rejected the whole mutation because
+    // `AddCommentPayload` has no `comment`, and a reader still keyed on that
+    // path would report a url for a run that never posted one. A url that is not
+    // there has to read as absent — the CLI turns that into exit 1, which is
+    // the whole reporting mechanism, and a second one here would be a second
+    // place for the truth to come apart.
+    for (const payload of [
+      { comment: { url: "https://gh/old-shape" } },
+      { commentEdge: {} },
+      { commentEdge: { node: {} } },
+    ]) {
+      const r = recorder(
+        threads(["PRRT_a", false]),
+        JSON.stringify({
+          data: { addComment: payload, resolve0: { thread: { isResolved: true } } },
+        }),
+      );
+      const result = await sweep(plan({ requested: ["PRRT_a"] }), true, {
+        gh: r.gh,
+        out: () => undefined,
+      });
+      expect(result.commentUrl, JSON.stringify(payload)).toBeNull();
+    }
   });
 });
 

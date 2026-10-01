@@ -235,7 +235,7 @@ export function dispositionMutation(threadCount: number): string {
   ).join("\n");
   return `mutation SweepDisposition($subject: ID!, $body: String!${decl ? `, ${decl}` : ""}) {
   addComment(input: { subjectId: $subject, body: $body }) {
-    comment { url }
+    commentEdge { node { url } }
   }
 ${resolves}
 }`;
@@ -365,7 +365,10 @@ export async function sweep(plan: SweepPlan, post: boolean, deps: SweepDeps): Pr
     );
   }
   const data = written.data ?? {};
-  const comment = (data["addComment"] as { comment?: { url?: string } } | undefined)?.comment;
+  const addComment = data["addComment"] as
+    | { commentEdge?: { node?: { url?: string } } }
+    | undefined;
+  const comment = addComment?.commentEdge?.node;
   const resolvedIds = ids.filter((_, i) => {
     const r = data[`resolve${i}`] as { thread?: { isResolved?: boolean } } | undefined;
     return r?.thread?.isResolved === true;
