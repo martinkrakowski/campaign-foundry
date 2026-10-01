@@ -51,7 +51,7 @@ permission and effort flags, so I can correct it before anything runs. Verified 
 |---|---|---|
 | grok | `grok --prompt-file BRIEF.md --always-approve --effort high --output-format plain --max-turns 600` | add `--disallowed-tools "edit,write"` (also `--deny <rule>` / `--tools` allowlist) |
 | claude | `claude -p "$(cat BRIEF.md)" --model <model> --permission-mode acceptEdits --output-format text` | add `--disallowedTools "Edit Write NotebookEdit"` |
-| agy | `agy --print "$(cat BRIEF.md)" --dangerously-skip-permissions --effort high --print-timeout 60m` | no CLI tool-deny flag — use the brief as the control |
+| agy | **no implementer seat** — the current cast is in `.claude/skills/orchestrate-wave/references/cast.md` (space-bunny primary, GLM-Flash fallback), and agy is the read-only second-pass **reviewer** | `agy --print "$(cat REVIEW-PROMPT.md)" --model gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json` — no CLI tool-deny flag, so use the brief as the control |
 | opencode | `opencode run --auto --model <provider>/<model> --variant high "$(cat BRIEF.md)"` (`-p` is `--password`, not print) | deny rules live in config, not a flag — use the brief |
 
 Check the exact tool names with `<cli> --help` before relying on a deny list; a misspelled

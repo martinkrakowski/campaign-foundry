@@ -30,8 +30,13 @@ fail with a misleading error rather than "no such model".
   **in addition** for high-risk lanes, not a replacement.
 - **Second-pass reviewer (owner, 2026-10-01): `gemini-3.1-pro-high` through `agy` ONLY** — never
   Gemini through opencode or OpenRouter (the owner's plan quota). It runs on midnight, **inside the
-  lane's own worktree**:
-  `ssh m 'cd <wt> && agy --print "<prompt>" --model gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json'`
+  lane's own worktree**, and the prompt goes in as a **FILE**, never as an argument:
+  `scp <prompt> m:<wt>/.agents/briefs/scratch/review-prompt.txt`, then
+  `ssh m 'cd <wt> && agy --print "$(cat .agents/briefs/scratch/review-prompt.txt)" --model gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json'`
+  - **Never interpolate a diff, or any untrusted text, into a shell command string.** A
+    double-quoted `agy --print "<diff>"` expands every `$(…)` and backtick in that diff on
+    midnight before agy sees it; the single-quoted ssh argument above expands `$(cat …)` remotely,
+    and a command substitution's output is never re-evaluated.
   - **The prompt embeds the diff and says "read files only with your file-reading tool; run no
     shell command."** Headless agy auto-denies any shell command outside its allow-list and then
     answers **EMPTY** — 5 of the 13 reviews on 2026-09-30 came back that way. **An empty response is

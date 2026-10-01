@@ -126,7 +126,13 @@ describe("TEMPLATE_F and the doc", () => {
     expect(brief).toContain(CHECKLIST);
     expect(brief.indexOf(CHECKLIST)).toBeGreaterThan(brief.indexOf("## Working rules"));
     expect(brief.indexOf(CHECKLIST)).toBeLessThan(brief.indexOf("## Verification"));
-    expect([...brief.matchAll(/^#{1,2} /gm)].map((match) => match[0])).not.toContain(CHECKLIST);
+    // Against the rendered text, not against the heading LIST the order test builds:
+    // that list is `[...brief.matchAll(/^#{1,2} /gm)]`, and its captures are the
+    // hash run alone, so every element is `"# "` or `"## "` and no heading text is
+    // ever in it. `not.toContain(CHECKLIST)` there passed for a reason that had
+    // nothing to do with the checklist, which is the shape of an assertion that
+    // cannot fail.
+    expect(brief).not.toMatch(/^#{1,2} Concurrency checklist/m);
 
     // The five items are the five, in order, and each of the three that has a
     // defect behind it still cites it: a checklist that lost a citation would
@@ -220,6 +226,19 @@ describe("the verification block", () => {
     expect(block).toBe(`\n${VERIFICATION_MAC.replace("<LANE>", "HXF7")}`);
     expect(block).toContain("Then run `yarn gate --lane HXF7` in the FOREGROUND");
     expect(block).not.toContain("Do NOT run `yarn gate`");
+  });
+
+  test("midnight's test Postgres address is in the midnight block and out of a mac brief", () => {
+    // `127.0.0.1` on the Mac is the Mac, so a mac lane told to set midnight's
+    // address selects the server-only path against a database that is not there.
+    // The sentence therefore lives in VERIFICATION_MIDNIGHT, and this asserts on
+    // the RENDERED brief rather than on the constant, because the constant
+    // appearing in the mac block is only a bug once substitution has put it there.
+    const midnight = render({ ...header, host: "midnight" });
+    expect(midnight).toContain("TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres");
+    // The credential is the operator's, and no doc, brief or env line carries it.
+    expect(midnight).toContain("~/.pgpass");
+    expect(render({ ...header, host: "mac" })).not.toContain("TEST_PG_URL");
   });
 
   test("no <LANE> survives literally into a written brief, on either host", () => {

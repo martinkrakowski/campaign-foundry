@@ -27,12 +27,6 @@ Environment, for every shell call:
 
 <ENV>
 
-Midnight runs a test Postgres and lanes run against it: set
-\`TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres\` in the block above. The server uses
-SCRAM, so the credential comes from the operator's \`~/.pgpass\` — never in a URL, a brief or an env
-line. Without it every pg test silently ran on PGlite instead: on HXF3's two harness files, 108 s
-with 22 timeouts, against 11 s and 53/53.
-
 ## First: prove the gap
 
 <gap>
@@ -92,13 +86,19 @@ Run every verification command in the foreground and read its exit code. A task 
  * a lane there is told not to try and to run its own targeted commands in the
  * foreground instead.
  *
+ * It also carries **midnight's test Postgres**, and that sentence is here rather
+ * than in {@link TEMPLATE_F} for a host reason: `127.0.0.1` on the Mac is the
+ * Mac, so a mac lane told to set the midnight address would select the
+ * server-only path against a database that is not there. The credential is the
+ * operator's `~/.pgpass` and is never written into a URL, a brief or an env line.
+ *
  * The middle line is a placeholder and stays one. `<targeted commands>` is the
  * orchestrator's to fill — the commands are per lane and this tool has no way to
  * know them — and it is NOT one of the seven names `substitute` fills, so it
  * reaches the file as the word the orchestrator will search for.
  */
 export const VERIFICATION_MIDNIGHT =
-  "**Do NOT run `yarn gate` or `yarn test:cov`** (this host cannot pass the full suite; GitHub CI is the gate). Run, in the FOREGROUND, reading each exit code:\n<targeted commands>";
+  "**Do NOT run `yarn gate` or `yarn test:cov`** (this host cannot pass the full suite; GitHub CI is the gate). Run, in the FOREGROUND, reading each exit code:\n<targeted commands>\n\nSet `TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres` — midnight's test Postgres, in the environment block above. The server uses SCRAM, so the credential comes from the operator's `~/.pgpass`, never in a URL, a brief or an env line. Without it every pg test silently ran on PGlite instead: on HXF3's two harness files, 108 s with 22 timeouts, against 11 s and 53/53.";
 
 /**
  * The mac verification block: the same targeted commands, and then the whole

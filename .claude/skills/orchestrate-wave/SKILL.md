@@ -253,9 +253,10 @@ that did not happen.
    **Deviations** section) rather than waiting for the wave: the review bots then run alongside the
    second-host check and the model review, and one fix round answers both. A **`high`-risk** lane's
    PR waits for D184's pre-PR review to settle first. **Nothing merges early** —
-   `scripts/merge-prs.sh` still gates on the checks, the unresolved threads and D184. When a lane
-   stops one step short anyway, **finish it mechanically yourself** after verifying the diff.
-   (why: [rationale](references/rationale.md#a-lane-is-not-done-until-the-pr-exists-and-lanes-routinely-stop-one-step-short))
+   `scripts/merge-prs.sh` still gates on the checks, the unresolved threads and D184. **When a lane
+   did the work but left it uncommitted, verify the diff and commit it yourself** (one commit, the
+   lane's own subject). That is a legitimate orchestrator action, not a fix the lane owes you; what
+   is not legitimate is reporting the lane done because it said so.
 
    **Emit the event in the tool call immediately before the launch, with nothing between them** —
    never afterwards, never "as you go". **There is no launcher that emits for you, and there will not
@@ -300,9 +301,14 @@ that did not happen.
 
    **The second-pass reviewer is Gemini, through `agy` ONLY** — never Gemini through opencode or
    OpenRouter (the owner's plan quota; owner, 2026-10-01). On midnight, **inside the lane's own
-   worktree**: `ssh m 'cd <wt> && agy --print "<prompt>" --model gemini-3.1-pro-high --effort high
-   --print-timeout 30m --output-format json'`. **The prompt embeds the diff and says "read files
-   only with your file-reading tool; run no shell command"** — headless agy auto-denies shell
+   worktree**, and hand it a **FILE**: `scp <prompt> m:<wt>/.agents/briefs/scratch/review-prompt.txt`,
+   then `ssh m 'cd <wt> && agy --print "$(cat .agents/briefs/scratch/review-prompt.txt)" --model
+   gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json'`. **Never
+   interpolate a diff, or any untrusted text, into a shell command string**: a double-quoted
+   `agy --print "<diff>"` expands every `$(…)` and backtick in that diff on midnight, before agy
+   sees it, while the single-quoted ssh argument above makes `$(cat …)` expand remotely and a
+   command substitution's output is never re-evaluated. **The prompt embeds the diff and says "read
+   files only with your file-reading tool; run no shell command"** — headless agy auto-denies shell
    outside its allow-list and then answers **EMPTY** (5 of the 13 reviews on 2026-09-30). **Never
    `--dangerously-skip-permissions`** — that is an implementer flag and the reviewer must not copy
    it. **An empty response is a failed review: re-run it; it is never a clean verdict.** The

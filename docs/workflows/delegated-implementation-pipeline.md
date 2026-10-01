@@ -331,11 +331,23 @@ at once reports the one it noticed first.
 #### The second-pass reviewer is Gemini, through `agy`
 
 **Gemini through `agy` ONLY — never Gemini through opencode or OpenRouter** (the owner's plan
-quota; owner, 2026-10-01). Run it on midnight, **inside the lane's own worktree**:
+quota; owner, 2026-10-01). Run it on midnight, **inside the lane's own worktree**, and hand it a
+**FILE**:
 
 ```bash
-ssh m 'cd <wt> && agy --print "<prompt>" --model gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json'
+# 1. Write the prompt LOCALLY. It embeds the diff, so it is data, not a command.
+# 2. Copy it into the lane worktree's gitignored scratch.
+scp <prompt> m:<wt>/.agents/briefs/scratch/review-prompt.txt
+
+# 3. Run it there.
+ssh m 'cd <wt> && agy --print "$(cat .agents/briefs/scratch/review-prompt.txt)" --model gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json'
 ```
+
+**Never interpolate a diff, or any untrusted text, into a shell command string.** A
+double-quoted `agy --print "<diff>"` expands every `$(…)` and backtick in that diff **on midnight,
+before agy sees it**. Above, the ssh argument is single-quoted, so `$(cat …)` is expanded by the
+**remote** shell and a command substitution's output is never re-evaluated — the diff reaches agy
+as inert text.
 
 **The prompt embeds the diff and says "read files only with your file-reading tool; run no shell
 command".** Headless agy auto-denies any shell command outside its allow-list and then answers
@@ -657,12 +669,6 @@ repository.
 Environment, for every shell call:
 
 <ENV>
-
-Midnight runs a test Postgres and lanes run against it: set
-`TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres` in the block above. The server uses
-SCRAM, so the credential comes from the operator's `~/.pgpass` — never in a URL, a brief or an env
-line. Without it every pg test silently ran on PGlite instead: on HXF3's two harness files, 108 s
-with 22 timeouts, against 11 s and 53/53.
 
 ## First: prove the gap
 
