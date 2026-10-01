@@ -335,6 +335,21 @@ LOCK_HELD=0
 # everything the gate then reports would land in that file — which cleanup
 # deletes. These are what the release messages go to instead, so the report is
 # on the caller's stdout whatever the interrupted command was doing with its own.
+#
+# The residual, accepted: every step's children now INHERIT fds 3 and 4, so a
+# descendant of the test:cov step that outlives the gate can hold the caller's
+# stdout open through fd 3 even where fd 1 was redirected into a file about to be
+# deleted. For a step that captures nothing that is nothing new — those children
+# already held the caller's stdout on fd 1 — and the heartbeat subshell gives
+# both straight back as its first act. The alternative is worse, and not merely
+# less tidy: closing 3 and 4 around run_test_cov's eval leaves them CLOSED when
+# bash runs the deferred trap inside that redirect, and a failed `>&3` on
+# `sh "$LOCK_SCRIPT" release …` is a shell redirection error, which skips the
+# release command itself — so the fd that reports the release would become the
+# reason the lock is never given back. Measured with them closed around the eval:
+# exit 143, the lock left behind, no release line, and under bash not even the
+# error naming the bad descriptors (it is captured along with everything else;
+# dash prints both on stderr). Do not tidy this.
 exec 3>&1 4>&2
 HEARTBEAT_PID=""
 HB_FAILED="${TMPDIR:-/tmp}/cf-gate.hbfailed.$$"

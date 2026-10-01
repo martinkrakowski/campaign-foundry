@@ -339,6 +339,13 @@ describe("gate.sh signals", () => {
         dir,
         {
           CF_GATE_STEPS: `test:cov\ttouch "${inStep}"; sleep 3`,
+          // The interval is this case's, not the host's, and the bound below is
+          // measured against it: the orphan the `exec 3>&- 4>&-` line prevents
+          // holds the pipe for as long as this sleep. On a host whose
+          // CF_GATE_HEARTBEAT_SECONDS were at or under the bound, a script
+          // WITHOUT that line would pass here — the assertion would be measuring
+          // the host's configuration rather than the script.
+          CF_GATE_HEARTBEAT_SECONDS: "60",
         },
         shell,
       );
@@ -358,7 +365,12 @@ describe("gate.sh signals", () => {
         expect({ shell, status: result.status }).toEqual({ shell, status: 143 });
         expect(result.stdout).toContain("gate-lock: released by lane-a");
         expect(result.stdout).toContain("gate: lock released, heartbeat stopped");
-        expect(result.stdout).not.toContain("FAILED to release");
+        // stderr, not stdout: the gate's FAILED line is written to its own saved
+        // fd 4, so asserting on stdout here asserted nothing a script could do.
+        // On the caller's stderr it is a real assertion — a release that failed
+        // or was refused prints there, under every shell, whatever the step was
+        // doing with fd 1.
+        expect(result.stderr).not.toContain("FAILED to release");
         expect(locksLeftIn(dir)).toEqual([]);
       } finally {
         await stopGate(child, done);
