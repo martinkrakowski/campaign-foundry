@@ -106,6 +106,61 @@ plan committed
       └─▶ next wave (repeat) → docs/session-log PR at the end
 ```
 
+### Watching a lane
+
+A lane is a process, and until it writes a PR its only visible sign of life is
+its log. `yarn lane:watch` answers the three questions that log cannot — *is it
+still working*, *what has it cost*, and *when did it finish* — from the
+opencode server itself, over two read-only GETs.
+
+```bash
+# 1. Dispatch with ocm-run, which prints every `opencode run --format json`
+#    event. The FIRST one carrying a sessionID is the one to keep. `-R` reads
+#    each line as raw text, `fromjson?` yields nothing for a line that is not
+#    JSON, and `-r` is what prints the string bare — without it jq emits a
+#    quoted `"ses_x"`, and `checkSession` refuses the quote marks.
+ocm-run … | tee /tmp/lane.log
+session=$(jq -rR 'fromjson? | select(.sessionID?) | .sessionID' /tmp/lane.log | head -1)
+
+# 2. Follow it. One compact line per tool call, step and retry; heartbeats and
+#    every other lane's events are dropped, and consecutive identical lines
+#    collapse — step numbers count from attach. Exits when the lane does.
+yarn lane:watch follow --server http://127.0.0.1:4096 --session "$session"
+
+# 3. When it settles, log the timing and the cost into the wave.
+yarn lane:watch usage --server http://127.0.0.1:4096 --session "$session" \
+  --json --emit "$logdir" "$wave" "$lane" implement
+```
+
+**`--server` is loopback-only.** It must be `http://` on `127.0.0.1`,
+`localhost` or `[::1]` — the tunnel the orchestrator opens to the lane's
+machine. Anything else exits 2. The tool is read-only toward the server: it
+sends GET, refuses redirects, and will request exactly two paths,
+`/session/{sessionID}` and `/global/event`.
+
+**The exit codes are the signal, and 3 is the one to notice.**
+
+| Exit | `usage` | `follow` |
+| --- | --- | --- |
+| 0 | the usage was read | the session went idle |
+| 1 | no such session, or the read failed | the session errored, or the stream dropped through every reconnect |
+| 2 | the command line is wrong | the command line is wrong |
+| 3 | the server reported no `tokens`/`cost` — **printed as `null`, never a 0** | no event **for this session** for `--stall` seconds (default 600) |
+
+Exit 3 from `follow` means *investigate*, and it deliberately does not fire on
+a heartbeat: the server being alive says nothing about the lane. A dropped
+stream is re-subscribed three times, a second apart, before it becomes exit 1 —
+because a drop is usually a tunnel blip — but each reconnect is a **fresh**
+subscription with no replay, so if the lane finished inside one of those gaps
+the watch cannot see it and will end in 3 instead. `usage` is what tells the
+rest.
+
+`scripts/lane-usage.sh` stays as the SQLite fallback: it reads opencode's own
+database over ssh and needs no server, but it prints **0** for a token or cost
+row that is not there yet, which is indistinguishable from a lane that has
+billed nothing. Prefer `lane:watch` where the tunnel is up; keep the shell
+script for when it is not.
+
 ### Plan review gate
 
 A lane is briefed from its row in a plan's lane table (`docs/planning/*.md`, rows like

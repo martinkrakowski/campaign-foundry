@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -53,6 +54,38 @@ function scratch(): string {
   return dir;
 }
 
+/**
+ * A scratch that is a git worktree of its own, so `git rev-parse
+ * --show-toplevel` has a root to print and `acquire` takes its git branch
+ * rather than the `pwd -P` one. The lock parent is ${TMPDIR:-/tmp}, which is
+ * not inside a repository, so a plain scratch here really is outside one.
+ */
+function gitScratch(): string {
+  const dir = scratch();
+  const init = spawnSync("git", ["init", "--quiet", dir], { encoding: "utf8" });
+  if (init.status !== 0) throw new Error(`git init failed for ${dir}: ${init.stderr}`);
+  return dir;
+}
+
+/**
+ * What `acquire` reads as the caller's worktree for a cwd that is not inside a
+ * repository: `pwd -P`, which resolves symlinks, so it is `realpathSync` and
+ * not the path the test happened to build.
+ */
+function plainWorktree(cwd: string): string {
+  return realpathSync(cwd);
+}
+
+/** runLockIn from a cwd of its own — the worktree half of the TMPDIR/cwd pair. */
+function acquireFrom(
+  dir: string,
+  cwd: string,
+  args: string[],
+  env: Record<string, string> = {},
+): RunResult {
+  return runLockIn(dir, args, env, 15_000, "sh", cwd);
+}
+
 interface RunResult {
   status: number;
   stdout: string;
@@ -60,17 +93,34 @@ interface RunResult {
   pid?: number;
 }
 
+/**
+ * `dir` is the TMPDIR — where the LOCK lives. `cwd` is where the script is
+ * STANDING, which is a different thing and is only ever read as the caller's
+ * worktree (MH4). A lane takes a slot in the lock parent and runs its steps in
+ * its own checkout, so a test that gives two acquirers one TMPDIR and one cwd
+ * each is a host with two slots and two worktrees; a test that gives them two
+ * TMPDIRs is two hosts.
+ *
+ * CF_GATE_SLOTS is pinned HERE, between the inherited environment and the
+ * per-test one, because D188 sets it host-wide (/etc/environment) and most of
+ * these tests are written against the default of one slot: on a host with three,
+ * an acquirer that should have been told busy takes slot 1 instead and the test
+ * is asserting about busy. A test that means more slots says so in its own env,
+ * which is spread last and therefore wins.
+ */
 function runLockIn(
   dir: string,
   args: string[],
   env: Record<string, string> = {},
   timeout = 15_000,
   shell = "sh",
+  cwd?: string,
 ): RunResult {
   const result = spawnSync(shell, [gateLockSh, ...args], {
     encoding: "utf8",
-    env: { ...process.env, TMPDIR: dir, ...env },
+    env: { ...process.env, CF_GATE_SLOTS: "1", TMPDIR: dir, ...env },
     timeout,
+    cwd,
   });
   return {
     status: result.status ?? -1,
@@ -130,9 +180,12 @@ function startLockIn(
   args: string[],
   env: Record<string, string> = {},
   shell = "sh",
+  cwd?: string,
 ): { child: ChildProcess; done: Promise<RunResult> } {
+  // The same host-wide pin as runLockIn above — see there for why.
   const child = spawn(shell, [gateLockSh, ...args], {
-    env: { ...process.env, TMPDIR: dir, ...env },
+    env: { ...process.env, CF_GATE_SLOTS: "1", TMPDIR: dir, ...env },
+    cwd,
   });
   let stdout = "";
   let stderr = "";
@@ -275,6 +328,47 @@ describe("gate-lock.sh", () => {
     // reclaimed.
     expect(lockFile(dir, "owner").trim()).toBe("lane-a");
     expect(lockFile(dir, "pid").trim()).toBe(String(process.pid));
+  });
+
+  test("an acquire from a directory that no longer exists is refused, having taken nothing", () => {
+    // One gate per worktree is enforced by comparing worktrees, and an EMPTY
+    // worktree compares equal to nothing: worktree_holder skips a slot whose
+    // worktree file is empty, so a lock that recorded "" would be invisible to
+    // the next acquire from the same directory, and two gates would each hold a
+    // slot in one worktree. So the identity is required, and the refusal is
+    // CLOSED — before the slot loop, not after a slot is won and given back.
+    //
+    // The shape here is the portable one. Handing spawnSync a `cwd` that is not
+    // there fails inside libuv with ENOENT before any shell starts, on every
+    // platform, so the child is asked to delete its OWN cwd and then exec: the
+    // shell is already running when the directory goes. `cd` succeeds, `rmdir`
+    // succeeds because the directory is empty, and from the `exec` on there is
+    // no path back to it — `git rev-parse` cannot answer, and `pwd -P` prints
+    // nothing at all (measured here under /bin/sh, which is dash, and under
+    // bash: both give an empty string, with the getcwd failure on stderr).
+    const dir = scratch();
+    const doomed = scratch();
+    const result = spawnSync(
+      "sh",
+      ["-c", 'cd "$1" && rmdir "$1" && exec sh "$2" acquire lane-gone', "sh", doomed, gateLockSh],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          CF_GATE_SLOTS: "1",
+          TMPDIR: dir,
+          CF_GATE_CALLER_PID: String(process.pid),
+        },
+      },
+    );
+    // Exit 2 and not 75: the host is not busy, and retrying cannot help while
+    // the caller's own directory is gone.
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("cannot determine the caller's worktree");
+    // Nothing was taken, and nothing was half-taken: no lock at the name, and
+    // no candidate left behind by a try_create the loop never had to enter.
+    expect(existsSync(lockDir(dir))).toBe(false);
+    expect(leftoverCands(dir)).toEqual([]);
   });
 
   test("a live holder makes acquire exit 75", () => {
@@ -1292,7 +1386,7 @@ describe("gate-lock.sh CF_GATE_SLOTS", () => {
   function seedNamed(
     dir: string,
     name: string,
-    holder: { owner?: string; pid?: number; started?: number; beat?: number },
+    holder: { owner?: string; pid?: number; started?: number; beat?: number; worktree?: string },
   ): string {
     const slot = join(dir, name);
     mkdirSync(slot, { recursive: true });
@@ -1301,6 +1395,11 @@ describe("gate-lock.sh CF_GATE_SLOTS", () => {
     writeFileSync(join(slot, "started"), `${holder.started ?? now}\n`);
     writeFileSync(join(slot, "pid"), `${holder.pid ?? process.pid}\n`);
     writeFileSync(join(slot, "beat"), `${holder.beat ?? now}\n`);
+    // The FIFTH file is written only when a test asks for it, so every seeded
+    // slot above is still exactly the four files a pre-MH4 holder left behind —
+    // which is the point of one of the tests below.
+    if (holder.worktree !== undefined)
+      writeFileSync(join(slot, "worktree"), `${holder.worktree}\n`);
     return slot;
   }
 
@@ -1308,7 +1407,7 @@ describe("gate-lock.sh CF_GATE_SLOTS", () => {
   function seedSlot(
     dir: string,
     n: number,
-    holder: { owner?: string; pid?: number; started?: number; beat?: number },
+    holder: { owner?: string; pid?: number; started?: number; beat?: number; worktree?: string },
   ): string {
     return seedNamed(dir, n === 0 ? "cf-gate.lock" : `cf-gate.lock.${n}`, holder);
   }
@@ -1438,12 +1537,24 @@ describe("gate-lock.sh CF_GATE_SLOTS", () => {
     // Each command waits for a file of its own, so all three are provably parked
     // at once — three locks on the host at the same moment, not three runs that
     // happened to overlap.
+    //
+    // A cwd each, under the one TMPDIR. Three lanes in ONE checkout is three
+    // gates against one tree, which is exactly what the lock exists to prevent:
+    // `verify-manifests` mutates the tree it verifies, so two of them at once
+    // write manifests the other is reading. Before that rule existed this test
+    // ran all three from the vitest process's own cwd and was three gates in one
+    // worktree; the host lock did not notice and the row review caught it. Three
+    // plain scratch cwds are three worktrees that differ under `pwd -P`, which is
+    // the branch a directory outside any repository takes.
     const lanes = ["lane-a", "lane-b", "lane-c"];
-    const started = lanes.map((lane) =>
+    const cwds = lanes.map(() => scratch());
+    const started = lanes.map((lane, n) =>
       startLockIn(
         dir,
         ["run", lane, "--", "sh", "-c", `while [ ! -f "$TMPDIR/go-${lane}" ]; do sleep 1; done`],
         { CF_GATE_SLOTS: "3" },
+        "sh",
+        cwds[n],
       ),
     );
     try {
@@ -1460,10 +1571,29 @@ describe("gate-lock.sh CF_GATE_SLOTS", () => {
         const holder = started[lanes.indexOf(owners[n])];
         // The holder is the run itself, exactly as at SLOTS=1.
         expect(slotFile(slotDir(dir, n), "pid").trim()).toBe(String(holder.child.pid));
+        // …and it recorded the worktree it is standing in, which is the one
+        // thing that lets the next acquirer see it. The set is the set of cwds,
+        // matched as a set because the slot-to-run mapping above is a race: if
+        // these were not three different worktrees the whole host would be
+        // answering about one tree and this test would be passing for the wrong
+        // reason.
+        expect(slotFile(slotDir(dir, n), "worktree").trim()).toBe(
+          plainWorktree(cwds[lanes.indexOf(owners[n])]),
+        );
       }
+      expect(lanes.map((_, n) => slotFile(slotDir(dir, n), "worktree").trim()).sort()).toEqual(
+        cwds.map(plainWorktree).sort(),
+      );
 
       // A fourth caller, with the host's full three slots busy.
-      const fourth = runLockIn(dir, ["run", "lane-d", "--", "true"], { CF_GATE_SLOTS: "3" });
+      const fourth = runLockIn(
+        dir,
+        ["run", "lane-d", "--", "true"],
+        { CF_GATE_SLOTS: "3" },
+        15_000,
+        "sh",
+        scratch(),
+      );
       expect(fourth.status).toBe(75);
       expect(fourth.stderr).toContain("busy");
       // It names the first holder, which is the one a retrying caller waits for
@@ -1628,6 +1758,323 @@ describe("gate-lock.sh CF_GATE_SLOTS", () => {
     expect(released.status).toBe(0);
     expect(existsSync(lockDir(dir))).toBe(false);
     expect(existsSync(slotDir(dir, 1))).toBe(true);
+  });
+
+  // ONE GATE PER WORKTREE, even at SLOTS>1. The lock is per HOST and not per
+  // checkout, and at SLOTS>1 a second gate in the same checkout is simply handed
+  // the next slot and both proceed — while `verify-manifests`, one of the two
+  // steps the lock exists to serialise, MUTATES the tree it is verifying. So two
+  // gates beside each other in one worktree each write manifests the other is
+  // reading. Until now that rule was prose in the script's header and nothing
+  // else; these tests are the rule.
+  test("a second acquire in the same worktree is refused, and it is the WORKTREE that is compared", () => {
+    const dir = scratch();
+    const worktree = gitScratch();
+    // The holder acquires for real, so the `worktree` file in its slot is
+    // written by try_create rather than by this test, and it names the
+    // repository ROOT — the worktree, not the directory the lane happened to be
+    // standing in.
+    const held = acquireFrom(dir, worktree, ["acquire", "lane-holder"], {
+      CF_GATE_CALLER_PID: String(process.pid),
+      CF_GATE_SLOTS: "2",
+    });
+    expect(held.status).toBe(0);
+    expect(slotFile(slotDir(dir, 0), "worktree").trim()).toBe(realpathSync(worktree));
+
+    // The second caller stands in a SUBDIRECTORY of that same worktree, which is
+    // the case a comparison of directories would wave through: the directories
+    // differ, the worktree does not.
+    const nested = join(worktree, "packages");
+    mkdirSync(nested);
+    const refused = acquireFrom(dir, nested, ["acquire", "lane-late"], {
+      CF_GATE_CALLER_PID: "424242",
+      CF_GATE_SLOTS: "2",
+    });
+    expect(refused.status).toBe(75);
+    expect(refused.stderr).toContain("same worktree");
+    // It names the holder it yielded to, the slot that holder is in, and the
+    // worktree they share: `busy` on its own sends a caller looking for a host
+    // with no room left rather than for another gate in its own checkout.
+    expect(refused.stderr).toContain("lane-holder");
+    expect(refused.stderr).toContain(slotDir(dir, 0));
+    expect(refused.stderr).toContain(realpathSync(worktree));
+
+    // Its own slot is gone again. It won one and gave it back, rather than
+    // holding a slot it is not using under a beat nothing refreshes.
+    expect(existsSync(slotDir(dir, 1))).toBe(false);
+    // And the holder's lock is exactly as it was — its five files, none of them
+    // the refused acquirer's.
+    expect(readdirSync(slotDir(dir, 0)).sort()).toEqual([
+      "beat",
+      "owner",
+      "pid",
+      "started",
+      "worktree",
+    ]);
+    expect(slotFile(slotDir(dir, 0), "pid").trim()).toBe(String(process.pid));
+  });
+
+  test("two acquires in two worktrees both succeed, and each records its own", () => {
+    // The other branch of the identity, and the reason the rule is not a
+    // "one gate per host" rule wearing a worktree's name: these two share a lock
+    // parent and are in two plain directories, which are two worktrees.
+    const dir = scratch();
+    const first = scratch();
+    const second = scratch();
+    // The FIRST caller records a pid that is really alive — this test process —
+    // because it has to still be holding slot 0 when the second one arrives, or
+    // the second reclaims it as a dead pid and the slots below say nothing about
+    // worktrees at all. The second records a dead one on purpose: nothing judges
+    // it, because it wins a free slot and returns.
+    const one = acquireFrom(dir, first, ["acquire", "lane-a"], {
+      CF_GATE_CALLER_PID: String(process.pid),
+      CF_GATE_SLOTS: "2",
+    });
+    const two = acquireFrom(dir, second, ["acquire", "lane-b"], {
+      CF_GATE_CALLER_PID: "515151",
+      CF_GATE_SLOTS: "2",
+    });
+    expect(one.status).toBe(0);
+    expect(two.status).toBe(0);
+    // One slot each, which is what the second slot is FOR.
+    expect(slotFile(slotDir(dir, 0), "owner").trim()).toBe("lane-a");
+    expect(slotFile(slotDir(dir, 1), "owner").trim()).toBe("lane-b");
+    // Neither recorded the other's worktree: outside any repository the
+    // identity is `pwd -P`, and these two paths differ.
+    expect(slotFile(slotDir(dir, 0), "worktree").trim()).toBe(plainWorktree(first));
+    expect(slotFile(slotDir(dir, 1), "worktree").trim()).toBe(plainWorktree(second));
+  });
+
+  test("a live same-worktree holder in a HIGHER slot blocks too", () => {
+    // ANY OTHER slot, not only a lower one. Yielding only to a lower slot looks
+    // equivalent and is not: a third holder releasing slot 0 between the two
+    // acquires leaves the later acquirer below the earlier one, after the
+    // earlier one has already checked and found nothing above it. Two gates then
+    // run in one worktree and the rule is enforced nowhere.
+    const dir = scratch();
+    const worktree = scratch();
+    // Slot 1 is held, live and fresh, in this worktree, while slot 0 is free —
+    // so the slot loop takes slot 0 and never looks at slot 1 at all, and the
+    // only thing that can refuse this acquire is the worktree check.
+    const holder = seedSlot(dir, 1, {
+      owner: "lane-holder",
+      pid: process.pid,
+      worktree: plainWorktree(worktree),
+    });
+    const refused = acquireFrom(dir, worktree, ["acquire", "lane-late"], {
+      CF_GATE_CALLER_PID: "424242",
+      CF_GATE_SLOTS: "2",
+    });
+    expect(refused.status).toBe(75);
+    expect(refused.stderr).toContain("same worktree");
+    expect(refused.stderr).toContain("lane-holder");
+    expect(refused.stderr).toContain(holder);
+    // The slot it had won went back, and the holder above it is untouched.
+    expect(existsSync(lockDir(dir))).toBe(false);
+    expect(slotFile(holder, "owner").trim()).toBe("lane-holder");
+    expect(slotFile(holder, "pid").trim()).toBe(String(process.pid));
+  });
+
+  test("a same-worktree holder that is dead or stale does not block", () => {
+    // The judgement is the slot loop's own — the pid alive AND the beat not
+    // stale — and nothing stricter than it. A holder the loop would have
+    // reclaimed is not running any more, and refusing on one would leave a
+    // worktree nobody is gating unable to gate itself for as long as the
+    // abandoned lock sits in the lock parent.
+    const worktree = scratch();
+    const staleBeat = Math.floor(Date.now() / 1000) - 700;
+    for (const dead of [
+      { why: "a dead pid", holder: { owner: "lane-dead", pid: reapedPid() } },
+      { why: "a stale beat", holder: { owner: "lane-stale", pid: process.pid, beat: staleBeat } },
+    ]) {
+      const dir = scratch();
+      seedSlot(dir, 0, { ...dead.holder, worktree: plainWorktree(worktree) });
+      const taken = acquireFrom(dir, worktree, ["acquire", "lane-new"], {
+        CF_GATE_CALLER_PID: "424242",
+        CF_GATE_SLOTS: "2",
+      });
+      expect({ why: dead.why, status: taken.status }).toEqual({ why: dead.why, status: 0 });
+      // The corpse is reclaimed on the way, and the slot is this caller's.
+      expect(slotFile(lockDir(dir), "owner").trim()).toBe("lane-new");
+    }
+  });
+
+  test("a same-worktree holder that is dead or stale in ANOTHER slot does not block, and is left where it is", () => {
+    // The liveness filter itself, and it needs the corpse somewhere the slot
+    // loop will NOT walk over. Seeded at slot 0 — as the test above does — the
+    // loop reclaims slot 0 before try_create wins, and by the time
+    // worktree_holder scans, the only slot left is the acquirer's own, which the
+    // scan skips by path. Every liveness line in worktree_holder can be deleted
+    // and that test stays green: it was measuring the reclaim path, not the
+    // filter. (Measured: the mutation read `survived` before this test existed.)
+    //
+    // So the corpse goes in SLOT 1, which is a slot the loop never looks at
+    // because it wins the free slot 0 first. Nothing is reclaimed, nothing is
+    // judged, and the only thing that can answer this acquire is the pair of
+    // filters: pid alive AND beat not stale, the slot loop's own judgement and
+    // nothing stricter. Over-blocking is its own bug — a crashed holder's
+    // abandoned lock must not lock a worktree nobody is gating out of gating
+    // itself.
+    const worktree = scratch();
+    const staleBeat = Math.floor(Date.now() / 1000) - 700;
+    for (const dead of [
+      { why: "a dead pid", owner: "lane-dead", holder: { pid: reapedPid() } },
+      { why: "a stale beat", owner: "lane-stale", holder: { pid: process.pid, beat: staleBeat } },
+    ]) {
+      const dir = scratch();
+      const corpse = seedSlot(dir, 1, {
+        owner: dead.owner,
+        ...dead.holder,
+        worktree: plainWorktree(worktree),
+      });
+      // From the seeded worktree, or the seed's worktree file matches nothing
+      // and the case passes for the wrong reason.
+      const taken = acquireFrom(dir, worktree, ["acquire", "lane-new"], {
+        CF_GATE_CALLER_PID: "424242",
+        CF_GATE_SLOTS: "2",
+      });
+      expect({ why: dead.why, status: taken.status }).toEqual({ why: dead.why, status: 0 });
+      // It took the free slot 0, which is all the loop had to do.
+      expect(slotFile(lockDir(dir), "owner").trim()).toBe("lane-new");
+      // The corpse is STILL there, untouched: worktree_holder reads slots, it
+      // never reclaims them. Reclaiming is the loop's job and it never saw this
+      // one, which is also what "not reclaiming" in the output says.
+      expect(existsSync(corpse)).toBe(true);
+      expect(slotFile(corpse, "owner").trim()).toBe(dead.owner);
+      expect(taken.stdout).not.toContain("reclaiming");
+    }
+  });
+
+  test("a same-worktree refusal that has lost its own slot leaves the replacement alone", async () => {
+    // `rm -rf "$LOCK"` is a statement about the NAME, and by the time a refused
+    // acquire gives its slot back the name may not be the one it created. The
+    // window is real, not theoretical: MH5's acquire window is gate.sh being
+    // TERMed while the acquire child carries on, so the recorded caller pid is
+    // gone mid-acquire and the next contender judges the slot reclaimable on
+    // its first pass. The refused acquire then deletes the replacement — a lock
+    // it never held and never named, belonging to a gate that is running now.
+    //
+    // So the give-back re-reads owner and pid and removes only while both are
+    // still this invocation's, the contract release already uses. Driving it
+    // needs the scan and the removal parked apart from each other, which
+    // CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM is for: the two are
+    // microseconds apart in production, and a test that raced them would be
+    // racing luck.
+    const dir = scratch();
+    const worktree = scratch();
+    // A live same-worktree holder in slot 0, so this acquirer cannot take slot
+    // 0, wins slot 1, and is then refused — the only path that reaches a
+    // give-back at all.
+    const holder = seedSlot(dir, 0, {
+      owner: "lane-holder",
+      pid: process.pid,
+      worktree: plainWorktree(worktree),
+    });
+    const hook = join(dir, "paused-before-same-worktree-rm");
+    const { done } = startLockIn(
+      dir,
+      ["acquire", "lane-late"],
+      {
+        CF_GATE_CALLER_PID: "424242",
+        CF_GATE_SLOTS: "2",
+        CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM: hook,
+      },
+      "sh",
+      worktree,
+    );
+    try {
+      // Parked between the scan and the give-back, holding slot 1.
+      await waitForFile(hook);
+      expect(existsSync(slotDir(dir, 1))).toBe(true);
+      // The name is taken over while it waits: the slot is removed and a
+      // contender's lock, with another owner and another pid, is seeded there.
+      rmSync(slotDir(dir, 1), { recursive: true, force: true });
+      const replacement = seedSlot(dir, 1, {
+        owner: "lane-replacement",
+        pid: process.pid,
+        worktree: plainWorktree(worktree),
+      });
+      rmSync(hook, { force: true });
+
+      const result = await done;
+      // Still the same refusal: the guard changes what is removed, not the
+      // answer the caller gets.
+      expect(result.status).toBe(75);
+      expect(result.stderr).toContain("same worktree");
+      // The replacement is intact — both halves of the identity disagree with
+      // this invocation's, and the give-back removed nothing.
+      expect(slotFile(replacement, "owner").trim()).toBe("lane-replacement");
+      expect(slotFile(replacement, "pid").trim()).toBe(String(process.pid));
+      // And the holder it yielded to in the first place never moved.
+      expect(slotFile(holder, "owner").trim()).toBe("lane-holder");
+    } finally {
+      // A failed assertion must not leave the child parked on a hook file in a
+      // TMPDIR the afterEach has already removed: it would sleep forever with
+      // nobody left to release its slot. Removing the file releases it, and
+      // awaiting `done` is safe however many callers await it.
+      rmSync(hook, { force: true });
+      await done;
+    }
+  }, 30_000);
+
+  test("a holder with no worktree file never blocks: it never claimed one", () => {
+    // Compatibility, and not optional: locks outlive the script that wrote
+    // them. A slot taken before this rule existed carries four files and no
+    // worktree, and a check that read that empty answer as "the same worktree"
+    // would block every acquire on that host against a lock that never claimed
+    // a worktree at all — the seeded slots in this file included.
+    const dir = scratch();
+    const holder = seedSlot(dir, 0, { owner: "lane-old", pid: process.pid });
+    expect(readdirSync(holder).sort()).toEqual(["beat", "owner", "pid", "started"]);
+    const taken = runLockIn(dir, ["acquire", "lane-new"], {
+      CF_GATE_CALLER_PID: "424242",
+      CF_GATE_SLOTS: "2",
+    });
+    // Slot 0 is held live, so this caller is answered at slot 1 — which it only
+    // ever reaches because the four-file holder in slot 0 did not block it.
+    expect(taken.status).toBe(0);
+    expect(slotFile(slotDir(dir, 1), "owner").trim()).toBe("lane-new");
+    expect(slotFile(holder, "owner").trim()).toBe("lane-old");
+  });
+
+  test("a same-worktree refusal records no slot in CF_GATE_SLOT_OUT", () => {
+    // The pin is what the caller's heartbeat, verify and release are handed, and
+    // what a cleanup fallback reads when a gate dies without releasing. A slot
+    // given back on a same-worktree refusal must never reach that file: a pin to
+    // a slot that no longer exists is a holder that verifies a lock nobody holds
+    // and releases whatever has taken the name since. So the check runs BEFORE
+    // the pin is written, and a caller answered 75 here has no pin at all.
+    const control = scratch();
+    const controlPin = join(scratch(), "slot-out-control");
+    // The control first, so the refusal below is about ORDER and not about a
+    // variable nothing reads: on a host with no same-worktree holder, the pin is
+    // written and holds the slot that was taken.
+    const allowed = runLockIn(control, ["acquire", "lane-elsewhere"], {
+      CF_GATE_CALLER_PID: "424242",
+      CF_GATE_SLOT_OUT: controlPin,
+    });
+    expect(allowed.status).toBe(0);
+    expect(readFileSync(controlPin, "utf8").trim()).toBe(lockDir(control));
+
+    const dir = scratch();
+    const worktree = scratch();
+    seedSlot(dir, 0, {
+      owner: "lane-holder",
+      pid: process.pid,
+      worktree: plainWorktree(worktree),
+    });
+    const pin = join(scratch(), "slot-out-refused");
+    const refused = acquireFrom(dir, worktree, ["acquire", "lane-late"], {
+      CF_GATE_CALLER_PID: "515151",
+      CF_GATE_SLOTS: "2",
+      CF_GATE_SLOT_OUT: pin,
+    });
+    expect(refused.status).toBe(75);
+    expect(refused.stderr).toContain("same worktree");
+    expect(existsSync(pin)).toBe(false);
+    // Nothing for a pin to name even if one had been written.
+    expect(existsSync(slotDir(dir, 1))).toBe(false);
+    expect(slotFile(lockDir(dir), "owner").trim()).toBe("lane-holder");
   });
 });
 
