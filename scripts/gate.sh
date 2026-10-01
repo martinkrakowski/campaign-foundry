@@ -366,17 +366,13 @@ release_failed=0
 release_attempted=0
 
 release_lock() {
-  # At most one release per gate, whatever asks for it. Two callers can: the
-  # end-of-run release below and cleanup's, and with the acquire-window recovery
-  # in between the second one would find the slot file still naming the slot the
-  # first already gave back — printing a second "released", or worse, naming a
-  # slot some other gate has since taken and reporting a REFUSAL on a gate that
-  # did nothing wrong. Set on any attempt, so the flag covers the refused and the
-  # busy ones too.
+  # A release child has already been started, by the end-of-run release or by an
+  # earlier signal: there is nothing left for a second caller to do. The flag is
+  # READ here and SET immediately before the child below — see the comment there
+  # for why it is not set on entry.
   if [ "$release_attempted" -eq 1 ]; then
     return 0
   fi
-  release_attempted=1
   # The acquire window: a lock this gate WON before it knew it held one. A signal
   # delivered while the acquire child runs is deferred by dash and by bash alike
   # until that child exits, and the child is not signalled — it completes its
@@ -408,6 +404,29 @@ release_lock() {
     fi
     rm -f "$HB_FAILED"
     LOCK_HELD=0
+    # At most ONE release child per gate — and the flag says exactly that, which
+    # is why it is set HERE and not on entry. Two callers can reach this function
+    # (the end-of-run release and cleanup's), and cleanup's must be a no-op once a
+    # child has been started: a second one would find the slot file still naming
+    # the slot the first already gave back, print a second "released", or — on a
+    # host where another gate has since taken that name — report a REFUSAL for a
+    # gate that did nothing wrong.
+    #
+    # It cannot be set on entry, because everything between here and this line can
+    # be interrupted by a signal and re-entered through cleanup: `kill` and
+    # `wait` above (wait is interruptible by a trapped signal in dash and in bash
+    # alike — measured: the handler runs while the loop is still alive), and the
+    # `rm`. A flag set there turns that re-entry into a silent no-op, and the gate
+    # exits 143 with its lock still on disk naming a dead pid. Re-entry is safe
+    # here instead: HEARTBEAT_PID is then either already cleared or names a loop
+    # on its way out, so killing and waiting it again is harmless, and LOCK_SLOT_PATH
+    # is the slot this gate took either way.
+    #
+    # The window this leaves is the gap between this assignment and the fork
+    # below — a couple of microseconds, and not closable in sh without a subshell,
+    # which would put the release one process further from the trap that has to
+    # interrupt it.
+    release_attempted=1
     # The release's status and diagnostics are not discarded: a release that
     # failed (or was refused — see gate-lock.sh) must be reported, never
     # announced as released. It is pinned to the slot this gate took, so a
@@ -494,6 +513,28 @@ start_heartbeat() {
     # wider, and it outlives the gate that already said it was gone.
     exec 3>&- 4>&-
     trap - INT TERM EXIT
+    # Test hook (CF_GATE_TEST_PAUSE_BEFORE_HEARTBEAT_STOP): a pause in the loop's
+    # own DEATH, which is the only way to make the release's `wait` for it a
+    # window a test can signal into. The loop above dies at once, so that `wait` is
+    # a few microseconds wide; a trapped signal is another matter, because a shell
+    # defers its handler until the foreground command it is waiting for returns
+    # (measured: 0.6s behind a `sleep 1`, and not at all behind a `sleep 60`
+    # within ten), so with a handler installed here the loop survives the kill
+    # until its own `sleep` ends, announces itself by touching
+    # $CF_GATE_TEST_PAUSE_BEFORE_HEARTBEAT_STOP.in-handler — which is the test's
+    # proof that the gate is inside that `wait` rather than merely about to be —
+    # and does not die until the named file EXISTS.
+    #
+    # Waiting for the file to APPEAR rather than to disappear is what makes a
+    # re-entry harmless: a gate whose release was interrupted sends a second TERM
+    # while this handler is still running, the shell runs the handler again, and an
+    # exit condition the test can take back would leave the loop spinning on a
+    # marker that had just been put back (measured under dash: the gate never
+    # finished). The handler ends by EXITING — a loop that merely ignored the kill
+    # would never be reaped, and the release would wait on it forever.
+    if [ -n "${CF_GATE_TEST_PAUSE_BEFORE_HEARTBEAT_STOP:-}" ]; then
+      trap 'touch "$CF_GATE_TEST_PAUSE_BEFORE_HEARTBEAT_STOP.in-handler" 2>/dev/null; while [ ! -f "$CF_GATE_TEST_PAUSE_BEFORE_HEARTBEAT_STOP" ]; do sleep 1; done; exit 0' TERM
+    fi
     while :; do
       sleep "$HB_SECONDS"
       # The heartbeat is ownership-checked on the lock side too: it refreshes

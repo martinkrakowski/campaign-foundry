@@ -127,18 +127,15 @@ function occurrences(haystack: string, needle: string): number {
 }
 
 /**
- * Never leave a gate running, whatever an assertion did: a parked acquire child
- * holds its parent's stdout open, so a test that abandons one also abandons a
- * process for as long as the pause it is parked in allows. The marker goes first
- * for exactly that reason — a paused `while [ -f … ]; do sleep 1; done` would
- * otherwise never let the child, and so never let `close`, arrive.
+ * Never leave a gate running, whatever an assertion did: a parked child holds its
+ * parent's stdout open, so a test that abandons one also abandons a process for as
+ * long as the pause it is parked in allows — and `close` never arrives. Whatever
+ * pause a case is sitting in must therefore be released BEFORE this is called,
+ * because the file or files it waits on mean opposite things to different hooks:
+ * CF_GATE_TEST_PAUSE_BEFORE_MV ends when its marker is REMOVED, while
+ * CF_GATE_TEST_PAUSE_BEFORE_HEARTBEAT_STOP ends when its file APPEARS.
  */
-async function stopGate(
-  child: ChildProcess,
-  done: Promise<unknown>,
-  markers: string[] = [],
-): Promise<void> {
-  for (const marker of markers) rmSync(marker, { force: true });
+async function stopGate(child: ChildProcess, done: Promise<unknown>): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill("SIGKILL");
   await done;
@@ -171,6 +168,15 @@ async function within<T>(promise: Promise<T>, ms: number, what: string): Promise
 /** Every lock-shaped name left in `dir`, whatever slot of the semaphore it is. */
 function locksLeftIn(dir: string): string[] {
   return readdirSync(dir).filter((entry) => entry.startsWith("cf-gate.lock"));
+}
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -318,10 +324,82 @@ describe("gate.sh signals", () => {
         // …and nothing of it is left, in any slot of the host's semaphore.
         expect({ shell, left: locksLeftIn(dir) }).toEqual({ shell, left: [] });
       } finally {
-        await stopGate(child, done, [mvMarker]);
+        // The acquire child spins until this marker is GONE, and it holds the
+        // gate's stdout while it does — so it goes before the gate is killed.
+        rmSync(mvMarker, { force: true });
+        await stopGate(child, done);
       }
     }
   }, 60_000);
+
+  test("a TERM while the release is stopping the heartbeat still gives the lock back", async () => {
+    for (const shell of SIGNAL_SHELLS) {
+      const dir = scratch();
+      // The hook's two files (see gate.sh): the loop announces itself in the
+      // handler and waits for `letItDie` to EXIST, so neither a second TERM from
+      // an interrupted release nor a re-entered handler can take the latch back.
+      const letItDie = join(dir, "release-the-heartbeat");
+      const inHandler = `${letItDie}.in-handler`;
+      const { child, stdoutSoFar, done } = startGate(
+        dir,
+        {
+          // ONE locked step, and it is the last one, so the release under test is
+          // the end-of-run one: the lock is given back the moment the step passes,
+          // with no cleanup trap anywhere near it and nowhere to fall back to.
+          CF_GATE_STEPS: "verify-manifests\tsleep 1",
+          // Short, because the release cannot reach its `wait` until the loop's
+          // in-flight `sleep` returns: a trapped signal is deferred until the
+          // foreground command finishes, so a 60s interval would park the gate for
+          // a minute before this case could start.
+          CF_GATE_HEARTBEAT_SECONDS: "3",
+          CF_GATE_TEST_PAUSE_BEFORE_HEARTBEAT_STOP: letItDie,
+        },
+        shell,
+      );
+      try {
+        await waitForOutput(stdoutSoFar, "gate: heartbeat pid");
+        // The handshake, and the reason this case is deterministic: that file is
+        // written by the loop's TERM handler, which only runs once the loop is
+        // being stopped — so this exists while the gate is INSIDE release_lock's
+        // `wait` for it, not merely on its way there.
+        await waitForFile(inHandler, 30_000);
+        // That `wait` is interruptible by a trapped signal in dash and in bash
+        // alike, so this lands in the one window where the gate has decided to
+        // release the lock and has not yet run the release.
+        process.kill(child.pid as number, "SIGTERM");
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        // Read before the loop is allowed to die, because this is where the two
+        // scripts differ: the fixed gate is still alive inside cleanup's own
+        // release, while a gate that treats "entered release_lock" as "released"
+        // has already exited — with the lock still on disk.
+        const survived = child.exitCode === null && child.signalCode === null;
+        // Let the heartbeat die so the gate can finish. Unfixed, the gate is
+        // already gone and this only releases the loop it left parked.
+        writeFileSync(letItDie, "");
+        const result = await done;
+        expect({ shell, survived, status: result.status }).toEqual({
+          shell,
+          survived: true,
+          status: 143,
+        });
+        // Both lines, because the lock is the whole point: a gate that exits 143
+        // having released nothing looks exactly like one that released cleanly,
+        // and only the lock's own name tells them apart.
+        expect(result.stdout).toContain("gate-lock: released by lane-a");
+        expect(result.stdout).toContain("gate: lock released, heartbeat stopped");
+        expect({ shell, left: locksLeftIn(dir) }).toEqual({ shell, left: [] });
+        // Nothing of the loop survives either: the gate reaped it, which is the
+        // only reason its `wait` returned.
+        const heartbeat = Number(/gate: heartbeat pid (\d+)/.exec(result.stdout)?.[1]);
+        expect({ shell, alive: isAlive(heartbeat) }).toEqual({ shell, alive: false });
+      } finally {
+        // Creating the release file is what lets the parked loop die, so a case
+        // that died before reaching it cannot leave the gate waiting on it.
+        writeFileSync(letItDie, "");
+        await stopGate(child, done);
+      }
+    }
+  }, 90_000);
 
   test("a TERM during the test:cov step reports the release on the caller's stdout", async () => {
     for (const shell of SIGNAL_SHELLS) {

@@ -52,6 +52,23 @@
         "a TERM during the test:cov step reports the release on the caller's stdout"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate.sh",
+      "before": "  if [ \"$release_attempted\" -eq 1 ]; then\n    return 0\n  fi\n",
+      "after": "  if [ \"$release_attempted\" -eq 1 ]; then\n    return 0\n  fi\n  release_attempted=1\n",
+      "because": "the flag set on ENTRY as well as before the child, which is the same script as the flag set only on entry: the second assignment is then a no-op re-set of a value already 1, and the early return turns every re-entry into a silent skip. Everything between the two is interruptible by a signal and re-enters through cleanup - `kill` and `wait` above all, because wait is interruptible by a trapped signal in dash and in bash alike (the handler runs while the loop is still alive) - and cleanup's release_lock then does nothing at all. The gate exits 143 having released nothing, and the lock is left on disk naming a pid that is gone: measured on the unfixed script under sh, dash and bash, 1 run in 1 each, zero release lines on stdout and `cf-gate.lock` left holding lane-a's dead pid. The test catches it by the liveness it reads BEFORE it lets the parked heartbeat die: the fixed gate is still running inside cleanup's own release, this one has already exited. It fails on every shell in the list, since neither the deferral nor the interruption is shell-specific.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-signals.test.ts",
+        "-t",
+        "a TERM while the release is stopping the heartbeat still gives the lock back"
+      ],
+      "verdict": "caught"
     }
   ]
 }
