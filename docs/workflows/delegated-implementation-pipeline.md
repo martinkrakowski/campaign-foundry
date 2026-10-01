@@ -45,7 +45,7 @@ Flags below were read from each CLI's `--help` on 2026-08-26. Re-check after upg
 |---|---|---|
 | **grok** | `grok --prompt-file BRIEF.md --always-approve --effort high --output-format plain --max-turns 600` | **Use `--prompt-file`, never `-p`** — long briefs are truncated through `-p`. |
 | **claude** | `claude -p "$(cat BRIEF.md)" --permission-mode acceptEdits --output-format text` | `--dangerously-skip-permissions` only in a sandbox. `--bg` returns immediately. |
-| **agy** | `agy --print "$(cat BRIEF.md)" --dangerously-skip-permissions --effort high --output-format text --print-timeout 60m` | No `--prompt-file`; raise `--print-timeout` (default 5 m) or long lanes are cut off. |
+| **agy** | `agy --print "$(cat review-prompt.txt)" --model gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json` | **Reviewer only** (no implementer seat; Gemini only through agy). NEVER `--dangerously-skip-permissions` for a review. No `--prompt-file`: pass the prompt through `$(cat file)`, never by interpolating a diff into the command string. An empty `response` is a failed review. |
 | **opencode** | `opencode run --auto --model openrouter/z-ai/glm-5.3-flash --variant high "$(cat BRIEF.md)"` | **`-p` is `--password` here, not print.** `--auto` is the permission bypass. **`--model` is required.** *"User not found."* means a **stale stored credential** in `~/.local/share/opencode/auth.json`, not a broken prefix (corrected 2026-09-04) — and the environment variable does not override a stored key. Never start two `opencode run` invocations in the same instant: they collide on its SQLite store and the second dies with `database is locked`. See the model-id table in `orchestrator-kickoff-prompt.md`. |
 
 Launch each one **detached from the orchestrator's task runner**, or a harness timeout
@@ -204,6 +204,42 @@ done
 
 Then launch one CLI per lane with its brief (template A).
 
+#### The tools the dispatch routine runs
+
+Four commands do this work. A brief that names none of them is a brief the orchestrator re-derives
+under pressure.
+
+- **`yarn brief:new`** drafts the lane brief itself — Template F, below — so the header, the
+  working rules and the host's own verification block are written once instead of copied per lane:
+  `--lane <id> --plan <path> --worktree <abs path> --branch <name> --tip <sha> --host
+  <midnight|mac> --out <path> [--env-file <path>]`.
+- **`yarn fix-brief`** drafts the fix-round brief from a PR's **unresolved** review threads
+  (Template E), one item per thread: `--pr <number> --lane <id> --round <k> --worktree <abs path>
+  --branch <name> --tip <sha> --out <path> [--threads <ids>]`.
+- **`yarn lane:watch`** answers *is it still working* and *what has it cost* — `follow` while the
+  lane runs, `usage` when it settles, both with `--emit <logdir> <wave> <lane> implement` so the
+  numbers reach the wave record. See *Watching a lane*, above.
+- **`ocm-run -s <session id>`** resumes a lane's session instead of starting a new one, and takes
+  **`--fork`** when the branch moved, because the old session's view of the branch is stale. It
+  retries once by itself when the first attempt dies on an early `database is locked`.
+
+#### The orchestrator pushes and opens the PR, and opens it early
+
+**The lane commits; the orchestrator pushes and opens the PR.** Template A used to tell the lane to
+run `gh pr create` itself, which Template F's sandboxed lane never did — so the brief and the
+routine disagreed about who finished a lane.
+
+**Open a `normal`-risk lane's PR as soon as its commits land, not when the wave finishes.** The
+review bots then run while the second-host check and the model review are still in flight, and
+**one fix round answers both** instead of two sequential rounds over the same head.
+
+A **`high`-risk** lane keeps D184's pre-PR review: its PR waits until that review has settled,
+because a `high` row is read twice on purpose.
+
+**Nothing merges early.** Opening the PR is not merging it. `scripts/merge-prs.sh` still gates on
+the checks, the unresolved review threads and D184, and re-reads the head immediately before
+`gh pr merge`. What changes is only when the review starts.
+
 ### Lane status is derived, never asserted
 
 **Do not take a lane's word for its own state.** Ask git and the forge, and let their output
@@ -277,6 +313,52 @@ For each PR, run an **adversarial reviewer against the branch diff, never the wo
 tree** (template B). In parallel, read the bot comments (Qodo, CodeRabbit, …) and
 **verify each claim against the code before acting on it** — bots are usually right here
 but not always, and an unverified "fix" is how a plan gets corrupted.
+
+#### Passes, by the row's risk tier
+
+D184 puts a risk tier on every plan row, and that tier is the review budget:
+
+| Tier | Passes |
+|---|---|
+| `normal` | ONE combined pass over the **row and the brief together**, then the model review of the diff |
+| `high` | the row on its own, the brief on its own, and a **pre-PR** pass over the diff before the PR is opened |
+| both | a pre-merge pass on the final head, and a re-check after every fix round |
+
+Three passes for `high` is not distrust of the normal case: a wrong premise, an unenumerated
+surface and a diff that only reads right are independent failures, and one pass walking all three
+at once reports the one it noticed first.
+
+#### The second-pass reviewer is Gemini, through `agy`
+
+**Gemini through `agy` ONLY — never Gemini through opencode or OpenRouter** (the owner's plan
+quota; owner, 2026-10-01). Run it on midnight, **inside the lane's own worktree**, and hand it a
+**FILE**:
+
+```bash
+# 1. Write the prompt LOCALLY. It embeds the diff, so it is data, not a command.
+# 2. Copy it into the lane worktree's gitignored scratch.
+scp <prompt> m:<wt>/.agents/briefs/scratch/review-prompt.txt
+
+# 3. Run it there.
+ssh m 'cd <wt> && agy --print "$(cat .agents/briefs/scratch/review-prompt.txt)" --model gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json'
+```
+
+**Never interpolate a diff, or any untrusted text, into a shell command string.** A
+double-quoted `agy --print "<diff>"` expands every `$(…)` and backtick in that diff **on midnight,
+before agy sees it**. Above, the ssh argument is single-quoted, so `$(cat …)` is expanded by the
+**remote** shell and a command substitution's output is never re-evaluated — the diff reaches agy
+as inert text.
+
+**The prompt embeds the diff and says "read files only with your file-reading tool; run no shell
+command".** Headless agy auto-denies any shell command outside its allow-list and then answers
+**EMPTY** — 5 of the 13 reviews on 2026-09-30 came back that way — so a reviewer sent to go and
+look at the tree, instead of being handed it, returns nothing at all.
+
+- **An empty response is a failed review: re-run it. It is never a clean verdict.**
+- **Never** pass `--dangerously-skip-permissions` to it. The implementer rows in
+  `references/cast.md` carry that flag; a reviewer must not copy it.
+- **The reviewer's model is never the implementer's.** The implementer here is
+  `openrouter/stealth/space-bunny-alpha`, so a Gemini pass is a genuinely independent read.
 
 ### Stage 3 — Remediate
 
@@ -389,18 +471,23 @@ Rules:
   it over `test.maxWorkers` after the config is resolved, and unvalidated, so it silently wins and
   the number validated above becomes the one that is ignored.
 - Tests live <WHERE>, one behaviour per test, no real clock/network/filesystem in unit tests.
-- The database tests run on PGlite unless `TEST_PG_URL` is set, and on a loaded host you should set
-  it: `TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres`. Every migrated test database is then
-  a copy of one migrated template (110 ms) instead of a fresh PGlite (5.2–6.5 s), and the
-  server-only tests stop skipping themselves.
+- The database tests run on PGlite unless `TEST_PG_URL` is set. On midnight it should be set, to
+  `TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres`. The server uses SCRAM, so the
+  credential comes from the operator's `~/.pgpass` — never in a URL, a brief or an env line.
+  Every migrated test database is then a copy of one migrated template (110 ms) instead of a fresh
+  PGlite (5.2–6.5 s), and the server-only tests stop skipping themselves. Without it every pg test
+  silently ran on PGlite: on HXF3's two harness files, 108 s with 22 timeouts, against 11 s and
+  53/53.
 - Never hand-edit generated files; change the generator/manifest and regenerate.
 - Do not reference paths that do not exist. If the plan and the code disagree, implement the
   smallest faithful interpretation and record it under Deviations — never improvise silently.
 - Conventional Commits, one logical change per commit, with NO attribution lines: no
   `Co-Authored-By`, no "Generated with", no `Claude-Session` (owner rule; squash-merge would carry
   them onto `main`).
-- Open a PR against main with `gh pr create` (title = commit summary; body = what/why,
-  verification incl. the coverage line, and a **Deviations** section). Do NOT merge.
+- **Commit your work and stop there: the orchestrator pushes and opens the PR**, with
+  `gh pr create` against main (title = commit summary; body = what/why, verification incl. the
+  coverage line, and a **Deviations** section), so the review bots, the second-host check and the
+  model review all run against one head. Do NOT push or open a PR yourself, and do NOT merge.
 - Never edit `.agents/session-log.md`: the orchestrator writes the wave record at close. (A w06 lane
   appended one because this line used to ask for it, and the orchestrator reverted it.)
 - Measure a file's coverage the way the gate does. Run `npx vitest run --coverage
@@ -413,15 +500,34 @@ Rules:
   not evidence.
 - If `test:cov` fails ONLY with timeouts in test files you did not touch, and the host's load
   average is far above its core count (`uptime`), do not retry more than once. Show those files pass
-  alone, report the load, and push **only to obtain CI evidence**. In that case your local gate
-  counts as FAILED: say so in the PR body and in your final message, and the lane is unverified
-  until CI's full gate passes on the pushed head (the orchestrator merges only on that). Never raise
-  a test timeout to get through.
+  alone, report the load, and tell the orchestrator to push **only to obtain CI evidence**. In that
+  case your local gate counts as FAILED: say so in your final message, and the orchestrator carries
+  it into the PR body; the lane is unverified until CI's full gate passes on the pushed head (the
+  orchestrator merges only on that). Never raise a test timeout to get through.
 
-Final message: PR URL, files changed, coverage line, deviations. Nothing else.
-If you cannot produce a PR URL and a passing gate (or, under the loaded-host rule, a PR whose
-local gate is reported as failed and awaits CI), say **STUCK** and what blocks it —
-do not report progress. The orchestrator verifies both independently either way.
+### Concurrency checklist (locks, signals, async setup/cleanup, shared test state)
+
+If this lane touches a lock, a signal, an async setup or a cleanup, or shared test state, walk all
+five before you call it done. Three of them are wave-w01 defects that shipped.
+
+- **(a)** Re-check ownership or staleness **after the LAST `await` or `wait`**, immediately before
+  you act on the shared state — never on entry. #642 (HXF3) adopted the database before the
+  org-seed `await`.
+- **(b)** Set an "attempted" or "done" flag **immediately before the action it records**, never on
+  entry. #641 (MH5) set the release flag before the heartbeat `wait`.
+- **(c)** A shell `wait` or `sleep` is **interrupted by a trapped signal**: the trap runs inside it,
+  not after it. Trace what each trap does at each such point.
+- **(d)** A cleanup can run **twice or late** — a second actor, a timeout, a crash handler — so it
+  must be **read-only on state it does not own**. #639 (MH4) had a refused acquire give back a slot
+  no longer its own.
+- **(e)** For **each** of those points, one test that **stacks a second actor there**. The same path
+  run twice with nothing else changed is not that test, and it is the only thing that catches
+  (a)–(d).
+
+Final message: commits, files changed, coverage line, deviations. Nothing else.
+If you cannot produce a passing gate (or, under the loaded-host rule, commits whose local gate is
+reported as failed and awaits CI), say **STUCK** and what blocks it — do not report progress. The
+orchestrator verifies both independently either way.
 ```
 
 ### Template B — Reviewer (orchestrator subagent, read-only)
@@ -578,6 +684,25 @@ Environment, for every shell call:
 - **Coverage:** under an agent, vitest's coverage TEXT table hides fully covered files, so read `coverage/coverage-summary.json` (`--coverage.reporter=json-summary`).
 - Never call the real GitHub API or `gh`, and never spawn a CLI under test: call it in-process with injected I/O.
 
+### Concurrency checklist (locks, signals, async setup/cleanup, shared test state)
+
+If this lane touches a lock, a signal, an async setup or a cleanup, or shared test state, walk all
+five before you call it done. Three of them are wave-w01 defects that shipped.
+
+- **(a)** Re-check ownership or staleness **after the LAST `await` or `wait`**, immediately before
+  you act on the shared state — never on entry. #642 (HXF3) adopted the database before the
+  org-seed `await`.
+- **(b)** Set an "attempted" or "done" flag **immediately before the action it records**, never on
+  entry. #641 (MH5) set the release flag before the heartbeat `wait`.
+- **(c)** A shell `wait` or `sleep` is **interrupted by a trapped signal**: the trap runs inside it,
+  not after it. Trace what each trap does at each such point.
+- **(d)** A cleanup can run **twice or late** — a second actor, a timeout, a crash handler — so it
+  must be **read-only on state it does not own**. #639 (MH4) had a refused acquire give back a slot
+  no longer its own.
+- **(e)** For **each** of those points, one test that **stacks a second actor there**. The same path
+  run twice with nothing else changed is not that test, and it is the only thing that catches
+  (a)–(d).
+
 ## Verification
 <VERIFICATION>
 
@@ -718,9 +843,8 @@ seat. Two swaps worth knowing:
 - **Claude Code as the host.** Run the orchestrator interactively and use its subagents for
   stage 2 instead of a separate `claude -p` — cheaper and context-rich, at the cost of
   reviewer independence (§1).
-- **agy as implementer.** `agy --print "$(cat brief.md)" --dangerously-skip-permissions
-  --effort high --print-timeout 60m` — it has no `--prompt-file`, and the default 5-minute
-  print timeout will truncate a lane, so raise it explicitly.
+- **agy is not an implementer seat** (owner, 2026-10-01): it is the read-only second-pass reviewer.
+  See the reviewer seat above and `references/cast.md`.
 
 ---
 

@@ -51,7 +51,7 @@ permission and effort flags, so I can correct it before anything runs. Verified 
 |---|---|---|
 | grok | `grok --prompt-file BRIEF.md --always-approve --effort high --output-format plain --max-turns 600` | add `--disallowed-tools "edit,write"` (also `--deny <rule>` / `--tools` allowlist) |
 | claude | `claude -p "$(cat BRIEF.md)" --model <model> --permission-mode acceptEdits --output-format text` | add `--disallowedTools "Edit Write NotebookEdit"` |
-| agy | `agy --print "$(cat BRIEF.md)" --dangerously-skip-permissions --effort high --print-timeout 60m` | no CLI tool-deny flag — use the brief as the control |
+| agy | **no implementer seat** — the current cast is in `.claude/skills/orchestrate-wave/references/cast.md` (space-bunny primary, GLM-Flash fallback), and agy is the read-only second-pass **reviewer** | `agy --print "$(cat REVIEW-PROMPT.md)" --model gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json` — no CLI tool-deny flag, so use the brief as the control |
 | opencode | `opencode run --auto --model <provider>/<model> --variant high "$(cat BRIEF.md)"` (`-p` is `--password`, not print) | deny rules live in config, not a flag — use the brief |
 
 Check the exact tool names with `<cli> --help` before relying on a deny list; a misspelled
@@ -64,7 +64,7 @@ tool name silently denies nothing.
 |---|---|---|
 | grok | `grok models` | The id is **`grok-4.6`**, not `grok-4.6-high` — effort is a separate `--reasoning-effort` / `--effort` flag. Passing a fused id errors with *"unknown model id"*. Quota exhausts (HTTP 402) and later resets. |
 | opencode | `opencode models` | `--model` is **required** and takes `provider/model`. **`"User not found."` means a stale stored credential, not a bad model id** (corrected 2026-09-04): opencode keeps its own key in `~/.local/share/opencode/auth.json` under `<provider>.key`, an `OPENROUTER_API_KEY` in the environment does **not** override a stored key (verified 2026-09-04; whether it is consulted when no key is stored was **not** tested), and the prefix was never broken. Prove the key independently with `curl -H "Authorization: Bearer $KEY" https://openrouter.ai/api/v1/key`. Also: two `opencode run` invocations started in the same instant collide on its SQLite store and the second dies with `database is locked` — stagger by 30-45s. |
-| agy | `agy models` | `gemini-3.7-flash-*` and `gemini-3.1-pro-{high,low}`; effort is `--effort`. Detached runs need `--dangerously-skip-permissions` — the denial is the permission prompt failing with no TTY, not the detachment. |
+| agy | `agy models` | `gemini-3.7-flash-*` and `gemini-3.1-pro-{high,low}`; effort is `--effort`. agy has no implementer seat now; it is the read-only reviewer, and a review NEVER takes `--dangerously-skip-permissions`. Headless, it auto-denies any shell command and returns an empty response, so the prompt embeds the diff and says to read files only (see `references/cast.md`). |
 
 **Choosing the cast — what a full wave actually showed (2026-08-31, one repo, briefs by one
 orchestrator, so indicative rather than definitive):**
