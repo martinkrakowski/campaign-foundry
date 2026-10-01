@@ -466,7 +466,7 @@ One commit. Owned paths only. No trailers.
 The SHA, each item's result (fixed, or refuted with the mechanism), and each command's exit code.
 
 If a finding is wrong, say so with the mechanism rather than changing code to match it.
-Run the gate in the foreground and read its exit code. A task you launched is not a result.
+Run every verification command in the foreground and read its exit code. A task you launched is not a result.
 ````
 
 After the round, close the threads with Template D's `yarn sweep`, naming the fix commit in the
