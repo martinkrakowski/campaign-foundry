@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "lane": "HXF4-lane-observability",
+  "mutations": [
+    {
+      "file": "tools/lane-watch/lib/server.ts",
+      "before": "  if (!LOOPBACK_HOSTS.has(url.hostname)) {",
+      "after": "  if (false) {",
+      "because": "The loopback check is the ONLY thing standing between a mistyped --server and a request to whatever host the operator named. This tool is read-only toward the server by construction — it sends GET, refuses redirects, and will request exactly two paths — but 'read-only' bounds what it may ASK, not where it may ask it, and the one endpoint that carries every other lane's events on a shared machine is the one worth not asking from off-box. `checkServer` returns `url.origin`, so with the host check gone an operator's typo, or a config file pointing at a shared box, is followed without complaint and the tunnel's only property is gone. The protocol check on the line above stays intact, which is why this mutation is narrow: it removes exactly the host half and leaves everything else in place. The test expects exit 2 for two non-loopback hosts and asserts no request was recorded, so it must fail",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/lane-watch/__tests__/usage.test.ts",
+        "-t",
+        "a non-loopback --server is refused before any request is made"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/lane-watch/lib/follow.ts",
+      "before": "  const arm = (): void => {\n    io.clearTimer(timer);\n    stalled = false;\n    timer = io.setTimer(() => {\n      stalled = true;\n      if (reader !== null) {\n        // Cancelling resolves the PENDING read as `done: true`, which unblocks\n        // the loop. The flag is checked before the `done` branch, so a\n        // cancellation this timer caused is never mistaken for a drop.\n        void reader.cancel();\n        return;\n      }\n      // Still connecting: there is no reader to cancel, so the one-shot\n      // deferred the get is raced against is what gets woken.\n      const wake = wakeConnect;\n      wakeConnect = null;\n      wake?.();\n    }, stallMs);\n  };",
+      "after": "  const arm = (): void => {};",
+      "because": "The stall timer is the whole reason this tool exists as a liveness check. Emptying `arm` removes the timer at BOTH call sites — the one before the get and the one after every event for the session — so nothing ever arms it and a lane that dies mid-step leaves a subscription that stays open forever: the server is alive, so nothing errors, the tunnel holds, and the watch reports a working lane for as long as anyone waits. That is the exact condition the row was written against, where lane liveness is inferred from a log's byte count that stops growing just as often when a lane is working. Re-anchored in fix round 2: `arm` grew a body when the stall became a flag plus a cancel rather than a raced promise, and the claim is unchanged — emptying it still empties every re-arm. The heartbeat test drives a fixture carrying heartbeats and another lane's events past the window and expects exit 3; with no timer armed the watch is parked on a read that never settles, so the test's own `feed.close()` (made double-close tolerant in that round, because the stall now cancels the reader) is what ends each attempt: four instant reconnects and exit 1. The failure is the exit code, not a timeout",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/lane-watch/__tests__/follow.test.ts",
+        "-t",
+        "heartbeats and another session's events do NOT reset it, and it exits 3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/lane-watch/lib/follow.ts",
+      "before": "  if (owner !== session) {",
+      "after": "  if (false) {",
+      "because": "`/global/event` carries EVERY instance's events on the machine, so this branch is the whole difference between watching one lane and watching the box. With it gone, another lane's `session.idle` ends the watch at 0 and the orchestrator records a still-running lane as settled — the failure the row names first, and one that is invisible in a wave's own log because the lane did go on working afterwards. It is also what makes the unattributed-error carve-out reachable, so emptying the branch does not merely widen the filter: it removes the only place the filter is applied, and the `forSession` flag it returns becomes vacuous, which is why the stall timer would then re-arm on every heartbeat. The test feeds another lane's idle and tool call ahead of this lane's and asserts the log holds this lane's line alone",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/lane-watch/__tests__/follow.test.ts",
+        "-t",
+        "another lane going idle does not end this lane's watch"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

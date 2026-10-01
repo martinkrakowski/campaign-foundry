@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { resolveMaxWorkers } from "./tools/gate/lib/max-workers.js";
 
 const webSrc = fileURLToPath(new URL("./apps/web/src", import.meta.url));
 
@@ -19,6 +20,9 @@ const webSrc = fileURLToPath(new URL("./apps/web/src", import.meta.url));
 // the consumer — `yarn gate --profile midnight` filters on these two names.
 export default defineConfig({
   test: {
+    // `undefined` unless the HOST sets CF_TEST_MAX_WORKERS, which is what leaves
+    // CI and the Mac on vitest's own default (see tools/gate/lib/max-workers.ts).
+    maxWorkers: resolveMaxWorkers(),
     tags: [
       {
         name: "golden-bytes",
