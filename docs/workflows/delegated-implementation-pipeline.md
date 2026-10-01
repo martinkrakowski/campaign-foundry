@@ -106,6 +106,61 @@ plan committed
       └─▶ next wave (repeat) → docs/session-log PR at the end
 ```
 
+### Watching a lane
+
+A lane is a process, and until it writes a PR its only visible sign of life is
+its log. `yarn lane:watch` answers the three questions that log cannot — *is it
+still working*, *what has it cost*, and *when did it finish* — from the
+opencode server itself, over two read-only GETs.
+
+```bash
+# 1. Dispatch with ocm-run, which prints every `opencode run --format json`
+#    event. The FIRST one carrying a sessionID is the one to keep. `-R` reads
+#    each line as raw text, `fromjson?` yields nothing for a line that is not
+#    JSON, and `-r` is what prints the string bare — without it jq emits a
+#    quoted `"ses_x"`, and `checkSession` refuses the quote marks.
+ocm-run … | tee /tmp/lane.log
+session=$(jq -rR 'fromjson? | select(.sessionID?) | .sessionID' /tmp/lane.log | head -1)
+
+# 2. Follow it. One compact line per tool call, step and retry; heartbeats and
+#    every other lane's events are dropped, and consecutive identical lines
+#    collapse — step numbers count from attach. Exits when the lane does.
+yarn lane:watch follow --server http://127.0.0.1:4096 --session "$session"
+
+# 3. When it settles, log the timing and the cost into the wave.
+yarn lane:watch usage --server http://127.0.0.1:4096 --session "$session" \
+  --json --emit "$logdir" "$wave" "$lane" implement
+```
+
+**`--server` is loopback-only.** It must be `http://` on `127.0.0.1`,
+`localhost` or `[::1]` — the tunnel the orchestrator opens to the lane's
+machine. Anything else exits 2. The tool is read-only toward the server: it
+sends GET, refuses redirects, and will request exactly two paths,
+`/session/{sessionID}` and `/global/event`.
+
+**The exit codes are the signal, and 3 is the one to notice.**
+
+| Exit | `usage` | `follow` |
+| --- | --- | --- |
+| 0 | the usage was read | the session went idle |
+| 1 | no such session, or the read failed | the session errored, or the stream dropped through every reconnect |
+| 2 | the command line is wrong | the command line is wrong |
+| 3 | the server reported no `tokens`/`cost` — **printed as `null`, never a 0** | no event **for this session** for `--stall` seconds (default 600) |
+
+Exit 3 from `follow` means *investigate*, and it deliberately does not fire on
+a heartbeat: the server being alive says nothing about the lane. A dropped
+stream is re-subscribed three times, a second apart, before it becomes exit 1 —
+because a drop is usually a tunnel blip — but each reconnect is a **fresh**
+subscription with no replay, so if the lane finished inside one of those gaps
+the watch cannot see it and will end in 3 instead. `usage` is what tells the
+rest.
+
+`scripts/lane-usage.sh` stays as the SQLite fallback: it reads opencode's own
+database over ssh and needs no server, but it prints **0** for a token or cost
+row that is not there yet, which is indistinguishable from a lane that has
+billed nothing. Prefer `lane:watch` where the tunnel is up; keep the shell
+script for when it is not.
+
 ### Plan review gate
 
 A lane is briefed from its row in a plan's lane table (`docs/planning/*.md`, rows like
@@ -318,6 +373,21 @@ Rules:
   worktree** even at `CF_GATE_SLOTS=3`: the slots are per host, not per checkout, and
   `verify-manifests` mutates the tree it verifies, so two gates in two worktrees would each be
   handed a slot and each would write manifests the other reads.
+- `CF_TEST_MAX_WORKERS` is how many workers ONE vitest run may spawn, and it is set
+  **HOST-WIDE** beside `CF_GATE_SLOTS`, by the same rule and for the same reason: the two are one
+  decision, `CF_GATE_SLOTS × CF_TEST_MAX_WORKERS ≤ the host's threads` (on midnight, 6 × 4 or
+  7 × 3). Vitest's default is `availableParallelism() − 1` per run — ~23 workers on midnight's
+  24 threads — so three slots already ask for ~69, and seven would ask for ~160: tens of
+  gigabytes of RSS against ~40 free, and false timeouts on the CPU-bound tests, which fail on
+  their own internal deadlines and cannot be saved by a larger `--testTimeout`. `vitest.config.ts`
+  passes it as `test.maxWorkers` (parsed by `tools/gate/lib/max-workers.ts`); a value that is not
+  a positive whole number at or below `availableParallelism()` throws at config load, naming the
+  variable. **Unset means unset** — CI and the Mac pass nothing and get vitest's own default,
+  unchanged. Never set it in a repo file, a script or a workflow, and never per seat: a seat that
+  caps its own workers below the host's cap does not get a quieter machine, it gets a lane whose
+  timeout budget nobody else is running under. Do not also set `VITEST_MAX_WORKERS`: vitest applies
+  it over `test.maxWorkers` after the config is resolved, and unvalidated, so it silently wins and
+  the number validated above becomes the one that is ignored.
 - Tests live <WHERE>, one behaviour per test, no real clock/network/filesystem in unit tests.
 - The database tests run on PGlite unless `TEST_PG_URL` is set, and on a loaded host you should set
   it: `TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres`. Every migrated test database is then
@@ -471,6 +541,71 @@ Run every verification command in the foreground and read its exit code. A task 
 
 After the round, close the threads with Template D's `yarn sweep`, naming the fix commit in the
 disposition and passing the brief's thread ids as the class.
+
+### Template F — Lane brief for a sandboxed lane (the text `yarn brief:new` drafts)
+
+Template A is prose the orchestrator writes every time, and it has drifted: the header, the working
+rules and the environment are the same on every lane. This one is drafted instead. `yarn brief:new`
+writes the block below with `<LANE>`, `<PLAN>`, `<WORKTREE>`, `<BRANCH>`, `<TIP>`, `<ENV>` and
+`<VERIFICATION>` filled in, and leaves `<gap>`, `<notes>`, `<targeted commands>` and
+`<commit subject>` for the orchestrator, because those four are the lane's own work. `--env-file`
+supplies `<ENV>`, one line at a time and indented into the block, so the node path and `TMPDIR` of
+the host a lane runs on are read from a file instead of written into a template that lives in the
+repository.
+
+````markdown
+# Lane <LANE> — brief
+
+- **Worktree (absolute, on this server):** <WORKTREE>
+- **Branch:** <BRANCH>, checked out at origin/main <TIP> (the plan row is current in this tree). Read the row IN FULL: `grep -n '<LANE>' <PLAN>`, then read that whole line. It is long; do not stop at the first 2,000 characters. No PR exists; you do NOT push or open one.
+- **The row is the spec:** its enumerated items, tests, mutation, Owns and Must-not are all required. The notes below are clarifications, and the row wins on any conflict.
+
+Environment, for every shell call:
+
+<ENV>
+
+## First: prove the gap
+
+<gap>
+
+## Notes
+<notes>
+
+## Working rules
+- `.agents/briefs/` is gitignored; run `mkdir -p .agents/briefs/scratch` first. Put scratch files there, and never stage anything under `.agents/briefs/`.
+- **The host lock is shared** (other lanes run here). On exit 75 with `gate-lock: busy`, sleep 60 and retry, up to 20 times; if still busy, report the timeout and `sh scripts/gate-lock.sh status` output. NEVER remove a lock: a lock is released by its own `run`, and a child you started is released in a `finally`.
+- **Mutations** go through `sh scripts/gate-lock.sh run <LANE> -- yarn mutate …`, writing `--because` FIRST. `command` is an argv array; see `.agents/manifests/<LANE>.json`. Each `before` must be a unique anchor.
+- **Coverage:** under an agent, vitest's coverage TEXT table hides fully covered files, so read `coverage/coverage-summary.json` (`--coverage.reporter=json-summary`).
+- Never call the real GitHub API or `gh`, and never spawn a CLI under test: call it in-process with injected I/O.
+
+## Verification
+<VERIFICATION>
+
+## Commit
+
+Commit only the row's Owns paths. Stage explicit paths, never `git add -A`. Conventional Commits, e.g. `<commit subject>`. No trailers. Never use `-c core.hooksPath` or `--no-verify`.
+
+## Must not
+
+- anything in the row's Must-not column;
+- push, open a PR, rebase, merge or stash;
+- edit `AGENTS.md`, `.agents/*.md` or `yarn.lock`;
+- add a dependency.
+
+## Report
+
+Report the commit SHA(s), each command's exit code and key output, the coverage rows, every mutation verdict, and the wall time per step.
+
+If a finding is wrong, say so with the mechanism rather than changing code to match it.
+Run every verification command in the foreground and read its exit code. A task you launched is not a result.
+````
+
+The two hosts differ in exactly one place: the block under `## Verification`. `--host midnight` puts
+"do NOT run `yarn gate` or `yarn test:cov`; targeted only" there, because that host cannot pass the
+full suite; `--host mac` puts the same targeted commands and then `yarn gate --lane <LANE>`, in the
+foreground. Neither variant is written out twice — each is one constant in
+`tools/brief-new/lib/template.ts`, with the lane's own id already in place before the single
+substitution pass runs.
 
 ---
 

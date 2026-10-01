@@ -23,7 +23,24 @@
 # `cf-gate.lock.<n>.reclaim.<pid>.<x>`) are derived from that slot's own path and
 # are never slots themselves.
 #
-# CF_GATE_SLOTS IS SET HOST-WIDE, AND ONLY HOST-WIDE — /etc/environment on the
+# CF_GATE_SLOTS SAYS HOW MANY GATES MAY RUN AT ONCE, and CF_TEST_MAX_WORKERS
+# SAYS HOW MANY WORKERS ONE OF THEM MAY SPAWN — so the two are one decision,
+# made once, for the host: CF_GATE_SLOTS × CF_TEST_MAX_WORKERS ≤ the host's
+# threads. Vitest's default is availableParallelism() − 1 per run (~23 on
+# midnight's 24 threads), so without the second variable three slots already
+# ask for ~69 workers and seven would ask for ~160: tens of gigabytes against
+# ~40 free, and false timeouts on the CPU-bound tests, which fail on their own
+# internal deadlines and cannot be saved by a bigger --testTimeout.
+# CF_TEST_MAX_WORKERS is read by `vitest.config.ts` (the parse is
+# tools/gate/lib/max-workers.ts; a value that is not a positive whole number at
+# or below availableParallelism() throws at config load, naming the variable).
+# Unset means unset: CI and the Mac get vitest's own default, unchanged. On
+# midnight that is 6 × 4 or 7 × 3. Do not also set VITEST_MAX_WORKERS: vitest
+# applies it OVER test.maxWorkers after the config is resolved, and it does so
+# unvalidated (a bare parseInt), so it silently wins and the validated number
+# beside it becomes the one that is ignored.
+#
+# BOTH ARE SET HOST-WIDE, AND ONLY HOST-WIDE — /etc/environment on the
 # midnight host, never in one seat's environment, at any moment and whatever that
 # seat is holding. The number of slots is a property of the host, and the reason
 # does not depend on what any one seat is doing: a caller that believes in one
@@ -31,12 +48,38 @@
 # the one it just ran beside. That is equally true of a seat holding nothing —
 # a seat's own view of the host is the thing that is wrong, and holding less is
 # not a reason to hold a different opinion of it. So the way to change the count
-# is to change the host's, for every seat at once.
+# is to change the host's, for every seat at once. A seat that capped its own
+# workers below the host's cap does not get a quieter machine; it gets a lane
+# whose timeout budget nobody else is running under, and a slot it believes is
+# cheaper than it is.
 #
 # ONE GATE PER WORKTREE, even at SLOTS>1, because the lock is per host and not
 # per checkout: `verify-manifests` mutates the tree it is verifying, so two
-# lanes in two worktrees on one host would each be handed a different slot and
-# each would then write manifests the other is reading.
+# gates in ONE worktree would each be handed a different slot and each would
+# then write manifests the other is reading. (Two lanes in two worktrees is the
+# case slots exist for, and is not what this rule is about.)
+#
+# So `acquire` learns WHICH worktree the caller is standing in, records it in its
+# own slot as the fifth file `worktree`, and — having won a slot, before the pin
+# is written — looks over every other slot for one that names the same worktree
+# under a holder that is still alive and answering. Finding one, it gives its own
+# slot back and answers 75: busy, and the words "same worktree" beside the holder
+# it yielded to. See acquire, worktree_holder and same_worktree_exit.
+#
+# ANY other slot, not only a lower-numbered one. Yielding only downward looks
+# equivalent and is not: a third holder releasing slot 0 between the two acquires
+# leaves the later acquirer BELOW the earlier one, after the earlier one has
+# already checked and found nothing above it. Two gates then run in one worktree
+# and the rule is enforced nowhere.
+#
+# This never lets two run, because the winner is still working when the loser
+# looks: whichever of two same-worktree acquirers checks second sees the other at
+# its own name. The one residual is a double yield — both land before either has
+# checked — and that is the busy contract both already had: two callers told to
+# sleep and retry, neither running. A slot with no `worktree` file never blocks:
+# a holder from before this rule existed never claimed one, and treating that
+# empty answer as a match would lock the whole host against a lock that has
+# nothing to say about worktrees.
 #
 # A HOLDER PINS ITS SLOT, and only acts on the pinned path. `acquire` writes the
 # slot it took into the file named by CF_GATE_SLOT_OUT, the caller reads it back,
@@ -55,11 +98,15 @@
 # two filters.
 #
 # The lock is a directory at ${TMPDIR:-/tmp}/cf-gate.lock — mkdir is the
-# atomic test-and-set, there is nothing else in POSIX sh — holding four files:
+# atomic test-and-set, there is nothing else in POSIX sh — holding five files:
 #   owner    the lane id that took it
 #   pid      the HOLDER's pid (the shell that runs the locked steps, or `run`)
 #   started  epoch second of acquisition
 #   beat     epoch second of the last heartbeat
+#   worktree the worktree the holder was standing in when it took the slot
+#            (see the header: one gate per worktree, and this is what "the same
+#            worktree" is compared against — written last because a lock that
+#            cannot answer it simply never blocks)
 # The pid is the HOLDER's, and a holder only holds while it is alive: a lock
 # whose recorded pid is gone is reclaimed by the next acquire, so the pid has
 # to name a process that outlives the work. It is therefore never guessed.
@@ -277,7 +324,7 @@ slot_uid=""
 #
 # `-prune` is the POSIX spelling of "do not go below this", and it works on GNU
 # and BSD find alike: the point is to read the directory's own uid without
-# walking a holder's four files (or anything else it may since have grown).
+# walking a holder's five files (or anything else it may since have grown).
 slot_is_provenance() {
   [ ! -L "$1" ] || return 1
   [ -d "$1" ] || return 1
@@ -417,6 +464,67 @@ EOF
 # and heartbeat, where a pid that matches nobody is a refusal, not a hazard.
 recorded_pid="${CF_GATE_CALLER_PID:-$$}"
 
+# The worktree the CALLER is standing in, which is the identity `run` and
+# `acquire` hold the lock for: one gate per worktree (see the header).
+#
+# `git rev-parse --show-toplevel` names the worktree this directory belongs to,
+# and `pwd -P` is the answer for a directory that is not in one at all — a
+# lane's own scratch, a checkout nobody has initialised. Nothing here changes
+# directory, so this is the caller's own cwd: the worktree root for `yarn gate`,
+# whatever directory the lane is in for `run`, and — in a linked worktree — that
+# worktree's OWN root rather than the main checkout's, because git resolves it
+# from where the caller is standing.
+#
+# Resolved ONCE per acquire, not per slot: it is one answer about one directory,
+# and the slot loop would otherwise fork `git` once per pass to learn it again.
+caller_worktree() {
+  worktree=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
+  # An empty answer is not an identity. `pwd -P` cannot fail while the shell is
+  # running, but git can exit 0 having printed nothing, and a lock that recorded
+  # "" would then match every other lock that recorded "" — including the ones
+  # that mean nothing by it.
+  [ -n "$worktree" ] || worktree=$(pwd -P)
+  printf '%s\n' "$worktree"
+}
+
+# The first OTHER slot that is in the caller's own worktree and whose holder is
+# still answering for it, or 1. Prints the slot; nothing else.
+#
+# Three filters, and each is one this file already has:
+#   existing_slots  so only a canonical slot name this user actually owns is
+#                   read at all — a scan answers whoever planted a directory
+#                   that happens to carry the right contents;
+#   != $LOCK        so the slot this caller JUST won is not its own rival. Its
+#                   worktree file is this caller's own, and it is still fresh:
+#                   without this every acquire would refuse itself;
+#   live AND fresh  `pid_alive` and not `beat_is_stale`, which is the slot loop's
+#                   own judgement a few lines below. A holder the loop would
+#                   reclaim is not one to yield to — it is not running — and
+#                   refusing on it would leave a worktree nobody is gating
+#                   unable to gate itself until the corpse is cleared.
+#
+# A slot with no `worktree` file, or an empty one, matches nothing: a lock from
+# before this rule existed never claimed a worktree, and reading its silence as
+# agreement would block the whole host against it.
+worktree_holder() {
+  while IFS= read -r slot_candidate; do
+    [ -n "$slot_candidate" ] || continue
+    [ "$slot_candidate" = "$LOCK" ] && continue
+    slot_seen_worktree=$(cat "$slot_candidate/worktree" 2>/dev/null)
+    [ -n "$slot_seen_worktree" ] || continue
+    [ "$slot_seen_worktree" = "$worktree" ] || continue
+    slot_seen_pid=$(cat "$slot_candidate/pid" 2>/dev/null)
+    pid_alive "$slot_seen_pid" || continue
+    slot_seen_beat=$(cat "$slot_candidate/beat" 2>/dev/null)
+    beat_is_stale "$slot_seen_beat" && continue
+    printf '%s\n' "$slot_candidate"
+    return 0
+  done <<EOF
+$(existing_slots)
+EOF
+  return 1
+}
+
 usage() {
   printf '%s\n' "usage: $0 run <lane> -- <command...> | acquire <lane> | release <lane> | verify <lane> | status | heartbeat" >&2
   exit 2
@@ -468,6 +576,11 @@ try_create() {
   printf '%s\n' "$now" > "$cand/started" 2>/dev/null || { rm -rf "$cand"; return 1; }
   printf '%s\n' "$recorded_pid" > "$cand/pid" 2>/dev/null || { rm -rf "$cand"; return 1; }
   printf '%s\n' "$now" > "$cand/beat" 2>/dev/null || { rm -rf "$cand"; return 1; }
+  # The fifth file, and the one `worktree_holder` reads. Written inside the
+  # candidate like the rest, so it appears at the name with the rename and never
+  # before: a slot that exists is a slot whose worktree is already known, which
+  # is what lets the check after this decide on it without a second wait.
+  printf '%s\n' "$worktree" > "$cand/worktree" 2>/dev/null || { rm -rf "$cand"; return 1; }
   # Test hook (CF_GATE_TEST_PAUSE_BEFORE_MV): a pause point between the fully
   # written temp directory and the rename, so a test can prove no partial
   # lock ever appears at the name and can race a contender in.
@@ -546,6 +659,53 @@ busy_exit() {
   exit $BUSY
 }
 
+# Give a slot back — but only while it is still THIS invocation's.
+#
+# `rm -rf` on a path is a statement about the NAME, not about the directory this
+# process created, and both of acquire's give-backs are reached after the name
+# could have moved on. A contender that judged the slot dead and took it in the
+# window has its replacement deleted by an acquire that had already been
+# refused, so the refused caller takes out a lock it never held and never named.
+# That window is real and this lane's own neighbour found it: MH5's acquire
+# window is gate.sh TERMed while the acquire child carries on, so the recorded
+# caller pid is gone mid-acquire and the very next contender judges the slot
+# reclaimable on its first pass.
+#
+# So the same contract release uses (see release) applies here: re-read owner
+# and pid, remove only while both are still this invocation's, and otherwise
+# leave whatever is at the name completely alone. A holder that lost its lock can
+# neither delete the replacement nor keep it.
+#
+# Always returns 0, and changes no exit code. Both callers are about to exit 75
+# or 2 regardless — the caller does not get a slot out of this either way — and
+# a removal declined here means the name belongs to a contender now, which is
+# the right place for it and is visible in `status`. Silent by design: the
+# refusal that brought us here has already said why we are leaving.
+give_back_slot() {
+  if [ "$(cat "$LOCK/owner" 2>/dev/null)" != "$lane" ]; then
+    return 0
+  fi
+  if [ "$(cat "$LOCK/pid" 2>/dev/null)" != "$recorded_pid" ]; then
+    return 0
+  fi
+  rm -rf "$LOCK" 2>/dev/null
+  return 0
+}
+
+# The same 75, for a host that HAS room and must not be used anyway: another
+# live holder is gating the very tree this caller is standing in. It names the
+# holder, the slot it holds, and the worktree they share, because `busy` on its
+# own sends a caller looking for a full host — sleeping and retrying a host that
+# will never be free for it, for as long as that holder runs — rather than for a
+# second gate beside it in its own checkout.
+same_worktree_exit() {
+  holder_owner=$(cat "$1/owner" 2>/dev/null)
+  holder_pid=$(cat "$1/pid" 2>/dev/null)
+  holder_beat=$(cat "$1/beat" 2>/dev/null)
+  printf '%s\n' "gate-lock: busy — same worktree: $worktree is already gated by ${holder_owner:-unknown} (pid ${holder_pid:-?}, beat ${holder_beat:-?}) at $1; 75 means busy: sleep and retry, never remove the lock by hand" >&2
+  exit $BUSY
+}
+
 # acquire WRITES a lock, so it needs a pid that will still be alive while the
 # work it protects runs. With no CF_GATE_CALLER_PID the only pid on offer is
 # this script's own, and that process is gone before the caller has run a step:
@@ -590,6 +750,14 @@ require_caller_pid() {
 # and refusing on it would deadlock its own owner into waiting for a holder that
 # is not answering.
 #
+# A SAME-WORKTREE REFUSAL happens here too, and is the one 75 that is not about
+# the host having no room left: this caller has just won a slot and is giving it
+# straight back because a live holder is gating the tree it is standing in. It is
+# 75 and not 2 because the host is not broken and the caller is not wrong — it
+# is another caller, doing the same work in the same place, and the answer is the
+# same sleep and retry. See the header for why it is any other slot and not only
+# a lower one.
+#
 # On success the slot taken is written to CF_GATE_SLOT_OUT, when that is set. It
 # is how the caller learns which slot it got instead of guessing it, and it is
 # what its heartbeat, verify and release are pinned to (see the header). A
@@ -599,6 +767,27 @@ acquire() {
   lane=$1
   if self_held=$(self_held_slot); then
     printf '%s\n' "gate-lock: acquire refused — pid $recorded_pid already holds $self_held with a live holder and a fresh heartbeat (beat $(cat "$self_held/beat" 2>/dev/null)); one pid holds one slot, and a second would leave the first unrefreshed and reclaimable under this caller" >&2
+    exit 2
+  fi
+  # The worktree this caller is in, once, before the loop — see caller_worktree.
+  # Every slot it could take is the same caller's, so this is one answer asked
+  # once rather than a fork per pass.
+  worktree=$(caller_worktree)
+  # No identity, no lock — fail CLOSED, and before the slot loop, so nothing has
+  # been taken and nothing has to be given back. `caller_worktree` asks git and
+  # then `pwd -P`, and both can come back empty: the cwd has been deleted or
+  # become unreachable underneath this process, which is a real shape here rather
+  # than a theory (MH5's acquire window is a gate TERMed mid-acquire, and a
+  # directory removed under a running shell is one `rmdir` away).
+  #
+  # Recording "" instead is the one answer that silently disarms the rule: an
+  # empty worktree file matches nothing in worktree_holder, so this holder would
+  # be invisible to the very next acquire from the same directory, and two gates
+  # in one worktree would each hold a slot — which is the whole defect this lane
+  # closed. Exit 2, not 75: the host is not busy and retrying will not help
+  # while the caller's own directory is gone.
+  if [ -z "$worktree" ]; then
+    printf '%s\n' "gate-lock: cannot determine the caller's worktree — the caller's directory is gone or unreadable, so no lock was taken (a lock with no worktree cannot be compared and would not be seen by the next acquire)" >&2
     exit 2
   fi
   slot_no=0
@@ -612,10 +801,33 @@ acquire() {
     while :; do
       pass=$((pass + 1))
       if try_create "$lane"; then
+        # One gate per worktree, decided HERE, and for two reasons in one place.
+        # After try_create's read-back, so the slot is certainly this caller's:
+        # the scan is over every slot that is canonical and this user's, and it
+        # skips this one by path. Before the pin is written below, so a slot
+        # given back here is never a pin the caller — or a cleanup fallback
+        # reading one — can heartbeat, verify or release.
+        #
+        # And before the "acquired by" line as well, which is the same point on
+        # stdout: a caller that reads that line believes it holds a slot, and on
+        # this path it no longer does. The busy line below is the whole truth.
+        if same_worktree_slot=$(worktree_holder); then
+          # Test hook (CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM): between the
+          # scan and the give-back, which is the window the name can be taken in
+          # and the give-back can then delete the taker. Parking it is the only
+          # way to hit that window on purpose: the scan and the removal are
+          # microseconds apart, and a test that raced them would be racing luck.
+          if [ -n "${CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM:-}" ]; then
+            touch "$CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM" 2>/dev/null
+            while [ -f "$CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM" ]; do sleep 1; done
+          fi
+          give_back_slot
+          same_worktree_exit "$same_worktree_slot"
+        fi
         printf '%s\n' "gate-lock: acquired by $lane (pid $recorded_pid) at $LOCK"
         if [ -n "${CF_GATE_SLOT_OUT:-}" ]; then
           if ! printf '%s\n' "$LOCK" > "$CF_GATE_SLOT_OUT" 2>/dev/null; then
-            rm -rf "$LOCK" 2>/dev/null
+            give_back_slot
             printf '%s\n' "gate-lock: acquire — cannot record the slot taken in $CF_GATE_SLOT_OUT; the lock is given back rather than left held by a caller that cannot pin it" >&2
             exit 2
           fi
@@ -719,7 +931,7 @@ acquire() {
 #   command has been reaped. `wait` then has no child left (`wait: pid N is not
 #   a child of this shell`) and the `exit 143` runs without ever entering the
 #   EXIT trap. Observed 6 times in 6: exit 143, no "released by", the lock left
-#   at the name with all four of its files, and the heartbeat still looping
+#   at the name with all of its files, and the heartbeat still looping
 #   under a pid that had died — a lock the next acquire reclaims on pid-death
 #   and an orphan refreshing a dead holder's beat. A CI timeout that sends TERM
 #   twice is exactly that.
@@ -773,7 +985,7 @@ run_cleanup() {
   # cleanup killed this shell outright — before `release`, with the lock still at
   # the name. Measured here with one refresh parked in
   # CF_GATE_TEST_PAUSE_BEFORE_BEAT_MV, a TERM, and a second TERM 0.5s later:
-  # exit 143, no "released by" line, and the lock left at the name with all four
+  # exit 143, no "released by" line, and the lock left at the name with all
   # of its files, under /bin/sh AND /bin/dash. A CI timeout that sends TERM
   # twice is exactly that. Nothing outside can break the cleanup any more, and
   # `kill -9` on this pid remains the way out of a command that will not stop.
@@ -1159,7 +1371,7 @@ heartbeat() {
   # saw an empty value 10 times in 7 seconds.
   #
   # The new value is staged BESIDE THE LOCK, not inside it, so the lock
-  # directory holds nothing but the four files try_create wrote: a removal never
+  # directory holds nothing but the five files try_create wrote: a removal never
   # has to unlink a file that is still being written, and the only entry that
   # can appear after creation is the finished one this rename delivers.
   # Same filesystem by construction — the lock is itself
