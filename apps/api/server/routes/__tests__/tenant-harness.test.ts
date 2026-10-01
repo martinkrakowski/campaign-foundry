@@ -2,9 +2,11 @@ import { describe, test, expect } from "vitest";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { defineEventHandler } from "h3";
+import { projectRoot, resetProjectRoot } from "@campaignfoundry/shared";
 import { database } from "../../lib/db/database.js";
 import { storeBackend } from "../../lib/config.js";
 import { migratedDatabase } from "../../lib/db/__tests__/pglite-client.js";
+import { getLastOpenedStore } from "../../lib/ports/index.js";
 import { requestTenant } from "../../lib/tenant.js";
 import {
   ACME_TENANT,
@@ -14,6 +16,7 @@ import {
   setupFsHarness,
   setupPgHarness,
   setupTenantHarness,
+  type PgHarness,
   type TenantContext,
 } from "./tenant-harness.js";
 
@@ -95,6 +98,106 @@ describe("tenant-harness (PT-2a item 1)", () => {
       expect(() => assertNoLeakedTenantDirs()).toThrow(/Leaked 1 tenant temp director/);
     } finally {
       harness.cleanup();
+      expect(() => assertNoLeakedTenantDirs()).not.toThrow();
+    }
+  });
+
+  // #631, the crossing in miniature and without the timeout that causes it: a
+  // test whose body kept running after its budget was gone calls `cleanup()` at
+  // a moment another test is mid-flight, and "restore what I found" hands THAT
+  // test the process environment this one happened to start in — for the first
+  // test in a worker, unset, which is no root at all. With `PROJECT_ROOT`
+  // unset, `projectRoot()` walks up from cwd to the checkout, so the live
+  // test's next write lands in the repo (`briefs/<slug>/`, gitignored and
+  // therefore invisible; `state/last-opened/local.json`, not ignored at all) and
+  // the next `sync:check` fails on a tree nobody edited.
+  //
+  // The pointer is written through the registry rather than a mounted route
+  // because that is where the root is resolved (`lib/ports/index.ts`): fs under
+  // `<projectRoot>/state/last-opened`, so the assertion can name the file. Both
+  // harnesses are fs for the same reason — a pg harness's `getLastOpenedStore`
+  // is a `PgLastOpenedStore`, which has no file location to assert.
+  test("a stale cleanup cannot hand the checkout to the harness still live", async () => {
+    const checkout = process.cwd();
+    const stale = setupFsHarness();
+    const live = setupFsHarness();
+    const backendWhileLive = process.env.STORE_BACKEND;
+    try {
+      stale.cleanup();
+
+      expect(process.env.PROJECT_ROOT).toBe(live.projectRoot);
+      expect(process.env.STORE_BACKEND).toBe(backendWhileLive);
+
+      await getLastOpenedStore(LOCAL_TENANT).write("campaign-1", LOCAL_TENANT.userId);
+
+      expect(existsSync(join(live.projectRoot, "state", "last-opened", "local.json"))).toBe(true);
+      expect(existsSync(join(checkout, "state"))).toBe(false);
+    } finally {
+      live.cleanup();
+      // `live` restores what IT found, which was `stale`'s temp root — a
+      // directory `stale`'s own cleanup removed. Back to what the worker
+      // started with, so the next test in this file inherits nothing.
+      delete process.env.PROJECT_ROOT;
+      delete process.env.OUTPUT_DIR;
+      resetProjectRoot();
+      expect(() => assertNoLeakedTenantDirs()).not.toThrow();
+    }
+  });
+
+  // The same crossing, one step earlier in the story and the one that actually
+  // fires on a slow host: the pg setup awaits its migrations, so between setting
+  // the roots and returning the harness there is a window in which no harness is
+  // registered. A cleanup landing there restored as if it were the last, and
+  // handed the test about to run the previous one's root — unset, for the first
+  // test in a worker. That one never timed out and never appeared in a trace of
+  // a `cleanup`; it wrote `briefs/pointed-at/` into the checkout all the same.
+  //
+  // A stub database, because what is under test is the ENVIRONMENT the setup
+  // installs, not SQL: `makeDb` is gated so the test controls exactly when the
+  // setup is mid-flight.
+  test("a cleanup landing mid-setup cannot take the roots that setup installed", async () => {
+    const checkout = process.cwd();
+    let migrate: () => void = () => undefined;
+    const migrated = new Promise<void>((resolveGate) => {
+      migrate = resolveGate;
+    });
+    const stubDb = {
+      query: async () => ({ rows: [] }),
+      exec: async () => undefined,
+      transaction: async <T>(work: (tx: never) => Promise<T>) =>
+        work({ query: async () => ({ rows: [] }), exec: async () => undefined } as never),
+      end: async () => undefined,
+    } as unknown as Awaited<ReturnType<typeof migratedDatabase>>;
+
+    const previous = setupFsHarness();
+    const inFlight = setupPgHarness(async () => {
+      await migrated;
+      return stubDb;
+    });
+    // Mid-setup: `PROJECT_ROOT` already names the pg harness's temp root, but
+    // its `setup` has not resolved — and, before the fix, had not registered.
+    const rootDuringSetup = process.env.PROJECT_ROOT;
+    let harness: PgHarness | undefined;
+    try {
+      expect(rootDuringSetup).toBeDefined();
+
+      previous.cleanup();
+      expect(process.env.PROJECT_ROOT).toBe(rootDuringSetup);
+
+      migrate();
+      harness = await inFlight;
+      expect(process.env.PROJECT_ROOT).toBe(harness.projectRoot);
+      expect(projectRoot()).toBe(harness.projectRoot);
+      expect(existsSync(join(checkout, "state"))).toBe(false);
+    } finally {
+      migrate();
+      harness ??= await inFlight.catch(() => undefined);
+      await harness?.cleanup();
+      previous.cleanup();
+      delete process.env.PROJECT_ROOT;
+      delete process.env.OUTPUT_DIR;
+      delete process.env.STORE_BACKEND;
+      resetProjectRoot();
       expect(() => assertNoLeakedTenantDirs()).not.toThrow();
     }
   });

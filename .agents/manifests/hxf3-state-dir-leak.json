@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "HXF3-state-dir-leak",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/__tests__/tenant-harness.ts",
+      "before": "      const stale = !isInnermost(harness);\n      retire(harness);\n      rmSync(tmpDir, { recursive: true, force: true });\n      if (stale) return;",
+      "after": "      retire(harness);\n      rmSync(tmpDir, { recursive: true, force: true });",
+      "because": "the guard itself, which is the whole of #631: a test that ran past its budget is not cancelled, and its late `cleanup()` used to restore the environment it had found — unset, for the first test in a worker — while the NEXT test was mid-flight. `projectRoot()` then walks up from cwd to the checkout and the live test's writes land in the repo, `state/last-opened/local.json` among them, which is a dirty tree for a run that edited nothing. Restoring unconditionally is today's behaviour, so this is the defect verbatim: the test stands up harness A, harness B, calls A's cleanup first, and expects B's root to still be the environment. Measured here at the default 5 s timeout, where every pg setup overruns it, this left `briefs/local-only/` in the checkout; with the guard in place the same run leaves the tree clean",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/tenant-harness.test.ts",
+        "-t",
+        "a stale cleanup cannot hand the checkout to the harness still live"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/__tests__/tenant-harness.ts",
+      "before": "  const pending: object = {};\n  liveHarnesses.push(pending);",
+      "after": "  const pending: object = {};",
+      "because": "the other half, and the half that fires on a slow host: `setupPgHarness` sets PROJECT_ROOT/OUTPUT_DIR/STORE_BACKEND and THEN awaits `makeDb()`, which migrates a whole database. For those seconds the roots are installed but no harness has registered, so a cleanup landing in that window saw itself as the innermost live harness and restored over them — handing the test about to run the PREVIOUS root, unset for the first test in a worker, without any test having timed out and with no stale cleanup anywhere in the picture. Measured at the default timeout, that alone put `briefs/deleted/`, `briefs/mine/`, `briefs/pointed-at/`, `briefs/store-explodes/` and a whole `state/` into the checkout; the guard's own test cannot see it because that harness never registered. The test gates `makeDb`, runs a cleanup while the setup is suspended, and expects the roots the setup installed to survive it",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/tenant-harness.test.ts",
+        "-t",
+        "a cleanup landing mid-setup cannot take the roots that setup installed"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

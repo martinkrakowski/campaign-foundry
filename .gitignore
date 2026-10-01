@@ -44,6 +44,14 @@ SYNC-MIGRATION-REPORT.md
 !/briefs/sample-*
 /assets/inputs/*/
 
+# Per-user state the fs backend writes under a project root — `state/last-opened/`
+# today. Anchored, so nothing under a workspace is caught, and no tracked path
+# lives here. Belt and braces for #631: `tenant-harness.ts` refuses the crossing
+# that used to resolve the project root to the checkout and leave
+# `state/last-opened/local.json` in the tree, and its own `afterAll` fails the
+# test — so this entry should never hide anything.
+/state/
+
 # Orchestration lane briefs — per-session working notes handed to implementer
 # lanes. Operator data like /briefs and /assets/inputs, not repo content: they
 # name worktree paths and SHAs that are meaningless outside the session that

@@ -26,6 +26,52 @@ import type { TenantContext } from "../../lib/tenant.js";
 const createdTenantDirs = new Set<string>();
 
 /**
+ * Harnesses set up in this worker and not yet cleaned up, oldest first.
+ *
+ * A test that runs past its budget is not cancelled: vitest fails it and starts
+ * the next one, while the abandoned body keeps going and calls `cleanup()` when
+ * it finishes — often seconds later, mid-flight in whatever test is running by
+ * then. "Restore what I found" is the wrong verb for that call. The first test
+ * in a worker found `PROJECT_ROOT` unset, so the late cleanup hands the live
+ * test an unset root, `projectRoot()` walks up from cwd to the checkout, and
+ * the live test's next write lands in the repo — `briefs/<slug>/` (gitignored,
+ * so invisible) and `state/last-opened/local.json` (not ignored at all), which
+ * is a dirty tree for a run that edited nothing. It is the same crossing
+ * `pools.test.ts` had, and it cost #631 a `sync:check` failure.
+ *
+ * So a cleanup is only allowed to restore the environment when it is the
+ * innermost live harness — the one whose own `setup` was the last thing to run.
+ * Any other is STALE, and a stale cleanup removes its own temp dir (and closes
+ * its own database) and nothing else: no env restore, no `resetProjectRoot()`,
+ * no `resetAllStores()`. Dropping the store resets is the load-bearing half —
+ * `resetAllStores()` clears the memoized project root and empties every
+ * registry cache, so the live test's next request would resolve its store
+ * against the environment this stale cleanup had just rewritten.
+ */
+const liveHarnesses: object[] = [];
+
+/** True when `harness` is the innermost live harness — the only one allowed to
+ *  restore the environment. Anything else (or one already dropped from the list
+ *  by a later `cleanup`) is stale. */
+function isInnermost(harness: object): boolean {
+  return liveHarnesses.at(-1) === harness;
+}
+
+/** Take a harness out of the live list. A harness no longer in it was already
+ *  cleaned up, and its `cleanup` has run twice — still stale, still minimal. */
+function retire(harness: object): void {
+  const at = liveHarnesses.indexOf(harness);
+  if (at !== -1) liveHarnesses.splice(at, 1);
+}
+
+/** Stand a harness in for the placeholder a setup registered before its first
+ *  `await`, keeping that position — the order is what `isInnermost` reads. */
+function promote(placeholder: object, harness: object): void {
+  const at = liveHarnesses.indexOf(placeholder);
+  if (at !== -1) liveHarnesses[at] = harness;
+}
+
+/**
  * Assert that all temporary directories created by the harness have been removed
  * and not recreated by late writes.
  */
@@ -40,6 +86,15 @@ export function assertNoLeakedTenantDirs(): void {
 
 afterAll(() => {
   assertNoLeakedTenantDirs();
+  // The crossing this harness is hardened against writes here, so say so in a
+  // test rather than in the next lane's `git status`: `projectRoot()` resolves
+  // to the checkout whenever `PROJECT_ROOT` is unset, and `state/` is where the
+  // per-user pointer lands under it. An unedited tree that grows one is a
+  // failure here, not a dirty checkout somebody has to unpick.
+  const inCheckout = join(process.cwd(), "state");
+  if (existsSync(inCheckout)) {
+    throw new Error(`A test wrote outside its temp dir: ${inCheckout} exists in the checkout.`);
+  }
 });
 
 export { LOCAL_TENANT, type TenantContext } from "../../lib/tenant.js";
@@ -143,6 +198,15 @@ export interface FsHarness {
 /**
  * Set up the filesystem backend with temporary PROJECT_ROOT and OUTPUT_DIR,
  * org 'local' at the root, and org 'acme' under 'orgs/acme'.
+ *
+ * `cleanup()` restores only what this harness found, and only while this
+ * harness is the innermost live one — see `liveHarnesses` for why a late
+ * cleanup from a test that ran out its budget must not. The consequence is
+ * worth stating plainly: with harness A stale and harness B live, B's own
+ * cleanup still restores B's original, which is A's temp root — a directory A
+ * already removed. A write arriving after that recreates that temp path (never
+ * the checkout, which is the whole point), and `assertNoLeakedTenantDirs` names
+ * it instead of letting it pass as tidiness.
  */
 export function setupFsHarness(): FsHarness {
   const origProjectRoot = process.env.PROJECT_ROOT;
@@ -169,7 +233,7 @@ export function setupFsHarness(): FsHarness {
   resetProjectRoot();
   resetAllStores();
 
-  return {
+  const harness: FsHarness = {
     backend: "fs",
     tmpDir,
     projectRoot,
@@ -177,6 +241,11 @@ export function setupFsHarness(): FsHarness {
     localRoots: { projectRoot, outputRoot },
     acmeRoots: { projectRoot: acmeProj, outputRoot: acmeOut },
     cleanup() {
+      const stale = !isInnermost(harness);
+      retire(harness);
+      rmSync(tmpDir, { recursive: true, force: true });
+      if (stale) return;
+
       resetAllStores();
       if (origProjectRoot === undefined) delete process.env.PROJECT_ROOT;
       else process.env.PROJECT_ROOT = origProjectRoot;
@@ -188,9 +257,10 @@ export function setupFsHarness(): FsHarness {
       else process.env.STORE_BACKEND = origStoreBackend;
 
       resetProjectRoot();
-      rmSync(tmpDir, { recursive: true, force: true });
     },
   };
+  liveHarnesses.push(harness);
+  return harness;
 }
 
 export interface PgHarness {
@@ -205,6 +275,11 @@ export interface PgHarness {
 /**
  * Set up the PostgreSQL backend using migratedDatabase(), STORE_BACKEND=postgres,
  * and mocking database() via setDatabase().
+ *
+ * `cleanup()` is the fs harness's cleanup with the database added, and the same
+ * staleness rule applies: a stale one closes its own database and removes its
+ * own temp dir, and leaves the environment, the store registries and the live
+ * harness's `setDatabase()` mock exactly as it found them.
  */
 export async function setupPgHarness(
   makeDb: () => ReturnType<typeof migratedDatabase> = migratedDatabase,
@@ -226,6 +301,19 @@ export async function setupPgHarness(
   process.env.PROJECT_ROOT = projectRoot;
   process.env.OUTPUT_DIR = outputRoot;
   process.env.STORE_BACKEND = "postgres";
+
+  // Live from HERE, not from the `return` below. `makeDb()` migrates a whole
+  // database, so this setup spans seconds of `await` with the environment
+  // already pointing at its temp root — and a cleanup landing inside that
+  // window found no live harness at all (this one had not registered, and the
+  // previous one had already retired), so it restored as if it were the last,
+  // handing the test that was about to run the root this setup had just
+  // installed. Measured on the default 5 s timeout, where every pg setup
+  // overruns it: `briefs/pointed-at/` and `state/last-opened/local.json` in
+  // the checkout, from a harness that never even timed out. The placeholder is
+  // this setup's claim on the environment; `promote` hands it to the harness.
+  const pending: object = {};
+  liveHarnesses.push(pending);
 
   const restore = () => {
     if (origProjectRoot === undefined) delete process.env.PROJECT_ROOT;
@@ -256,6 +344,7 @@ export async function setupPgHarness(
     try {
       await db?.end();
     } finally {
+      retire(pending);
       restore();
     }
     throw error;
@@ -265,22 +354,36 @@ export async function setupPgHarness(
   resetProjectRoot();
   resetAllStores();
 
-  return {
+  const harness: PgHarness = {
     backend: "postgres",
     db: ready,
     tmpDir,
     projectRoot,
     outputRoot,
     async cleanup() {
-      resetAllStores();
-      resetDatabase();
+      const stale = !isInnermost(harness);
+      retire(harness);
       try {
+        // A stale cleanup closes its OWN database and nothing else: the env
+        // restore, the store resets and `resetDatabase()` all belong to the
+        // harness that is still live, and `resetDatabase()` in particular would
+        // unmount the live harness's mock out from under it.
+        if (!stale) {
+          resetAllStores();
+          resetDatabase();
+        }
         await ready.end();
       } finally {
-        restore();
+        // The temp dir goes either way, and the environment is restored only
+        // by the harness that is still live — never from a `finally`, which
+        // would swallow the failure `end()` reports.
+        rmSync(tmpDir, { recursive: true, force: true });
+        if (!stale) restore();
       }
     },
   };
+  promote(pending, harness);
+  return harness;
 }
 
 export async function setupTenantHarness(backend: "fs"): Promise<FsHarness>;
