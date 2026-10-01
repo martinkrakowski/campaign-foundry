@@ -21,9 +21,9 @@
     },
     {
       "file": "scripts/merge-prs.sh",
-      "before": "  if [[ \"$holder\" != <-> ]] || ps -p \"$holder\" >/dev/null 2>&1; then",
-      "after": "  if [[ \"$holder\" != <-> ]]; then",
-      "because": "the liveness test is the whole of the busy answer, and this is the mutation the row names for the lock. With `ps -p` gone, a lock whose pid names a LIVE process falls past the guard into the reclaim below: this run mv's a running run's lock aside, deletes it, takes the name and merges. The holder does not stop — it is mid-run, it still believes it holds the lock, and its own release at exit finds the name already re-taken, which release_lock's `$$` check then declines to remove. Two runs merge at once, which is the entire failure the lock was added for, and it is silent: both exit 0. The dead-pid reclaim test cannot see this, because that lock's pid really is gone and the mutant takes the same path it always took; the three-PR test never starts a second run; and the INT test plants nothing, so it too agrees with the mutant. The test that sees it plants a lock holding THIS test process's own pid — alive, so the honest script must answer 75 — and then asserts the refused run did no work at all: no PR banner, no merge, and the holder's lock still on disk afterwards",
+      "before": "trap 'forward_signal 143' TERM\nacquire_lock\nRUN_TMP=$(mktemp -d \"${TMPDIR:-/tmp}/merge-prs-run-XXXXXX\") || die \"mktemp failed\"",
+      "after": "trap 'forward_signal 143' TERM\nRUN_TMP=$(mktemp -d \"${TMPDIR:-/tmp}/merge-prs-run-XXXXXX\") || die \"mktemp failed\"",
+      "because": "the run never consults the lock at all, which is the mutation the row names for the lock. Every other guard in acquire_lock is defence in depth and deliberately redundant — the judgement refuses a live holder, the rename is arbitrated, the nesting of a candidate inside an existing lock is detected, and the read-back insists the name carries this run's own pid — so weakening any ONE of them still leaves an answer and still exits 75. Removing the call is the only way to show what the lock is actually for: with it gone, a second run starts beside a live holder, takes the same TMPDIR, refreshes and merges the same branches concurrently, and exits 0. Nothing in the script notices, because nothing is left to notice. The planted holder in the test is THIS test process's own pid, so the honest script must answer 75 and name it; the mutant instead merges PR #101 and deletes its branch on the forge",
       "command": [
         "yarn",
         "vitest",
@@ -33,6 +33,40 @@
         "tools/merge-prs",
         "-t",
         "live holder's lock exits 75"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "  moved=$(cat \"$aside/pid\" 2>/dev/null)\n  if [[ \"$moved\" == \"$judged\" ]]; then",
+      "after": "  moved=$(cat \"$aside/pid\" 2>/dev/null)\n  if true; then",
+      "because": "the check that the lock moved aside is the one that judged dead is the whole of the reclaim's safety, and the `mv` cannot do it alone: the rename is what arbitrates between two reclaimers, but it happily renames a LIVE run's lock out of the way when that lock replaced the dead one between this run's `ps` and this run's `mv`. With the comparison gone, the live lock is deleted, the name is free, and this run takes it and merges — while the run that was holding it merges too, still believing it holds the lock, and its release at exit declines to remove a name this run now owns. Two runs merge at once and both exit 0, which is the one outcome the lock exists to make impossible, and it is silent. The other lock tests cannot see it: the plain dead-pid test has no replacement to confuse it, and the live-holder test never reaches a reclaim. The test that sees it uses the MERGE_PRS_TEST_PAUSE_AFTER_LIVENESS hook to hold this run between the judgement and the `mv`, swaps in a lock carrying a LIVE pid, and then requires 75 plus that live lock still on disk",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "replaced by a LIVE one between the liveness check"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "  print -r -- \"MERGED $pr\" >>\"$MARK_FILE\"",
+      "after": "  print -r -- \"MERGED $pr $worktree $branch\" >>\"$MARK_FILE\"",
+      "because": "putting the worktree and the branch back into the marker is the regression this lane was sent back for, and it is one line: a worktree path may contain a space, so the moment the marker carries one again, the line stops being a line the caller can match whole. Here the caller matches with `grep -qx \"MERGED $pr\"`, so the extra fields make every match fail and a PR that merged is treated as one that did not — its worktree is never removed and its branch is never deleted on the forge, which is the silent half of a refusal. Under the old `read -r` parse the same marker was worse rather than better: it split into four fields, so a path like `/x/My Work/wt` became `/x/My` in WORKTREES and the rest in BRANCHES. The test is the one that merges a PR from a worktree whose path contains a space and then requires the worktree gone and the branch deleted, which is the only assertion in the file that can tell a marker carrying a path from one that does not",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "worktree path contains a space is still cleaned up"
       ],
       "verdict": "caught"
     }

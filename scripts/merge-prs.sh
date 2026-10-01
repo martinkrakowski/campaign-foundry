@@ -25,12 +25,23 @@
 # refused with its reason, and the run exits 1 if any PR was refused. WITHOUT
 # the flag this script stops at the first refusal, exactly as it always has.
 #
-# ONE RUN AT A TIME. At start the run takes ${TMPDIR:-/tmp}/cf-merge-prs.lock
-# with an atomic `mkdir` and writes its own pid inside it. A live holder makes
-# a second run exit 75 with `merge-prs: another run holds the lock (pid N)`;
-# a dead holder's lock is reclaimed; and the lock is released on EXIT, INT and
-# TERM. 75 means busy, exactly as it means busy in scripts/gate-lock.sh:
-# sleep and retry, never remove the lock by hand.
+# ONE RUN AT A TIME. At start the run takes ${TMPDIR:-/tmp}/cf-merge-prs.lock by
+# renaming a fully written candidate directory onto that name — the rename is
+# the only moment the name exists, so no run ever sees a lock with no pid in it.
+# A live holder makes a second run exit 75 with `merge-prs: another run holds
+# the lock (pid N)`; a dead holder's lock is reclaimed, and only after the lock
+# that was moved aside is confirmed to be the one that was judged dead; and the
+# lock is released on EXIT, INT and TERM. 75 means busy, exactly as it means
+# busy in scripts/gate-lock.sh: sleep and retry, never remove the lock by hand.
+#
+# Two things about that lock worth knowing before concluding it is stuck. A pid
+# can be RECYCLED: a lock whose holder died still names a pid, and if the kernel
+# has since handed that number to something else the holder reads as alive
+# forever. So before removing a lock by hand, look at what the pid is —
+# `ps -p <pid> -o command=` — and remove it only if that is not a merge-prs run.
+# And the lock's parent is ${TMPDIR:-/tmp}, which on macOS is private to one
+# login session: two runs from different sessions do not see each other's lock
+# at all, and the single-run rule is only as good as the session it is run in.
 #
 # For each PR, in order:
 #   0. D184's pre-PR-review gate, ONLY when the spec names a lane: refuse this
@@ -40,8 +51,10 @@
 #      here ends the WHOLE run, exactly as it always has, unless --continue was
 #      given; then it costs that one PR. An empty
 #      lane field is today's behaviour exactly: no lane, no gate, no wave
-#      required. A lane given with an empty wave is a malformed spec and dies
-#      outright, since the gate cannot be asked anything without one.
+#      required. A lane given with an empty wave is a malformed spec, and it
+#      refuses that PR — which without --continue is the end of the run, and
+#      with it is one more skipped PR, since the gate cannot be asked anything
+#      without a wave.
 #   1. Refresh the branch from origin/<main>. Conflicts are auto-resolved ONLY for
 #      ordinary text conflicts in append-only files (see APPEND_ONLY) by keeping both
 #      sides; anything else — a different path, a modify/delete, a binary conflict, a
@@ -105,20 +118,159 @@ while [[ $# -ge 1 ]]; do
 done
 
 # ONE RUN AT A TIME. The lock is a directory at ${TMPDIR:-/tmp}/cf-merge-prs.lock
-# holding one file, `pid`. `mkdir` is the atomic step — it either creates the
-# name or fails, and no read-then-write can lose the race the way a test for the
-# file's existence and a write of it can. The pid goes INSIDE it, so a holder is
-# identifiable from the moment the name exists.
+# holding one file, `pid`, and it is taken by a CANDIDATE DIRECTORY renamed onto
+# that name — the metadata is written first and the rename is the only moment
+# the name exists, so no other run can ever see a lock without a pid in it.
 #
-# A holder is alive if `ps -p <pid>` succeeds. NEVER `pgrep`: it matches
-# process command lines, so it matches the very caller waiting on it — that is
-# what deadlocked the orchestrator's chained runs for hours. `kill -0` is no
-# better here, because it answers EPERM as a line of locale-dependent text to
-# parse, and a process this user may not signal is alive.
+# A holder is alive if `ps -p <pid>` succeeds. NEVER `pgrep`: it matches process
+# command lines, so it matches the very caller waiting on it — that is what
+# deadlocked the orchestrator's chained runs for hours. `kill -0` is no better
+# here, because it answers EPERM as a line of locale-dependent text to parse,
+# and a process this user may not signal is alive.
 LOCK_DIR="${TMPDIR:-/tmp}/cf-merge-prs.lock"
 # 75 is BUSY, the same contract scripts/gate-lock.sh defines: this run is not
 # wrong and the host is not broken, there is simply another run in the way.
 BUSY=75
+
+# The pid the lock at the name names, or empty when there is none to read.
+# `cat` and not `$(<file)`: zsh's own "no such file" diagnostic for `$(<…)` is
+# NOT covered by a redirection inside the substitution, so a lock with no pid in
+# it printed that error to stderr on every run that looked at it.
+lock_holder_pid() {
+  cat "$LOCK_DIR/pid" 2>/dev/null
+}
+
+# Is that pid a live process?
+pid_alive() {
+  ps -p "$1" >/dev/null 2>&1
+}
+
+# A lock directory with no pid in it, and old enough that nobody is mid-write in
+# it. The candidate-and-rename acquire makes this state impossible for a lock
+# this script took, so this is the escape for the ones that exist anyway: a
+# SIGKILL inside the old mkdir-then-write ordering, or a lock somebody removed
+# the pid file from. Sixty seconds is not a tuned number — the window between one
+# holder creating the name and writing its pid is sub-millisecond, and a
+# pid-less lock a minute old can only be a crashed holder's.
+#
+# Judged by find's OUTPUT, never its exit status: find exits 0 whether or not it
+# matched anything, so a test written on the exit code would call every fresh
+# pid-less lock old and hand the host to whichever run asked first.
+lock_is_pidless_and_old() {
+  [[ -f "$LOCK_DIR/pid" ]] && return 1
+  [[ -n "$(find "$LOCK_DIR" -maxdepth 0 -mmin +1 2>/dev/null)" ]]
+}
+
+# Move the lock aside and delete it — but ONLY the lock that was judged dead.
+#
+# The `mv` is the arbitration between two reclaimers: only one rename lands, so
+# two runs that both read the same dead pid cannot both decide the stale lock
+# was theirs. The verification is what closes the race the rename alone does
+# not: a run that replaced the name with a LIVE lock between our `ps` and our
+# `mv` would otherwise have that lock renamed aside and deleted, and both runs
+# would then merge at once — the exact failure this lock exists to prevent. So
+# the aside's pid must be the one that was judged. Anything else is a lock this
+# run never judged, and it is NEVER deleted: put it back when the name is free,
+# leave it aside when it is not, and report the abort either way.
+reclaim_lock() {
+  local judged="$1" aside moved
+  aside="$LOCK_DIR.stale.$$"
+  # This aside is named for our own pid, so anything already at that name is a
+  # dead earlier attempt of this same pid. Clearing it first matters: `mv` into
+  # an EXISTING directory succeeds by nesting the source inside it, so a
+  # leftover aside would quietly swallow the lock instead of being renamed.
+  rm -rf "$aside" 2>/dev/null
+  mv "$LOCK_DIR" "$aside" 2>/dev/null || return 1
+  moved=$(cat "$aside/pid" 2>/dev/null)
+  if [[ "$moved" == "$judged" ]]; then
+    rm -rf "$aside"
+    return 0
+  fi
+  if [[ ! -d "$LOCK_DIR" ]] && mv "$aside" "$LOCK_DIR" 2>/dev/null; then
+    echo "merge-prs: reclaim of the lock at $LOCK_DIR aborted — the lock at that name is not the one that was judged dead, so it was put back" >&2
+  else
+    echo "merge-prs: reclaim of the lock at $LOCK_DIR aborted — the name is taken, and the copy that was not ours is left at $aside and never deleted" >&2
+  fi
+  return 1
+}
+
+# Answer 75, naming the holder this run can see. Never returns.
+busy_exit() {
+  local holder
+  holder=$(lock_holder_pid)
+  [[ "$holder" == <-> ]] || holder="unknown"
+  echo "merge-prs: another run holds the lock (pid $holder)" >&2
+  exit $BUSY
+}
+
+# Take the lock, or answer 75 and do nothing else. Never `pgrep` (see above).
+# It installs NO trap: see the call site below for why that is not an oversight.
+acquire_lock() {
+  local cand holder
+  # Judge what is at the name BEFORE this run touches it, and that order is not
+  # cosmetic. Creating the candidate below moves a directory INTO the name when
+  # the name is already taken, and creating or removing anything inside a
+  # directory updates that directory's mtime — so an attempt made first would
+  # reset the very mtime lock_is_pidless_and_old measures, and a crashed
+  # holder's pid-less lock would read as young again on the next attempt and the
+  # one after. Judge, then act. The cost is that a lock released microseconds
+  # after the read is answered busy rather than taken, which is what 75 means
+  # and what the caller already does about it.
+  holder=$(lock_holder_pid)
+  if [[ "$holder" == <-> ]] && ! pid_alive "$holder"; then
+    # A readable pid whose process is gone: a crashed holder. Move its lock
+    # aside — but only ever THAT lock, see reclaim_lock — and then take the
+    # name the move leaves free.
+    #
+    # Test hook (MERGE_PRS_TEST_PAUSE_AFTER_LIVENESS): between judging the
+    # holder dead and moving the lock aside, so a test can put a LIVE lock at
+    # the name in exactly that window and prove the reclaim refuses it.
+    if [[ -n "${MERGE_PRS_TEST_PAUSE_AFTER_LIVENESS:-}" ]]; then
+      touch "$MERGE_PRS_TEST_PAUSE_AFTER_LIVENESS" 2>/dev/null
+      while [[ -f "$MERGE_PRS_TEST_PAUSE_AFTER_LIVENESS" ]]; do sleep 1; done
+    fi
+    # Judged with the pid that was read, so reclaim_lock can insist the lock it
+    # moved aside is that one and not a replacement.
+    reclaim_lock "$holder" || busy_exit
+  elif lock_is_pidless_and_old; then
+    # No pid at all, and old enough that nobody is mid-write in it. Judged as
+    # the empty string, so the aside's pid is compared against the absence that
+    # was judged: a lock that grew a pid in the meantime is a different lock.
+    reclaim_lock "" || busy_exit
+  elif [[ "$holder" == <-> ]] || [[ -d "$LOCK_DIR" ]]; then
+    # Somebody else's, and not provably abandoned: a live pid, or a pid-less
+    # directory young enough to be a holder microseconds into its own acquire.
+    # Neither is this run's to take on a guess.
+    busy_exit
+  fi
+
+  # The name is free, or was just freed by a verified reclaim. The candidate is
+  # complete before the name exists, and the rename is the only moment the name
+  # exists — a bare `mkdir` then `echo > pid` has a window in between that every
+  # other run reads as a lock with no pid in it, and that is not a harmless
+  # reading: it is a lock nobody can reclaim, because there is no pid to judge.
+  cand="$LOCK_DIR.cand.$$"
+  rm -rf "$cand" 2>/dev/null
+  if mkdir "$cand" 2>/dev/null && echo "$$" >"$cand/pid" 2>/dev/null \
+    && mv "$cand" "$LOCK_DIR" 2>/dev/null; then
+    # `mv` onto an EXISTING directory does not rename over it: it moves the
+    # candidate INTO that directory and exits 0, empty target or not. That is
+    # the busy answer, and the nesting is the only way to tell it apart from a
+    # win — so our own candidate, which can only be this run's, is taken back
+    # out of the holder's lock rather than left in it.
+    if [[ -d "${LOCK_DIR:?}/${cand##*/}" ]]; then
+      rm -rf "${LOCK_DIR:?}/${cand##*/}" 2>/dev/null
+    elif [[ "$(lock_holder_pid)" == "$$" ]]; then
+      # Read-back: the name holds OUR pid. A rename cannot have replaced a
+      # non-empty directory, so nothing could have taken the name in between.
+      return 0
+    fi
+  fi
+  # Lost the name to a run that took it between the judgement above and this
+  # rename. That is a busy host, not a broken one.
+  rm -rf "$cand" 2>/dev/null
+  busy_exit
+}
 
 # Drop the lock, and this run's scratch with it. On every exit: the end of the
 # loop, a refusal, a signal, a failed `mktemp` — a lock that only the happy path
@@ -133,7 +285,7 @@ BUSY=75
 release_lock() {
   local pid
   if [[ -f "$LOCK_DIR/pid" ]]; then
-    pid=$(<"$LOCK_DIR/pid")
+    pid=$(cat "$LOCK_DIR/pid" 2>/dev/null)
     if [[ "$pid" == "$$" ]]; then
       rm -rf "$LOCK_DIR"
     fi
@@ -141,40 +293,6 @@ release_lock() {
   if [[ -n "$RUN_TMP" ]]; then
     rm -rf "$RUN_TMP"
   fi
-}
-
-# Take the lock, or answer 75 and do nothing else. Never `pgrep` (see above).
-# It installs NO trap: see the call site below for why that is not an oversight.
-acquire_lock() {
-  local holder
-  if mkdir "$LOCK_DIR" 2>/dev/null; then
-    echo "$$" >"$LOCK_DIR/pid"
-    return 0
-  fi
-  holder=$(<"$LOCK_DIR/pid" 2>/dev/null)
-  # Only a lock that is PROVABLY abandoned is taken. A readable pid whose process
-  # is gone is a crashed holder. Anything else is a live run and is waited out:
-  # a lock with no readable pid is a holder caught between the `mkdir` above and
-  # its own write, and taking that is the double merge this lock exists to
-  # prevent. (scripts/gate-lock.sh pays for the same window differently, by
-  # renaming a fully written directory onto the name; `mkdir` is what the plan
-  # asks for here, so the window is closed on the reading side instead.)
-  if [[ "$holder" != <-> ]] || ps -p "$holder" >/dev/null 2>&1; then
-    [[ "$holder" == <-> ]] || holder="unknown"
-    echo "merge-prs: another run holds the lock (pid $holder)" >&2
-    exit $BUSY
-  fi
-  # A dead holder. Move the lock aside before retrying, so two reclaimers cannot
-  # both decide the stale lock was theirs and both win the mkdir: only one
-  # rename lands, and the loser falls through to the retry, which finds the
-  # winner's live lock and answers 75 like anyone else.
-  mv "$LOCK_DIR" "$LOCK_DIR.stale.$$" 2>/dev/null && rm -rf "$LOCK_DIR.stale.$$"
-  if mkdir "$LOCK_DIR" 2>/dev/null; then
-    echo "$$" >"$LOCK_DIR/pid"
-    return 0
-  fi
-  echo "merge-prs: another run holds the lock (pid unknown) at $LOCK_DIR" >&2
-  exit $BUSY
 }
 
 # One stderr capture and one marker file, reused by every PR in the run. Named
@@ -196,8 +314,30 @@ RUN_TMP=""
 # lock (exit 75) runs this trap on its way out too, and the `$$` check in
 # release_lock is what stops it deleting the live holder's lock.
 trap 'release_lock' EXIT
-trap 'release_lock; exit 130' INT
-trap 'release_lock; exit 143' TERM
+# The pid of the PR in flight, or empty when there is none. Forward_signal reads
+# it; the loop clears it the moment the body is reaped, so a signal that arrives
+# between two PRs cannot signal a pid the kernel has since handed to somebody
+# else.
+pr_child=""
+# Hand the signal on to the PR in flight before giving the lock back. zsh
+# DEFERS a trap while a foreground child runs, so the body is backgrounded and
+# waited on (see the loop): signalled at the parent alone, a foreground body
+# would have gone on to `gh pr merge` and been reaped by no epilogue at all.
+#
+# TERM, never INT, and to the body's own pid: see the note at the loop for what
+# this does and does not reach.
+forward_signal() {
+  trap '' INT TERM
+  if [[ -n "$pr_child" ]]; then
+    kill -TERM "$pr_child" 2>/dev/null
+    wait "$pr_child" 2>/dev/null
+    pr_child=""
+  fi
+  release_lock
+  exit "$1"
+}
+trap 'forward_signal 130' INT
+trap 'forward_signal 143' TERM
 acquire_lock
 RUN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/merge-prs-run-XXXXXX") || die "mktemp failed"
 MARK_FILE="$RUN_TMP/marker"
@@ -425,16 +565,19 @@ pr_body() {
   gh pr merge "$pr" --squash || die "squash-merge failed for #$pr"
   echo "merged #$pr"
 
-  # Announce the merge on fd 3, the body's own channel, which is the ONLY way
-  # the caller learns what to clean up afterwards: this runs in a subshell, so
-  # the arrays it appended to are gone by the time it returns, and the epilogue
-  # removes worktrees and DELETES BRANCHES ON THE FORGE. For a refused PR that
-  # is the one thing this script must never do — the refused work is the only
-  # copy left, and a branch deleted here is a lane's PR gone from under it.
-  # So the appends below are driven by this line and by nothing else, not even
-  # by an exit status of 0. `-` stands in for an empty field, which no worktree
-  # path or branch name can be and which must never reach `git worktree remove`.
-  echo "MERGED $pr ${worktree:--} ${branch:--}" >&3
+  # Announce the merge BY PATH, for the caller to find. Not on an inherited fd:
+  # every child this body starts inherits that fd, so any tool that writes to it
+  # — or closes it — takes the marker with it, and the PR that merged is then a
+  # PR whose worktree and branch are never cleaned up. MARK_FILE lives under
+  # this run's own RUN_TMP, whose name no child knows.
+  #
+  # ONLY the PR number. Not the worktree and not the branch: the caller split
+  # those out of the spec itself and still has them, and a worktree path may
+  # contain a space — which `read -r` split, so a merged PR's worktree was left
+  # behind and `git branch -D` was handed whatever survived the split. A marker
+  # that cannot be misparsed is worth more than one that repeats what the caller
+  # already knows.
+  print -r -- "MERGED $pr" >>"$MARK_FILE"
   # Explicitly zero, because the marker is bookkeeping: a failed write to it
   # must not turn a merge that happened into a refusal.
   return 0
@@ -467,16 +610,36 @@ for spec in "$@"; do
     # the last thing that PR wrote to stderr — so this PR's stderr is captured
     # and replayed at the end of it. Per PR, not for the run: the next PR's
     # output can never land between one PR's message and the PR it belongs to.
-    ( pr_body "$pr" "$worktree" "$branch" "$lane" "$wave" 2>"$ERR_FILE" ) 3>"$MARK_FILE"
-    pr_status=$?
-    cat "$ERR_FILE" >&2
+    ( pr_body "$pr" "$worktree" "$branch" "$lane" "$wave" 2>"$ERR_FILE" ) &
+    pr_child=$!
   else
     # Without --continue, stderr is not captured at all and the body writes
     # straight through to the terminal, in the order it wrote it. Today's
     # output, byte for byte, on the path that did not ask to change.
-    ( pr_body "$pr" "$worktree" "$branch" "$lane" "$wave" ) 3>"$MARK_FILE"
-    pr_status=$?
+    ( pr_body "$pr" "$worktree" "$branch" "$lane" "$wave" ) &
+    pr_child=$!
   fi
+  # Backgrounded and WAITED ON, not run in the foreground: zsh defers this
+  # shell's own INT and TERM traps until a foreground child is gone, so a
+  # foreground body would swallow the signal, carry on to `gh pr merge`, and be
+  # reaped by no epilogue at all. `wait` is what makes the trap prompt, and it
+  # leaves the exit status the body's own.
+  #
+  # What the trap's forwarded TERM reaches, measured: the body's own subshell
+  # dies at once, so the loop never returns to this PR and the merge is not
+  # attempted — that is the half that matters. What it does NOT reach is a `gh`
+  # already exec'd, which is a process of its own below the body: killing the
+  # body leaves it running, and it is the one thing here that could still land a
+  # merge after this run has released the lock. It cannot be closed from here
+  # without a process group of its own for the body, and the window is a single
+  # in-flight `gh pr merge` — named here rather than left to be discovered.
+  wait $pr_child
+  pr_status=$?
+  # Cleared before anything else can signal it: from here on this pid is a
+  # process that no longer exists, and a signal sent to it would land on whatever
+  # the kernel has since made of the number.
+  pr_child=""
+  [[ -z "$CONTINUE" ]] || cat "$ERR_FILE" >&2
 
   # Stop at the first refusal, as this script always has, and before the
   # epilogue below can remove anything: a run that ended at a refusal has
@@ -486,11 +649,18 @@ for spec in "$@"; do
   fi
 
   # What the epilogue may touch. A PR that announced a merge is the only kind
-  # that goes in, whatever it exited with.
-  if read -r marker marker_pr marker_wt marker_br <"$MARK_FILE" \
-    && [[ "$marker" == "MERGED" && "$marker_pr" == "$pr" ]]; then
-    [[ "$marker_wt" == "-" ]] || WORKTREES+=("$marker_wt")
-    [[ "$marker_br" == "-" ]] || BRANCHES+=("$marker_br")
+  # that goes in, whatever it exited with — and the fields appended are THIS
+  # spec's own, already split above, never anything read back out of the marker.
+  # A refused PR is in neither list, so the epilogue canNOT remove its worktree
+  # or delete its branch on the forge: that is the one thing which must not
+  # happen to the only copy of the work.
+  #
+  # `grep -qx` and not `read`: the test is for one whole line ANYWHERE in the
+  # file, so anything written to the marker path ahead of the merge cannot hide
+  # the real line by being the first one.
+  if grep -qx "MERGED $pr" "$MARK_FILE" 2>/dev/null; then
+    [[ -n "$worktree" ]] && WORKTREES+=("$worktree")
+    [[ -n "$branch" ]] && BRANCHES+=("$branch")
     merged=1
   else
     merged=0
