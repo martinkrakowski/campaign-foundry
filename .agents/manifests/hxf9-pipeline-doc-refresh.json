@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "lane": "HXF9-pipeline-doc-refresh",
+  "mutations": [
+    {
+      "file": "tools/brief-new/lib/template.ts",
+      "before": "### Concurrency checklist (locks, signals, async setup/cleanup, shared test state)\n\n",
+      "after": "\n",
+      "because": "the one line that makes the checklist a section rather than a paragraph, in the one place the tool actually writes from: TEMPLATE_F is what render() substitutes into, so deleting the heading ships a brief whose five concurrency items sit under '## Working rules' as ordinary bullets, and a lane navigating by headings never sees that they are a checklist at all. The drift test fails first and states why in one line — TEMPLATE_F no longer equals the doc's Template F block byte for byte, which is exactly the drift the pair exists to make impossible, and it fails from the deletion alone because the doc's copy of the heading is untouched. render.test.ts's checklist test fails on the same deletion, so the claim does not rest on the drift test alone.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/brief-new/__tests__/render.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
