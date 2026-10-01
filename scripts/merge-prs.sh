@@ -43,6 +43,17 @@
 # login session: two runs from different sessions do not see each other's lock
 # at all, and the single-run rule is only as good as the session it is run in.
 #
+# SIGNALS, and one dependency they need. Each PR runs as a process in a process
+# group of its own, so `kill -TERM` on this script stops that PR — its `gh`, its
+# `yarn`, everything under it — and then releases the lock and exits 143 (130 for
+# INT). Making that group costs one `perl -MPOSIX -e 'POSIX::setpgid(0,0)'` per
+# PR, because zsh will not give a backgrounded subshell a group of its own
+# (`setopt monitor` is refused in a non-interactive script), and a run without
+# that group can only be taken down by walking process ids, which misses anything
+# that is no longer somebody's child. perl ships with macOS and ubuntu-latest; if
+# it is missing this script says so and stops, rather than taking a lock it then
+# cannot defend.
+#
 # For each PR, in order:
 #   0. D184's pre-PR-review gate, ONLY when the spec names a lane: refuse this
 #      PR before touching git or the forge at all — a refused lane costs no
@@ -86,6 +97,26 @@ MAIN=${MAIN_BRANCH:-main}
 
 die() { echo "ERROR: $*" >&2; exit 1 }
 
+# This script's own path, captured HERE at the top level and used to re-enter it
+# (launch_pr_body). It cannot be read as `$0` from inside a function: zsh sets
+# $0 there to the FUNCTION's name — the first version passed "launch_pr_body" as
+# the script to run, and every PR body died with "can't open input file:
+# launch_pr_body" before printing a byte. At the top level $0 is the path this
+# script was invoked with, which is what the body has to be given.
+MERGE_PRS_SELF="$0"
+
+# The hidden entry point this script re-enters through to run ONE PR's body in a
+# process group of its own (see launch_pr_body). `__pr_body` is not a user flag and
+# is not in the usage above: the parent run passes it so the body can be a separate
+# process, and a separate process is the only thing that can be signalled as a
+# group. Everything above this line is definitions; the body is dispatched near the
+# bottom, once pr_body exists, and it never touches the lock.
+PR_BODY_MODE=""
+if [[ "${1:-}" == "__pr_body" ]]; then
+  PR_BODY_MODE=1
+  shift
+fi
+
 # Leading flags, parsed in a loop so their order is not a rule a caller has to
 # know: `--logdir X --continue` and `--continue --logdir X` are the same run.
 # The first argument that is not a flag is a spec, and everything from there on
@@ -95,27 +126,47 @@ die() { echo "ERROR: $*" >&2; exit 1 }
 # that carries a lane. Omitted, `pre-pr-check` resolves it itself — the same
 # resolution wave-event.sh uses — so this script never invents a default of its
 # own to drift from that one.
-LOGDIR_OVERRIDE=""
 # With --continue, a refused PR is one line in the closing summary instead of
 # the end of the run. Empty means "stop at the first refusal", which is what
 # every caller that does not ask for it gets.
-CONTINUE=""
-while [[ $# -ge 1 ]]; do
-  case "$1" in
-    --logdir)
-      [[ $# -ge 2 ]] || die "--logdir requires a directory"
-      LOGDIR_OVERRIDE="$2"
-      shift 2
-      ;;
-    --continue)
-      CONTINUE=1
-      shift
-      ;;
-    *)
-      break
-      ;;
-  esac
-done
+#
+# SKIPPED ENTIRELY for a body. A body inherits both from the environment, and
+# re-initialising them here reset the inherited values to empty — which is how
+# `--logdir` stopped reaching `pre-pr-check` for every lane and nothing said so:
+# the body ran, the gate ran, and the log directory was simply not the one the
+# caller asked for. A body's configuration is what the parent exported, and
+# nothing in here may overwrite it.
+if [[ -z "$PR_BODY_MODE" ]]; then
+  LOGDIR_OVERRIDE=""
+  CONTINUE=""
+  while [[ $# -ge 1 ]]; do
+    case "$1" in
+      --logdir)
+        [[ $# -ge 2 ]] || die "--logdir requires a directory"
+        LOGDIR_OVERRIDE="$2"
+        shift 2
+        ;;
+      --continue)
+        CONTINUE=1
+        shift
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+fi
+
+# perl is here for exactly one line — the `setpgid` in launch_pr_body — and that one
+# line is what lets a signal reach a `gh` the body has already exec'd, which is the
+# difference between stopping a run and leaving it to finish merging. perl ships
+# with macOS and with ubuntu-latest, so this is a check rather than a dependency;
+# the message says what is missing and what it is needed for, because the failure
+# mode without it is not a crash here but a signal this script silently cannot
+# deliver later, when a merge is already in flight. The POSIX module is checked too,
+# since a perl without it cannot setpgid at all (see launch_pr_body).
+perl -MPOSIX -e 1 >/dev/null 2>&1 \
+  || die "merge-prs: perl with the POSIX module is required — each PR body is launched through 'perl -MPOSIX -e setpgid' so a signal can reach the whole process group, and this perl cannot load POSIX"
 
 # ONE RUN AT A TIME. The lock is a directory at ${TMPDIR:-/tmp}/cf-merge-prs.lock
 # holding one file, `pid`, and it is taken by a CANDIDATE DIRECTORY renamed onto
@@ -149,12 +200,21 @@ lock_holder_pid() {
   print -r -- "${$(lock_token)%% *}"
 }
 
-# This acquisition's own token. The nonce only has to differ between two
-# acquisitions racing for one name — it is not a secret and nothing is
-# authenticated with it — so pid, $RANDOM and the clock together are more than
-# enough, and `date +%s%N` is not portable to every macOS, hence the fallback.
+# This acquisition's own token, as `<pid> <nonce>` — and the SPACE is load-bearing,
+# not formatting. lock_holder_pid and acquire_lock both read the pid half with
+# `${token%% *}`, so a token written without one is returned whole: `1234-1234-99-
+# 1699…` is not `<->`, the liveness test never runs, and a crashed holder's lock
+# cannot be judged dead by anyone, ever. Every test in the file plants a lock in
+# the documented format and so agreed with that; the only thing that catches it is
+# a lock this script produced itself, which is why one of them now SIGKILLs a real
+# run instead of writing the file.
+#
+# The nonce only has to differ between two acquisitions racing for one name — it
+# is not a secret and nothing is authenticated with it — so pid, $RANDOM and the
+# clock together are more than enough, and `date +%s%N` is not portable to every
+# macOS, hence the fallback.
 new_lock_token() {
-  print -r -- "$$-$$-$RANDOM-$(date +%s%N 2>/dev/null || date +%s)"
+  print -r -- "$$ $$-$RANDOM-$(date +%s%N 2>/dev/null || date +%s)"
 }
 
 # Is that pid a live process?
@@ -322,85 +382,9 @@ release_lock() {
   fi
 }
 
-# Every pid whose parent is $1, in ONE `ps` pass however deep the walk goes:
-# `ps -A -o pid=,ppid=` is the spelling both GNU and BSD ps accept, where
-# `--ppid` is GNU-only.
-child_pids() {
-  ps -A -o pid=,ppid= 2>/dev/null | awk -v parent="$1" '$2 == parent { print $1 }'
-}
-
-# Signal a process and everything under it, DEEPEST FIRST. The order is the
-# point: a child killed first cannot spawn a replacement while the walk is still
-# looking for its own children, and a parent killed first would have its subtree
-# re-parented to init, where this walk could no longer find it at all.
-kill_tree() {
-  local pid="${1:-}" child
-  [[ -n "$pid" ]] || return 0
-  for child in ${(f)"$(child_pids "$pid")"}; do
-    kill_tree "$child"
-  done
-  kill -TERM "$pid" 2>/dev/null
-}
-
-# One stderr capture and one marker file, reused by every PR in the run. Named
-# before the lock is taken so the EXIT trap can always read it.
-RUN_TMP=""
-# The token this run installed, or empty when it never took the lock. Empty is
-# also what a run refused the lock carries out to its exit, and it matches no
-# lock's token, which is what keeps that run from deleting the holder's.
-LOCK_TOKEN=""
-# The traps go on HERE, at the top level of the script, and never inside
-# acquire_lock — because in zsh a trap set in a function belongs to that
-# function: it FIRES when the function returns, and is gone afterwards.
-# Measured here on zsh 5.9, an EXIT trap installed inside a function ran the
-# moment that function returned (with every variable the run had not yet
-# assigned still empty) and left no trap behind, so the lock was taken and
-# released again before the first PR and the whole run was unprotected — with
-# no symptom except that nothing was ever locked. A lock that does not survive
-# its own acquire is worse than no lock, because every caller now believes
-# there is one.
-#
-# Before the acquire rather than after it, so the window between holding a lock
-# and being ready to give it back is not a signal-shaped hole. A run refused the
-# lock (exit 75) runs this trap on its way out too, and the token check in
-# release_lock is what stops it deleting the live holder's lock.
-trap 'release_lock' EXIT
-# The pid of the PR in flight, or empty when there is none. forward_signal reads
-# it; the loop clears it the moment the body is reaped, so a signal that arrives
-# between two PRs cannot signal a pid the kernel has since handed to somebody
-# else.
-pr_child=""
-# Hand the signal on to the PR in flight — the whole tree, not just the body —
-# before giving the lock back, or a `gh` already exec'd below the body outlives
-# it and can complete a merge after this run has released the lock.
-#
-# The body is signalled by TREE rather than by process GROUP because zsh will
-# not give it a group: `setopt monitor` is refused outright in a non-interactive
-# script ("can't change option: monitor", measured on zsh 5.9), so without job
-# control a backgrounded subshell stays in its PARENT's process group — measured
-# here, parent and child both at pgid 4136593 — and `kill -TERM -- -$child` has
-# no group to name. Walking the tree by parent pid is the portable equivalent,
-# and it reaches the `gh` under the body as well as the body itself.
-forward_signal() {
-  trap '' INT TERM
-  if [[ -n "$pr_child" ]]; then
-    kill_tree "$pr_child"
-    wait "$pr_child" 2>/dev/null
-    pr_child=""
-  fi
-  release_lock
-  exit "$1"
-}
-trap 'forward_signal 130' INT
-trap 'forward_signal 143' TERM
-acquire_lock
-# Test hook (MERGE_PRS_TEST_RUN_TMP): replace the mktemp with a directory the
-# test chose, so it can make the marker file's directory unwritable and prove
-# what a merge does when it cannot be recorded. Unset in every real run.
-RUN_TMP="${MERGE_PRS_TEST_RUN_TMP:-}"
-[[ -n "$RUN_TMP" ]] || RUN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/merge-prs-run-XXXXXX") || die "mktemp failed"
-MARK_FILE="$RUN_TMP/marker"
-ERR_FILE="$RUN_TMP/stderr"
+# The trap and acquire block, and launch_pr_body, live BELOW pr_body: a body runs in
+# its own process and must not take a lock this run already holds. See the internal
+# entry point, and the note on zsh's function-scoped traps where the traps go on.
 
 # Files where two branches legitimately append and both sides must survive.
 # Extend for your repo (a session log, a hand-maintained barrel, a changelog).
@@ -652,6 +636,134 @@ pr_body() {
   return 0
 }
 
+# 3, not 1: the body exits 3 when `gh pr merge` SUCCEEDED and only the marker
+# could not be written. It is not a refusal and must never be counted as one —
+# the merge is on the forge — but the run still has to end non-zero, so this
+# code is what tells the two apart without a second channel to write on (the
+# channel is exactly what failed). Declared before the entry point below, which
+# is the first thing that can run a body.
+EXIT_MERGED_UNRECORDED=3
+
+# THE INTERNAL ENTRY POINT. Everything above is definitions; this is the only
+# path that runs a body, and it exists because the body has to be a separate
+# process: zsh will not put a backgrounded subshell in a process group of its
+# own, so a signal could not be aimed at one PR's `gh` without hitting this run.
+# The exit status is the body's own, which is what the parent's `wait` reads.
+#
+# It deliberately does NOT touch the lock, and it is reached BEFORE the traps and
+# the acquire below: a body that could take or release the lock would be a body
+# that could end the run, and this one is supposed to be told what to do and
+# nothing more. Its environment is its configuration — see the exports below.
+if [[ -n "$PR_BODY_MODE" ]]; then
+  # Exactly the five spec fields, because pr_body reads them as $1..$5 under
+  # `set -u` and a short call would die on a parameter-not-set error that names
+  # nothing useful. This entry point is not for callers; the message says so.
+  [[ $# -eq 5 ]] \
+    || die "merge-prs: __pr_body is an internal entry point and takes exactly the five spec fields (got $#). Run scripts/merge-prs.sh with PR specs instead."
+  pr_body "$@"
+  exit $?
+fi
+
+# One stderr capture and one marker file, reused by every PR in the run. Named
+# before the lock is taken so the EXIT trap can always read it.
+RUN_TMP=""
+# The token this run installed, or empty when it never took the lock. Empty is
+# also what a run refused the lock carries out to its exit, and it matches no
+# lock's token, which is what keeps that run from deleting the holder's.
+LOCK_TOKEN=""
+# The pid of the PR in flight, or empty when there is none — and that pid is also
+# the body's PROCESS GROUP, because launch_pr_body gives it one. forward_signal
+# reads it; the loop clears it the moment the body is reaped, so a signal that
+# arrives between two PRs cannot aim at a group the kernel has since handed to
+# somebody else.
+pr_child=""
+# Hand the signal to the PR in flight, then give the lock back.
+#
+# The GROUP is the point, and it is atomic in a way a walk of the process tree is
+# not. `kill -TERM -- -$pr_child` names every process in that group at the instant
+# it is delivered — the body, a `gh` it exec'd a moment ago, a `yarn` under that,
+# anything any of them started since — with no read-then-act window in which a new
+# child can appear unmissed, and no pid that can be recycled between reading it
+# and signalling it. The walk this replaces (`ps -A -o ppid=` recursion, deepest
+# first, which is what round 2 shipped) had neither property: it missed a child
+# spawned after its own pass, and it missed every descendant that had been
+# re-parented away, because such a process is no longer anybody's child while
+# still being in this group. `wait` reaps the body, and the group is gone by then
+# or the run has said so loudly enough.
+forward_signal() {
+  trap '' INT TERM
+  if [[ -n "$pr_child" ]]; then
+    kill -TERM -- "-$pr_child" 2>/dev/null
+    wait "$pr_child" 2>/dev/null
+    pr_child=""
+  fi
+  release_lock
+  exit "$1"
+}
+# The traps go on HERE, at the top level of the script, and never inside
+# acquire_lock — because in zsh a trap set in a function belongs to that
+# function: it FIRES when the function returns, and is gone afterwards.
+# Measured here on zsh 5.9, an EXIT trap installed inside a function ran the
+# moment that function returned (with every variable the run had not yet
+# assigned still empty) and left no trap behind, so the lock was taken and
+# released again before the first PR and the whole run was unprotected — with
+# no symptom except that nothing was ever locked. A lock that does not survive
+# its own acquire is worse than no lock, because every caller now believes
+# there is one.
+#
+# Before the acquire rather than after it, so the window between holding a lock
+# and being ready to give it back is not a signal-shaped hole. A run refused the
+# lock (exit 75) runs this trap on its way out too, and the token check in
+# release_lock is what stops it deleting the live holder's lock.
+trap 'release_lock' EXIT
+trap 'forward_signal 130' INT
+trap 'forward_signal 143' TERM
+acquire_lock
+# Test hook (MERGE_PRS_TEST_RUN_TMP): replace the mktemp with a directory the
+# test chose, so it can make the marker file's directory unwritable and prove
+# what a merge does when it cannot be recorded. Unset in every real run.
+RUN_TMP="${MERGE_PRS_TEST_RUN_TMP:-}"
+[[ -n "$RUN_TMP" ]] || RUN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/merge-prs-run-XXXXXX") || die "mktemp failed"
+MARK_FILE="$RUN_TMP/marker"
+ERR_FILE="$RUN_TMP/stderr"
+
+# Everything a body READS has to be in the environment rather than in a variable
+# of this shell, because the body is a different process. Exported once, here, and
+# deliberately not by blanket: the lock's own state — LOCK_TOKEN, LOCK_DIR,
+# pr_child — must NOT travel, or a body would be holding the name and the token
+# that make it look like the holder. Nothing exported here is secret; the nonce in
+# the lock token is not even exported.
+export REPO MAIN REQUIRED_CHECK REVIEW_SETTLE_SECONDS APPEND_ONLY
+export LOGDIR_OVERRIDE CONTINUE MARK_FILE ERR_FILE RUN_TMP
+
+# Start one PR's body in a process group of its own, and set pr_child to its pid —
+# which is also that group's id, because the group is made before the exec.
+#
+# `setpgid(0,0)` makes the perl process a group leader and `exec` then replaces it
+# with zsh WITHOUT changing pid, so the group survives the handover and holds
+# nothing but this body and whatever it starts. zsh cannot do this itself:
+# `setopt monitor` is refused outright in a non-interactive script ("can't change
+# option: monitor", measured on zsh 5.9), so without job control a backgrounded
+# subshell stays in its PARENT's group — measured here, parent and child both at
+# pgid 4136593 — and there would be no group of the body's own to signal without
+# signalling this run along with it.
+#
+# `POSIX::setpgid` and not a bare `setpgid`: perl has no such builtin, and the
+# bare spelling dies with "Undefined subroutine &main::setpgid" before the `or
+# die` beside it can run — so the failure is a compile-time death in the child,
+# not a diagnosable one here. setsid(1) would do the same job and is NOT the
+# choice: it is util-linux, and this script has to work on macOS, whose perl does
+# carry POSIX::setpgid.
+#
+# "$MERGE_PRS_SELF" is this script, re-entered at the internal entry point, and the
+# parent's cwd does not change inside the loop, so a relative path still resolves
+# for the body.
+launch_pr_body() {
+  perl -MPOSIX -e 'POSIX::setpgid(0,0) or die "setpgid: $!"; exec @ARGV' \
+    zsh "$MERGE_PRS_SELF" __pr_body "$@" &
+  pr_child=$!
+}
+
 # The run. Each PR is a subshell so a refusal costs that PR and no other, and
 # the epilogue below sees only the PRs that announced a merge.
 typeset -a WORKTREES BRANCHES
@@ -667,13 +779,6 @@ unrecorded_count=0
 # (it is `?` under its other name), and assigning to it fails the whole script
 # with "read-only variable: status" — mid-run, on the first PR, with the lock
 # held and the message naming a line that looks like an ordinary assignment.
-#
-# 3, not 1: the body exits 3 when `gh pr merge` SUCCEEDED and only the marker
-# could not be written. It is not a refusal and must never be counted as one —
-# the merge is on the forge — but the run still has to end non-zero, so this
-# code is what tells the two apart without a second channel to write on (the
-# channel is exactly what failed).
-EXIT_MERGED_UNRECORDED=3
 for spec in "$@"; do
   # Array-split on "|", not the old ${%%|*}/${#*|} chain: that chain reused
   # trailing text for a field a shorter spec never gave it, once a fourth and
@@ -690,14 +795,12 @@ for spec in "$@"; do
     # the last thing that PR wrote to stderr — so this PR's stderr is captured
     # and replayed at the end of it. Per PR, not for the run: the next PR's
     # output can never land between one PR's message and the PR it belongs to.
-    ( pr_body "$pr" "$worktree" "$branch" "$lane" "$wave" 2>"$ERR_FILE" ) &
-    pr_child=$!
+    launch_pr_body "$pr" "$worktree" "$branch" "$lane" "$wave" 2>"$ERR_FILE"
   else
     # Without --continue, stderr is not captured at all and the body writes
     # straight through to the terminal, in the order it wrote it. Today's
     # output, byte for byte, on the path that did not ask to change.
-    ( pr_body "$pr" "$worktree" "$branch" "$lane" "$wave" ) &
-    pr_child=$!
+    launch_pr_body "$pr" "$worktree" "$branch" "$lane" "$wave"
   fi
   # Backgrounded and WAITED ON, not run in the foreground: zsh defers this
   # shell's own INT and TERM traps until a foreground child is gone, so a
@@ -706,9 +809,9 @@ for spec in "$@"; do
   # leaves the exit status the body's own.
   wait $pr_child
   pr_status=$?
-  # Cleared before anything else can signal it: from here on this pid is a
-  # process that no longer exists, and a signal sent to it would land on whatever
-  # the kernel has since made of the number.
+  # Cleared before anything else can signal it: from here on this group is gone,
+  # and a signal aimed at that number would land on whatever the kernel has since
+  # made of it.
   pr_child=""
   [[ -z "$CONTINUE" ]] || cat "$ERR_FILE" >&2
 

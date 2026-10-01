@@ -86,6 +86,23 @@
         "SAME pid but a different nonce"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "  print -r -- \"$$ $$-$RANDOM-$(date +%s%N 2>/dev/null || date +%s)\"",
+      "after": "  print -r -- \"$$-$$-$RANDOM-$(date +%s%N 2>/dev/null || date +%s)\"",
+      "because": "one missing space, and the lock becomes unreclaimable for the rest of the host's life. Every reader takes the pid half with `${token%% *}`: a token written `$$-$$-<nonce>` has no space in it, so that expansion returns the WHOLE string, `1234-1234-99-1699…`, which is not `<->` — so the liveness branch is never entered, the run falls through to the `-d $LOCK_DIR` test, and answers 75. Forever, to every run, including the one that owns the crashed lock: nothing can ever judge it dead, and the nonce that would have made two tokens distinguishable is welded to the pid instead of separated from it. This shipped once already, and every test in the file agreed with it, because every reclaim test PLANTS a lock file and the harness wrote `<pid> <nonce>` — the documented shape, not the shape the script produced. That is why the test this mutation is aimed at exists: it starts a real run, lets the script's own acquire write the token, SIGKILLs the holder, and asks the next run to cope with what was actually written. It fails here on the format itself, before the reclaim is even attempted, which is the earliest the defect is visible at all",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "left by a crashed run"
+      ],
+      "verdict": "caught"
     }
   ]
 }

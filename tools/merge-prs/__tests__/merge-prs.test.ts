@@ -158,18 +158,28 @@ function makeHarness(): Harness {
   const ghStub = [
     "#!/bin/sh",
     "set -u",
-    "# STUB_GH_SLEEP parks the first gh call, so a test can signal a run that is",
+    "# STUB_GH_SLEEP parks the gh stub, so a test can signal a run that is",
     "# provably mid-flight. The lock is taken before any gh call happens, so a",
     "# parked gh is a run holding it.",
     "# STUB_GH_CALLED_OUT names a file this stub creates on entry. A test that",
     "# signals a run must wait for THAT and not for the lock: the lock is taken",
     "# before the first PR's body is even spawned, so a signal sent on it can",
     "# land while the run is still fetching, be answered at once, and pass",
-    "# against a script that would have swallowed it mid-merge. The file is",
-    "# written before the sleep, so its existence means the body is inside this",
-    "# call right now.",
-    '[ -z "${STUB_GH_CALLED_OUT:-}" ] || : >"$STUB_GH_CALLED_OUT"',
-    '[ -z "${STUB_GH_SLEEP:-}" ] || sleep "$STUB_GH_SLEEP"',
+    "# against a script that would have swallowed it mid-merge.",
+    "# STUB_GH_PGID_OUT records this stub's process group, which is the PR body's",
+    "# group: the stub is started by the body, so it inherits the group the body was",
+    "# given. A test that crashes a run needs it to clean up the body afterwards —",
+    "# the body is NOT in the run's own group, so killing the run leaves it behind.",
+    "#",
+    "# All three happen on the FIRST call only, which is what makes the file a",
+    "# handshake rather than a poll: a test that waits for the pgid file knows the",
+    "# stub is parked inside that call, and a run whose body outlives a failed",
+    "# cleanup finishes quickly instead of sleeping once per gh call it makes.",
+    'if [ -n "${STUB_GH_CALLED_OUT:-}" ] && [ ! -f "$STUB_GH_CALLED_OUT" ]; then',
+    '  : >"$STUB_GH_CALLED_OUT"',
+    '  [ -z "${STUB_GH_PGID_OUT:-}" ] || ps -o pgid= -p "$$" 2>/dev/null | tr -d " " >"$STUB_GH_PGID_OUT"',
+    '  [ -z "${STUB_GH_SLEEP:-}" ] || sleep "$STUB_GH_SLEEP"',
+    "fi",
     "# STUB_MARKER_JUNK makes this stub write a line of noise into the run's",
     "# merge-marker file before the merge it is here to perform. The script",
     "# writes that file by a path under its own scratch directory and matches a",
@@ -180,6 +190,21 @@ function makeHarness(): Harness {
     '  for m in "${TMPDIR:-/tmp}"/merge-prs-run-*/marker; do',
     '    [ -f "$m" ] && echo "$STUB_MARKER_JUNK" >>"$m"',
     "  done",
+    "fi",
+    "# STUB_SURVIVOR_OUT names a file this stub writes a PID into, and",
+    "# STUB_SURVIVOR_SECONDS how long that process lives. It is spawned through a",
+    "# DOUBLE FORK on purpose: the inner shell is orphaned the moment the outer one",
+    "# exits, so it keeps this body's process GROUP while no longer being anybody's",
+    "# CHILD. That is the shape a process-tree walk cannot see and a",
+    "# process-group signal can — the walk matches on parent pid, and this process's",
+    "# parent is init — so it is what tells the two apart.",
+    "#",
+    "# Once only: the stub answers every gh call, and five survivors would prove",
+    "# nothing about one signal. The inner shell reports its OWN pid because $$ in a",
+    "# POSIX subshell is the parent shell's, which is the one number that would make",
+    "# this test pass for the wrong reason.",
+    'if [ -n "${STUB_SURVIVOR_OUT:-}" ] && [ ! -f "$STUB_SURVIVOR_OUT" ]; then',
+    '  ( ( sh -c \'echo $$ >"$1"; exec sleep "$2"\' _ "$STUB_SURVIVOR_OUT" "${STUB_SURVIVOR_SECONDS:-120}" ) & ) &',
     "fi",
     "branch_of() {",
     '  awk -v pr="$1" \'$1 == pr { print $2 }\' "$STUB_STATE/branches"',
@@ -480,6 +505,83 @@ function parkedRun(harness: Harness): {
 } {
   const calledOut = join(harness.stateDir, "gh-called");
   return { env: { STUB_GH_SLEEP: "30", STUB_GH_CALLED_OUT: calledOut }, calledOut };
+}
+
+/**
+ * Poll until a file exists AND has content in it.
+ *
+ * Not the same wait as "the file exists", and the difference is a real race: the
+ * stub writes its pgid with `ps … > "$file"`, and the shell creates and truncates
+ * the file when it sets the redirection up — before `ps` has produced a byte. A
+ * test that waited for the file alone read an empty pgid, computed a group of 0,
+ * killed nothing, and then sat waiting for a body that was never going to die.
+ */
+async function waitForContent(path: string, timeoutMs = 5_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (existsSync(path) && readFileSync(path, "utf8").trim() !== "") return true;
+    if (Date.now() > deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+/** The pid of a process, or undefined if it is gone. */ function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The parent pid of a process, or undefined if it is gone. */
+function parentPidOf(pid: number): number | undefined {
+  const out = spawnSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" });
+  const text = (out.stdout ?? "").trim();
+  return text === "" ? undefined : Number(text);
+}
+
+/**
+ * SIGKILL a run and everything under it, and leave whatever it was holding on
+ * disk. SIGKILL is the point: it cannot be trapped, so this is the only way to
+ * produce the state every other test in this file only ever PLANTS — a lock
+ * written by the script's own acquire, by a holder that is genuinely gone.
+ *
+ * The parent's process group is killed FIRST, before its PR body, and the order
+ * is the whole trick. A body killed first would let `wait` return, and the run
+ * would carry on to its epilogue and release its own lock — which is the opposite
+ * of a crash. Killing the run first leaves the body, which is in a group of its
+ * own, and that is the group the stub reports its pgid for.
+ *
+ * Returns the pgid of the PR body, so a caller can clean that up too.
+ */
+function crashRun(child: ChildProcess, bodyPgidFile: string): number | undefined {
+  const parentPid = child.pid as number;
+  const bodyPgid = (() => {
+    try {
+      return Number(readFileSync(bodyPgidFile, "utf8").trim());
+    } catch {
+      return undefined;
+    }
+  })();
+  try {
+    process.kill(-parentPid, "SIGKILL");
+  } catch {
+    // Not a group leader; the direct kill below still does it.
+  }
+  try {
+    process.kill(parentPid, "SIGKILL");
+  } catch {
+    // Already gone.
+  }
+  if (bodyPgid !== undefined && bodyPgid > 0) {
+    try {
+      process.kill(-bodyPgid, "SIGKILL");
+    } catch {
+      // Already gone, or never got a group.
+    }
+  }
+  return bodyPgid;
 }
 
 describe.skipIf(!hasZsh())("merge-prs.sh — D184's pre-PR-review gate", () => {
@@ -1067,12 +1169,131 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       expect(mergedByStub(harness)).toBe("");
       expect(existsSync(harness.lockDir)).toBe(false);
     } finally {
-      // The stubbed `sleep 30` is a grandchild of the body, and a signal to
-      // the body does not reach it — that residual is named in the script. It
-      // outlives this test by seconds and holds no lock, so it is left to end
-      // on its own rather than waited for.
+      // Nothing is left to clean up but the run itself: the body is its own
+      // process group, so the signal this test sent reached the stub inside it and
+      // there is no orphan to wait for.
       await stopRun(child);
       harness.cleanup();
     }
   }, 20_000);
+
+  test("a lock this script wrote itself, left by a crashed run, is reclaimed by the next run", async () => {
+    // Every other reclaim test in this file PLANTS a lock file. That is how the
+    // no-space token shipped: the harness wrote `<pid> <nonce>`, the script wrote
+    // `$$-$$-<nonce>`, both looked like a dead holder to a reader, and no test ever
+    // asked the script to produce one. So nothing is planted here — a real run
+    // takes the lock, is SIGKILLed holding it, and the next run has to cope with
+    // what the first one actually wrote.
+    const harness = makeHarness();
+    const calledOut = join(harness.stateDir, "gh-called");
+    const pgidOut = join(harness.stateDir, "gh-pgid");
+    const { child, closed } = startMergePrs(
+      harness,
+      [specOf(PR_ONE)],
+      { STUB_GH_SLEEP: "30", STUB_GH_CALLED_OUT: calledOut, STUB_GH_PGID_OUT: pgidOut },
+      true,
+    );
+    try {
+      // Waiting for the pgid file, not just the called-out file: the stub writes
+      // the pgid as it parks, so this is the handshake that says "parked, and here
+      // is the group to clean up". Waiting for the other file alone races it.
+      expect(await waitForContent(pgidOut, 5_000), "the PR body to park and report its group").toBe(
+        true,
+      );
+      expect(existsSync(harness.lockDir)).toBe(true);
+
+      // What the script itself wrote, read back the way every other run reads it.
+      const token = readFileSync(join(harness.lockDir, "pid"), "utf8").trim();
+      const holder = token.split(" ")[0] ?? "";
+      expect(
+        holder,
+        `the lock token must be "<pid> <nonce>", got ${JSON.stringify(token)}`,
+      ).toMatch(/^\d+$/);
+      // The nonce half is what makes a stale lock distinguishable from a fresh
+      // holder that was handed the same recycled pid, so it has to be there.
+      expect(token.split(" ")).toHaveLength(2);
+      expect((token.split(" ")[1] ?? "").length).toBeGreaterThan(0);
+
+      crashRun(child, pgidOut);
+      await closed;
+      await stopRun(child);
+
+      // The crash really did leave the lock behind, naming a pid that is gone —
+      // the only state a crashed run can leave, and the one every planted lock
+      // was standing in for.
+      expect(existsSync(harness.lockDir)).toBe(true);
+      expect(pidAlive(Number(holder))).toBe(false);
+
+      // And the next run reclaims it and does the work, instead of answering 75
+      // for ever. A token with no space in it parses as no pid at all, so this is
+      // where that shows up.
+      const second = runMergePrs(harness, [specOf(PR_ONE)]);
+      expect(second.stderr).not.toContain("another run holds the lock");
+      expect(second.stdout).toContain("merged #101");
+      expect(branchExistsOnOrigin(harness, PR_ONE.branch)).toBe(false);
+      // The reclaimed lock was given back rather than left for the run after it.
+      expect(existsSync(harness.lockDir)).toBe(false);
+    } finally {
+      await stopRun(child);
+      harness.cleanup();
+    }
+  }, 60_000);
+
+  test("a PR body that left a process behind in its group takes that process with it", async () => {
+    // The shape a process-TREE walk cannot see. The stub double-forks a sleeper
+    // and lets the middle process exit, so the sleeper keeps the body's process
+    // GROUP while its parent becomes init: `ps -o ppid=` no longer names anybody
+    // the run could walk to, but the group is still the body's. Round 2 signalled
+    // the tree, so this process survived every signal the run sent and outlived
+    // the lock it was started under.
+    const harness = makeHarness();
+    const calledOut = join(harness.stateDir, "gh-called");
+    const survivorOut = join(harness.stateDir, "survivor-pid");
+    const { child, done } = startMergePrs(harness, [specOf(PR_ONE)], {
+      STUB_GH_CALLED_OUT: calledOut,
+      STUB_SURVIVOR_OUT: survivorOut,
+      STUB_SURVIVOR_SECONDS: "300",
+    });
+    try {
+      expect(await waitForContent(survivorOut, 5_000), "the orphan to report its own pid").toBe(
+        true,
+      );
+      const survivor = Number(readFileSync(survivorOut, "utf8").trim());
+      expect(survivor).toBeGreaterThan(0);
+      // Precondition, and the reason a walk misses it: nobody in this run is its
+      // parent any more. If this ever fails the test has stopped testing the shape
+      // it exists for.
+      expect(
+        parentPidOf(survivor),
+        "the orphan was not re-parented, so the walk would find it",
+      ).not.toBe(child.pid as number);
+      expect(pidAlive(survivor)).toBe(true);
+
+      process.kill(child.pid as number, "SIGTERM");
+      const finished = await Promise.race([
+        done.then((result) => ({ kind: "exited" as const, result })),
+        new Promise<{ kind: "deadline" }>((resolve) =>
+          setTimeout(() => resolve({ kind: "deadline" }), 5_000),
+        ),
+      ]);
+      expect(finished.kind, "the run did not answer SIGTERM").toBe("exited");
+
+      // The whole point: the process that is in the group and in nobody's tree
+      // went with the group. A walk leaves it running for its full 300s.
+      expect(
+        await waitFor(() => !pidAlive(survivor), 5_000, "the re-parented process to be gone"),
+      ).toBe(true);
+      // And the lock is still handed back on the way out.
+      expect(existsSync(harness.lockDir)).toBe(false);
+    } finally {
+      await stopRun(child);
+      // The sleeper is 300s long on purpose; nothing else here would ever reap it.
+      try {
+        process.kill(Number(readFileSync(survivorOut, "utf8").trim()), "SIGKILL");
+      } catch {
+        // Already gone, which is the case this wants.
+      }
+      harness.cleanup();
+    }
+  }, 30_000);
 });
