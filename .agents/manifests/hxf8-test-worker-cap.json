@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "HXF8-test-worker-cap",
+  "mutations": [
+    {
+      "file": "tools/gate/lib/max-workers.ts",
+      "before": "  const raw = env[\"CF_TEST_MAX_WORKERS\"];\n  if (raw === undefined) return undefined;",
+      "after": "  const raw = undefined;\n  if (raw === undefined) return undefined;",
+      "because": "the read itself. Answered from a literal instead of the env, the helper takes the same path it takes for a host that never set the variable, so CF_TEST_MAX_WORKERS becomes a name in a message and in two documentation notes and nothing else: vitest.config.ts still assigns its result to test.maxWorkers, the operator still reads their /etc/environment and believes the cap is in force, and every run goes back to availableParallelism() - 1 workers per slot with no red anywhere. The refusal cases survive it too, since they are never reached, which is what makes this shape of silent failure so cheap to ship. The test that pins it states the env explicitly and asks for the number back",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/max-workers.test.ts",
+        "-t",
+        "a whole number is passed through as the worker count"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "vitest.config.ts",
+      "before": "    maxWorkers: resolveMaxWorkers(),",
+      "after": "    // maxWorkers: resolveMaxWorkers(),",
+      "because": "the wiring, which is one line and the whole of what connects this lane to a running suite. Commented out rather than deleted so the mutation is a plausible edit — a tidy, a merge, someone tidying a config — and every other claim in this manifest still holds: the helper is still exported, still fully covered, still refusing every bad value with the variable named, and the tests that call it directly still pass. What is gone is the only assignment, so test.maxWorkers is undefined on every host including one whose operator has set the variable, and the oversubscription this lane exists to stop returns silently. The test that pins it IMPORTS this config with the variable stubbed and reads test.maxWorkers back; a grep for maxWorkers would still match this mutant, and the comment is the likeliest thing to survive the deletion, which is why the plan rejected that shape of test",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/max-workers.test.ts",
+        "-t",
+        "the cap reaches test.maxWorkers when CF_TEST_MAX_WORKERS is set"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

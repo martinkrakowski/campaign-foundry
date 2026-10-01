@@ -23,7 +23,21 @@
 # `cf-gate.lock.<n>.reclaim.<pid>.<x>`) are derived from that slot's own path and
 # are never slots themselves.
 #
-# CF_GATE_SLOTS IS SET HOST-WIDE, AND ONLY HOST-WIDE — /etc/environment on the
+# CF_GATE_SLOTS SAYS HOW MANY GATES MAY RUN AT ONCE, and CF_TEST_MAX_WORKERS
+# SAYS HOW MANY WORKERS ONE OF THEM MAY SPAWN — so the two are one decision,
+# made once, for the host: CF_GATE_SLOTS × CF_TEST_MAX_WORKERS ≤ the host's
+# threads. Vitest's default is availableParallelism() − 1 per run (~23 on
+# midnight's 24 threads), so without the second variable three slots already
+# ask for ~69 workers and the owner's six or seven would ask for ~160: tens of
+# gigabytes against ~40 free, and false timeouts on the CPU-bound tests, which
+# fail on their own internal deadlines and cannot be saved by a bigger
+# --testTimeout. CF_TEST_MAX_WORKERS is read by `vitest.config.ts` (the parse is
+# tools/gate/lib/max-workers.ts; a value that is not a positive whole number at
+# or below availableParallelism() throws at config load, naming the variable).
+# Unset means unset: CI and the Mac get vitest's own default, unchanged. On
+# midnight that is 6 × 4 or 7 × 3.
+#
+# BOTH ARE SET HOST-WIDE, AND ONLY HOST-WIDE — /etc/environment on the
 # midnight host, never in one seat's environment, at any moment and whatever that
 # seat is holding. The number of slots is a property of the host, and the reason
 # does not depend on what any one seat is doing: a caller that believes in one
@@ -31,7 +45,10 @@
 # the one it just ran beside. That is equally true of a seat holding nothing —
 # a seat's own view of the host is the thing that is wrong, and holding less is
 # not a reason to hold a different opinion of it. So the way to change the count
-# is to change the host's, for every seat at once.
+# is to change the host's, for every seat at once. A seat that capped its own
+# workers below the host's cap does not get a quieter machine; it gets a lane
+# whose timeout budget nobody else is running under, and a slot it believes is
+# cheaper than it is.
 #
 # ONE GATE PER WORKTREE, even at SLOTS>1, because the lock is per host and not
 # per checkout: `verify-manifests` mutates the tree it is verifying, so two
