@@ -4,8 +4,8 @@
   "mutations": [
     {
       "file": "scripts/merge-prs.sh",
-      "before": "  if [[ -z \"$CONTINUE\" && $pr_status -ne 0 ]]; then\n    exit $pr_status\n  fi",
-      "after": "  if [[ $pr_status -ne 0 ]]; then\n    exit $pr_status\n  fi",
+      "before": "  if [[ -z \"$CONTINUE\" && $pr_status -ne 0 && $pr_status -ne $EXIT_MERGED_UNRECORDED ]]; then\n    exit $pr_status\n  fi",
+      "after": "  if [[ $pr_status -ne 0 && $pr_status -ne $EXIT_MERGED_UNRECORDED ]]; then\n    exit $pr_status\n  fi",
       "because": "dropping $CONTINUE from the guard makes --continue behave exactly as the run behaved before the flag existed: the first PR whose body refused ends the whole run, so #103 is never attempted, the closing summary is never printed, and exit 1 stops meaning \"one PR of three was refused\" and goes back to meaning \"nothing after the second was tried\". It is the mutation the row names for the flag, and it is invisible to every other test in the file for a reason worth stating: the WITHOUT-flag test already stops at the second PR, so the mutant agrees with it exactly, and the three lock tests either plant a lock or plant a dead pid before a single-PR run that never reaches this line at all. Only the three-PR test can see it, because it is the only one that requires a PR AFTER a refused one to be merged. The refusal it plants is the row's own case — one unresolved review thread in the middle — so the mutant loses a real merge (#103) rather than only a summary line",
       "command": [
         "yarn",
@@ -21,8 +21,8 @@
     },
     {
       "file": "scripts/merge-prs.sh",
-      "before": "trap 'forward_signal 143' TERM\nacquire_lock\nRUN_TMP=$(mktemp -d \"${TMPDIR:-/tmp}/merge-prs-run-XXXXXX\") || die \"mktemp failed\"",
-      "after": "trap 'forward_signal 143' TERM\nRUN_TMP=$(mktemp -d \"${TMPDIR:-/tmp}/merge-prs-run-XXXXXX\") || die \"mktemp failed\"",
+      "before": "trap 'forward_signal 143' TERM\nacquire_lock",
+      "after": "trap 'forward_signal 143' TERM",
       "because": "the run never consults the lock at all, which is the mutation the row names for the lock. Every other guard in acquire_lock is defence in depth and deliberately redundant — the judgement refuses a live holder, the rename is arbitrated, the nesting of a candidate inside an existing lock is detected, and the read-back insists the name carries this run's own pid — so weakening any ONE of them still leaves an answer and still exits 75. Removing the call is the only way to show what the lock is actually for: with it gone, a second run starts beside a live holder, takes the same TMPDIR, refreshes and merges the same branches concurrently, and exits 0. Nothing in the script notices, because nothing is left to notice. The planted holder in the test is THIS test process's own pid, so the honest script must answer 75 and name it; the mutant instead merges PR #101 and deletes its branch on the forge",
       "command": [
         "yarn",
@@ -55,8 +55,8 @@
     },
     {
       "file": "scripts/merge-prs.sh",
-      "before": "  print -r -- \"MERGED $pr\" >>\"$MARK_FILE\"",
-      "after": "  print -r -- \"MERGED $pr $worktree $branch\" >>\"$MARK_FILE\"",
+      "before": "  if ! print -r -- \"MERGED $pr\" >>\"$MARK_FILE\"; then",
+      "after": "  if ! print -r -- \"MERGED $pr $worktree $branch\" >>\"$MARK_FILE\"; then",
       "because": "putting the worktree and the branch back into the marker is the regression this lane was sent back for, and it is one line: a worktree path may contain a space, so the moment the marker carries one again, the line stops being a line the caller can match whole. Here the caller matches with `grep -qx \"MERGED $pr\"`, so the extra fields make every match fail and a PR that merged is treated as one that did not — its worktree is never removed and its branch is never deleted on the forge, which is the silent half of a refusal. Under the old `read -r` parse the same marker was worse rather than better: it split into four fields, so a path like `/x/My Work/wt` became `/x/My` in WORKTREES and the rest in BRANCHES. The test is the one that merges a PR from a worktree whose path contains a space and then requires the worktree gone and the branch deleted, which is the only assertion in the file that can tell a marker carrying a path from one that does not",
       "command": [
         "yarn",
@@ -67,6 +67,23 @@
         "tools/merge-prs",
         "-t",
         "worktree path contains a space is still cleaned up"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "  if [[ \"$moved\" == \"$judged\" ]]; then",
+      "after": "  if [[ \"${moved%% *}\" == \"${judged%% *}\" ]]; then",
+      "because": "the reclaim then compares only the pid halves of the two tokens, which is the decision the nonce exists to overrule. A stale lock and the live lock that replaced it are then free to agree about the pid - which is the whole of what a stale lock and its replacement can be relied on to agree about, because the kernel recycles pids and hands a crashed holder's number to somebody else - and the mv that arbitrates between two reclaimers is perfectly happy to rename a LIVE run's lock out of the way and delete it. Both runs then merge, both exit 0, and the run whose lock was deleted never learns it had one. The nonce is what makes the two distinguishable, and trimming it off both sides of the comparison is exactly the regression. No other test can see it: the plain dead-pid reclaim has no replacement to confuse it, the live-holder test is refused before any reclaim, and the earlier race test swaps in a lock with a DIFFERENT pid, which a pid-only comparison already rejects. The test that sees it plants the same pid with a different nonce at the pause hook, and requires 75 with the replacement still on disk carrying its own nonce",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "SAME pid but a different nonce"
       ],
       "verdict": "caught"
     }

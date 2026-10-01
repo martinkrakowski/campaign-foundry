@@ -152,6 +152,24 @@ jobs:
       - name: Verify manifest inventories (yarn arch:inventory)
         run: "yarn arch:inventory"
 
+      # ubuntu-latest ships no zsh at all. scripts/merge-prs.sh is zsh
+      # (D184), and its own tests (tools/merge-prs/__tests__) run only
+      # `describe.skipIf(!hasZsh())` — without this, the merge gate's only
+      # wiring test silently skips everywhere it actually matters (S3, the
+      # HX4 fix round). Every other suite in this repo is POSIX sh or
+      # TypeScript and needs nothing here.
+      #
+      # It sits BEFORE the manifest step below, and not with the Test step it
+      # used to sit above, because that step REPLAYS mutation manifests — and a
+      # replay that cannot run its command is not a skipped test but a failed
+      # claim. With zsh installed only later, tools/merge-prs registered no tests
+      # at all here, every `-t` pattern in its manifest matched nothing, and
+      # verify-manifests reported each one UNCHECKABLE COMMAND and failed the
+      # build. A test that skips itself where its interpreter is missing is
+      # right for a suite; for a manifest it is indistinguishable from a lie.
+      - name: Install zsh (for D184's merge-prs.sh wiring tests)
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
       # A mutation manifest records the mutations a lane claims its tests catch.
       # Replaying it is what makes the claim evidence rather than a report: two
       # seats this week stated verdicts they had never observed, one quoting
@@ -220,15 +238,6 @@ jobs:
 
       - name: Lint
         run: "yarn lint"
-
-      # ubuntu-latest ships no zsh at all. scripts/merge-prs.sh is zsh
-      # (D184), and its own tests (tools/merge-prs/__tests__) run only
-      # `describe.skipIf(!hasZsh())` — without this, the merge gate's only
-      # wiring test silently skips everywhere it actually matters (S3, the
-      # HX4 fix round). Every other suite in this repo is POSIX sh or
-      # TypeScript and needs nothing here.
-      - name: Install zsh (for D184's merge-prs.sh wiring tests)
-        run: sudo apt-get update && sudo apt-get install -y zsh
 
       # run_tests = true; delete this step to skip tests in CI.
       # test:cov enforces the 100% coverage gate (vitest.config.ts thresholds).

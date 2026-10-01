@@ -132,12 +132,29 @@ LOCK_DIR="${TMPDIR:-/tmp}/cf-merge-prs.lock"
 # wrong and the host is not broken, there is simply another run in the way.
 BUSY=75
 
-# The pid the lock at the name names, or empty when there is none to read.
-# `cat` and not `$(<file)`: zsh's own "no such file" diagnostic for `$(<…)` is
-# NOT covered by a redirection inside the substitution, so a lock with no pid in
-# it printed that error to stderr on every run that looked at it.
-lock_holder_pid() {
+# The token in the lock at the name, or empty when there is none to read: a
+# `<pid> <nonce>` pair. `cat` and not `$(<file)`: zsh's own "no such file"
+# diagnostic for `$(<…)` is NOT covered by a redirection inside the substitution,
+# so a lock with no token in it printed that error to stderr on every run that
+# looked at it.
+lock_token() {
   cat "$LOCK_DIR/pid" 2>/dev/null
+}
+
+# The pid half of it, and the ONLY part liveness is judged by — a pid on its own
+# cannot tell a stale lock from a fresh holder that was handed the same recycled
+# number, which is what the nonce exists for. A lock written by an older build
+# holds a bare pid, and `%% *` leaves that answer unchanged.
+lock_holder_pid() {
+  print -r -- "${$(lock_token)%% *}"
+}
+
+# This acquisition's own token. The nonce only has to differ between two
+# acquisitions racing for one name — it is not a secret and nothing is
+# authenticated with it — so pid, $RANDOM and the clock together are more than
+# enough, and `date +%s%N` is not portable to every macOS, hence the fallback.
+new_lock_token() {
+  print -r -- "$$-$$-$RANDOM-$(date +%s%N 2>/dev/null || date +%s)"
 }
 
 # Is that pid a live process?
@@ -168,10 +185,14 @@ lock_is_pidless_and_old() {
 # was theirs. The verification is what closes the race the rename alone does
 # not: a run that replaced the name with a LIVE lock between our `ps` and our
 # `mv` would otherwise have that lock renamed aside and deleted, and both runs
-# would then merge at once — the exact failure this lock exists to prevent. So
-# the aside's pid must be the one that was judged. Anything else is a lock this
-# run never judged, and it is NEVER deleted: put it back when the name is free,
-# leave it aside when it is not, and report the abort either way.
+# would then merge at once — the exact failure this lock exists to prevent.
+#
+# What is compared is the whole TOKEN, not the pid. A replacement whose live
+# holder was handed the same recycled pid carries a different nonce, so equal
+# pid text — which is all a stale lock and its replacement can be relied on to
+# agree about — no longer passes for proof of anything. Anything else is a lock
+# this run never judged, and it is NEVER deleted: put it back when the name is
+# free, leave it aside when it is not, and report the abort either way.
 reclaim_lock() {
   local judged="$1" aside moved
   aside="$LOCK_DIR.stale.$$"
@@ -205,8 +226,10 @@ busy_exit() {
 
 # Take the lock, or answer 75 and do nothing else. Never `pgrep` (see above).
 # It installs NO trap: see the call site below for why that is not an oversight.
+# Sets LOCK_TOKEN to the token this run installed, which is what release_lock
+# insists on before it removes anything.
 acquire_lock() {
-  local cand holder
+  local cand token holder
   # Judge what is at the name BEFORE this run touches it, and that order is not
   # cosmetic. Creating the candidate below moves a directory INTO the name when
   # the name is already taken, and creating or removing anything inside a
@@ -216,7 +239,8 @@ acquire_lock() {
   # one after. Judge, then act. The cost is that a lock released microseconds
   # after the read is answered busy rather than taken, which is what 75 means
   # and what the caller already does about it.
-  holder=$(lock_holder_pid)
+  token=$(lock_token)
+  holder="${token%% *}"
   if [[ "$holder" == <-> ]] && ! pid_alive "$holder"; then
     # A readable pid whose process is gone: a crashed holder. Move its lock
     # aside — but only ever THAT lock, see reclaim_lock — and then take the
@@ -229,16 +253,18 @@ acquire_lock() {
       touch "$MERGE_PRS_TEST_PAUSE_AFTER_LIVENESS" 2>/dev/null
       while [[ -f "$MERGE_PRS_TEST_PAUSE_AFTER_LIVENESS" ]]; do sleep 1; done
     fi
-    # Judged with the pid that was read, so reclaim_lock can insist the lock it
-    # moved aside is that one and not a replacement.
-    reclaim_lock "$holder" || busy_exit
+    # Judged with the whole token that was read, so reclaim_lock can insist the
+    # lock it moved aside is that one and not a replacement — not even one whose
+    # holder was handed the same recycled pid.
+    reclaim_lock "$token" || busy_exit
   elif lock_is_pidless_and_old; then
-    # No pid at all, and old enough that nobody is mid-write in it. Judged as
-    # the empty string, so the aside's pid is compared against the absence that
-    # was judged: a lock that grew a pid in the meantime is a different lock.
+    # No token at all, and old enough that nobody is mid-write in it. Judged as
+    # the empty string, so the aside's token is compared against the absence
+    # that was judged: a lock that grew a token in the meantime is a different
+    # lock.
     reclaim_lock "" || busy_exit
   elif [[ "$holder" == <-> ]] || [[ -d "$LOCK_DIR" ]]; then
-    # Somebody else's, and not provably abandoned: a live pid, or a pid-less
+    # Somebody else's, and not provably abandoned: a live pid, or a token-less
     # directory young enough to be a holder microseconds into its own acquire.
     # Neither is this run's to take on a guess.
     busy_exit
@@ -246,12 +272,13 @@ acquire_lock() {
 
   # The name is free, or was just freed by a verified reclaim. The candidate is
   # complete before the name exists, and the rename is the only moment the name
-  # exists — a bare `mkdir` then `echo > pid` has a window in between that every
-  # other run reads as a lock with no pid in it, and that is not a harmless
-  # reading: it is a lock nobody can reclaim, because there is no pid to judge.
+  # exists — a bare `mkdir` then a write has a window in between that every
+  # other run reads as a lock with no token in it, and that is not a harmless
+  # reading: it is a lock nobody can reclaim, because there is nothing to judge.
+  LOCK_TOKEN=$(new_lock_token)
   cand="$LOCK_DIR.cand.$$"
   rm -rf "$cand" 2>/dev/null
-  if mkdir "$cand" 2>/dev/null && echo "$$" >"$cand/pid" 2>/dev/null \
+  if mkdir "$cand" 2>/dev/null && echo "$LOCK_TOKEN" >"$cand/pid" 2>/dev/null \
     && mv "$cand" "$LOCK_DIR" 2>/dev/null; then
     # `mv` onto an EXISTING directory does not rename over it: it moves the
     # candidate INTO that directory and exits 0, empty target or not. That is
@@ -260,8 +287,8 @@ acquire_lock() {
     # out of the holder's lock rather than left in it.
     if [[ -d "${LOCK_DIR:?}/${cand##*/}" ]]; then
       rm -rf "${LOCK_DIR:?}/${cand##*/}" 2>/dev/null
-    elif [[ "$(lock_holder_pid)" == "$$" ]]; then
-      # Read-back: the name holds OUR pid. A rename cannot have replaced a
+    elif [[ "$(lock_token)" == "$LOCK_TOKEN" ]]; then
+      # Read-back: the name holds OUR token. A rename cannot have replaced a
       # non-empty directory, so nothing could have taken the name in between.
       return 0
     fi
@@ -276,17 +303,17 @@ acquire_lock() {
 # loop, a refusal, a signal, a failed `mktemp` — a lock that only the happy path
 # releases is a lock the next run has to reclaim.
 #
-# The pid check is the guard that matters: this only ever removes a lock that
-# still names THIS process, so a run that was refused the lock (exit 75, someone
-# else's lock at the name) cannot delete the holder that is still working, and a
-# holder whose lock was reclaimed underneath it cannot delete its replacement.
-# The INT and TERM traps below end in `exit`, which runs this again — hence the
-# no-op when the lock is already gone.
+# The token check is the guard that matters: this only ever removes a lock that
+# still carries THIS acquisition's token, so a run that was refused the lock
+# (exit 75, someone else's lock at the name) cannot delete the holder that is
+# still working, and a holder whose lock was reclaimed underneath it cannot
+# delete its replacement — not even one whose holder was handed this run's own
+# recycled pid, which is what the pid-only version of this check would have
+# done. The INT and TERM traps below end in `exit`, which runs this again — hence
+# the no-op when the lock is already gone.
 release_lock() {
-  local pid
   if [[ -f "$LOCK_DIR/pid" ]]; then
-    pid=$(cat "$LOCK_DIR/pid" 2>/dev/null)
-    if [[ "$pid" == "$$" ]]; then
+    if [[ "$(lock_token)" == "$LOCK_TOKEN" ]]; then
       rm -rf "$LOCK_DIR"
     fi
   fi
@@ -295,9 +322,33 @@ release_lock() {
   fi
 }
 
+# Every pid whose parent is $1, in ONE `ps` pass however deep the walk goes:
+# `ps -A -o pid=,ppid=` is the spelling both GNU and BSD ps accept, where
+# `--ppid` is GNU-only.
+child_pids() {
+  ps -A -o pid=,ppid= 2>/dev/null | awk -v parent="$1" '$2 == parent { print $1 }'
+}
+
+# Signal a process and everything under it, DEEPEST FIRST. The order is the
+# point: a child killed first cannot spawn a replacement while the walk is still
+# looking for its own children, and a parent killed first would have its subtree
+# re-parented to init, where this walk could no longer find it at all.
+kill_tree() {
+  local pid="${1:-}" child
+  [[ -n "$pid" ]] || return 0
+  for child in ${(f)"$(child_pids "$pid")"}; do
+    kill_tree "$child"
+  done
+  kill -TERM "$pid" 2>/dev/null
+}
+
 # One stderr capture and one marker file, reused by every PR in the run. Named
 # before the lock is taken so the EXIT trap can always read it.
 RUN_TMP=""
+# The token this run installed, or empty when it never took the lock. Empty is
+# also what a run refused the lock carries out to its exit, and it matches no
+# lock's token, which is what keeps that run from deleting the holder's.
+LOCK_TOKEN=""
 # The traps go on HERE, at the top level of the script, and never inside
 # acquire_lock — because in zsh a trap set in a function belongs to that
 # function: it FIRES when the function returns, and is gone afterwards.
@@ -311,25 +362,29 @@ RUN_TMP=""
 #
 # Before the acquire rather than after it, so the window between holding a lock
 # and being ready to give it back is not a signal-shaped hole. A run refused the
-# lock (exit 75) runs this trap on its way out too, and the `$$` check in
+# lock (exit 75) runs this trap on its way out too, and the token check in
 # release_lock is what stops it deleting the live holder's lock.
 trap 'release_lock' EXIT
-# The pid of the PR in flight, or empty when there is none. Forward_signal reads
+# The pid of the PR in flight, or empty when there is none. forward_signal reads
 # it; the loop clears it the moment the body is reaped, so a signal that arrives
 # between two PRs cannot signal a pid the kernel has since handed to somebody
 # else.
 pr_child=""
-# Hand the signal on to the PR in flight before giving the lock back. zsh
-# DEFERS a trap while a foreground child runs, so the body is backgrounded and
-# waited on (see the loop): signalled at the parent alone, a foreground body
-# would have gone on to `gh pr merge` and been reaped by no epilogue at all.
+# Hand the signal on to the PR in flight — the whole tree, not just the body —
+# before giving the lock back, or a `gh` already exec'd below the body outlives
+# it and can complete a merge after this run has released the lock.
 #
-# TERM, never INT, and to the body's own pid: see the note at the loop for what
-# this does and does not reach.
+# The body is signalled by TREE rather than by process GROUP because zsh will
+# not give it a group: `setopt monitor` is refused outright in a non-interactive
+# script ("can't change option: monitor", measured on zsh 5.9), so without job
+# control a backgrounded subshell stays in its PARENT's process group — measured
+# here, parent and child both at pgid 4136593 — and `kill -TERM -- -$child` has
+# no group to name. Walking the tree by parent pid is the portable equivalent,
+# and it reaches the `gh` under the body as well as the body itself.
 forward_signal() {
   trap '' INT TERM
   if [[ -n "$pr_child" ]]; then
-    kill -TERM "$pr_child" 2>/dev/null
+    kill_tree "$pr_child"
     wait "$pr_child" 2>/dev/null
     pr_child=""
   fi
@@ -339,7 +394,11 @@ forward_signal() {
 trap 'forward_signal 130' INT
 trap 'forward_signal 143' TERM
 acquire_lock
-RUN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/merge-prs-run-XXXXXX") || die "mktemp failed"
+# Test hook (MERGE_PRS_TEST_RUN_TMP): replace the mktemp with a directory the
+# test chose, so it can make the marker file's directory unwritable and prove
+# what a merge does when it cannot be recorded. Unset in every real run.
+RUN_TMP="${MERGE_PRS_TEST_RUN_TMP:-}"
+[[ -n "$RUN_TMP" ]] || RUN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/merge-prs-run-XXXXXX") || die "mktemp failed"
 MARK_FILE="$RUN_TMP/marker"
 ERR_FILE="$RUN_TMP/stderr"
 
@@ -577,7 +636,17 @@ pr_body() {
   # behind and `git branch -D` was handed whatever survived the split. A marker
   # that cannot be misparsed is worth more than one that repeats what the caller
   # already knows.
-  print -r -- "MERGED $pr" >>"$MARK_FILE"
+  #
+  # The write is CHECKED, because past this point the merge is a fact on the
+  # forge and a silent failure here would report it as a refusal — sending the
+  # caller after a gate that passed, and leaving the only copy of the branch
+  # behind. So a marker that cannot be written is its own outcome, named as
+  # such and never counted as a refusal; the exit code it carries makes the run
+  # fail even with --continue.
+  if ! print -r -- "MERGED $pr" >>"$MARK_FILE"; then
+    echo "merge-prs: #$pr MERGED but its marker could not be written — clean up ${worktree:-its worktree}/${branch:-its branch} by hand" >&2
+    return $EXIT_MERGED_UNRECORDED
+  fi
   # Explicitly zero, because the marker is bookkeeping: a failed write to it
   # must not turn a merge that happened into a refusal.
   return 0
@@ -590,10 +659,21 @@ typeset -a WORKTREES BRANCHES
 typeset -a RESULTS
 merged_count=0
 refused_count=0
+# Merges that happened and could not be written down. Counted apart from both
+# the merged and the refused tallies, because it is neither: the merge is real
+# and the run is still a failure.
+unrecorded_count=0
 # `pr_status`, never `status`: zsh's `status` is a read-only special parameter
 # (it is `?` under its other name), and assigning to it fails the whole script
 # with "read-only variable: status" — mid-run, on the first PR, with the lock
 # held and the message naming a line that looks like an ordinary assignment.
+#
+# 3, not 1: the body exits 3 when `gh pr merge` SUCCEEDED and only the marker
+# could not be written. It is not a refusal and must never be counted as one —
+# the merge is on the forge — but the run still has to end non-zero, so this
+# code is what tells the two apart without a second channel to write on (the
+# channel is exactly what failed).
+EXIT_MERGED_UNRECORDED=3
 for spec in "$@"; do
   # Array-split on "|", not the old ${%%|*}/${#*|} chain: that chain reused
   # trailing text for a field a shorter spec never gave it, once a fourth and
@@ -624,15 +704,6 @@ for spec in "$@"; do
   # foreground body would swallow the signal, carry on to `gh pr merge`, and be
   # reaped by no epilogue at all. `wait` is what makes the trap prompt, and it
   # leaves the exit status the body's own.
-  #
-  # What the trap's forwarded TERM reaches, measured: the body's own subshell
-  # dies at once, so the loop never returns to this PR and the merge is not
-  # attempted — that is the half that matters. What it does NOT reach is a `gh`
-  # already exec'd, which is a process of its own below the body: killing the
-  # body leaves it running, and it is the one thing here that could still land a
-  # merge after this run has released the lock. It cannot be closed from here
-  # without a process group of its own for the body, and the window is a single
-  # in-flight `gh pr merge` — named here rather than left to be discovered.
   wait $pr_child
   pr_status=$?
   # Cleared before anything else can signal it: from here on this pid is a
@@ -644,7 +715,12 @@ for spec in "$@"; do
   # Stop at the first refusal, as this script always has, and before the
   # epilogue below can remove anything: a run that ended at a refusal has
   # appended nothing, so there is nothing for it to clean up either way.
-  if [[ -z "$CONTINUE" && $pr_status -ne 0 ]]; then
+  #
+  # A merge that could not be MARKED is not a refusal and does not stop the run:
+  # the merge already happened, stopping here would abandon the PRs after it for
+  # a bookkeeping failure, and this outcome is carried to the end of the run by
+  # unrecorded_count instead.
+  if [[ -z "$CONTINUE" && $pr_status -ne 0 && $pr_status -ne $EXIT_MERGED_UNRECORDED ]]; then
     exit $pr_status
   fi
 
@@ -662,6 +738,16 @@ for spec in "$@"; do
     [[ -n "$worktree" ]] && WORKTREES+=("$worktree")
     [[ -n "$branch" ]] && BRANCHES+=("$branch")
     merged=1
+  elif [[ $pr_status -eq $EXIT_MERGED_UNRECORDED ]]; then
+    # Merged, and the marker says so by its absence — the only way it can.
+    # Deliberately NOT appended to either list: the epilogue is the one place
+    # that destroys things, and this is the path where this run's own record of
+    # what it did is known to be incomplete. The worktree and the branch are
+    # named for the operator instead.
+    merged=0
+    unrecorded_count=$((unrecorded_count + 1))
+    RESULTS+=("#$pr ($branch): merged, but NOT recorded — its marker could not be written")
+    echo "=== PR #$pr merged but NOT recorded" >&2
   else
     merged=0
   fi
@@ -714,4 +800,10 @@ if [[ -n "$CONTINUE" ]]; then
   # is not done, and saying so is the one lie this summary exists to prevent.
   [[ "$refused_count" -eq 0 ]] || exit 1
 fi
+# A PR that merged and could not be recorded fails the run in BOTH modes, and
+# it is checked outside the --continue block on purpose: without the flag there
+# is no summary, and a run whose only failure was a merge it could not write
+# down must still end non-zero rather than printing ALL DONE over a branch
+# somebody has to go and clean up by hand.
+[[ "$unrecorded_count" -eq 0 ]] || exit 1
 echo "ALL DONE"

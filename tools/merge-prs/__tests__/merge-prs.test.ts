@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -197,6 +198,16 @@ function makeHarness(): Harness {
     "    printf 'Build\\tpass\\t1m0s\\thttps://example.invalid/build/%s\\n' \"${3:-0}\"",
     "    ;;",
     '  "pr merge")',
+    "    # Park HERE, on the merge call itself rather than on every gh call, so",
+    "    # a signal test can land while the merge is in flight — which is the one",
+    "    # moment where a gh left running could still land a merge after this run",
+    "    # has released the lock. This stub's OWN pid is published first, so the",
+    "    # test can ask whether the process below the run's body died, and the",
+    "    # sleep is BEFORE anything is recorded, so a killed run merges nothing.",
+    '    if [ -n "${STUB_GH_MERGE_PID_FILE:-}" ]; then',
+    '      echo "$$" >"$STUB_GH_MERGE_PID_FILE"',
+    '      sleep "${STUB_GH_MERGE_SLEEP:-30}"',
+    "    fi",
     '    printf "%s\\n" "${3:-}" >>"$STUB_STATE/merged"',
     "    ;;",
     '  "api "*)',
@@ -302,10 +313,50 @@ function mergedByStub(harness: Harness): string {
   return existsSync(log) ? readFileSync(log, "utf8") : "";
 }
 
-/** A lock directory held by `pid`, planted the way a live holder leaves it. */
-function seedLock(harness: Harness, pid: number): void {
+/**
+ * A lock directory as a holder leaves it: a `<pid> <nonce>` token in `pid`.
+ * The nonce defaults to something that cannot be the one a real acquisition
+ * generates, so a test that wants the nonce to matter says so by passing one.
+ */
+function seedLock(harness: Harness, pid: number, nonce = "seeded-by-test"): void {
   mkdirSync(harness.lockDir, { recursive: true });
-  writeFileSync(join(harness.lockDir, "pid"), `${pid}\n`);
+  writeFileSync(join(harness.lockDir, "pid"), `${pid} ${nonce}\n`);
+}
+
+/** The token currently in the lock, or "" when there is no lock. */
+function lockToken(harness: Harness): string {
+  const file = join(harness.lockDir, "pid");
+  return existsSync(file) ? readFileSync(file, "utf8").trim() : "";
+}
+
+/** The pid half of the lock's token — who a reader would name as the holder. */
+function lockPid(harness: Harness): string {
+  return lockToken(harness).split(" ")[0] ?? "";
+}
+
+/** Is this pid still running? Signal 0 asks without delivering. */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The run's scratch directory, which holds the merge-marker file. Named by the
+ * script, so a test finds it by globbing; the lock proves the run is past its
+ * own setup before this can answer.
+ */
+function findRunTmp(harness: Harness): string | undefined {
+  for (const entry of readdirSync(harness.root)) {
+    if (entry.startsWith("merge-prs-run-")) {
+      const candidate = join(harness.root, entry);
+      if (existsSync(join(candidate, "marker")) || existsSync(candidate)) return candidate;
+    }
+  }
+  return undefined;
 }
 
 /** A pid that is not alive: spawn a short child, reap it, use its pid. */
@@ -658,7 +709,7 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       // must not take it on its way out — that is the one way a second runner
       // could break the first.
       expect(existsSync(harness.lockDir)).toBe(true);
-      expect(readFileSync(join(harness.lockDir, "pid"), "utf8").trim()).toBe(String(process.pid));
+      expect(lockPid(harness)).toBe(String(process.pid));
     } finally {
       harness.cleanup();
     }
@@ -762,7 +813,7 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       // run that is still merging can still release it, and the run that was
       // refused did not take it.
       expect(existsSync(harness.lockDir)).toBe(true);
-      expect(readFileSync(join(harness.lockDir, "pid"), "utf8").trim()).toBe(String(process.pid));
+      expect(lockPid(harness)).toBe(String(process.pid));
       // And the refused run did no work.
       expect(mergedByStub(harness)).toBe("");
       expect(branchExistsOnOrigin(harness, PR_ONE.branch)).toBe(true);
@@ -842,6 +893,132 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       expect(result.stdout).toContain(`deleted origin/${PR_ONE.branch}`);
       expect(branchExistsOnOrigin(harness, PR_ONE.branch)).toBe(false);
     } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("TERM while a merge is in flight kills the gh under the body before the lock is released", async () => {
+    // The one moment a stopped run could still merge: the signal is handled,
+    // the lock is given back, and a `gh pr merge` already exec'd beneath the
+    // body is still running — so the next run takes the lock and two runs merge
+    // at once. Signalling the parent alone is what a CI timeout does.
+    const harness = makeHarness();
+    const mergePidFile = join(harness.stateDir, "gh-merge-pid");
+    const { child, done } = startMergePrs(harness, [specOf(PR_ONE)], {
+      STUB_GH_MERGE_PID_FILE: mergePidFile,
+      STUB_GH_MERGE_SLEEP: "30",
+    });
+    try {
+      expect(
+        await waitFor(() => existsSync(mergePidFile), 10_000, "the merge call to be in flight"),
+      ).toBe(true);
+      const stubPid = Number(readFileSync(mergePidFile, "utf8").trim());
+      expect(isAlive(stubPid)).toBe(true);
+
+      process.kill(child.pid as number, "SIGTERM");
+      await done;
+
+      // The lock went, and the gh beneath the body was already dead at the first
+      // moment it was gone. Polled together rather than awaited one after the
+      // other, because the two facts are only interesting as a pair: a run that
+      // released the lock first and signalled afterwards shows a LIVE stub here.
+      let stubAliveWhenLockGone: boolean | null = null;
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline && stubAliveWhenLockGone === null) {
+        if (!existsSync(harness.lockDir)) stubAliveWhenLockGone = isAlive(stubPid);
+        else await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(
+        stubAliveWhenLockGone,
+        "the lock never went away, or it went while the gh under the body was still alive",
+      ).toBe(false);
+      expect(isAlive(stubPid)).toBe(false);
+      // And nothing was merged on the way out.
+      expect(mergedByStub(harness)).toBe("");
+      expect(branchExistsOnOrigin(harness, PR_ONE.branch)).toBe(true);
+    } finally {
+      await stopRun(child);
+      harness.cleanup();
+    }
+  });
+
+  test("a merge whose marker cannot be written is merged-and-unrecorded, and fails the run", () => {
+    // Past `gh pr merge` the merge is a fact on the forge. If the marker write
+    // then fails and the run says nothing, the PR is reported REFUSED — sending
+    // the caller after a gate that passed — and its worktree and branch are left
+    // behind with no run failing over it.
+    const harness = makeHarness();
+    // No test hook needed, and no polling either: the run writes its marker into
+    // a directory it names itself, so a test that wants that directory
+    // unwritable has to say where it is. MERGE_PRS_TEST_RUN_TMP replaces the
+    // mktemp, which puts it on a path the test chose and can then lock down.
+    const runTmp = join(harness.root, "read-only-run");
+    try {
+      mkdirSync(runTmp, { recursive: true });
+      // The marker file itself is writable; its DIRECTORY is not, which is the
+      // shape a full disk or a read-only mount gives and the one that stops the
+      // create rather than the append.
+      chmodSync(runTmp, 0o555);
+
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        MERGE_PRS_TEST_RUN_TMP: runTmp,
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("#101 MERGED but its marker could not be written");
+      // Never as a refusal: the merge happened, and a reader must not be sent
+      // looking for a gate failure that never happened.
+      expect(result.stdout).not.toContain("REFUSED");
+      expect(result.stderr).not.toContain("REFUSED");
+      // And not as a success either — no ALL DONE over a branch nobody cleaned.
+      expect(result.stdout).not.toContain("ALL DONE");
+      // The epilogue is the one place that deletes things, and this is the path
+      // where the run's own record is known to be incomplete, so the branch is
+      // still there for the operator the message points at.
+      expect(branchExistsOnOrigin(harness, PR_ONE.branch)).toBe(true);
+      expect(result.stdout).not.toContain(`deleted origin/${PR_ONE.branch}`);
+    } finally {
+      // The run removed its own scratch on the way out, so this is usually a
+      // no-op — and it has to be guarded, not assumed.
+      if (existsSync(runTmp)) chmodSync(runTmp, 0o755);
+      harness.cleanup();
+    }
+  });
+
+  test("a replacement lock with the SAME pid but a different nonce is not deleted", async () => {
+    // A recycled pid is the case equal pid text cannot decide. The kernel hands
+    // the number a crashed holder's lock still names to somebody else, that
+    // somebody takes the lock, and now the stale lock and the live one agree
+    // about the pid and disagree about everything else.
+    const harness = makeHarness();
+    const pausePoint = join(harness.root, "paused-after-liveness");
+    const recycled = reapedPid();
+    seedLock(harness, recycled, "nonce-of-the-dead-lock");
+    const { child, closed } = startMergePrs(harness, [specOf(PR_ONE)], {
+      MERGE_PRS_TEST_PAUSE_AFTER_LIVENESS: pausePoint,
+    });
+    try {
+      expect(
+        await waitFor(() => existsSync(pausePoint), 5_000, "the run to judge the holder dead"),
+      ).toBe(true);
+
+      // Same pid as the lock it judged dead, different nonce: a replacement no
+      // amount of pid comparison can recognise.
+      rmSync(harness.lockDir, { recursive: true, force: true });
+      seedLock(harness, recycled, "nonce-of-the-live-lock");
+
+      rmSync(pausePoint, { force: true });
+      const result = await closed;
+
+      expect(result.status).toBe(75);
+      expect(result.stderr).toContain("is not the one that was judged dead");
+      // The replacement is intact, nonce and all. Deleting it would leave its
+      // holder running with no lock at all, which is the failure under test.
+      expect(existsSync(harness.lockDir)).toBe(true);
+      expect(lockToken(harness)).toBe(`${recycled} nonce-of-the-live-lock`);
+      expect(mergedByStub(harness)).toBe("");
+    } finally {
+      await stopRun(child);
       harness.cleanup();
     }
   });
