@@ -69,13 +69,20 @@ describe("vitest.config.ts", () => {
   });
 
   test("the cap reaches test.maxWorkers when CF_TEST_MAX_WORKERS is set", async () => {
-    vi.stubEnv("CF_TEST_MAX_WORKERS", "3");
+    // "1", not "3": the stub goes through the SAME validation a real host
+    // setting does, so a value above this host's availableParallelism() throws
+    // inside the import and the test fails on a 1- or 2-vCPU runner (a
+    // cpuset-limited container, a private-repo runner) for a reason that has
+    // nothing to do with the wiring. "1" is below every host's CPU count, and is
+    // still distinct from `undefined`, so a deleted or commented-out
+    // `maxWorkers` line is still caught.
+    vi.stubEnv("CF_TEST_MAX_WORKERS", "1");
     vi.resetModules();
     // Extensionless, as gate.test.ts imports this same config: a `.ts`
     // specifier is TS5097 under this repo's tsconfig, and the resolution that
     // matters here is vite's, which finds the file either way.
     const { default: cfg } = await import("../../../vitest.config");
-    expect(cfg.test?.maxWorkers).toBe(3);
+    expect(cfg.test?.maxWorkers).toBe(1);
   });
 
   test("maxWorkers stays undefined when the variable is unset", async () => {

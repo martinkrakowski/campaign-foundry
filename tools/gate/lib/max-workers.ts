@@ -6,10 +6,10 @@ import { availableParallelism } from "node:os";
  * The problem is arithmetic, and it is host-wide rather than per lane. Vitest's
  * default is `availableParallelism() - 1`, so on a 24-thread host every run
  * asks for ~23 workers. `CF_GATE_SLOTS` decides how many runs happen at once:
- * three slots already give ~69 workers, and the owner's next step (six or seven
- * slots) would ask for ~160 — tens of gigabytes of RSS against ~40 free, and
- * false timeouts on the CPU-bound tests, which fail on their own internal
- * deadlines and cannot be saved by a larger `--testTimeout`.
+ * three slots already give ~69 workers, and seven would ask for ~160 — tens of
+ * gigabytes of RSS against ~40 free, and false timeouts on the CPU-bound tests,
+ * which fail on their own internal deadlines and cannot be saved by a larger
+ * `--testTimeout`.
  *
  * So the two variables are ONE decision, made once, for the host:
  * `CF_GATE_SLOTS × CF_TEST_MAX_WORKERS ≤ threads`. On midnight that is 6 × 4

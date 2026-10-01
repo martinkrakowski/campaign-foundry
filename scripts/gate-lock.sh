@@ -28,14 +28,17 @@
 # made once, for the host: CF_GATE_SLOTS × CF_TEST_MAX_WORKERS ≤ the host's
 # threads. Vitest's default is availableParallelism() − 1 per run (~23 on
 # midnight's 24 threads), so without the second variable three slots already
-# ask for ~69 workers and the owner's six or seven would ask for ~160: tens of
-# gigabytes against ~40 free, and false timeouts on the CPU-bound tests, which
-# fail on their own internal deadlines and cannot be saved by a bigger
-# --testTimeout. CF_TEST_MAX_WORKERS is read by `vitest.config.ts` (the parse is
+# ask for ~69 workers and seven would ask for ~160: tens of gigabytes against
+# ~40 free, and false timeouts on the CPU-bound tests, which fail on their own
+# internal deadlines and cannot be saved by a bigger --testTimeout.
+# CF_TEST_MAX_WORKERS is read by `vitest.config.ts` (the parse is
 # tools/gate/lib/max-workers.ts; a value that is not a positive whole number at
 # or below availableParallelism() throws at config load, naming the variable).
 # Unset means unset: CI and the Mac get vitest's own default, unchanged. On
-# midnight that is 6 × 4 or 7 × 3.
+# midnight that is 6 × 4 or 7 × 3. Do not also set VITEST_MAX_WORKERS: vitest
+# applies it OVER test.maxWorkers after the config is resolved, and it does so
+# unvalidated (a bare parseInt), so it silently wins and the validated number
+# beside it becomes the one that is ignored.
 #
 # BOTH ARE SET HOST-WIDE, AND ONLY HOST-WIDE — /etc/environment on the
 # midnight host, never in one seat's environment, at any moment and whatever that
