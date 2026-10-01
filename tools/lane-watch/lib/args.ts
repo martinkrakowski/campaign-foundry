@@ -71,11 +71,11 @@ export function parseUsageArgs(argv: readonly string[]): UsageArgs {
     const flag = argv[i];
     switch (flag) {
       case "--server": {
-        server = valueAfter(argv, ++i, String(flag));
+        server = valueAfter(argv, ++i, flag);
         break;
       }
       case "--session": {
-        session = valueAfter(argv, ++i, String(flag));
+        session = valueAfter(argv, ++i, flag);
         break;
       }
       case "--json": {
@@ -83,19 +83,19 @@ export function parseUsageArgs(argv: readonly string[]): UsageArgs {
         break;
       }
       case "--emit": {
-        const logdir = valueAfter(argv, ++i, String(flag));
-        const wave = valueAfter(argv, ++i, String(flag));
-        const lane = valueAfter(argv, ++i, String(flag));
-        const stage = valueAfter(argv, ++i, String(flag));
+        const logdir = valueAfter(argv, ++i, flag);
+        const wave = valueAfter(argv, ++i, flag);
+        const lane = valueAfter(argv, ++i, flag);
+        const stage = valueAfter(argv, ++i, flag);
         emit = { logdir, wave, lane, stage, event: "settled" };
         break;
       }
       case "--event": {
-        event = valueAfter(argv, ++i, String(flag));
+        event = valueAfter(argv, ++i, flag);
         break;
       }
       default:
-        throw new Error(`unknown argument '${String(flag)}'\n${LANE_WATCH_USAGE}`);
+        throw new Error(`unknown argument '${flag}'\n${LANE_WATCH_USAGE}`);
     }
   }
 
@@ -126,15 +126,15 @@ export function parseFollowArgs(argv: readonly string[]): FollowArgs {
     const flag = argv[i];
     switch (flag) {
       case "--server": {
-        server = valueAfter(argv, ++i, String(flag));
+        server = valueAfter(argv, ++i, flag);
         break;
       }
       case "--session": {
-        session = valueAfter(argv, ++i, String(flag));
+        session = valueAfter(argv, ++i, flag);
         break;
       }
       case "--stall": {
-        const raw = valueAfter(argv, ++i, String(flag));
+        const raw = valueAfter(argv, ++i, flag);
         if (!/^\d+$/.test(raw)) {
           throw new Error(
             `--stall wants a whole number of seconds, got '${raw}'\n${LANE_WATCH_USAGE}`,
@@ -144,7 +144,7 @@ export function parseFollowArgs(argv: readonly string[]): FollowArgs {
         break;
       }
       default:
-        throw new Error(`unknown argument '${String(flag)}'\n${LANE_WATCH_USAGE}`);
+        throw new Error(`unknown argument '${flag}'\n${LANE_WATCH_USAGE}`);
     }
   }
 

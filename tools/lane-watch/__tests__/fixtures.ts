@@ -9,8 +9,10 @@ import type { SpawnResult } from "../lib/types.js";
  *
  * The frame shapes come from the row's facts about opencode 1.18.33, read live
  * by a reviewer: a frame is `data: {directory, project, workspace, payload}`
- * with `payload = {id, type, properties}`, the terminator is CRLF, and
- * `server.connected` / `server.heartbeat` arrive UNWRAPPED.
+ * with `payload = {id, type, properties}`, and the live stream is
+ * **LF-terminated**. CRLF is still what the SSE format permits, so the parser
+ * accepts both and there is a fixture for each — but the fixture that matches
+ * this server is the LF one.
  */
 
 const encoder = new TextEncoder();
@@ -30,14 +32,22 @@ export function bare(body: unknown): string {
   return data(body);
 }
 
-/** The framing itself: `data: `, CRLF, and the blank line that ends the frame. */
+/** The framing itself: `data: `, LF, and the blank line that ends the frame. */
 export function data(value: unknown): string {
+  return `data: ${JSON.stringify(value)}\n\n`;
+}
+
+/**
+ * The same framing with CRLF terminators, which the SSE format permits and a
+ * proxy in front of the tunnel may well produce.
+ */
+export function dataCrlf(value: unknown): string {
   return `data: ${JSON.stringify(value)}\r\n\r\n`;
 }
 
 /** A frame whose payload is not a JSON object at all. */
-export function rawFrame(text: string): string {
-  return `data: ${text}\r\n\r\n`;
+export function rawFrame(text: string, terminator = "\n"): string {
+  return `data: ${text}${terminator.repeat(2)}`;
 }
 
 /** A stream this file hands bytes to, one `push` at a time. */

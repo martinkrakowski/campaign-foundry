@@ -20,6 +20,12 @@ export interface LaneWatchCliIo {
   readonly spawn: (command: string, args: readonly string[]) => Promise<SpawnResult>;
   readonly setTimer: (fn: () => void, ms: number) => unknown;
   readonly clearTimer: (handle: unknown) => void;
+  /**
+   * Milliseconds to wait before re-subscribing, 0 for none. A real backoff
+   * belongs here and nowhere else: `follow` reads it off the injected io, so
+   * the tool never reaches for a clock the tests cannot see.
+   */
+  readonly reconnectDelayMs: number;
 }
 
 /**
@@ -29,11 +35,12 @@ export interface LaneWatchCliIo {
  * exit path — read, 404, unparseable, unreported, emitted, or a throw out of
  * the emit — aborts the in-flight request.
  *
- * `--emit` runs only on a COMPLETE reading. Emitting a partial one would put a
- * `settled` event on the wave whose detail reads `tokens: null`, and the
- * status page would then show a lane settled from a reading that said it knew
- * nothing. The read's own exit 3 already said so, and passing it through keeps
- * that the single answer.
+ * `--emit` runs on an INCOMPLETE reading too, and the reading's own exit 3 is
+ * still returned when the script accepts the event. The detail is the same
+ * record `usage --json` prints, so the unreported fields arrive on the wave as
+ * JSON `null` and `secs` is still carried — which is what lets a lane that
+ * errored before billing anything be recorded at all. Suppressing the emit
+ * there would leave the one lane whose timing matters most with no event.
  */
 async function runUsage(args: UsageArgs, io: LaneWatchCliIo): Promise<number> {
   // Both validations run BEFORE the read. A session id that is not `ses_…` is
@@ -53,13 +60,19 @@ async function runUsage(args: UsageArgs, io: LaneWatchCliIo): Promise<number> {
         logError: io.logError,
       },
     );
-    if (args.emit === null || usage === null || code !== EXIT_OK) return code;
+    if (args.emit === null || usage === null) return code;
     const emitted = await emit(args.emit, usage, {
       spawn: io.spawn,
       log: io.log,
       logError: io.logError,
     });
-    return emitted.code;
+    // The script's own exit code wins when it is not 0, because a stage it
+    // refused (2) or a script it could not run (1) is the more specific
+    // answer than "the reading was incomplete". Otherwise the reading's own
+    // verdict stands: an incomplete reading is still emitted, so a lane that
+    // died before billing anything can be recorded with `--event failed`
+    // instead of leaving no event at all.
+    return emitted.code !== EXIT_OK ? emitted.code : code;
   } finally {
     controller.abort();
   }
@@ -82,6 +95,7 @@ async function runFollow(args: FollowArgs, io: LaneWatchCliIo): Promise<number> 
     logError: io.logError,
     setTimer: io.setTimer,
     clearTimer: io.clearTimer,
+    reconnectDelayMs: io.reconnectDelayMs,
   };
   try {
     return await follow({ ...args, session: checkSession(args.session) }, deps);
@@ -146,6 +160,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       }),
     setTimer: (fn, ms) => setTimeout(fn, ms),
     clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    // The one caller that wants a real pause. 1000ms is short enough that a
+    // tunnel blip costs a second rather than a minute, and long enough that
+    // four attempts are not spent inside one heartbeat interval.
+    reconnectDelayMs: 1000,
   })
     .then((code) => {
       process.exitCode = code;

@@ -19,6 +19,64 @@ function compact(value: unknown): string {
   return String(value);
 }
 
+/**
+ * An envelope this tool can read a payload off, or `{}` for one it cannot.
+ *
+ * `JSON.parse` returns whatever the bytes described, including `null`, a bare
+ * number and a string. Property access on `null` throws, so this exists so
+ * that a frame the server sent as nonsense is DROPPED rather than ending the
+ * watch through an exception — an exception out of `follow` reaches the CLI's
+ * usage-error arm and exits 2, telling the operator their command line was
+ * wrong when the server was at fault.
+ */
+function asEnvelope(value: unknown): EventEnvelope {
+  return typeof value === "object" && value !== null ? (value as EventEnvelope) : {};
+}
+
+/**
+ * The render layer: prints a progress line, collapsing consecutive identical
+ * ones.
+ *
+ * A tool's state arrives as a STREAM of updates — `running`, `running`,
+ * `running` for as long as one command runs — and only the CHANGES say
+ * anything. Ten identical updates are one line in the log.
+ *
+ * The collapse is here, at the render layer, and not in the frame handler,
+ * because the handler's verdict is what drives the outcome and what re-arms
+ * the stall. Skipping the log call must NOT skip the liveness: each of those
+ * ten updates is a live ping from the lane, and a watch that stopped counting
+ * them would stall a lane that is working perfectly.
+ */
+class LineRenderer {
+  private previous: string | null = null;
+  private readonly log: (text: string) => void;
+
+  constructor(log: (text: string) => void) {
+    this.log = log;
+  }
+
+  print(line: string): void {
+    if (line === this.previous) return;
+    this.previous = line;
+    this.log(line);
+  }
+}
+
+/**
+ * The pause before a re-subscribe.
+ *
+ * It goes through the injected `setTimer` rather than a bare `setTimeout`, for
+ * the same reason the stall does: only the injected one a fake clock can
+ * drive. `reconnectDelayMs` of 0 resolves immediately without arming anything,
+ * so the drop tests are not waiting out three backoffs to assert a result.
+ */
+function waitBeforeReconnect(io: FollowIo): Promise<void> {
+  if (io.reconnectDelayMs <= 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    io.setTimer(resolve, io.reconnectDelayMs);
+  });
+}
+
 /** `follow`'s dependencies. The signal is the caller's, aborted on every exit. */
 export interface FollowIo {
   readonly get: Get;
@@ -32,6 +90,17 @@ export interface FollowIo {
    * cover it. Injecting it also keeps every global out of this file except
    * `TextDecoder`.
    */
+  /**
+   * The pause between reconnect attempts, in milliseconds.
+   *
+   * REQUIRED rather than defaulted, because the two callers that matter want
+   * opposite things and a default would silently pick one: the entry wrapper
+   * passes a real backoff so a tunnel blip does not spend all four attempts in
+   * milliseconds, and every test passes 0 so the drop tests stay instant. A
+   * default parameter is not an option here — istanbul counts the default as a
+   * branch, and a branch only the tests never take is a branch nothing covers.
+   */
+  readonly reconnectDelayMs: number;
   readonly setTimer: (fn: () => void, ms: number) => unknown;
   readonly clearTimer: (handle: unknown) => void;
 }
@@ -107,8 +176,15 @@ function handleFrame(
     io.logError(`lane:watch: skipping an unparseable frame: ${errorText(error)}`);
     return CONTINUE;
   }
-  const payload = envelope.payload;
-  if (payload === undefined || payload.type === undefined) return CONTINUE;
+  // `null` is not `undefined`, so an `=== undefined` guard reads straight
+  // through it and the property read throws — and a frame of `data: null`
+  // throws on the ENVELOPE, before any guard on the payload can run. A frame
+  // carrying `null` where an object belongs is the same class of thing as one
+  // with no payload at all: skipped. Throwing here instead would exit 2,
+  // reporting a VALID command line as the operator's mistake when it was the
+  // server that sent nonsense.
+  const payload = asEnvelope(envelope).payload;
+  if (payload === undefined || payload === null || payload.type === undefined) return CONTINUE;
   const type = payload.type;
   const properties = payload.properties;
   const owner = properties?.sessionID;
@@ -164,8 +240,8 @@ function handleFrame(
  * arm, and are dropped BEFORE printing. That is the difference between a
  * readable log and fifty lines a second of prose.
  */
-function partLine(part: MessagePart | undefined, steps: StepCounter): string | null {
-  if (part === undefined) return null;
+function partLine(part: MessagePart | undefined | null, steps: StepCounter): string | null {
+  if (part === undefined || part === null) return null;
   if (part.type === "tool") {
     return `tool ${part.tool ?? "unknown"} ${part.state?.status ?? "unknown"}`;
   }
@@ -198,14 +274,19 @@ function partLine(part: MessagePart | undefined, steps: StepCounter): string | n
  */
 export async function follow(args: FollowArgs, io: FollowIo): Promise<number> {
   const stallMs = args.stallSecs * 1000;
+  // Hoisted so step numbering is the LANE's, not one subscription's: a drop
+  // in the middle of step 7 must not make the next `step-start` claim to be
+  // step 1, or a lane that reconnects three times reads as three short lanes.
+  const steps = new StepCounter();
   for (let attempt = 0; attempt <= MAX_RECONNECTS; attempt++) {
     if (attempt > 0) {
       io.logError(
         `lane:watch: re-subscribing to ${GLOBAL_EVENT_PATH} (${attempt} of ${MAX_RECONNECTS}) — ` +
           `this is a fresh subscription, so events since the drop are lost`,
       );
+      await waitBeforeReconnect(io);
     }
-    const outcome = await subscribe(args, io, stallMs);
+    const outcome = await subscribe(args, io, stallMs, steps);
     if (outcome !== "dropped") return EXIT_FOR[outcome];
   }
   io.logError(
@@ -221,7 +302,12 @@ export async function follow(args: FollowArgs, io: FollowIo): Promise<number> {
  * body-less response, or a reader that reached `done` — the four ways the
  * stream can end without the session having ended.
  */
-async function subscribe(args: FollowArgs, io: FollowIo, stallMs: number): Promise<Outcome> {
+async function subscribe(
+  args: FollowArgs,
+  io: FollowIo,
+  stallMs: number,
+  steps: StepCounter,
+): Promise<Outcome> {
   let response: Response;
   try {
     response = await io.get(GLOBAL_EVENT_PATH, io.signal);
@@ -248,8 +334,15 @@ async function subscribe(args: FollowArgs, io: FollowIo, stallMs: number): Promi
     io.logError(`lane:watch: the event stream could not be read: ${errorText(error)}`);
     return "dropped";
   }
-  const steps = new StepCounter();
+  // The lane's, not this subscription's: `follow` owns it so step numbering
+  // survives a reconnect.
   const decoder = new TextDecoder();
+  // The render layer, per subscription: a reattach gets a fresh previous line,
+  // so the first line after a drop prints even if it repeats the last one
+  // before the drop. The re-subscribe on stderr says a new subscription began;
+  // a log whose first line is missing would contradict it.
+  const renderer = new LineRenderer(io.log);
+  const renderIo = { log: (text: string) => renderer.print(text), logError: io.logError };
   let concluded: Outcome | null = null;
 
   // One promise for the whole subscription. It resolves at most once, and the
@@ -275,7 +368,7 @@ async function subscribe(args: FollowArgs, io: FollowIo, stallMs: number): Promi
 
   const parser = new SseParser((data) => {
     if (concluded !== null) return;
-    const result = handleFrame(data, args.session, steps, io);
+    const result = handleFrame(data, args.session, steps, renderIo);
     if (result.outcome !== "continue") {
       concluded = result.outcome;
       return;
@@ -309,12 +402,20 @@ async function subscribe(args: FollowArgs, io: FollowIo, stallMs: number): Promi
         io.logError(`lane:watch: the event stream failed mid-read: ${errorText(raced.error)}`);
         return "dropped";
       }
-      if (concluded !== null) return concluded;
       if (raced.chunk.done) {
         io.logError("lane:watch: the event stream ended (the reader is done)");
         return "dropped";
       }
       parser.push(decoder.decode(raced.chunk.value, { stream: true }));
+      // The conclusion is read HERE, after the chunk that carried it, and not
+      // on the way into the next iteration. `/global/event` never closes, so
+      // checking before the push means the watch has its answer and then waits
+      // for a frame that may not come for ten seconds: a finished lane is
+      // reported up to a heartbeat late, and with any `--stall` shorter than
+      // that gap it is reported as a STALL — exit 3, "investigate" — for a
+      // lane that completed perfectly. A conclusion that arrives and is then
+      // ignored is a wrong exit code, which is worse than a slow one.
+      if (concluded !== null) return concluded;
     }
   } finally {
     io.clearTimer(timer);

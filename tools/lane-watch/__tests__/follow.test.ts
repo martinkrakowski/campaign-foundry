@@ -30,9 +30,12 @@ function harness(
   timers: {
     readonly set: LaneWatchCliIo["setTimer"];
     readonly clear: LaneWatchCliIo["clearTimer"];
+    /** 0 in every harness but the one that tests the reconnect backoff. */
+    readonly reconnectDelayMs?: number;
   } = {
     set: (fn, ms) => setTimeout(fn, ms),
     clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    reconnectDelayMs: 0,
   },
 ): Harness {
   const log: string[] = [];
@@ -50,6 +53,7 @@ function harness(
       spawn: async () => ({ code: 0, stderr: "" }),
       setTimer: timers.set,
       clearTimer: timers.clear,
+      reconnectDelayMs: timers.reconnectDelayMs ?? 0,
     },
   };
 }
@@ -95,11 +99,16 @@ describe("lane:watch follow — the session filter", () => {
     expect(h.log).toEqual(["tool bash running"]);
   });
 
-  test("heartbeats and connected frames are dropped without printing", async () => {
+  test("heartbeats, connected frames and an unwrapped sync are dropped without printing", async () => {
+    // `{"type":"sync"}` is the real UNWRAPPED frame this server sends: no
+    // directory, no project, no payload — just a type at the top level. It is
+    // the shape a reader who assumed the envelope would trip over, and it must
+    // be skipped exactly like a heartbeat.
     const { answer, feed } = open();
     const h = harness(followArgv(), [answer]);
     const running = runCli(h.io);
     feed.push(bare({ type: "server.connected" }));
+    feed.push(bare({ type: "sync" }));
     feed.push(bare({ type: "server.heartbeat", timestamp: 1 }));
     feed.push(bare({ type: "server.heartbeat", timestamp: 2 }));
     feed.push(frame("session.idle", { sessionID: SESSION }));
@@ -122,6 +131,24 @@ describe("lane:watch follow — the session filter", () => {
     expect(await running).toBe(0);
     expect(h.log).toEqual([]);
     expect(h.err.join("\n")).toContain("unparseable frame");
+  });
+
+  test("a null envelope, payload or part is skipped, not thrown", async () => {
+    // `null` is not `undefined`, so an `=== undefined` guard reads straight
+    // through it and the property read throws. A malformed frame is the same
+    // class of thing as a frame with no payload: skipped, not fatal. Throwing
+    // here exits 2, which reports a VALID command line as the operator's
+    // mistake when it was the server that sent nonsense.
+    const { answer, feed } = open();
+    const h = harness(followArgv(), [answer]);
+    const running = runCli(h.io);
+    feed.push(bare(null));
+    feed.push(bare({ payload: null }));
+    feed.push(frame("message.part.updated", { sessionID: SESSION, part: null }));
+    feed.push(frame("session.idle", { sessionID: SESSION }));
+    feed.close();
+    expect(await running).toBe(0);
+    expect(h.log).toEqual([]);
   });
 });
 
@@ -372,10 +399,10 @@ describe("lane:watch follow — the exits", () => {
     feed.push(frame("session.idle", { sessionID: SESSION }));
     feed.close();
     expect(await running).toBe(0);
-    expect(h.log).toEqual([
-      "error (not attributed to any session) unknown: no message",
-      "error (not attributed to any session) unknown: no message",
-    ]);
+    // Two frames, one line: the render layer collapses consecutive identical
+    // lines, and these two describe the same fact. The shapes differ (no
+    // `error` key at all, and an empty one) and both are still read.
+    expect(h.log).toEqual(["error (not attributed to any session) unknown: no message"]);
   });
 });
 
@@ -459,6 +486,85 @@ describe("lane:watch follow — the stall", () => {
   });
 });
 
+describe("lane:watch follow — the concluding frame ends the watch itself", () => {
+  /**
+   * Each of these leaves the stream OPEN, which is the whole point.
+   *
+   * `/global/event` never closes, so a watch that waits for another frame
+   * before acting on the one it has is waiting for a heartbeat: with the
+   * default stall it reports a finished lane up to ten seconds late, and with
+   * any stall shorter than the heartbeat gap it reports the finish as a
+   * STALL — exit 3, "investigate" — for a lane that completed perfectly.
+   */
+  const concluding: readonly (readonly [string, () => string, number])[] = [
+    ["session.idle", () => frame("session.idle", { sessionID: SESSION }), 0],
+    [
+      "a session.status of type idle",
+      () => frame("session.status", { sessionID: SESSION, status: { type: "idle" } }),
+      0,
+    ],
+    [
+      "a session error",
+      () =>
+        frame("session.error", {
+          sessionID: SESSION,
+          error: { name: "ProviderAuthError", data: { message: "no credential" } },
+        }),
+      1,
+    ],
+  ];
+
+  for (const [what, feed1, expected] of concluding) {
+    test(`${what} ends the watch without waiting for another frame`, async () => {
+      vi.useFakeTimers();
+      const { answer, feed } = open();
+      const h = harness(followArgv(["--stall", "2"]), [answer]);
+      const running = runCli(h.io);
+      feed.push(feed1());
+      // Past the stall window, with the stream still open and nothing to
+      // re-arm the timer. A watch that was still waiting here would end 3 —
+      // which is why this advances BEFORE awaiting: the fixed watch has
+      // already answered, and the broken one answers 3 during the same
+      // advance, so the failure is the exit code and not a test timeout.
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await running, what).toBe(expected);
+      expect(h.err.join("\n"), what).not.toContain("no event for session");
+    });
+  }
+  test("ten identical tool updates print one line, and each still re-arms the stall", async () => {
+    // The collapse is at the render layer ONLY. Each of the ten is a live ping
+    // from the lane, so the stall must still be re-armed by the last one: a
+    // watch that printed one line and stopped counting would report a lane
+    // that is running one long command as stalled.
+    vi.useFakeTimers();
+    const stallSecs = 30;
+    const { answer, feed } = open();
+    const h = harness(followArgv(["--stall", String(stallSecs)]), [answer]);
+    const running = runCli(h.io);
+    const tool = () =>
+      frame("message.part.updated", {
+        sessionID: SESSION,
+        part: { type: "tool", tool: "bash", state: { status: "running" } },
+      });
+    for (let i = 0; i < 9; i++) {
+      feed.push(tool());
+      await vi.advanceTimersByTimeAsync(2000);
+    }
+    // 18s in, inside the 30s window: nine identical updates, one line.
+    expect(h.log).toEqual(["tool bash running"]);
+    feed.push(tool());
+    // The tenth arrived at 18s, so the deadline moved to 48s. Advancing to
+    // 36s is past the ORIGINAL deadline and well inside the current one.
+    await vi.advanceTimersByTimeAsync(18_000);
+    feed.push(frame("session.idle", { sessionID: SESSION }));
+    await vi.advanceTimersByTimeAsync(0);
+    feed.close();
+    expect(await running).toBe(0);
+    expect(h.log).toEqual(["tool bash running"]);
+    expect(h.err.join("\n")).not.toContain("no event for session");
+  });
+});
+
 describe("lane:watch follow — the drop", () => {
   test("a reader that reaches done exits 1 after 3 reconnects, over 4 fetches", async () => {
     // A dropped stream is usually a tunnel blip, so it is re-subscribed. Each
@@ -520,6 +626,54 @@ describe("lane:watch follow — the drop", () => {
     feed.fail(new Error("the tunnel went away"));
     expect(await running).toBe(1);
     expect(h.err.join("\n")).toContain("failed mid-read");
+  });
+
+  test("a non-zero reconnect delay is waited out between attempts, through the injected timer", async () => {
+    // A short tunnel blip should not spend all four attempts inside one
+    // heartbeat. The delay is read off the injected io and waited on the
+    // injected setTimer, so it is the same clock the stall uses — which is
+    // what lets a test observe it at all.
+    vi.useFakeTimers();
+    const h = harness(followArgv(), [() => eventStream(closed())], {
+      set: (fn, ms) => setTimeout(fn, ms),
+      clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+      reconnectDelayMs: 2000,
+    });
+    const running = runCli(h.io);
+    // Attempt 1 has been made and dropped; the watch is now waiting.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.calls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(h.calls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.calls).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(h.calls).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(h.calls).toHaveLength(4);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await running).toBe(1);
+  });
+
+  test("step numbering survives a reconnect, because the lane did not restart", async () => {
+    const first = open();
+    const second = open();
+    const h = harness(followArgv(), [first.answer, second.answer]);
+    const running = runCli(h.io);
+    first.feed.push(
+      frame("message.part.updated", { sessionID: SESSION, part: { type: "step-start" } }),
+    );
+    first.feed.close();
+    second.feed.push(
+      frame("message.part.updated", { sessionID: SESSION, part: { type: "step-start" } }),
+    );
+    second.feed.push(frame("session.idle", { sessionID: SESSION }));
+    second.feed.close();
+    expect(await running).toBe(0);
+    // The counter belongs to the LANE. Held per subscription, the second step
+    // would print as step 1 and a lane that dropped mid-way would read as two
+    // short lanes rather than one longer one.
+    expect(h.log).toEqual(["step 1 start", "step 2 start"]);
   });
 
   test("a reconnected stream that then reports idle exits 0", async () => {

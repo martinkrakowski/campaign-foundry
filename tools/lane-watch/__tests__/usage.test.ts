@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { existsSync } from "node:fs";
 import { runCli, type LaneWatchCliIo } from "../cli.js";
 import { WAVE_EVENT_SCRIPT } from "../lib/emit.js";
 import { ALLOWED_PATHS, SESSION_ID } from "../lib/server.js";
@@ -55,6 +56,7 @@ function harness(
       spawn: spawned.spawn,
       setTimer: (fn, ms) => setTimeout(fn, ms),
       clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+      reconnectDelayMs: 0,
     },
   };
 }
@@ -253,26 +255,27 @@ describe("lane:watch usage", () => {
 });
 
 describe("lane:watch usage --emit", () => {
+  // `--json` throughout, so the printed record and the emitted `--detail` can
+  // be compared byte for byte: the wave log and the operator's terminal must
+  // hold one value.
   const emitArgv = (extra: readonly string[] = []): readonly string[] => [
-    ...usageArgv(["--emit", "/tmp/wave-1", "wave-1", "HXF4", "implement", ...extra]),
+    ...usageArgv(["--json", "--emit", "/tmp/wave-1", "wave-1", "HXF4", "implement", ...extra]),
   ];
 
   test("runs wave-event.sh with exactly the documented argv, and the detail is compact", async () => {
-    // --json so the printed record and the emitted detail can be compared byte
-    // for byte: the wave log and the operator's terminal must hold one value.
-    const h = harness(
-      [...usageArgv(["--json"]), "--emit", "/tmp/wave-1", "wave-1", "HXF4", "implement"],
-      [json(COMPLETE)],
-    );
+    const h = harness(emitArgv(), [json(COMPLETE)]);
     expect(await runCli(h.io)).toBe(0);
     expect(h.spawnCalls).toHaveLength(1);
     const call = h.spawnCalls[0];
     expect(call.command).toBe("sh");
     const [script, ...args] = call.args;
     // Resolved from this repo's own import.meta.url, so it is the repo's
-    // script and not whatever the operator's cwd happens to point at.
+    // script and not whatever the operator's cwd happens to point at. The stat
+    // is what pins the `../` DEPTH: a wrong count still ends in
+    // `…/scripts/wave-event.sh` as a string, and only existsSync notices that
+    // the file it names is not there. A stat, not a spawn — nothing runs.
     expect(script).toBe(WAVE_EVENT_SCRIPT);
-    expect(script?.endsWith("/scripts/wave-event.sh")).toBe(true);
+    expect(existsSync(WAVE_EVENT_SCRIPT)).toBe(true);
     expect(args.slice(0, 7)).toEqual([
       "--logdir",
       "/tmp/wave-1",
@@ -318,14 +321,42 @@ describe("lane:watch usage --emit", () => {
     expect(h.err.join("\n")).toContain("spawn sh ENOENT");
   });
 
-  test("an incomplete usage is not emitted, and its exit code is passed through", async () => {
-    // A `settled` event whose detail reads tokens: null would show the status
-    // page a lane settled from a reading that said it knew nothing.
+  test("an incomplete usage is still emitted, with its missing fields as null", async () => {
+    // The lane that errored before billing anything is the one whose timing
+    // matters most, and it is exactly the reading that is incomplete. The
+    // detail carries JSON `null` for what the server did not report and keeps
+    // `secs` — never the string "unknown", and never a 0 — so a reader can
+    // tell "not reported" from "nothing spent".
+    for (const event of ["settled", "failed"]) {
+      const body = { ...COMPLETE };
+      delete (body as Record<string, unknown>)["tokens"];
+      const h = harness(emitArgv(event === "failed" ? ["--event", "failed"] : []), [json(body)]);
+      expect(await runCli(h.io), event).toBe(3);
+      expect(h.spawnCalls, event).toHaveLength(1);
+      expect(h.spawnCalls[0].args, event).toContain(event);
+      // args[0] is the script itself; --detail is args[7] and its value args[8].
+      const detail = h.spawnCalls[0].args[8] as string;
+      expect(detail, event).toBe(h.log[0]);
+      expect(JSON.parse(detail), event).toMatchObject({
+        secs: 61,
+        tokens_in: null,
+        cost: 0.4213,
+      });
+    }
+  });
+
+  test("a script that refuses the event outranks the incomplete reading", async () => {
+    // 2 (the script refused the stage) is more specific than 3 (the reading
+    // was incomplete), so it is the code the operator sees.
     const body = { ...COMPLETE };
     delete (body as Record<string, unknown>)["cost"];
-    const h = harness(emitArgv(), [json(body)]);
-    expect(await runCli(h.io)).toBe(3);
-    expect(h.spawnCalls).toEqual([]);
+    const h = harness(
+      emitArgv(["--event", "nonsense"]),
+      [json(body)],
+      [{ code: 2, stderr: "unknown event: nonsense\n" }],
+    );
+    expect(await runCli(h.io)).toBe(2);
+    expect(h.err.join("\n")).toContain("unknown event: nonsense");
   });
 
   test("a missing session is not emitted either", async () => {

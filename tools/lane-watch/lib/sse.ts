@@ -13,9 +13,11 @@
  * - `:` comments are ignored. The endpoint sends keep-alives.
  * - `id:` and `event:` are tolerated and unused. This stream has no `id:`
  *   lines and no replay, so reading either would be inventing a feature.
- * - CRLF is accepted. The endpoint's terminator is CRLF, and a parser that
- *   only splits on `\n` leaves a `\r` on the end of every value, which then
- *   fails `JSON.parse` on a frame that was perfectly well formed.
+ * - LF is what this server sends, and CRLF is accepted because the SSE format
+ *   permits it and something in front of the tunnel may rewrite it. A parser
+ *   that only splits on "\n" leaves a "\r" on the end of every value of a CRLF
+ *   stream, which then fails `JSON.parse` on a frame that was perfectly well
+ *   formed — so the terminator is stripped, not assumed.
  * - A chunk boundary may fall mid-line. Chunks arrive per read, and a split
  *   across a line's middle is ordinary, not an error.
  */

@@ -115,12 +115,16 @@ opencode server itself, over two read-only GETs.
 
 ```bash
 # 1. Dispatch with ocm-run, which prints every `opencode run --format json`
-#    event. The FIRST one carries the sessionID; keep it.
+#    event. The FIRST one carrying a sessionID is the one to keep. `-R` reads
+#    each line as raw text and `fromjson?` yields nothing for a line that is
+#    not JSON, so a banner or a blank line in the log is skipped rather than
+#    aborting the whole extraction.
 ocm-run … | tee /tmp/lane.log
-session=$(jq -r 'select(.sessionID) | .sessionID' /tmp/lane.log | head -1)
+session=$(jq -R 'fromjson? | select(.sessionID?) | .sessionID' /tmp/lane.log | head -1)
 
 # 2. Follow it. One compact line per tool call, step and retry; heartbeats and
-#    every other lane's events are dropped. Exits when the lane does.
+#    every other lane's events are dropped, and consecutive identical lines
+#    collapse — step numbers count from attach. Exits when the lane does.
 yarn lane:watch follow --server http://127.0.0.1:4096 --session "$session"
 
 # 3. When it settles, log the timing and the cost into the wave.
@@ -145,10 +149,11 @@ sends GET, refuses redirects, and will request exactly two paths,
 
 Exit 3 from `follow` means *investigate*, and it deliberately does not fire on
 a heartbeat: the server being alive says nothing about the lane. A dropped
-stream is re-subscribed three times before it becomes exit 1, because a drop is
-usually a tunnel blip — but each reconnect is a **fresh** subscription with no
-replay, so if the lane finished inside one of those gaps the watch cannot see
-it and will end in 3 instead. `usage` is what tells the rest.
+stream is re-subscribed three times, a second apart, before it becomes exit 1 —
+because a drop is usually a tunnel blip — but each reconnect is a **fresh**
+subscription with no replay, so if the lane finished inside one of those gaps
+the watch cannot see it and will end in 3 instead. `usage` is what tells the
+rest.
 
 `scripts/lane-usage.sh` stays as the SQLite fallback: it reads opencode's own
 database over ssh and needs no server, but it prints **0** for a token or cost
