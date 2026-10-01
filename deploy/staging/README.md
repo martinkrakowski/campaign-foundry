@@ -23,11 +23,21 @@ Object storage (D174c, Backblaze B2) is not set up: nothing uses it until PT-4.
 
 ## One-time setup (cluster-wide; done 2026-09-25)
 
+**Kubeconfig (2026-10-01):** every command here, and `deploy.sh`, uses a private copy at `~/.kube/config` on midnight (`0600`, owned by the operator), never the cluster-admin `/etc/rancher/k3s/k3s.yaml`, which is being moved to `0600 root`. One-time:
+
+```sh
+ssh m
+mkdir -p ~/.kube && chmod 700 ~/.kube
+sudo install -m 600 -o "$USER" -g "$USER" /etc/rancher/k3s/k3s.yaml ~/.kube/config
+```
+
+If the cluster CA or admin cert rotates, rerun the `install` line.
+
 The two operators are cluster-scoped installs:
 
 ```sh
 ssh m
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+export KUBECONFIG=$HOME/.kube/config
 helm repo add cnpg https://cloudnative-pg.github.io/charts
 helm install cnpg cnpg/cloudnative-pg --version 0.29.1 \
   --namespace cnpg-system --create-namespace --wait
@@ -49,7 +59,7 @@ trusted once):
 # in your own terminal: sudo asks for a password. The certificate is read from
 # Harbor's own Kubernetes Secret over the authenticated cluster API, not from the
 # network, so an intercepted TLS connection cannot plant a trust root.
-ssh -t m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n registry get secret harbor-ingress -o jsonpath="{.data.tls\.crt}" \
+ssh -t m 'KUBECONFIG=$HOME/.kube/config kubectl -n registry get secret harbor-ingress -o jsonpath="{.data.tls\.crt}" \
   | base64 -d | openssl x509 | sudo tee /etc/docker/certs.d/registry.midnight.lan/ca.crt >/dev/null'
 ssh -t m 'sudo cp /etc/docker/certs.d/registry.midnight.lan/ca.crt /usr/local/share/ca-certificates/registry.midnight.lan.crt \
   && sudo update-ca-certificates && sudo systemctl restart docker'
@@ -66,8 +76,8 @@ characters. It is generated on the node, so it never touches a laptop or the rep
 cluster, create the namespace first (the deploy would otherwise create it):
 
 ```sh
-ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl create namespace campaign-foundry-staging --dry-run=client -o yaml | KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl apply -f -'
-ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging create secret generic campaign-foundry-auth --from-literal=secret="$(openssl rand -hex 32)"'
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl create namespace campaign-foundry-staging --dry-run=client -o yaml | KUBECONFIG=$HOME/.kube/config kubectl apply -f -'
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging create secret generic campaign-foundry-auth --from-literal=secret="$(openssl rand -hex 32)"'
 ```
 
 `deploy.sh` checks it before building anything, and refuses while it is missing, has no
@@ -84,7 +94,7 @@ the repo. (A `read -s` inside `ssh m '…'` would run on the node, which has no 
 silence, so a pasted key would echo locally.)
 
 ```sh
-printf 'Resend API key: '; read -rs KEY; echo; [ -n "$KEY" ] && printf %s "$KEY" | ssh m 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml; kubectl -n campaign-foundry-staging create secret generic campaign-foundry-resend --from-file=api-key=/dev/stdin --dry-run=client -o yaml | kubectl apply -f -' || echo "no key entered"; unset KEY
+printf 'Resend API key: '; read -rs KEY; echo; [ -n "$KEY" ] && printf %s "$KEY" | ssh m 'export KUBECONFIG=$HOME/.kube/config; kubectl -n campaign-foundry-staging create secret generic campaign-foundry-resend --from-file=api-key=/dev/stdin --dry-run=client -o yaml | kubectl apply -f -' || echo "no key entered"; unset KEY
 ```
 
 This works in bash and zsh, and `create --dry-run=client | apply` also replaces an existing
@@ -94,14 +104,14 @@ key. When already on the node, drop the `ssh m '…'` wrapper and `export KUBECO
 Confirm the key landed without showing it; a Resend key is 36 characters, which is 48 in base64:
 
 ```sh
-ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging get secret campaign-foundry-resend -o go-template="{{len (index .data \"api-key\")}}"'
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging get secret campaign-foundry-resend -o go-template="{{len (index .data \"api-key\")}}"'
 ```
 
 If staging is already running, restart it so the pod picks the key up. On a fresh cluster, skip
 this; the first deploy reads the secret:
 
 ```sh
-ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging rollout restart deploy/campaign-foundry'
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging rollout restart deploy/campaign-foundry'
 ```
 
 The secret is optional in `app.yaml`, so a deploy without it still works and falls back to
@@ -115,13 +125,13 @@ and it arrives by email. **Without it**, the magic link is written to the API lo
 access is then account access. Read it with:
 
 ```sh
-ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging logs deploy/campaign-foundry -c api | grep "sign-in link" | tail -1'
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging logs deploy/campaign-foundry -c api | grep "sign-in link" | tail -1'
 ```
 
 After that first sign-in, make the account the owner of the `local` org:
 
 ```sh
-ssh m 'KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl -n campaign-foundry-staging exec deploy/campaign-foundry -c api -- node node_modules/tsx/dist/cli.mjs apps/api/bin/auth-cli.ts you@example.com'
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec deploy/campaign-foundry -c api -- node node_modules/tsx/dist/cli.mjs apps/api/bin/auth-cli.ts you@example.com'
 ```
 
 ## Deploy
