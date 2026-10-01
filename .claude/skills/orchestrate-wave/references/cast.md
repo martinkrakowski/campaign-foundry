@@ -591,7 +591,7 @@ clean bill from the model that wrote the code is worth nothing.
 
 - *If a finding is wrong, say so with the mechanism rather than changing code to match it.*
   (Counters the assertion-weakening that rots a suite silently.)
-- *Run the gate in the foreground and read its exit code. A task you launched is not a result.*
+- *Run every verification command in the foreground and read its exit code. A task you launched is not a result.*
   (Counters the gemini reporting defect above.)
 
 ### Per-run record

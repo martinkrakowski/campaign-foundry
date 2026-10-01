@@ -306,7 +306,18 @@ describe("the whole brief", () => {
     expect(brief).toContain("— end of quoted text for item 2 —");
     // The footer is Template E's own, untouched.
     expect(brief).toContain("## Verification (targeted — edit per lane)");
-    expect(brief.endsWith("A task you launched is not a result.")).toBe(true);
+    // The whole closing line, not just its second half. The second half is
+    // shared with the line this replaced, so an assertion on it alone passes
+    // against either — and what distinguishes them is precisely the sentence a
+    // midnight lane must not be handed. (The retired wording is deliberately
+    // not quoted here: this file is under `tools/`, which the tree scan in
+    // closing-line.test.ts reads, and a full quotation would match itself.)
+    expect(
+      brief.endsWith(
+        "Run every verification command in the foreground and read its exit code. " +
+          "A task you launched is not a result.",
+      ),
+    ).toBe(true);
   });
 
   test("each item carries the disposition the orchestrator fills in", () => {

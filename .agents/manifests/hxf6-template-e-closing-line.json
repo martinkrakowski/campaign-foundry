@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "lane": "HXF6-template-e-closing-line",
+  "mutations": [
+    {
+      "file": "tools/fix-brief/lib/template.ts",
+      "before": "Run every verification command in the foreground and read its exit code. A task you launched is not a result.`;",
+      "after": "Run the gate in the foreground and read its exit code. A task you launched is not a result.`;",
+      "because": "the whole point of the reword, restored in the one place the tool actually writes from: TEMPLATE_E is what render() substitutes into, so a brief handed to a lane ends by telling it to run the gate, and a midnight lane is told in three other places NOT to run the gate because the ~1,600 s suite cannot pass on that host. The line's second half survives the mutation untouched, so an assertion on the suffix alone still passes and the brief is still wrong. The test it names compares this constant with the doc's block byte for byte, and a constant the doc no longer says is exactly the drift the pair exists to make impossible. The grep test in closing-line.test.ts catches the same restoration from the other side, by finding the retired sentence in a file under tools/",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/fix-brief/__tests__/render.test.ts",
+        "-t",
+        "the constant equals the doc's Template E block byte for byte"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": ".claude/skills/orchestrate-wave/SKILL.md",
+      "before": "- *Run every verification command in the foreground and read its exit code. A task you launched is not a result.* Two",
+      "after": "- *Run the gate in the foreground and read its exit code. A task you launched is not a result.* Two",
+      "because": "the sentence as the ORCHESTRATOR states it, which is the copy a lane is most likely to meet first: the skill's own bullet list of the two mandatory closing lines. Nothing in the code compares this file to TEMPLATE_E, so the drift test cannot see it and only the tree scan can — which is the whole reason the sentence is asserted absent from docs/workflows, tools and .claude rather than merely absent from the one file the tool reads. The test names this path in the failure, so a wave that reintroduces the gate-only line is told which of the four readers of it went back",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/fix-brief/__tests__/closing-line.test.ts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
