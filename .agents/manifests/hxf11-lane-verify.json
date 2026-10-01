@@ -18,6 +18,23 @@
         "a file at 99.5% branches is LISTED and exits 1, though every line ran"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "tools/lane-verify/lib/coverage.ts",
+      "before": "  return Object.keys(summary).some((file) => file !== \"total\");",
+      "after": "  return true;",
+      "because": "the empty-run check, and the only place a run of this tool can settle on code it never measured. A `--cover` glob that matches nothing — a typo, a path that moved, a glob a shell expanded away — makes vitest write a summary carrying the `total` aggregate and NO per-file entry. Every other question asked of that document answers it correctly and says nothing wrong: `shortFiles` finds no short file and returns an empty list, which is indistinguishable from a perfect run, so the coverage row would read as 100% and the whole second-host check would settle on a branch whose coverage was never taken. Answering `true` unconditionally is the fail-open this row exists to close: the item-1 test drives a summary with no per-file entry and requires the row to be red and to name the globs (`no file matched --cover …`), and with the check gone the row is green and the run's exit code is 0. The `total`-only document is why the predicate is `some(file !== 'total')` rather than a key count, and why the sibling test in coverage.test.ts asserts `shortFiles` on the same document returns an empty list — that second assertion is what makes the pair readable: the list is empty AND the run is still red",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/lane-verify",
+        "-t",
+        "a --cover glob that matched nothing is red, naming the globs"
+      ],
+      "verdict": "caught"
     }
   ]
 }

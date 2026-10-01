@@ -1,3 +1,5 @@
+import type { Recorded } from "../lib/git.js";
+import type { VerifyIo } from "../lib/verify.js";
 import type { ProcessRunner, RunResult } from "../lib/types.js";
 
 /**
@@ -14,6 +16,10 @@ export const BRANCH = "feat/lane";
 export const HEAD = "1111111111111111111111111111111111111111";
 export const VERIFIED = "2222222222222222222222222222222222222222";
 export const LOCK = "the lockfile bytes\n";
+export const SUMMARY_AT = `${WORKTREE}/coverage/coverage-summary.json`;
+/** The vitest argv `greenScript` answers, as one key. */
+export const VITEST_KEY =
+  "yarn vitest run --project tools --coverage --coverage.include=tools/lane-verify/**/*.ts --coverage.reporter=json-summary";
 
 export interface Call {
   readonly command: string;
@@ -56,8 +62,7 @@ export function greenScript(): Record<string, Answer> {
     [`git show origin/${BRANCH}:yarn.lock`]: ok(LOCK),
     [`git checkout -q --detach origin/${BRANCH}`]: ok(),
     [`git checkout -q ${BRANCH}`]: ok(),
-    [`yarn vitest run --project tools --coverage --coverage.include=tools/lane-verify/**/*.ts --coverage.reporter=json-summary`]:
-      ok(" Test Files  1 passed (1)\n"),
+    [VITEST_KEY]: ok(" Test Files  1 passed (1)\n"),
     "yarn typecheck": ok(),
     "yarn format:check": ok("All matched files use Prettier code style!\n"),
   };
@@ -122,4 +127,69 @@ export function entry(short: Partial<Record<MetricName, number>> = {}): Record<s
 /** A whole `coverage-summary.json`: the named files plus a `total` at 100. */
 export function summary(files: Record<string, unknown>): string {
   return JSON.stringify({ ...files, total: entry() });
+}
+
+/**
+ * A summary carrying nothing but the `total` aggregate — what vitest writes when
+ * the `--cover` globs match no file at all. To every other question this tool
+ * asks of a summary it looks identical to a perfect run, which is why
+ * `measuredAnything` exists.
+ */
+export const EMPTY_SUMMARY = JSON.stringify({ total: entry() });
+
+/** The non-file dependencies of a run, with recorders for what they were told. */
+export interface LaneHarness {
+  readonly io: VerifyIo;
+  readonly calls: readonly Call[];
+  /**
+   * Every call and every unlink in the order they happened, as one list — which
+   * is the only way to assert about ORDER between a file operation and a command,
+   * since neither list alone knows about the other.
+   */
+  readonly events: readonly string[];
+  /** Every publication to `onRecord`, in order: what a signal path would restore. */
+  readonly recorded: readonly Recorded[];
+  /** Every path `removeFile` was asked to delete. */
+  readonly removed: readonly string[];
+}
+
+/**
+ * A `VerifyIo` over a script, with the two seams a run now has beyond the
+ * runner wired to something a test can read: what was deleted, and what was
+ * recorded. The latch starts open, exactly as the CLI entry's does.
+ */
+export function laneIo(
+  script: Record<string, Answer> = greenScript(),
+  readFile: VerifyIo["readFile"] = async () => summary({ "a.ts": entry() }),
+  removeFile: VerifyIo["removeFile"] = async () => undefined,
+  handlers: { readonly onCall?: (call: Call) => void } = {},
+): LaneHarness {
+  const events: string[] = [];
+  const { run, calls } = runnerFor(script, {
+    onCall: (call) => {
+      events.push(`call: ${call.command} ${call.args.join(" ")}`);
+      handlers.onCall?.(call);
+    },
+  });
+  const recorded: Recorded[] = [];
+  const removed: string[] = [];
+  return {
+    calls,
+    events,
+    recorded,
+    removed,
+    io: {
+      run,
+      readFile,
+      removeFile: async (path) => {
+        removed.push(path);
+        events.push(`unlink: ${path}`);
+        return removeFile(path);
+      },
+      latch: { restored: false },
+      onRecord: (value, _cwd) => {
+        recorded.push(value);
+      },
+    },
+  };
 }

@@ -10,9 +10,10 @@
  * One process this tool ran: its exit code and both streams.
  *
  * The streams are part of the result rather than something the caller goes and
- * fetches, because the STDOUT of the coverage step is where the coverage
- * table lives and the STDERR of every step is where a refusal states its reason.
- * Both are read on the step that produced them, and neither is ever re-read.
+ * fetches, because the STDOUT of the coverage step is where the coverage table
+ * lives, the STDERR of every step is where a refusal states its reason, and both
+ * are what the last forty lines under the table are cut from. Both are read on
+ * the step that produced them, and neither is ever re-read.
  */
 export interface RunResult {
   readonly code: number;
@@ -36,9 +37,54 @@ export type ProcessRunner = (
   options: { readonly cwd: string },
 ) => Promise<RunResult>;
 
-/** One line of the table: what ran, what it exited, and the line worth reading. */
+/**
+ * Whether a row ran at all.
+ *
+ * `skipped` is a STATE and not an exit code, and it is never green: a step this
+ * tool declined to run is a step it did not check, and reporting a run as
+ * verified on the strength of the steps it skipped is the whole failure this
+ * type exists to make impossible. It gets its own word in the table's exit
+ * column and its own value in the emitted detail, so neither a reader at a
+ * terminal nor a script reading the wave log can mistake it for a `0`.
+ */
+export type RowState = "ran" | "skipped";
+
+/**
+ * One line of the table: what ran, whether it ran, what it exited, and the line
+ * worth reading.
+ *
+ * `exit` is null for a row that was skipped and for one whose command could not
+ * be run to a completion — neither has an exit code, and both are non-green.
+ */
 export interface StepRow {
   readonly step: string;
-  readonly exit: number;
+  readonly state: RowState;
+  readonly exit: number | null;
   readonly key: string;
+}
+
+/**
+ * The tail of one red step's output, printed under the table.
+ *
+ * Only red steps have one. A green step's output is noise, and a table followed
+ * by forty lines of scrollback nobody asked for is a report nobody reads.
+ */
+export interface Diagnostic {
+  readonly step: string;
+  readonly exit: number | null;
+  readonly text: string;
+}
+
+/**
+ * One-shot, shared between the run and the signal path.
+ *
+ * Both can reach the restore — the run's `finally` on every ordinary exit, the
+ * SIGINT handler when the operator interrupts a coverage run — and a second
+ * `git checkout` over a tree that is already back where it belongs is not
+ * harmless, because a concurrent edit committed in between would be checked out
+ * away. Whoever gets here first sets the flag; the other reports the step as
+ * skipped rather than doing it twice.
+ */
+export interface RestoreLatch {
+  restored: boolean;
 }

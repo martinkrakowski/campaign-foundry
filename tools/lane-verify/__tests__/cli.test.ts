@@ -5,15 +5,17 @@ import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from "../lib/errors.js";
 import {
   BRANCH,
   VERIFIED,
+  VITEST_KEY,
   WORKTREE,
   entry,
   fail,
   greenScript,
+  laneIo,
   ok,
-  runnerFor,
   summary,
   type Answer,
 } from "./fixtures.js";
+import type { VerifyIo } from "../lib/verify.js";
 
 const ARGV = [
   "--worktree",
@@ -40,24 +42,26 @@ interface Harness {
     readonly args: readonly string[];
     readonly cwd: string;
   }[];
+  /** The seam records, so a test can assert about what the run was told. */
+  readonly lane: ReturnType<typeof laneIo>;
 }
 
 function harness(
   script: Record<string, Answer> = greenScript(),
   over: Partial<LaneVerifyCliIo> = {},
-  readFile: LaneVerifyCliIo["readFile"] = async () => summary({ "a.ts": entry() }),
+  readFile: VerifyIo["readFile"] = async () => summary({ "a.ts": entry() }),
 ): Harness {
-  const { run, calls } = runnerFor(script);
+  const lane = laneIo(script, readFile);
   const out: string[] = [];
   const err: string[] = [];
   return {
-    calls,
+    lane,
     out,
     err,
+    calls: lane.calls,
     io: {
       argv: ARGV,
-      run,
-      readFile,
+      ...lane.io,
       log: (text) => out.push(text),
       logError: (text) => err.push(text),
       ...over,
@@ -88,7 +92,7 @@ describe("runCli", () => {
     const h = harness();
     expect(await runCli(h.io)).toBe(EXIT_OK);
     expect(h.out).toHaveLength(2);
-    expect(h.out[0]?.split("\n")).toHaveLength(8);
+    expect(h.out[0]?.split("\n")).toHaveLength(9);
     expect(h.out[0]).toMatch(/^fetch\s+0\s+\(no output\)$/m);
     expect(h.out[1]).toBe(`verified ${VERIFIED}`);
     expect(h.err).toEqual([]);
@@ -125,9 +129,6 @@ describe("runCli", () => {
   });
 
   test("a runner that could not be LAUNCHED is exit 1, and the launch failure is the answer", async () => {
-    // Not a refusal: the worktree was allowed, and this tool failed to do its
-    // job on it. Exit 1 with the launch failure, rather than a table with an
-    // empty step in it and no reason anywhere.
     const h = harness();
     const real = h.io.run;
     const code = await runCli({
@@ -141,6 +142,87 @@ describe("runCli", () => {
     });
     expect(code).toBe(EXIT_FAILED);
     expect(h.err[0]).toBe("lane:verify: spawn git ENOENT");
+  });
+});
+
+describe("item 5 — the tails are printed under the table", () => {
+  test("a red step's tail follows the table, labelled with the step", async () => {
+    const h = harness(withStep(VITEST_KEY, fail(1, "FAIL  a.test.ts\n  1 failed\n", "")));
+    expect(await runCli(h.io)).toBe(EXIT_FAILED);
+    expect(h.out).toHaveLength(3);
+    expect(h.out[2]).toBe("\n--- tests (exit 1) ---\nFAIL  a.test.ts\n  1 failed");
+  });
+
+  test("a green run prints no tail at all", async () => {
+    const h = harness();
+    expect(await runCli(h.io)).toBe(EXIT_OK);
+    expect(h.out.join("\n")).not.toContain("---");
+  });
+});
+
+describe("item 4 — a crash with --emit still writes one FAILED event", () => {
+  test("the runner throws mid-run, and exactly one failed event reaches the wave", async () => {
+    const h = harness(withStep(FAILED_KEY, ok()), { argv: [...ARGV, ...EMITTED] }, undefined);
+    // Wrap the runner so the vitest call throws, as a killed child would.
+    const real = h.io.run;
+    const thrown = {
+      ...h.io,
+      run: (command: string, args: readonly string[], options: { readonly cwd: string }) => {
+        if (args.join(" ").includes("vitest")) throw new Error("runner vanished");
+        return real(command, args, options);
+      },
+    };
+    expect(await runCli(thrown)).toBe(EXIT_FAILED);
+    const events = h.calls.filter((c) => c.command === "sh");
+    expect(events).toHaveLength(1);
+    const detail = JSON.parse(
+      (events[0]?.args[events[0]?.args.indexOf("--detail") + 1] ?? "{}") as string,
+    ) as { error: string; steps: { step: string }[]; verified: string | null };
+    expect(detail.error).toBe("runner vanished");
+    // The rows gathered so far are in it: a lane's gate event with no rows in it
+    // tells a wave nothing about how far the run got.
+    expect(detail.steps.map((s) => s.step)).toEqual([
+      "fetch",
+      "checkout",
+      "head",
+      "preclean",
+      "restore",
+    ]);
+    expect(detail.verified).toBe(VERIFIED);
+    expect(events[0]?.cwd).toBe(REPO_ROOT);
+    expect(h.err[0]).toBe("lane:verify: runner vanished");
+  });
+
+  test("a REFUSAL with --emit is on the wave too, and stays exit 2", async () => {
+    const h = harness(
+      {
+        ...withStep(FAILED_KEY, ok()),
+        "git rev-parse --git-dir": ok("/repo/.git"),
+        "git rev-parse --git-common-dir": ok("/repo/.git"),
+      },
+      { argv: [...ARGV, ...EMITTED] },
+    );
+    expect(await runCli(h.io)).toBe(EXIT_REFUSED);
+    const detail = JSON.parse(
+      (h.calls.find((c) => c.command === "sh")?.args.slice(-1)[0] ?? "{}") as string,
+    ) as { error: string; steps: unknown[] };
+    expect(detail.error).toMatch(/MAIN worktree/);
+    expect(detail.steps).toEqual([]);
+  });
+
+  test("without --emit a crash writes no event at all", async () => {
+    const h = harness();
+    const real = h.io.run;
+    expect(
+      await runCli({
+        ...h.io,
+        run: (command, args, options) => {
+          if (args.join(" ").includes("vitest")) throw new Error("gone");
+          return real(command, args, options);
+        },
+      }),
+    ).toBe(EXIT_FAILED);
+    expect(h.calls.filter((c) => c.command === "sh")).toHaveLength(0);
   });
 });
 
@@ -162,39 +244,36 @@ describe("--emit", () => {
   });
 
   test("a red run writes the same event as failed", async () => {
-    const h = harness(
-      { ...withStep(FAILED_KEY, ok()), "yarn typecheck": fail(2, "", "error TS2345\n") },
-      { argv: [...ARGV, ...EMITTED] },
+    const h = harness(withStep(FAILED_KEY, ok()), { argv: [...ARGV, ...EMITTED] }, async () =>
+      summary({ "a.ts": entry({ branches: 99.5 }) }),
     );
     expect(await runCli(h.io)).toBe(EXIT_FAILED);
     expect(h.calls.filter((c) => c.command === "sh")).toHaveLength(1);
   });
 
   test("the detail is the printed table, so the event and the table cannot disagree", async () => {
-    const h = harness(
-      { ...withStep(FAILED_KEY, ok()) },
-      { argv: [...ARGV, ...EMITTED] },
-      async () => summary({ "a.ts": entry({ branches: 99.5 }) }),
+    const h = harness(withStep(FAILED_KEY, ok()), { argv: [...ARGV, ...EMITTED] }, async () =>
+      summary({ "a.ts": entry({ branches: 99.5 }) }),
     );
     expect(await runCli(h.io)).toBe(EXIT_FAILED);
     const event = h.calls.find((c) => c.command === "sh");
-    const detailIndex = event?.args.indexOf("--detail") ?? -1;
-    const detail = JSON.parse(event?.args[detailIndex + 1] as string) as {
-      steps: { step: string; exit: number; key: string }[];
+    const detail = JSON.parse(event?.args[event.args.indexOf("--detail") + 1] as string) as {
+      steps: { step: string; state: string; exit: number | null }[];
       verified: string;
     };
     expect(detail.verified).toBe(VERIFIED);
-    expect(detail.steps).toHaveLength(8);
+    expect(detail.steps).toHaveLength(9);
     expect(detail.steps.find((s) => s.step === "coverage")).toEqual({
       step: "coverage",
+      state: "ran",
       exit: 1,
-      key: "1 file(s) under 100: a.ts  branches",
-    });
+      key: expect.stringContaining("a.ts  branches"),
+    } as never);
     // The same rows, in the same order, are what was printed: the first two
     // columns of the table are the step and the exit, read back out of it.
     const printed = (h.out[0] ?? "").split("\n").map((line) => line.trim().split(/\s{2,}/));
-    expect(detail.steps.map((s) => `${s.step} ${s.exit}`)).toEqual(
-      printed.map(([step, exit]) => `${step} ${exit}`),
+    expect(detail.steps.map((s) => `${s.step} ${s.state} ${s.exit ?? "none"}`)).toEqual(
+      printed.map(([step, exit]) => `${step} ran ${exit}`),
     );
   });
 
@@ -222,8 +301,7 @@ describe("--emit", () => {
   test("the event is written AFTER the restore, so a failed event cannot strand the tree", async () => {
     const h = harness(withStep(SETTLED_KEY, ok()), { argv: [...ARGV, ...EMITTED] });
     expect(await runCli(h.io)).toBe(EXIT_OK);
-    const last = h.calls.at(-1);
-    expect(last?.command).toBe("sh");
+    expect(h.calls.at(-1)?.command).toBe("sh");
     expect(h.calls.at(-2)?.args).toEqual(["checkout", "-q", BRANCH]);
   });
 
@@ -235,11 +313,9 @@ describe("--emit", () => {
 
   test("the check's own red code stands even when the event is refused too", async () => {
     const h = harness(
-      {
-        ...withStep(FAILED_KEY, fail(2, "", "invalid lane\n")),
-        "yarn typecheck": fail(2, "", "error TS2345\n"),
-      },
+      withStep(FAILED_KEY, fail(2, "", "invalid lane\n")),
       { argv: [...ARGV, ...EMITTED] },
+      async () => summary({ "a.ts": entry({ branches: 99.5 }) }),
     );
     expect(await runCli(h.io)).toBe(EXIT_FAILED);
     expect(h.err).toEqual(["wave-event.sh: invalid lane"]);
