@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createApp, createRouter, defineEventHandler, toWebHandler, type EventHandler } from "h3";
@@ -104,14 +104,26 @@ export function checkoutRoot(): string {
   }
 }
 
+/** What a `state/` file looked like when the baseline was taken. */
+export interface StateFingerprint {
+  readonly size: number;
+  readonly mtimeMs: number;
+}
+
 /**
- * Every path under `<root>/state`, relative to `root`, or `[]` when there is no
- * such directory. The per-user pointer lands here on the fs backend
- * (`lib/ports/index.ts`), so a `state/` that appears where a test wrote is the
- * crossing this harness is hardened against.
+ * Every path under `<root>/state`, relative to `root`, with what each file
+ * looked like; empty when there is no such directory. The per-user pointer lands
+ * here on the fs backend (`lib/ports/index.ts`), so a `state/` that appears — or
+ * CHANGES — where a test wrote is the crossing this harness is hardened against.
+ *
+ * A fingerprint rather than a path set, because the crossing is not necessarily
+ * a new file: `FsLastOpenedStore.write` writes through a sibling temp file and
+ * renames it over the target, so a second write to the same user's pointer
+ * leaves the same path on disk with different bytes. A path set cannot see that,
+ * and the file it would hide is exactly the one whose content the fs tests read.
  */
-export function snapshotState(root: string): Set<string> {
-  const found = new Set<string>();
+export function snapshotState(root: string): Map<string, StateFingerprint> {
+  const found = new Map<string, StateFingerprint>();
   const walk = (dir: string, prefix: string): void => {
     let entries;
     try {
@@ -126,7 +138,10 @@ export function snapshotState(root: string): Set<string> {
     for (const entry of entries) {
       const path = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.isDirectory()) walk(join(dir, entry.name), path);
-      else found.add(path);
+      else {
+        const { size, mtimeMs } = statSync(join(dir, entry.name));
+        found.set(path, { size, mtimeMs });
+      }
     }
   };
   walk(join(root, "state"), "");
@@ -134,27 +149,37 @@ export function snapshotState(root: string): Set<string> {
 }
 
 /**
- * Fail on any path under `<root>/state` that the `baseline` did not have.
+ * Fail on any path under `<root>/state` that the `baseline` did not have, and on
+ * any path whose size or mtime changed since.
  *
  * A baseline, not an existence check, because the checkout's `state/` is not the
  * harness's to judge: `yarn dev` on the fs backend writes
  * `state/last-opened/local.json` under the checkout — PROJECT_ROOT unset is
  * exactly how a dev server runs — and an existence check would blame every
- * harness-importing test for the developer's own run. What is the harness's to
- * judge is a `state/` that GREW while a test ran.
+ * harness-importing file for the developer's own run. What is the harness's to
+ * judge is a `state/` that GREW or CHANGED while a test ran.
  *
- * KNOWN LIMIT, and it is a limit of existence checks, not of this one: a
- * crossing that overwrites a file already in the baseline is invisible here,
- * because the path set is unchanged. Comparing mtimes would close it at the cost
- * of a stat per file per assertion; the overwrite it would catch is a pointer
- * file whose content a test then reads through its own temp dir, so nothing
- * asserts on it.
+ * The limit that remains: a rewrite to the same byte length within one mtime
+ * tick, which nothing here produces — the rename that makes it is a distinct
+ * file until the rename. Hashing the contents would close even that, at the
+ * cost of reading every file on every assertion to catch a case no assertion
+ * observes.
  */
-export function assertNoNewState(root: string, baseline: ReadonlySet<string>): void {
-  const added = [...snapshotState(root)].filter((path) => !baseline.has(path));
-  if (added.length > 0) {
+export function assertNoNewState(
+  root: string,
+  baseline: ReadonlyMap<string, StateFingerprint>,
+): void {
+  const changed: string[] = [];
+  for (const [path, fingerprint] of snapshotState(root)) {
+    const before = baseline.get(path);
+    if (before === undefined) changed.push(`${path} (new)`);
+    else if (before.size !== fingerprint.size || before.mtimeMs !== fingerprint.mtimeMs) {
+      changed.push(`${path} (rewritten)`);
+    }
+  }
+  if (changed.length > 0) {
     throw new Error(
-      `A test wrote outside its temp dir: ${added.length} new path(s) under ${join(root, "state")}:\n${added.join("\n")}`,
+      `A test wrote outside its temp dir: ${changed.length} changed path(s) under ${join(root, "state")}:\n${changed.join("\n")}`,
     );
   }
 }
@@ -421,14 +446,26 @@ export async function setupPgHarness(
     // catch below is the stale path, so it ends this database and removes this
     // temp dir and restores nothing — which is exactly right for a setup that
     // never became a harness.
+    //
+    // Which is why the guard comes TWICE, and the second one sits after the LAST
+    // await: the org seed is an await too, and a harness that registers during
+    // it is just as live as one that registered during the migrations. Checking
+    // once, before the seed, adopted the database and then emptied the live
+    // caches on the way out — a guard that ran and did not help.
     if (!isInnermost(pending)) {
       throw new Error("setupPgHarness was abandoned: a newer harness is live");
     }
-    setDatabase(db);
+    // On `db` itself, not through `database()`: nothing is adopted until every
+    // await this setup does is done, so the seed cannot reach through a mount
+    // that a later guard would take back.
     await db.query("insert into org (id, name) values ($1, $2) on conflict do nothing", [
       "acme",
       "Acme",
     ]);
+    if (!isInnermost(pending)) {
+      throw new Error("setupPgHarness was abandoned: a newer harness is live");
+    }
+    setDatabase(db);
   } catch (error) {
     const stale = !isInnermost(pending);
     retire(pending);

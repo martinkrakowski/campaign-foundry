@@ -72,8 +72,8 @@
     },
     {
       "file": "apps/api/server/routes/__tests__/tenant-harness.ts",
-      "before": "    if (!isInnermost(pending)) {\n      throw new Error(\"setupPgHarness was abandoned: a newer harness is live\");\n    }\n",
-      "after": "    if (isInnermost(pending)) {\n      throw new Error(\"setupPgHarness was abandoned: a newer harness is live\");\n    }\n",
+      "before": "    if (!isInnermost(pending)) {\n      throw new Error(\"setupPgHarness was abandoned: a newer harness is live\");\n    }\n    // On `db` itself, not through `database()`: nothing is adopted until every\n    // await this setup does is done, so the seed cannot reach through a mount\n    // that a later guard would take back.\n    await db.query(\"insert into org (id, name) values ($1, $2) on conflict do nothing\", [",
+      "after": "    // On `db` itself, not through `database()`: nothing is adopted until every\n    // await this setup does is done, so the seed cannot reach through a mount\n    // that a later guard would take back.\n    await db.query(\"insert into org (id, name) values ($1, $2) on conflict do nothing\", [",
       "because": "the abandoned setup's own continuation, which no cleanup can reach: this setup's body overran its budget, a newer harness registered on top of it, and its migrations finished afterwards into a test that had already moved on. It then adopted the database — `setDatabase()` over the live harness's mock — and dropped the memoized root and every store registry under it. Adopting is what the test refuses: it starts the pg setup, puts a fs harness on top, releases the gate, and expects the setup to REJECT with the fs harness's environment intact. Inverting the question is the mutation rather than deleting the guard, because the claim is about WHICH setups may adopt — a deleted guard is a claim about a line existing",
       "command": [
         "yarn",
@@ -84,6 +84,40 @@
         "apps/api/server/routes/__tests__/tenant-harness.test.ts",
         "-t",
         "a setup abandoned under a newer harness rejects and adopts nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/__tests__/tenant-harness.ts",
+      "before": "    ]);\n    if (!isInnermost(pending)) {\n      throw new Error(\"setupPgHarness was abandoned: a newer harness is live\");\n    }\n    setDatabase(db);",
+      "after": "    ]);\n    setDatabase(db);",
+      "because": "the SECOND guard, and the one Qodo's High was about: the first guard runs right after `makeDb()`, but the org seed is another await, and a harness that registers during it is just as live as one that registered during the migrations. With this guard gone the setup mounts its database over that harness's mock — after the seed — and then `resetProjectRoot()` + `resetAllStores()` empty the live harness's caches on its way out, which is the whole crossing, reached through a path that had already been guarded. The test holds the seed open through the injected `makeDb`, registers a fs harness on top, releases the seed, and asks two things: that the setup REJECTS, and that `database()` is still the handle that was mounted before it started",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/tenant-harness.test.ts",
+        "-t",
+        "a setup abandoned during the org seed rejects and mounts nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/__tests__/tenant-harness.ts",
+      "before": "    else if (before.size !== fingerprint.size || before.mtimeMs !== fingerprint.mtimeMs) {",
+      "after": "    else if (false) {",
+      "because": "the half of the baseline check that is not about existence: `FsLastOpenedStore.write` renames a sibling temp file over the pointer, so a second write to the same user leaves the SAME path on disk with different bytes, and a path set reports nothing. Dropping the size/mtime comparison reduces the check to the existence test Qodo flagged as a false positive on any developer machine, and the test it fails is the one that rewrites a baseline file with a bumped mtime — an overwrite, not an addition",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/tenant-harness.test.ts",
+        "-t",
+        "a pointer OVERWRITTEN in place is caught too"
       ],
       "verdict": "caught"
     }

@@ -1,10 +1,18 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defineEventHandler } from "h3";
 import { projectRoot, resetProjectRoot } from "@campaignfoundry/shared";
-import { database, resetDatabase } from "../../lib/db/database.js";
+import { database, resetDatabase, setDatabase } from "../../lib/db/database.js";
 import { storeBackend } from "../../lib/config.js";
 import { migratedDatabase } from "../../lib/db/__tests__/pglite-client.js";
 import { getLastOpenedStore } from "../../lib/ports/index.js";
@@ -272,16 +280,30 @@ describe("tenant-harness (PT-2a item 1)", () => {
   // registered on top of it while its migrations ran. It must adopt nothing —
   // no `setDatabase` over the live mock, no resets over the live caches — and
   // reject, which is the only answer the abandoned body can still use.
+  //
+  // It must also not get as far as the org seed, which is what separates the
+  // FIRST guard from the second one: this setup is already stale by the time
+  // `makeDb()` resolves, so the seed below is a write into a database the setup
+  // is about to throw away — and the only guard standing in front of it is the
+  // one that runs immediately after `makeDb()`.
   test("a setup abandoned under a newer harness rejects and adopts nothing", async () => {
     let migrate: () => void = () => undefined;
     const migrated = new Promise<void>((resolveGate) => {
       migrate = resolveGate;
     });
+    const queries: string[] = [];
+    const db = stubDatabase();
     // The pg setup first, so the fs harness below registers ON TOP of it: that
     // is what makes this setup stale by the time its migrations finish.
     const abandoned = setupPgHarness(async () => {
       await migrated;
-      return stubDatabase();
+      return {
+        ...db,
+        query: async (text: string, params?: readonly unknown[]) => {
+          queries.push(text);
+          return db.query(text, params);
+        },
+      } as unknown as Awaited<ReturnType<typeof migratedDatabase>>;
     });
     const live = setupFsHarness();
 
@@ -289,6 +311,7 @@ describe("tenant-harness (PT-2a item 1)", () => {
       migrate();
       await expect(abandoned).rejects.toThrow("abandoned");
 
+      expect(queries).toEqual([]);
       expect(process.env.PROJECT_ROOT).toBe(live.projectRoot);
       expect(process.env.OUTPUT_DIR).toBe(live.outputRoot);
       expect(storeBackend()).toBe("fs");
@@ -297,6 +320,68 @@ describe("tenant-harness (PT-2a item 1)", () => {
       migrate();
       await abandoned.catch(() => undefined);
       live.cleanup();
+      delete process.env.PROJECT_ROOT;
+      delete process.env.OUTPUT_DIR;
+      delete process.env.STORE_BACKEND;
+      resetProjectRoot();
+      expect(existsSync(live.tmpDir)).toBe(false);
+    }
+  });
+
+  // The seed is the LAST await before adoption, so a harness that registers
+  // during it is as live as one that registered during the migrations. This
+  // setup had already passed the first guard when the seed began, and it used
+  // to go on to mount its database over that harness's mock and empty its
+  // caches — a guard that ran, and did not help. The seed is gated through the
+  // injected `makeDb`, so nothing in the harness itself had to change to hold
+  // the window open; and the fs harness is registered only once the test has
+  // SEEN the seed reached, because registering it earlier would simply trip the
+  // first guard and prove nothing about the second.
+  test("a setup abandoned during the org seed rejects and mounts nothing", async () => {
+    let seed: () => void = () => undefined;
+    const seeded = new Promise<void>((resolveGate) => {
+      seed = resolveGate;
+    });
+    let reachedSeed: () => void = () => undefined;
+    const atSeed = new Promise<void>((resolveGate) => {
+      reachedSeed = resolveGate;
+    });
+    const db = stubDatabase();
+    const gatedDb = {
+      ...db,
+      query: async (text: string, params?: readonly unknown[]) => {
+        if (text.startsWith("insert into org")) {
+          reachedSeed();
+          await seeded;
+        }
+        return db.query(text, params);
+      },
+    } as unknown as Awaited<ReturnType<typeof migratedDatabase>>;
+    // A database already mounted, so "the abandoned setup mounted nothing" is
+    // answerable: `database()` must still be this one, not the abandoned db.
+    const mounted = stubDatabase();
+    resetDatabase();
+    setDatabase(mounted);
+
+    const abandoned = setupPgHarness(async () => gatedDb);
+    await atSeed;
+    const live = setupFsHarness();
+
+    try {
+      seed();
+      await expect(abandoned).rejects.toThrow("abandoned");
+
+      expect(database()).toBe(mounted);
+      expect(database()).not.toBe(gatedDb);
+      expect(process.env.PROJECT_ROOT).toBe(live.projectRoot);
+      expect(process.env.OUTPUT_DIR).toBe(live.outputRoot);
+      expect(process.env.STORE_BACKEND).toBeUndefined();
+      expect(projectRoot()).toBe(live.projectRoot);
+    } finally {
+      seed();
+      await abandoned.catch(() => undefined);
+      live.cleanup();
+      resetDatabase();
       delete process.env.PROJECT_ROOT;
       delete process.env.OUTPUT_DIR;
       delete process.env.STORE_BACKEND;
@@ -445,7 +530,7 @@ describe("tenant-harness (PT-2a item 1)", () => {
     test("a state/ that was already there is not this suite's doing", () => {
       const baseline = snapshotState(root);
 
-      expect([...baseline]).toEqual(["last-opened/x.json"]);
+      expect([...baseline.keys()]).toEqual(["last-opened/x.json"]);
       expect(() => assertNoNewState(root, baseline)).not.toThrow();
     });
 
@@ -455,7 +540,29 @@ describe("tenant-harness (PT-2a item 1)", () => {
       writeFileSync(join(root, "state", "last-opened", "local.json"), "{}", "utf8");
 
       expect(() => assertNoNewState(root, baseline)).toThrow(
-        /1 new path\(s\) under .*state:\nlast-opened\/local\.json/,
+        /1 changed path\(s\) under .*state:\nlast-opened\/local\.json \(new\)/,
+      );
+    });
+
+    // The overwrite is the case a path set cannot see, and the pointer is
+    // written by rename-over (`fs-last-opened-store.ts`), so a second write
+    // leaves the same path with different bytes. The mtime is bumped explicitly
+    // rather than waited for, so the test asserts the CHECK and not the clock.
+    test("a pointer OVERWRITTEN in place is caught too", () => {
+      const baseline = snapshotState(root);
+      const pointer = join(root, "state", "last-opened", "x.json");
+
+      writeFileSync(pointer, '{"campaignId":"second","updatedAt":"later"}', "utf8");
+      const later = new Date(Date.now() + 10_000);
+      utimesSync(pointer, later, later);
+
+      expect(() => assertNoNewState(root, baseline)).toThrow(
+        /1 changed path\(s\) under .*state:\nlast-opened\/x\.json \(rewritten\)/,
+      );
+      // …and the bytes are not the only thing that distinguishes the two: a
+      // rewrite to the same length is still a rewrite.
+      expect(baseline.get("last-opened/x.json")?.size).not.toBe(
+        snapshotState(root).get("last-opened/x.json")?.size,
       );
     });
 
@@ -469,7 +576,7 @@ describe("tenant-harness (PT-2a item 1)", () => {
         expect(() => assertNoNewState(bare, snapshotState(bare))).not.toThrow();
 
         writeFileSync(join(bare, "state", "u1.json"), "{}", "utf8");
-        expect(() => assertNoNewState(bare, new Set())).toThrow(/u1\.json/);
+        expect(() => assertNoNewState(bare, new Map())).toThrow(/u1\.json/);
       } finally {
         rmSync(bare, { recursive: true, force: true });
       }
