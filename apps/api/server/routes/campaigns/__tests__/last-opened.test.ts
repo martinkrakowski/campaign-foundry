@@ -1,8 +1,9 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, beforeAll } from "vitest";
 import { existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { TenantContext } from "../../../lib/tenant.js";
 import { SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
+import { migratedDatabase } from "../../../lib/db/__tests__/pglite-client.js";
 import {
   getBriefStore,
   getLastOpenedStore,
@@ -99,6 +100,28 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
   "/campaigns/last-opened — $backend (PT-5e, D173, D180)",
   ({ backend }) => {
     const setup = () => (backend === "fs" ? setupFsHarness() : setupPgHarness());
+
+    // Every pg test below boots pglite and runs the whole migration set, which
+    // is seconds of cold work inside a test whose budget is 5 s — and a test
+    // that runs past its budget keeps running (which is how #631 wrote
+    // `state/last-opened/local.json` into the checkout). The 87a4ea93 shape
+    // pays that cost once, here, outside any test: boot one database, close it.
+    // Skipped on fs, which boots no database at all and would pay for nothing.
+    //
+    // A warm-up and nothing more — not a shared handle. `PgHarness.cleanup`
+    // ends the database it was given, so a db shared from here would be ended
+    // by the first test that cleaned up; each test still boots its own.
+    //
+    // The explicit timeout is the hook's own budget, not a test's: the api
+    // project sets no `hookTimeout`, so this would otherwise inherit vitest's
+    // 10 s default, which a cold pg boot plus the migration set overruns on a
+    // loaded machine. It buys nothing about the crossing below, which is fixed
+    // in the harness rather than by waiting longer.
+    beforeAll(async () => {
+      if (backend !== "postgres") return;
+      const warm = await migratedDatabase();
+      await warm.end();
+    }, 60_000);
 
     test("a user who has opened nothing answers { campaignId: null }", async () => {
       const harness = await setup();
