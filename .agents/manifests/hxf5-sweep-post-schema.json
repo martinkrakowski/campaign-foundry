@@ -18,6 +18,23 @@
         "a class of 1 selects only fields the schema declares"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "  resolve${i}: resolveReviewThread(input: { threadId: $thread${i} }) {\n    thread { id isResolved }\n  }",
+      "after": "  resolve${i}: resolveReviewThread(input: { threadId: $thread${i} }) {\n    thread\n  }",
+      "because": "a bare object field is refused by GitHub with 'Field must have selections', and the refusal takes the whole mutation document down — the same total loss as asking for a field that does not exist: the class comment posts nothing and not one thread resolves, and the operator is left reading a refusal. The anchor is the resolve template rather than the bare `thread`, because the template is what carries the set of id and isResolved; and it is worth a mutation of its own because the first one in this manifest only proved the walk can name a field, which a walk that never looks at selection sets is free to do — `thread` is a real field of ResolveReviewThreadPayload, so every field-existence check in the file still passes with the set gone. What catches it is the rule added beside the field lookup: whether a field carries a selection set is read from whether its introspected type is an object, so PullRequestReviewThread with no set is named in the failure the test prints",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/schema.test.ts",
+        "-t",
+        "a class of 1 selects only fields the schema declares"
+      ],
+      "verdict": "caught"
     }
   ]
 }

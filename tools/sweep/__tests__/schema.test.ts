@@ -126,10 +126,29 @@ const schema: GitHubSchema = JSON.parse(
   readFileSync(new URL("./fixtures/github-schema.json", import.meta.url), "utf8"),
 ) as GitHubSchema;
 
+/** The type selection every refresh query has to ask for, verbatim. */
+const THREE_LEVEL_OF_TYPE =
+  "type { name kind ofType { name kind ofType { name kind ofType { name } } } }";
+
 /**
- * Every field this walk names is a field of the type it was selected on. The
- * failure message carries the path — `Mutation.addComment.commentEdge.node` —
- * so the answer says which selection broke, and not merely that one did.
+ * Every field this walk names is a field of the type it was selected on, and
+ * it is spelled the way that type has to be spelled. The failure message
+ * carries the path — `Mutation.addComment.commentEdge.node` — so the answer
+ * says which selection broke, and not merely that one did.
+ *
+ * Whether a field carries a selection set is a property of its TYPE, not of how
+ * the mutation happens to write it, and GitHub rejects both mistakes in the one
+ * document that has to survive: `thread` bare is "Field must have selections",
+ * `url { x }` is "Field must not have a selection since URI has no subfields".
+ * Each is as fatal to the whole mutation as a field that does not exist, so
+ * each is asked here — off the same fixture, with no network.
+ *
+ * The line between the two cases is the fixture: a type it carries is an object
+ * this walk can descend into, and a type it does not is a leaf. That is the most
+ * an offline answer can know, and it is enough for the six types the mutation
+ * actually walks; a selection that returns a type the fixture does not carry is
+ * read here as a leaf, so a new object type in the mutation wants a refresh
+ * before it wants a shape check.
  */
 function expectShape(set: SelectionSet, type: string, path: string): void {
   for (const selection of set.selections) {
@@ -138,7 +157,16 @@ function expectShape(set: SelectionSet, type: string, path: string): void {
     expect(fields, `${at}: the introspected schema holds no type ${type}`).toBeDefined();
     const next = fields?.[selection.field];
     expect(next, `${at}: ${type} has no field named ${selection.field}`).toBeTypeOf("string");
-    expectShape(selection.set, next as string, at);
+    const given = selection.set.selections.length;
+    if (schema.types[next as string] === undefined) {
+      expect(given, `${at}: ${next} is a leaf, and it takes no selection set`).toBe(0);
+    } else {
+      expect(
+        given,
+        `${at}: ${next} is an object, and it takes a selection set — GitHub answers "Field must have selections"`,
+      ).toBeGreaterThan(0);
+      expectShape(selection.set, next as string, at);
+    }
   }
 }
 
@@ -152,6 +180,13 @@ describe("the schema fixture says how to refresh it", () => {
     for (const query of schema.refresh.queries) {
       expect(query).toContain("gh api graphql");
       expect(query).toContain("__type(name:");
+      // Three levels of ofType, and the reason is a leaf that stayed nameless.
+      // One level unwraps `ID!`; two unwrap `[ID!]!`. A field like
+      // PullRequestReviewThread.comments, typed NON_NULL(LIST(NON_NULL(X))), needs
+      // the third — and a field whose name comes back null is a field the next
+      // reader has to look up by hand, which is how a wrong type name gets into
+      // the fixture at all.
+      expect(query).toContain(THREE_LEVEL_OF_TYPE);
     }
   });
 
@@ -185,6 +220,32 @@ describe("dispositionMutation selects fields GitHub's schema has", () => {
       addComment?.set.selections[0]?.set.selections[0]?.set.selections.map((s) => s.field),
     ).toEqual(["url"]);
     expect(Object.keys(schema.types["AddCommentPayload"] ?? {})).not.toContain("comment");
+  });
+
+  // Both of these are GitHub-invalid the way a missing field is: the whole
+  // document is refused, so nothing posts and nothing resolves. Neither is a
+  // typo an eye can catch in a template literal, which is why the walk asks.
+  test("an object field with no selection set is refused, not waved through", () => {
+    const document = "mutation M { resolveReviewThread { thread } }";
+    expect(() => expectShape(parseSelectionSet(document), "Mutation", "Mutation")).toThrow(
+      /thread: PullRequestReviewThread is an object, and it takes a selection set/,
+    );
+  });
+
+  test("a leaf field with a selection set is refused, not waved through", () => {
+    const document = "mutation M { addComment { commentEdge { node { url { x } } } } }";
+    expect(() => expectShape(parseSelectionSet(document), "Mutation", "Mutation")).toThrow(
+      /node\.url: URI is a leaf, and it takes no selection set/,
+    );
+  });
+
+  test("the real mutation spells every field the way its type has to be spelled", () => {
+    // The positive half of the rule above, read off the real thing rather than
+    // off a hand-written document: every object carries a set, every leaf
+    // carries none, and the walk reaches all of it.
+    expect(() =>
+      expectShape(parseSelectionSet(dispositionMutation(2)), "Mutation", "Mutation"),
+    ).not.toThrow();
   });
 });
 
