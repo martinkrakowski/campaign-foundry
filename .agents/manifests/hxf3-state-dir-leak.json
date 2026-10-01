@@ -35,6 +35,57 @@
         "a cleanup landing mid-setup cannot take the roots that setup installed"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/__tests__/tenant-harness.ts",
+      "before": "        if (!stale) {\n          resetAllStores();\n          resetDatabase();\n        }",
+      "after": "        resetAllStores();\n        resetDatabase();",
+      "because": "the pg half of the stale rule, which the fs test above cannot reach at all: a stale pg cleanup used to call `resetDatabase()` on its way out, and `database()` then built a real client from the environment — which has no `DATABASE_URL` under test — so every store in the LIVE harness threw `DATABASE_URL is not set` instead of reading the mock it had. The test stands up two pg harnesses, cleans the outer one up first, and asks `database()` for the live one's handle. Dropping only the `resetDatabase()` call would leave `resetAllStores()` clearing the live harness's caches, which is the same theft by another route, so the claim is the block rather than the one line",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/tenant-harness.test.ts",
+        "-t",
+        "a stale pg cleanup leaves the live harness's database mounted"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/__tests__/tenant-harness.ts",
+      "before": "    const stale = !isInnermost(pending);\n    retire(pending);\n    if (!stale) resetDatabase();\n    try {\n      await db?.end();\n    } finally {\n      if (!stale) restore();\n      else rmSync(tmpDir, { recursive: true, force: true });\n    }",
+      "after": "    resetDatabase();\n    retire(pending);\n    try {\n      await db?.end();\n    } finally {\n      restore();\n    }",
+      "because": "the setup error path, which is the same crossing one path earlier than `cleanup()`: a pg setup that overran its budget and THEN failed — a migration or the org seed failing late — restored the environment unconditionally, handing the test now live the worker's own root (unset, so the checkout), and `resetDatabase()` unmounted that test's mock as well. The test starts the pg setup, puts a fs harness on top of it, then fails the database creation; the fs harness's roots and its memoized project root have to survive it",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/tenant-harness.test.ts",
+        "-t",
+        "a setup failing late cannot restore over the harness set up on top of it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/__tests__/tenant-harness.ts",
+      "before": "    if (!isInnermost(pending)) {\n      throw new Error(\"setupPgHarness was abandoned: a newer harness is live\");\n    }\n",
+      "after": "    if (isInnermost(pending)) {\n      throw new Error(\"setupPgHarness was abandoned: a newer harness is live\");\n    }\n",
+      "because": "the abandoned setup's own continuation, which no cleanup can reach: this setup's body overran its budget, a newer harness registered on top of it, and its migrations finished afterwards into a test that had already moved on. It then adopted the database — `setDatabase()` over the live harness's mock — and dropped the memoized root and every store registry under it. Adopting is what the test refuses: it starts the pg setup, puts a fs harness on top, releases the gate, and expects the setup to REJECT with the fs harness's environment intact. Inverting the question is the mutation rather than deleting the guard, because the claim is about WHICH setups may adopt — a deleted guard is a claim about a line existing",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/tenant-harness.test.ts",
+        "-t",
+        "a setup abandoned under a newer harness rejects and adopts nothing"
+      ],
+      "verdict": "caught"
     }
   ]
 }

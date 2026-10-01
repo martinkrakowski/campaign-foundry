@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createApp, createRouter, defineEventHandler, toWebHandler, type EventHandler } from "h3";
 import { afterAll } from "vitest";
 import { resetProjectRoot } from "@campaignfoundry/shared";
+import { isErrno } from "../../lib/brief-files.js";
 import { resetDatabase, setDatabase } from "../../lib/db/database.js";
 import { migratedDatabase } from "../../lib/db/__tests__/pglite-client.js";
 import type { SqlClient } from "../../lib/db/sql-client.js";
@@ -84,17 +85,89 @@ export function assertNoLeakedTenantDirs(): void {
   }
 }
 
+/** Files that mark the monorepo root, as `projectRoot()` marks it. */
+const ROOT_MARKERS = ["yarn.lock", "turbo.json"];
+
+/**
+ * The checkout this worker runs in: the nearest ancestor of cwd holding a root
+ * marker, the same walk `projectRoot()` does. Deliberately not `process.cwd()`,
+ * which is a workspace directory when vitest runs from one — and a check derived
+ * from the wrong directory is not a check at all, it is a green test.
+ */
+export function checkoutRoot(): string {
+  let dir = resolve(process.cwd());
+  for (;;) {
+    if (ROOT_MARKERS.some((marker) => existsSync(join(dir, marker)))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return resolve(process.cwd());
+    dir = parent;
+  }
+}
+
+/**
+ * Every path under `<root>/state`, relative to `root`, or `[]` when there is no
+ * such directory. The per-user pointer lands here on the fs backend
+ * (`lib/ports/index.ts`), so a `state/` that appears where a test wrote is the
+ * crossing this harness is hardened against.
+ */
+export function snapshotState(root: string): Set<string> {
+  const found = new Set<string>();
+  const walk = (dir: string, prefix: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+      // Absent is the ordinary case: a checkout that never ran the fs backend
+      // has no `state/` at all. Anything else is this check's own problem, and
+      // failing to LOOK must never read as "nothing there".
+      if (!isErrno(error, "ENOENT")) throw error;
+      return;
+    }
+    for (const entry of entries) {
+      const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(join(dir, entry.name), path);
+      else found.add(path);
+    }
+  };
+  walk(join(root, "state"), "");
+  return found;
+}
+
+/**
+ * Fail on any path under `<root>/state` that the `baseline` did not have.
+ *
+ * A baseline, not an existence check, because the checkout's `state/` is not the
+ * harness's to judge: `yarn dev` on the fs backend writes
+ * `state/last-opened/local.json` under the checkout — PROJECT_ROOT unset is
+ * exactly how a dev server runs — and an existence check would blame every
+ * harness-importing test for the developer's own run. What is the harness's to
+ * judge is a `state/` that GREW while a test ran.
+ *
+ * KNOWN LIMIT, and it is a limit of existence checks, not of this one: a
+ * crossing that overwrites a file already in the baseline is invisible here,
+ * because the path set is unchanged. Comparing mtimes would close it at the cost
+ * of a stat per file per assertion; the overwrite it would catch is a pointer
+ * file whose content a test then reads through its own temp dir, so nothing
+ * asserts on it.
+ */
+export function assertNoNewState(root: string, baseline: ReadonlySet<string>): void {
+  const added = [...snapshotState(root)].filter((path) => !baseline.has(path));
+  if (added.length > 0) {
+    throw new Error(
+      `A test wrote outside its temp dir: ${added.length} new path(s) under ${join(root, "state")}:\n${added.join("\n")}`,
+    );
+  }
+}
+
+/** What the checkout looked like before this file ran a single test. Taken at
+ *  module load, because that is the only moment the harness can honestly say
+ *  "before": a baseline taken in an `afterAll` would already contain the write
+ *  it is meant to catch. */
+const checkoutAtLoad = snapshotState(checkoutRoot());
+
 afterAll(() => {
   assertNoLeakedTenantDirs();
-  // The crossing this harness is hardened against writes here, so say so in a
-  // test rather than in the next lane's `git status`: `projectRoot()` resolves
-  // to the checkout whenever `PROJECT_ROOT` is unset, and `state/` is where the
-  // per-user pointer lands under it. An unedited tree that grows one is a
-  // failure here, not a dirty checkout somebody has to unpick.
-  const inCheckout = join(process.cwd(), "state");
-  if (existsSync(inCheckout)) {
-    throw new Error(`A test wrote outside its temp dir: ${inCheckout} exists in the checkout.`);
-  }
+  assertNoNewState(checkoutRoot(), checkoutAtLoad);
 });
 
 export { LOCAL_TENANT, type TenantContext } from "../../lib/tenant.js";
@@ -330,22 +403,41 @@ export async function setupPgHarness(
   };
 
   // A setup step that throws must not leave Postgres mode, the changed roots
-  // or the temp dir behind for the next test in this worker.
+  // or the temp dir behind for the next test in this worker — but a setup that
+  // failed LATE, from a body that overran its budget before the failure, has a
+  // live harness on top of it. Restoring over that one hands the test now
+  // running an unset root, and `resetDatabase()` unmounts its mock. So the same
+  // staleness rule as `cleanup()`: a stale failure closes its own database and
+  // removes its own temp dir, and touches nothing else.
   let db: Awaited<ReturnType<typeof migratedDatabase>> | undefined;
   try {
     db = await makeDb();
+    // An ABANDONED setup: this one's body overran its budget, and a newer
+    // harness registered on top of it while the migrations ran. Its roots were
+    // installed at entry and are nobody's now, so adopting the database here
+    // would mount it over the live harness's mock, and the two resets below
+    // would empty the live harness's caches. Reject instead: the body that gets
+    // this has already lost, and the process belongs to whoever is running. The
+    // catch below is the stale path, so it ends this database and removes this
+    // temp dir and restores nothing — which is exactly right for a setup that
+    // never became a harness.
+    if (!isInnermost(pending)) {
+      throw new Error("setupPgHarness was abandoned: a newer harness is live");
+    }
     setDatabase(db);
     await db.query("insert into org (id, name) values ($1, $2) on conflict do nothing", [
       "acme",
       "Acme",
     ]);
   } catch (error) {
-    resetDatabase();
+    const stale = !isInnermost(pending);
+    retire(pending);
+    if (!stale) resetDatabase();
     try {
       await db?.end();
     } finally {
-      retire(pending);
-      restore();
+      if (!stale) restore();
+      else rmSync(tmpDir, { recursive: true, force: true });
     }
     throw error;
   }
@@ -374,9 +466,10 @@ export async function setupPgHarness(
         }
         await ready.end();
       } finally {
-        // The temp dir goes either way, and the environment is restored only
-        // by the harness that is still live — never from a `finally`, which
-        // would swallow the failure `end()` reports.
+        // The temp dir goes either way, and the environment is restored only by
+        // the harness that is still live — so a failure `end()` reports is the
+        // one this cleanup throws, and it throws it AFTER the restore rather
+        // than swallowing it.
         rmSync(tmpDir, { recursive: true, force: true });
         if (!stale) restore();
       }
