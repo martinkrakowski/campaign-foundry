@@ -639,6 +639,39 @@ busy_exit() {
   exit $BUSY
 }
 
+# Give a slot back — but only while it is still THIS invocation's.
+#
+# `rm -rf` on a path is a statement about the NAME, not about the directory this
+# process created, and both of acquire's give-backs are reached after the name
+# could have moved on. A contender that judged the slot dead and took it in the
+# window has its replacement deleted by an acquire that had already been
+# refused, so the refused caller takes out a lock it never held and never named.
+# That window is real and this lane's own neighbour found it: MH5's acquire
+# window is gate.sh TERMed while the acquire child carries on, so the recorded
+# caller pid is gone mid-acquire and the very next contender judges the slot
+# reclaimable on its first pass.
+#
+# So the same contract release uses (see release) applies here: re-read owner
+# and pid, remove only while both are still this invocation's, and otherwise
+# leave whatever is at the name completely alone. A holder that lost its lock can
+# neither delete the replacement nor keep it.
+#
+# Always returns 0, and changes no exit code. Both callers are about to exit 75
+# or 2 regardless — the caller does not get a slot out of this either way — and
+# a removal declined here means the name belongs to a contender now, which is
+# the right place for it and is visible in `status`. Silent by design: the
+# refusal that brought us here has already said why we are leaving.
+give_back_slot() {
+  if [ "$(cat "$LOCK/owner" 2>/dev/null)" != "$lane" ]; then
+    return 0
+  fi
+  if [ "$(cat "$LOCK/pid" 2>/dev/null)" != "$recorded_pid" ]; then
+    return 0
+  fi
+  rm -rf "$LOCK" 2>/dev/null
+  return 0
+}
+
 # The same 75, for a host that HAS room and must not be used anyway: another
 # live holder is gating the very tree this caller is standing in. It names the
 # holder, the slot it holds, and the worktree they share, because `busy` on its
@@ -720,6 +753,23 @@ acquire() {
   # Every slot it could take is the same caller's, so this is one answer asked
   # once rather than a fork per pass.
   worktree=$(caller_worktree)
+  # No identity, no lock — fail CLOSED, and before the slot loop, so nothing has
+  # been taken and nothing has to be given back. `caller_worktree` asks git and
+  # then `pwd -P`, and both can come back empty: the cwd has been deleted or
+  # become unreachable underneath this process, which is a real shape here rather
+  # than a theory (MH5's acquire window is a gate TERMed mid-acquire, and a
+  # directory removed under a running shell is one `rmdir` away).
+  #
+  # Recording "" instead is the one answer that silently disarms the rule: an
+  # empty worktree file matches nothing in worktree_holder, so this holder would
+  # be invisible to the very next acquire from the same directory, and two gates
+  # in one worktree would each hold a slot — which is the whole defect this lane
+  # closed. Exit 2, not 75: the host is not busy and retrying will not help
+  # while the caller's own directory is gone.
+  if [ -z "$worktree" ]; then
+    printf '%s\n' "gate-lock: cannot determine the caller's worktree — the caller's directory is gone or unreadable, so no lock was taken (a lock with no worktree cannot be compared and would not be seen by the next acquire)" >&2
+    exit 2
+  fi
   slot_no=0
   busy_owner=""
   busy_pid=""
@@ -742,13 +792,22 @@ acquire() {
         # stdout: a caller that reads that line believes it holds a slot, and on
         # this path it no longer does. The busy line below is the whole truth.
         if same_worktree_slot=$(worktree_holder); then
-          rm -rf "$LOCK" 2>/dev/null
+          # Test hook (CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM): between the
+          # scan and the give-back, which is the window the name can be taken in
+          # and the give-back can then delete the taker. Parking it is the only
+          # way to hit that window on purpose: the scan and the removal are
+          # microseconds apart, and a test that raced them would be racing luck.
+          if [ -n "${CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM:-}" ]; then
+            touch "$CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM" 2>/dev/null
+            while [ -f "$CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM" ]; do sleep 1; done
+          fi
+          give_back_slot
           same_worktree_exit "$same_worktree_slot"
         fi
         printf '%s\n' "gate-lock: acquired by $lane (pid $recorded_pid) at $LOCK"
         if [ -n "${CF_GATE_SLOT_OUT:-}" ]; then
           if ! printf '%s\n' "$LOCK" > "$CF_GATE_SLOT_OUT" 2>/dev/null; then
-            rm -rf "$LOCK" 2>/dev/null
+            give_back_slot
             printf '%s\n' "gate-lock: acquire — cannot record the slot taken in $CF_GATE_SLOT_OUT; the lock is given back rather than left held by a caller that cannot pin it" >&2
             exit 2
           fi

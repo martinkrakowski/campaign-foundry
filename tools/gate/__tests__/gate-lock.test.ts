@@ -330,6 +330,47 @@ describe("gate-lock.sh", () => {
     expect(lockFile(dir, "pid").trim()).toBe(String(process.pid));
   });
 
+  test("an acquire from a directory that no longer exists is refused, having taken nothing", () => {
+    // One gate per worktree is enforced by comparing worktrees, and an EMPTY
+    // worktree compares equal to nothing: worktree_holder skips a slot whose
+    // worktree file is empty, so a lock that recorded "" would be invisible to
+    // the next acquire from the same directory, and two gates would each hold a
+    // slot in one worktree. So the identity is required, and the refusal is
+    // CLOSED — before the slot loop, not after a slot is won and given back.
+    //
+    // The shape here is the portable one. Handing spawnSync a `cwd` that is not
+    // there fails inside libuv with ENOENT before any shell starts, on every
+    // platform, so the child is asked to delete its OWN cwd and then exec: the
+    // shell is already running when the directory goes. `cd` succeeds, `rmdir`
+    // succeeds because the directory is empty, and from the `exec` on there is
+    // no path back to it — `git rev-parse` cannot answer, and `pwd -P` prints
+    // nothing at all (measured here under /bin/sh, which is dash, and under
+    // bash: both give an empty string, with the getcwd failure on stderr).
+    const dir = scratch();
+    const doomed = scratch();
+    const result = spawnSync(
+      "sh",
+      ["-c", 'cd "$1" && rmdir "$1" && exec sh "$2" acquire lane-gone', "sh", doomed, gateLockSh],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          CF_GATE_SLOTS: "1",
+          TMPDIR: dir,
+          CF_GATE_CALLER_PID: String(process.pid),
+        },
+      },
+    );
+    // Exit 2 and not 75: the host is not busy, and retrying cannot help while
+    // the caller's own directory is gone.
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("cannot determine the caller's worktree");
+    // Nothing was taken, and nothing was half-taken: no lock at the name, and
+    // no candidate left behind by a try_create the loop never had to enter.
+    expect(existsSync(lockDir(dir))).toBe(false);
+    expect(leftoverCands(dir)).toEqual([]);
+  });
+
   test("a live holder makes acquire exit 75", () => {
     const dir = scratch();
     seedLock(dir, { pid: process.pid, owner: "lane-a" });
@@ -1903,6 +1944,78 @@ describe("gate-lock.sh CF_GATE_SLOTS", () => {
       expect(taken.stdout).not.toContain("reclaiming");
     }
   });
+
+  test("a same-worktree refusal that has lost its own slot leaves the replacement alone", async () => {
+    // `rm -rf "$LOCK"` is a statement about the NAME, and by the time a refused
+    // acquire gives its slot back the name may not be the one it created. The
+    // window is real, not theoretical: MH5's acquire window is gate.sh being
+    // TERMed while the acquire child carries on, so the recorded caller pid is
+    // gone mid-acquire and the next contender judges the slot reclaimable on
+    // its first pass. The refused acquire then deletes the replacement — a lock
+    // it never held and never named, belonging to a gate that is running now.
+    //
+    // So the give-back re-reads owner and pid and removes only while both are
+    // still this invocation's, the contract release already uses. Driving it
+    // needs the scan and the removal parked apart from each other, which
+    // CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM is for: the two are
+    // microseconds apart in production, and a test that raced them would be
+    // racing luck.
+    const dir = scratch();
+    const worktree = scratch();
+    // A live same-worktree holder in slot 0, so this acquirer cannot take slot
+    // 0, wins slot 1, and is then refused — the only path that reaches a
+    // give-back at all.
+    const holder = seedSlot(dir, 0, {
+      owner: "lane-holder",
+      pid: process.pid,
+      worktree: plainWorktree(worktree),
+    });
+    const hook = join(dir, "paused-before-same-worktree-rm");
+    const { done } = startLockIn(
+      dir,
+      ["acquire", "lane-late"],
+      {
+        CF_GATE_CALLER_PID: "424242",
+        CF_GATE_SLOTS: "2",
+        CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM: hook,
+      },
+      "sh",
+      worktree,
+    );
+    try {
+      // Parked between the scan and the give-back, holding slot 1.
+      await waitForFile(hook);
+      expect(existsSync(slotDir(dir, 1))).toBe(true);
+      // The name is taken over while it waits: the slot is removed and a
+      // contender's lock, with another owner and another pid, is seeded there.
+      rmSync(slotDir(dir, 1), { recursive: true, force: true });
+      const replacement = seedSlot(dir, 1, {
+        owner: "lane-replacement",
+        pid: process.pid,
+        worktree: plainWorktree(worktree),
+      });
+      rmSync(hook, { force: true });
+
+      const result = await done;
+      // Still the same refusal: the guard changes what is removed, not the
+      // answer the caller gets.
+      expect(result.status).toBe(75);
+      expect(result.stderr).toContain("same worktree");
+      // The replacement is intact — both halves of the identity disagree with
+      // this invocation's, and the give-back removed nothing.
+      expect(slotFile(replacement, "owner").trim()).toBe("lane-replacement");
+      expect(slotFile(replacement, "pid").trim()).toBe(String(process.pid));
+      // And the holder it yielded to in the first place never moved.
+      expect(slotFile(holder, "owner").trim()).toBe("lane-holder");
+    } finally {
+      // A failed assertion must not leave the child parked on a hook file in a
+      // TMPDIR the afterEach has already removed: it would sleep forever with
+      // nobody left to release its slot. Removing the file releases it, and
+      // awaiting `done` is safe however many callers await it.
+      rmSync(hook, { force: true });
+      await done;
+    }
+  }, 30_000);
 
   test("a holder with no worktree file never blocks: it never claimed one", () => {
     // Compatibility, and not optional: locks outlive the script that wrote
