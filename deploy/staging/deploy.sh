@@ -34,7 +34,7 @@ IMAGE="registry.midnight.lan/library/campaign-foundry:$TAG"
 CONTEXT="${STAGING_DOCKER_CONTEXT:-midnight}"
 NODE="${STAGING_SSH:-m}"
 NS=campaign-foundry-staging
-remote() { ssh "$NODE" "KUBECONFIG=/etc/rancher/k3s/k3s.yaml $*"; }
+remote() { ssh "$NODE" "KUBECONFIG=\$HOME/.kube/config $*"; }
 
 if [ "$CONFIRMED" != yes ]; then
   if [ ! -t 0 ]; then
