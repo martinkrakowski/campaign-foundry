@@ -19,6 +19,21 @@ export interface ReviewThread extends ThreadState {
   readonly excerpt: string;
   /** The first comment's full body — attribution matches against it, not the excerpt. */
   readonly body: string;
+  /**
+   * The file the thread is anchored to, or `""` when the API omits one. Only
+   * `fix-brief` reads it, and it reads it as text off the wire rather than as
+   * a path to open, which is why the sanitising happens there.
+   */
+  readonly path: string;
+  /** The line the thread sits on NOW, or `null` for a thread with no line. */
+  readonly line: number | null;
+  /**
+   * The line the thread was written against, or `null`. This is the anchor a
+   * finding still refers to after the file moved underneath it.
+   */
+  readonly originalLine: number | null;
+  /** True only when the API says so — `isResolved` is not a proxy for it. */
+  readonly isOutdated: boolean;
 }
 
 /** The pull request shape the fetch response is expected to carry. */
@@ -35,6 +50,10 @@ export interface PullRequestShape {
           readonly nodes?: readonly {
             readonly id: string;
             readonly isResolved: boolean;
+            readonly path?: string;
+            readonly line?: number | null;
+            readonly originalLine?: number | null;
+            readonly isOutdated?: boolean;
             readonly comments?: {
               readonly nodes?: readonly {
                 readonly author?: { readonly login?: string } | null;

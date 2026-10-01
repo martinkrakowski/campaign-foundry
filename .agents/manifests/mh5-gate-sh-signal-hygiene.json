@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "MH5-gate-sh-signal-hygiene",
+  "mutations": [
+    {
+      "file": "scripts/gate.sh",
+      "before": "  if [ \"$LOCK_HELD\" -eq 0 ]; then\n    LOCK_SLOT_PATH=$(cat \"$LOCK_SLOT_FILE\" 2>/dev/null)\n    [ -n \"$LOCK_SLOT_PATH\" ] || return 0\n    LOCK_HELD=1\n  fi\n",
+      "after": "  if [ \"$LOCK_HELD\" -eq 0 ]; then\n    return 0\n  fi\n",
+      "because": "the acquire-window recovery itself. With it dropped, a TERM delivered while the acquire child runs leaves the lock behind naming a pid that is about to be gone: the signal is deferred until that foreground child exits and the child is NOT signalled, so it finishes its rename and writes the slot it won, and LOCK_HELD is still 0 when the deferred exit 143 runs, which means release_lock had nothing to give back. The name survives until some later acquire judges it abandoned - a leak, not a permanent hold. This fails on EVERY shell in the list rather than on one of them, because the deferral is POSIX and not a quirk of a particular /bin/sh: the test signs the parent pid only, and parks that child inside the existing CF_GATE_TEST_PAUSE_BEFORE_MV hook (inherited by the acquire child) so the window is deterministic instead of a race. Measured against the unfixed script before the lane started: exit 143 with no release line and a cf-gate.lock left naming the dead gate, 1 run in 1, under both dash and bash.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-signals.test.ts",
+        "-t",
+        "a TERM while the acquire child runs still releases the lock that child won"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate.sh",
+      "before": "      printf '%s\\n' \"gate: lock released, heartbeat stopped\" >&3\n",
+      "after": "      printf '%s\\n' \"gate: lock released, heartbeat stopped\"\n",
+      "because": "the gate's own release line goes back onto fd 1, and there the report becomes whatever the interrupted command was doing with fd 1. For the test:cov step that is the COVLOG capture run_test_cov wraps its command in, and under bash the trap runs with that capture still in effect, so the line lands in the coverage log and cleanup deletes it with the rest of the log: the lock IS released and the gate says nothing. The SHELL decides this one, and it is recorded here because no other field of a manifest is read as one: measured 3 lines lost under bash-as-sh and 0 under dash in the same second, so the command below catches it only on a host whose shell list contains bash (this one does), and on a dash-only host it would survive. The test waits for a trace its step writes from inside that capture before it signals, because signalling at the heartbeat line instead lands in the few milliseconds before the redirect exists - where the line reaches the caller anyway - and then this case passes against the very script it is meant to catch (measured: 3 shells out of 3). The release child's own stdio, the gate-lock: released by line, is a second and separate claim, pinned by the other assertion in the same test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-signals.test.ts",
+        "-t",
+        "a TERM during the test:cov step reports the release on the caller's stdout"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate.sh",
+      "before": "    exec 3>&- 4>&-\n    trap - INT TERM EXIT\n",
+      "after": "    trap - INT TERM EXIT\n",
+      "because": "the heartbeat subshell no longer gives the caller's saved stdout and stderr back, so the `sleep` that killing that subshell orphans holds fds 3 and 4 for the rest of the interval. That is the same orphan the comment above that line names, one fd wider, and it outlives a gate that has already printed that it is gone: the release is correct and reported once, and the caller's pipe is still open behind it. Measured with the interval pinned to 8s and the whole pipeline timed, because the reader sees EOF only when every writer of the pipe is gone: 3s with the line, 8s without - the same 3s/8s under sh, dash and bash alike, so unlike the mutation above this one is not shell-specific and it fails at the FIRST shell in the list. What catches it is the TIMING rather than a line of output, and the two have to be pinned together for that to mean anything: the case sets CF_GATE_HEARTBEAT_SECONDS to 60, so the orphan outlives the 20s `within` bound that waits for the gate to close, on a host whose own interval might be shorter than the bound. The test fails by that bound REJECTING (the gate under <shell> never closed - still not finished after 20000ms) and not by vitest's own timeout, so the failure names the mechanism instead of reporting that something took too long.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-signals.test.ts",
+        "-t",
+        "a TERM during the test:cov step reports the release on the caller's stdout"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate.sh",
+      "before": "  if [ \"$release_attempted\" -eq 1 ]; then\n    return 0\n  fi\n",
+      "after": "  if [ \"$release_attempted\" -eq 1 ]; then\n    return 0\n  fi\n  release_attempted=1\n",
+      "because": "the flag set on ENTRY as well as before the child, which is the same script as the flag set only on entry: the second assignment is then a no-op re-set of a value already 1, and the early return turns every re-entry into a silent skip. Everything between the two is interruptible by a signal and re-enters through cleanup - `kill` and `wait` above all, because wait is interruptible by a trapped signal in dash and in bash alike (the handler runs while the loop is still alive) - and cleanup's release_lock then does nothing at all. The gate exits 143 having released nothing, and the lock is left on disk naming a pid that is gone: measured on the unfixed script under sh, dash and bash, 1 run in 1 each, zero release lines on stdout and `cf-gate.lock` left holding lane-a's dead pid. The test catches it by the liveness it reads BEFORE it lets the parked heartbeat die: the fixed gate is still running inside cleanup's own release, this one has already exited. It fails on every shell in the list, since neither the deferral nor the interruption is shell-specific.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-signals.test.ts",
+        "-t",
+        "a TERM while the release is stopping the heartbeat still gives the lock back"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
