@@ -133,6 +133,8 @@ describe("TEMPLATE_F and the doc", () => {
     // nothing to do with the checklist, which is the shape of an assertion that
     // cannot fail.
     expect(brief).not.toMatch(/^#{1,2} Concurrency checklist/m);
+    // The whole line, so a level-4 heading (whose text still contains the level-3 one) fails too.
+    expect(brief.split("\n")).toContain(CHECKLIST);
 
     // The five items are the five, in order, and each of the three that has a
     // defect behind it still cites it: a checklist that lost a citation would
