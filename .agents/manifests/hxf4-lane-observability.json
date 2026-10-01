@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "lane": "HXF4-lane-observability",
+  "mutations": [
+    {
+      "file": "tools/lane-watch/lib/server.ts",
+      "before": "  if (!LOOPBACK_HOSTS.has(url.hostname)) {",
+      "after": "  if (false) {",
+      "because": "The loopback check is the ONLY thing standing between a mistyped --server and a request to whatever host the operator named. This tool is read-only toward the server by construction — it sends GET, refuses redirects, and will request exactly two paths — but 'read-only' bounds what it may ASK, not where it may ask it, and the one endpoint that carries every other lane's events on a shared machine is the one worth not asking from off-box. `checkServer` returns `url.origin`, so with the host check gone an operator's typo, or a config file pointing at a shared box, is followed without complaint and the tunnel's only property is gone. The protocol check on the line above stays intact, which is why this mutation is narrow: it removes exactly the host half and leaves everything else in place. The test expects exit 2 for two non-loopback hosts and asserts no request was recorded, so it must fail",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/lane-watch/__tests__/usage.test.ts",
+        "-t",
+        "a non-loopback --server is refused before any request is made"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/lane-watch/lib/follow.ts",
+      "before": "  const arm = (): void => {\n    io.clearTimer(timer);\n    timer = io.setTimer(fireStall, stallMs);\n  };\n  arm();",
+      "after": "  const arm = (): void => {};\n  arm();",
+      "because": "The stall timer is the whole reason this tool exists as a liveness check. Without it a lane that dies mid-step leaves a subscription that stays open forever: the server is alive, so nothing errors, the tunnel holds, and the watch reports a working lane for as long as anyone waits. That is the exact condition the row was written against — lane liveness inferred from a log's byte count, which stops growing just as often when a lane is working as when it has died. `arm` is also the ONLY re-arm point, so emptying it removes the timer both at the start of a subscription and after every event for the session, and the `--stall` option becomes a flag that changes nothing. The test drives a fixture carrying heartbeats and another lane's events past the window and expects exit 3; the fixture is closed only after the window, so the watch ends at 1 instead and fails on the exit code rather than on a timeout",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/lane-watch/__tests__/follow.test.ts",
+        "-t",
+        "heartbeats and another session's events do NOT reset it, and it exits 3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/lane-watch/lib/follow.ts",
+      "before": "  if (owner !== session) {",
+      "after": "  if (false) {",
+      "because": "`/global/event` carries EVERY instance's events on the machine, so this branch is the whole difference between watching one lane and watching the box. With it gone, another lane's `session.idle` ends the watch at 0 and the orchestrator records a still-running lane as settled — the failure the row names first, and one that is invisible in a wave's own log because the lane did go on working afterwards. It is also what makes the unattributed-error carve-out reachable, so emptying the branch does not merely widen the filter: it removes the only place the filter is applied, and the `forSession` flag it returns becomes vacuous, which is why the stall timer would then re-arm on every heartbeat. The test feeds another lane's idle and tool call ahead of this lane's and asserts the log holds this lane's line alone",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/lane-watch/__tests__/follow.test.ts",
+        "-t",
+        "another lane going idle does not end this lane's watch"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
