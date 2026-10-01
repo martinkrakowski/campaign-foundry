@@ -572,25 +572,49 @@ function startMergePrs(
   args: readonly string[],
   env: Readonly<Record<string, string>> = {},
   detached = false,
+  stdinPipe = false,
 ): { child: ChildProcess; done: Promise<RunResult>; closed: Promise<RunResult> } {
   // The body's process group, published by the gh stub when it is entered. Set
   // here rather than per test so that EVERY run this file starts can be torn
   // down completely, including one that fails before its own cleanup runs.
   const bodyPgidFile = join(harness.stateDir, "gh-pgid");
+  // `stdinPipe` is opt-in and exists for one test. The default "ignore" gives
+  // the run /dev/null on stdin, which is what every other test wants and what
+  // makes this file's own reads harmless. But it also means such a run would
+  // report EOF on stdin whether or not the script redirected it — so a test that
+  // used this path to prove the script's `</dev/null` was proving nothing, because
+  // spawnSync hands a child a CLOSED pipe. A real pipe, held open and never
+  // written to, is the only stdin that can tell the two apart: a body without the
+  // redirect blocks on a read that will never be answered.
+  //
+  // Typed as a tuple rather than left to be inferred, because the literal
+  // ["ignore","pipe","pipe"] is what let the overload pick the pipes and promise a
+  // non-null child.stdout; a computed array of the same shape does not, and every
+  // read below would be a `possibly null`.
+  const stdio: ["ignore" | "pipe", "pipe", "pipe"] = stdinPipe
+    ? ["pipe", "pipe", "pipe"]
+    : ["ignore", "pipe", "pipe"];
   const child = spawn("zsh", [mergePrsSh, ...args], {
     cwd: harness.repoDir,
     env: mergePrsEnv(harness, { STUB_GH_PGID_OUT: bodyPgidFile, ...env }),
     detached,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio,
   });
   liveRuns.add({ child, bodyPgidFile });
   bodyPgidFiles.set(child, bodyPgidFile);
+  // We asked for two pipes and got two pipes, but the union in the first slot of
+  // `stdio` above is enough for the spawn overload to fall back to its general
+  // shape, where the streams are typed `Readable | null`. One assertion each, on
+  // the two locals everything below reads, rather than four scattered through the
+  // collector.
+  const out = child.stdout!;
+  const errStream = child.stderr!;
   let stdout = "";
   let stderr = "";
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => (stdout += chunk));
-  child.stderr.on("data", (chunk: string) => (stderr += chunk));
+  out.setEncoding("utf8");
+  errStream.setEncoding("utf8");
+  out.on("data", (chunk: string) => (stdout += chunk));
+  errStream.on("data", (chunk: string) => (stderr += chunk));
   const settle = (code: number | null): RunResult => ({
     status: code ?? -1,
     stdout,
@@ -1489,7 +1513,7 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
     // so `kill -TERM -- -$pgid` names a group that does not exist, fails silently,
     // and `wait` then blocks for the whole PR: the signal is answered only after
     // the merge it was meant to stop, and the lock is released after that. The
-    // hook widens the window to two seconds so a signal can be aimed at it.
+    // hook widens the window to three seconds so a signal can be aimed at it.
     const harness = makeHarness();
     const pgidOut = join(harness.stateDir, "gh-pgid");
     const { child, done } = startMergePrs(harness, [specOf(PR_ONE)], {
@@ -1565,29 +1589,56 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
     }
   }, 30_000);
 
-  test("a PR body never waits on a terminal for input", () => {
+  test("a PR body never waits on a terminal for input", async () => {
     // The body inherits this run's stdin. On a terminal that is a tty, and the
-    // first thing to read it — a git credential prompt, a gh auth question, a pager
-    // — blocks on a human who is not there, holding the lock, with the run
+    // first thing to read it — a git credential prompt, a gh auth question, a
+    // pager — blocks on a human who is not there, holding the lock, with the run
     // looking exactly like a slow test. The stub reads stdin and records what it
-    // got; a body with `</dev/null` gets EOF at once.
+    // got, and a body with `</dev/null` gets EOF at once.
+    //
+    // The stdin here is a real pipe, HELD OPEN and never written to, and that is
+    // the whole test. The previous version of this test used runMergePrs, which
+    // cannot express a held-open pipe: spawnSync hands a child a pipe it has
+    // already closed, so the child sees EOF whether or not the script redirects
+    // anything — it passed with the `</dev/null` deleted, and proved nothing. With
+    // the pipe open, a body missing the redirect blocks on a read that will never
+    // be answered, and the run does not finish inside the race below.
     const harness = makeHarness();
+    const stdinOut = join(harness.stateDir, "stdin-read");
+    const { child, done } = startMergePrs(
+      harness,
+      [specOf(PR_ONE)],
+      { STUB_READ_STDIN_OUT: stdinOut },
+      false,
+      true,
+    );
     try {
-      const stdinOut = join(harness.stateDir, "stdin-read");
-      const result = runMergePrs(harness, [specOf(PR_ONE)], { STUB_READ_STDIN_OUT: stdinOut });
-
+      const finished = await Promise.race([
+        done.then((result) => ({ kind: "exited" as const, result })),
+        new Promise<{ kind: "blocked" }>((resolve) =>
+          setTimeout(() => resolve({ kind: "blocked" }), 10_000),
+        ),
+      ]);
+      // Not "did it eventually finish" — a run waiting on a person never does,
+      // and the lock it is holding is exactly the thing being tested.
       expect(
-        result.status,
-        `the run did not finish; stdout tail: ${result.stdout.slice(-400)} | stderr tail: ${result.stderr.slice(-400)}`,
-      ).toBe(0);
-      // EOF, and immediately: a body that could block here would have made this
-      // call sit until runMergePrs's own 60s timeout instead of returning.
+        finished.kind,
+        "the run did not finish: its body is waiting on a stdin that will never be answered",
+      ).toBe("exited");
+      const result = finished.kind === "exited" ? finished.result : undefined;
+      expect(result?.status).toBe(0);
+      // EOF, from the read the stub actually made.
+      expect(existsSync(stdinOut), "the stub never got to read stdin").toBe(true);
       expect(readFileSync(stdinOut, "utf8").trim()).toBe("EOF");
-      expect(result.stdout).toContain("merged #101");
+      expect(result?.stdout).toContain("merged #101");
     } finally {
+      // Close the pipe before tearing down: leaving it open is what the test is
+      // about, and stopRun must not have to know that to be safe.
+      child.stdin?.end();
+      await stopRun(child);
       harness.cleanup();
     }
-  });
+  }, 30_000);
 
   test("__pr_body is refused unless a run launched it", () => {
     // The entry point runs one PR's body with no lock and no epilogue. Anyone who
@@ -1607,12 +1658,14 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       expect(mergedByStub(harness)).toBe("");
       expect(existsSync(harness.lockDir)).toBe(false);
 
-      // A MERGE_PRS_PARENT of the caller's own choosing is enough to get past the
-      // guard, which is why the guard is about the shape of the call and not about
-      // proving anything: it exists to stop a typo or a stray spec, not an attacker.
+      // A MERGE_PRS_PARENT that is this test process's own pid is enough to get past
+      // the guard, because the body's PPID IS this process: spawnSync's child is
+      // parented to us. So the variable is the easy half and the PPID is the half
+      // that means something — the next case is the one that needs it.
       const withParent = spawnSync("zsh", [mergePrsSh, "__pr_body", "42", "", "feat/x", "", ""], {
         cwd: harness.repoDir,
         encoding: "utf8",
+        timeout: 30_000,
         env: {
           ...process.env,
           PATH: `${harness.stubBinDir}:${process.env.PATH ?? ""}`,
@@ -1627,6 +1680,31 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       // terms rather than being refused.
       expect(withParent.status).not.toBe(2);
       expect(withParent.stdout).toContain("=== PR #42");
+
+      // And the variable alone is not a ticket. This is the body orphaned in the
+      // gap between `perl … &` returning and `pr_child=$!`: its launcher is gone,
+      // it has been reparented to init, and it is still carrying a
+      // MERGE_PRS_PARENT that describes a process that is no longer its parent. It
+      // must refuse rather than go on to merge with no lock and no epilogue.
+      const orphaned = spawnSync("zsh", [mergePrsSh, "__pr_body", "42", "", "feat/x", "", ""], {
+        cwd: harness.repoDir,
+        encoding: "utf8",
+        timeout: 30_000,
+        env: {
+          ...process.env,
+          PATH: `${harness.stubBinDir}:${process.env.PATH ?? ""}`,
+          MARKER_FILE: harness.markerFile,
+          REVIEW_SETTLE_SECONDS: "0",
+          STUB_STATE: harness.stateDir,
+          STUB_ORIGIN: harness.originPath,
+          // Set, plausible, and not this body's actual parent.
+          MERGE_PRS_PARENT: "1",
+        },
+      });
+      expect(orphaned.status).toBe(2);
+      expect(orphaned.stderr).toContain("__pr_body is internal");
+      expect(orphaned.stdout).not.toContain("=== PR #42");
+      expect(mergedByStub(harness)).toBe("");
     } finally {
       harness.cleanup();
     }

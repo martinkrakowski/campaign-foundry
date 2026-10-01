@@ -122,11 +122,19 @@ if [[ "${1:-}" == "__pr_body" ]]; then
   # A caller is not a parent; exit 2 is the usage error this is, and it is not the
   # 1 a refusal uses, so a caller can tell "you may not do that" from "the gate
   # said no" without reading this file.
-  [[ -n "${MERGE_PRS_PARENT:-}" ]] \
-    || {
-      echo "merge-prs: __pr_body is internal and is refused without MERGE_PRS_PARENT" >&2
-      exit 2
-    }
+  #
+  # The variable alone is not enough, so the name is checked against the process
+  # that is actually this body's parent. The gap it closes is small and real: a
+  # body orphaned between `perl … &` returning and `pr_child=$!` — a signal in that
+  # window kills the launcher, and the body, reparented to init, is left holding a
+  # MERGE_PRS_PARENT that no longer describes anybody. It would otherwise go on to
+  # merge on its own, with no lock and no epilogue, which is the whole thing this
+  # guard is for. An attacker can still set both, and that is fine: this is here to
+  # stop a stray word, not to authenticate anybody.
+  if [[ -z "${MERGE_PRS_PARENT:-}" || "$PPID" != "$MERGE_PRS_PARENT" ]]; then
+    echo "merge-prs: __pr_body is internal" >&2
+    exit 2
+  fi
 fi
 
 # Leading flags, parsed in a loop so their order is not a rule a caller has to
@@ -703,7 +711,17 @@ pr_child=""
 # still being in this group. `wait` reaps the body, and the group is gone by then
 # or the run has said so loudly enough.
 forward_signal() {
-  trap '' INT TERM
+  # HUP is in the ignore list as well as INT and TERM, and leaving it out is how a
+  # second signal re-enters this function: SIGHUP is what a closing terminal sends,
+  # so it can arrive while the sweep below is running, and with the trap still
+  # installed the handler would run again — from inside itself — re-killing a group
+  # it had already swept, waiting on a pid it had already reaped, and running
+  # release_lock twice. There is no test for it and there will not be one: the
+  # window between the first signal and the sweep's last `kill -0` is about two
+  # milliseconds, so a test would be asserting on a race it cannot win, and a test
+  # that passes by luck is worse than the named reasoning. Ignoring every signal
+  # for the whole teardown is the fix that needs no test.
+  trap '' INT TERM HUP
   local group sweep
   if [[ -n "$pr_child" ]]; then
     group="$pr_child"
@@ -807,9 +825,12 @@ export LOGDIR_OVERRIDE CONTINUE MARK_FILE ERR_FILE RUN_TMP
 # The body runs with no terminal to answer, so neither of these may ever ask.
 # GIT_TERMINAL_PROMPT=0 is git's own switch for refusing a credential prompt, and
 # GH_PROMPT_DISABLED=1 is gh's; without them a body that reaches for a credential
-# blocks on a read from /dev/null (or worse, from a tty this run inherited) rather
-# than failing, so a missing token looks like a hang instead of like an error.
+# blocks on a read (see the </dev/null above) rather than failing, so a missing
+# token looks like a hang instead of like an error. The two pagers are pinned to
+# cat for the same reason: a pager is a program that wants a terminal, and the
+# ones that fall back to `less` on a pipe will sit there instead of printing.
 export GIT_TERMINAL_PROMPT=0 GH_PROMPT_DISABLED=1
+export GH_PAGER=cat GIT_PAGER=cat
 # The pid of the run that launched this body, and the only thing that makes the
 # __pr_body entry point above usable. It is exported rather than passed so it
 # cannot be forged by putting it in a spec: a spec is data, the environment is
@@ -840,7 +861,7 @@ export MERGE_PRS_PARENT=$$
 # for the body.
 launch_pr_body() {
   # MERGE_PRS_TEST_PRE_SETPGID_SLEEP widens the window between the fork and the
-  # setpgid, so a test can land a signal inside it on purpose. Unset in every real
+  # setsid, so a test can land a signal inside it on purpose. Unset in every real
   # run, and the sleep is the only thing this one-liner reads from the
   # environment: a body configurable by whoever launched the run would be a body
   # whose behaviour the run does not control.
@@ -851,7 +872,16 @@ launch_pr_body() {
   # pager — blocks on a human who is not there, holding the lock, with the run
   # looking exactly like a slow test. Refusing to answer is the point; the
   # environment below says the same thing to git and gh in words.
-  perl -MPOSIX -e 'sleep $ENV{MERGE_PRS_TEST_PRE_SETPGID_SLEEP} // 0; POSIX::setpgid(0,0) or die "setpgid: $!"; exec @ARGV' \
+  #
+  # `setsid` and not `setpgid`: a new SESSION, not just a new process group, so
+  # the body owns no controlling terminal at all and cannot open /dev/tty — which
+  # is where an ssh passphrase, an unknown host key, or a pager goes when a tool
+  # decides to ask on the terminal rather than on stdin, and it is how a body
+  # unattended on a developer's machine turns into a run waiting on a prompt
+  # nobody can see. The process group id is still the pid (measured: pid, pgid and
+  # sid all equal after the exec), so every `kill -- -$group` above and the sweep
+  # in forward_signal are unchanged by this.
+  perl -MPOSIX -e 'sleep $ENV{MERGE_PRS_TEST_PRE_SETPGID_SLEEP} // 0; POSIX::setsid() or die "setsid: $!"; exec @ARGV' \
     zsh "$MERGE_PRS_SELF" __pr_body "$@" < /dev/null &
   pr_child=$!
 }

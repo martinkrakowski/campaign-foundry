@@ -137,6 +137,23 @@
         "inside the window before the body has a process group"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "    zsh \"$MERGE_PRS_SELF\" __pr_body \"$@\" < /dev/null &",
+      "after": "    zsh \"$MERGE_PRS_SELF\" __pr_body \"$@\" &",
+      "because": "the body then inherits this run's stdin, and the first thing in it that reads — a git credential prompt, a gh auth question, a pager — blocks on a human who is not there, holding the lock, with the run indistinguishable from a slow test. This is the one mutation here that needed a TEST to be fixed before it could be trusted: the test for the redirect used runMergePrs, and spawnSync hands a child a pipe it has already closed, so the body saw EOF on stdin whether or not this redirect existed and the test passed with the line deleted. It is now given a real pipe, held open and never written to, which is the only stdin that distinguishes the two: with the redirect the stub's read returns EOF at once and the run finishes; without it the read blocks on an answer that is never coming and the run does not finish inside ten seconds",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "never waits on a terminal"
+      ],
+      "verdict": "caught"
     }
   ]
 }
