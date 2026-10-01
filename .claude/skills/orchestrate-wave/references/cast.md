@@ -28,27 +28,11 @@ fail with a misleading error rather than "no such model".
 - **Stage-2 reviewer (always, every PR):** an in-house `Agent` that is **not** the implementer,
   read-only, per the skill's Review stage; this is unchanged, and grok's pre-PR review is
   **in addition** for high-risk lanes, not a replacement.
-- **Second-pass reviewer (owner, 2026-10-01): `gemini-3.1-pro-high` through `agy` ONLY** — never
-  Gemini through opencode or OpenRouter (the owner's plan quota). It runs on midnight, **inside the
-  lane's own worktree**, and the prompt goes in as a **FILE**, never as an argument:
-  `scp <prompt> m:<wt>/.agents/briefs/scratch/review-prompt.txt`, then
-  `ssh m 'cd <wt> && agy --print "$(cat .agents/briefs/scratch/review-prompt.txt)" --model gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json'`
-  - **Never interpolate a diff, or any untrusted text, into a shell command string.** A
-    double-quoted `agy --print "<diff>"` expands every `$(…)` and backtick in that diff on
-    midnight before agy sees it; the single-quoted ssh argument above expands `$(cat …)` remotely,
-    and a command substitution's output is never re-evaluated.
-  - **The prompt embeds the diff and says "read files only with your file-reading tool; run no
-    shell command."** Headless agy auto-denies any shell command outside its allow-list and then
-    answers **EMPTY** — 5 of the 13 reviews on 2026-09-30 came back that way. **An empty response is
-    a failed review to re-run, never a clean verdict.**
-  - **Never `--dangerously-skip-permissions`.** The *Seat defaults — owner's instruction,
-    2026-09-25* table below carries it for implementers; the reviewer must not copy it.
-  - **The reviewer's model is never the implementer's** — on midnight that is
-    `openrouter/stealth/space-bunny-alpha`, so a Gemini pass is an independent read.
+- **Reviewer, every pass (owner, 2026-10-01): Fable**, meaning the in-house `Plan` agent with `model: fable`, read-only. That covers the plan or row, brief, pre-PR, pre-merge and re-check passes. It replaced the short-lived Gemini-through-agy second-pass seat (2026-09-30 to 2026-10-01), which was used while the Claude weekly quota was tight. If the owner asks for Gemini again: only through `agy`, with the prompt in a file and never interpolated into a command, never `--dangerously-skip-permissions`, and an empty response is a failed review.
 - **Plan reviewer:** `grok-4.7` read-only (above), or the in-house `Plan` agent when grok's weekly
   quota is spent; required before dispatching any rewritten lane row (SKILL.md, Before you dispatch).
-  **Unchanged by the second-pass seat: `grok-4.7` remains both the plan reviewer and the high-risk
-  pre-PR reviewer** — Gemini took the second pass, not either of those.
+  In practice (2026-09-29 onward) plan and pre-PR reviews have run on Fable; grok-4.7 is an
+  optional extra opinion for high-risk lanes, not a required pass.
 - **Local LM Studio models are not a lane seat.** The 30B at 10.10.0.220 runs on the orchestrator's
   own machine and made it unresponsive under memory pressure. Evaluated 2026-09-28; one-off text
   jobs only.

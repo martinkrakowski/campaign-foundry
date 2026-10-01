@@ -45,7 +45,7 @@ Flags below were read from each CLI's `--help` on 2026-08-26. Re-check after upg
 |---|---|---|
 | **grok** | `grok --prompt-file BRIEF.md --always-approve --effort high --output-format plain --max-turns 600` | **Use `--prompt-file`, never `-p`** — long briefs are truncated through `-p`. |
 | **claude** | `claude -p "$(cat BRIEF.md)" --permission-mode acceptEdits --output-format text` | `--dangerously-skip-permissions` only in a sandbox. `--bg` returns immediately. |
-| **agy** | `agy --print "$(cat review-prompt.txt)" --model gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json` | **Reviewer only** (no implementer seat; Gemini only through agy). NEVER `--dangerously-skip-permissions` for a review. No `--prompt-file`: pass the prompt through `$(cat file)`, never by interpolating a diff into the command string. An empty `response` is a failed review. |
+| **agy** | `agy --print "$(cat review-prompt.txt)" --model gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json` | **Not a default seat:** reviews are Fable. Only when the owner asks for a Gemini pass, and only through agy, never through opencode or OpenRouter. Never `--dangerously-skip-permissions`; pass the prompt through `$(cat file)`, never interpolated; an empty `response` is a failed review. |
 | **opencode** | `opencode run --auto --model openrouter/z-ai/glm-5.3-flash --variant high "$(cat BRIEF.md)"` | **`-p` is `--password` here, not print.** `--auto` is the permission bypass. **`--model` is required.** *"User not found."* means a **stale stored credential** in `~/.local/share/opencode/auth.json`, not a broken prefix (corrected 2026-09-04) — and the environment variable does not override a stored key. Never start two `opencode run` invocations in the same instant: they collide on its SQLite store and the second dies with `database is locked`. See the model-id table in `orchestrator-kickoff-prompt.md`. |
 
 Launch each one **detached from the orchestrator's task runner**, or a harness timeout
@@ -328,37 +328,13 @@ Three passes for `high` is not distrust of the normal case: a wrong premise, an 
 surface and a diff that only reads right are independent failures, and one pass walking all three
 at once reports the one it noticed first.
 
-#### The second-pass reviewer is Gemini, through `agy`
+#### Every review pass is Fable
 
-**Gemini through `agy` ONLY — never Gemini through opencode or OpenRouter** (the owner's plan
-quota; owner, 2026-10-01). Run it on midnight, **inside the lane's own worktree**, and hand it a
-**FILE**:
+**Owner, 2026-10-01: every review pass (the plan or row review, the brief review, the pre-PR review, the pre-merge review and every re-check) is the in-house `Plan` agent with `model: fable`, read-only.** Give it the ABSOLUTE paths of the brief and the plan, the diff command to run (`git diff origin/main...origin/<branch>`), and a worktree where it may run targeted tests. Never give it the main checkout, whose tests read the operator's `.env.local`. Ask for a verdict line plus numbered findings, each with severity, file:line, the concrete failing scenario and the EXACT fix text.
 
-```bash
-# 1. Write the prompt LOCALLY. It embeds the diff, so it is data, not a command.
-# 2. Copy it into the lane worktree's gitignored scratch.
-scp <prompt> m:<wt>/.agents/briefs/scratch/review-prompt.txt
-
-# 3. Run it there.
-ssh m 'cd <wt> && agy --print "$(cat .agents/briefs/scratch/review-prompt.txt)" --model gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json'
-```
-
-**Never interpolate a diff, or any untrusted text, into a shell command string.** A
-double-quoted `agy --print "<diff>"` expands every `$(…)` and backtick in that diff **on midnight,
-before agy sees it**. Above, the ssh argument is single-quoted, so `$(cat …)` is expanded by the
-**remote** shell and a command substitution's output is never re-evaluated — the diff reaches agy
-as inert text.
-
-**The prompt embeds the diff and says "read files only with your file-reading tool; run no shell
-command".** Headless agy auto-denies any shell command outside its allow-list and then answers
-**EMPTY** — 5 of the 13 reviews on 2026-09-30 came back that way — so a reviewer sent to go and
-look at the tree, instead of being handed it, returns nothing at all.
-
-- **An empty response is a failed review: re-run it. It is never a clean verdict.**
-- **Never** pass `--dangerously-skip-permissions` to it. The implementer rows in
-  `references/cast.md` carry that flag; a reviewer must not copy it.
-- **The reviewer's model is never the implementer's.** The implementer here is
-  `openrouter/stealth/space-bunny-alpha`, so a Gemini pass is a genuinely independent read.
+- **The reviewer's model is never the implementer's.** The implementer here is `openrouter/stealth/space-bunny-alpha`, so a Fable pass is an independent read.
+- **A reviewer's finding is a claim, not a verdict.** Verify each one against the code (or by running the built artefact) before sending it to a fix round, and refute it with the mechanism when it is wrong.
+- **If the owner asks for a Gemini pass instead,** it runs ONLY through `agy` (never through opencode or OpenRouter), with the prompt in a FILE and never interpolated into a command string: a double-quoted `agy --print "<diff>"` expands every `$(…)` and backtick in that diff before agy sees it. Use `ssh m 'cd <wt> && agy --print "$(cat .agents/briefs/scratch/review-prompt.txt)" …'`. Never pass `--dangerously-skip-permissions`; and an EMPTY response (headless agy denies shell commands) is a failed review to re-run, never a clean verdict.
 
 ### Stage 3 — Remediate
 
@@ -843,8 +819,8 @@ seat. Two swaps worth knowing:
 - **Claude Code as the host.** Run the orchestrator interactively and use its subagents for
   stage 2 instead of a separate `claude -p` — cheaper and context-rich, at the cost of
   reviewer independence (§1).
-- **agy is not an implementer seat** (owner, 2026-10-01): it is the read-only second-pass reviewer.
-  See the reviewer seat above and `references/cast.md`.
+- **agy is not a default seat** (owner, 2026-10-01): it neither implements nor reviews by default.
+  Reviews are Fable; see "Every review pass is Fable" above and `references/cast.md`.
 
 ---
 

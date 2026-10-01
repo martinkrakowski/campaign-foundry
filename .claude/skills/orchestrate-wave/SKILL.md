@@ -299,20 +299,7 @@ that did not happen.
    three separate passes; both get a pre-merge pass on the final head and a re-check after every
    fix round.
 
-   **The second-pass reviewer is Gemini, through `agy` ONLY** — never Gemini through opencode or
-   OpenRouter (the owner's plan quota; owner, 2026-10-01). On midnight, **inside the lane's own
-   worktree**, and hand it a **FILE**: `scp <prompt> m:<wt>/.agents/briefs/scratch/review-prompt.txt`,
-   then `ssh m 'cd <wt> && agy --print "$(cat .agents/briefs/scratch/review-prompt.txt)" --model
-   gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json'`. **Never
-   interpolate a diff, or any untrusted text, into a shell command string**: a double-quoted
-   `agy --print "<diff>"` expands every `$(…)` and backtick in that diff on midnight, before agy
-   sees it, while the single-quoted ssh argument above makes `$(cat …)` expand remotely and a
-   command substitution's output is never re-evaluated. **The prompt embeds the diff and says "read
-   files only with your file-reading tool; run no shell command"** — headless agy auto-denies shell
-   outside its allow-list and then answers **EMPTY** (5 of the 13 reviews on 2026-09-30). **Never
-   `--dangerously-skip-permissions`** — that is an implementer flag and the reviewer must not copy
-   it. **An empty response is a failed review: re-run it; it is never a clean verdict.** The
-   reviewer's model is never the implementer's (space-bunny here).
+   **Every review pass is Fable** (owner, 2026-10-01): the plan or row review, the brief review, pre-PR, pre-merge and every re-check run as the in-house `Plan` agent with `model: fable`, read-only, given absolute brief and plan paths, the diff command, and a non-main worktree for targeted tests. The reviewer's model is never the implementer's (space-bunny here). Verify each finding before a fix round, and refute a wrong one with its mechanism. A Gemini pass happens only if the owner asks, and only through `agy`, with the prompt in a file, never interpolated into a command string, never with `--dangerously-skip-permissions`, and an empty response is a failed review.
 
 3. **Remediate.** Merge verified findings into a fix brief (Template C), listing refuted items
    with reasons. **After any interrupted or killed `mutate:verify`, scan for a stranded mutation
