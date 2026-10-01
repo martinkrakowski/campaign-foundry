@@ -3,17 +3,42 @@
 # merge-prs.sh — sequentially refresh, verify and squash-merge a set of PRs.
 #
 # Usage:
-#   scripts/merge-prs.sh [--logdir <dir>] "<pr>|<worktree-or-empty>|<branch>|<lane-or-empty>|<wave-or-empty>" ...
+#   scripts/merge-prs.sh [--logdir <dir>] [--continue] "<pr>|<worktree-or-empty>|<branch>|<lane-or-empty>|<wave-or-empty>" ...
 #
 # Example:
 #   scripts/merge-prs.sh "41|../cf-wt-seeded-random|feat/seeded-random" "42||fix/typo"
 #   scripts/merge-prs.sh "43|../cf-wt-hx1|feat/reserved-ids|HX1-route-segments-reserved|wave-hardening-w06"
 #
+# PASS EVERY PR TO ONE RUN. Do not chain runs — "wait for the previous one to
+# finish, then start the next" — and above all do not chain them by matching
+# process command lines: `pgrep -f` answers a matcher with the matcher's OWN
+# command line, so those loops waited for each other for hours and merged
+# nothing. The run lock below is what makes a single run the safe shape: a
+# second run that starts while the first holds the lock exits 75 and says so,
+# instead of merging beside it.
+#
+# --continue: a PR refused at ANY step — D184's gate, a conflict, failed or
+# pending checks, an unresolved review thread, a head that moved — is reported
+# and SKIPPED, and the PRs after it still run. A refused PR's worktree and
+# branch are NOT removed, so the next run can pick it up and a refusal costs
+# nothing but the one PR. The closing summary lists every PR as merged or
+# refused with its reason, and the run exits 1 if any PR was refused. WITHOUT
+# the flag this script stops at the first refusal, exactly as it always has.
+#
+# ONE RUN AT A TIME. At start the run takes ${TMPDIR:-/tmp}/cf-merge-prs.lock
+# with an atomic `mkdir` and writes its own pid inside it. A live holder makes
+# a second run exit 75 with `merge-prs: another run holds the lock (pid N)`;
+# a dead holder's lock is reclaimed; and the lock is released on EXIT, INT and
+# TERM. 75 means busy, exactly as it means busy in scripts/gate-lock.sh:
+# sleep and retry, never remove the lock by hand.
+#
 # For each PR, in order:
-#   0. D184's pre-PR-review gate, ONLY when the spec names a lane: refuse the
-#      whole run before touching git or the forge at all — a refused lane
-#      costs no fetch, no push and no CI run — unless `yarn plan:review
-#      pre-pr-check <lane> --wave <wave> [--logdir <dir>]` exits 0. An empty
+#   0. D184's pre-PR-review gate, ONLY when the spec names a lane: refuse this
+#      PR before touching git or the forge at all — a refused lane costs no
+#      fetch, no push and no CI run — unless `yarn plan:review
+#      pre-pr-check <lane> --wave <wave> [--logdir <dir>]` exits 0. A refusal
+#      here ends the WHOLE run, exactly as it always has, unless --continue was
+#      given; then it costs that one PR. An empty
 #      lane field is today's behaviour exactly: no lane, no gate, no wave
 #      required. A lane given with an empty wave is a malformed spec and dies
 #      outright, since the gate cannot be asked anything without one.
@@ -29,7 +54,10 @@
 #      zero unresolved review threads on the final head, and a head unchanged since
 #      its check-runs were read. Both are decided in TypeScript (tools/sweep).
 #   5. Squash-merge.
-# Then remove the worktrees and delete the merged branches, and fast-forward main.
+# Then remove the worktrees and delete the merged branches, and fast-forward main —
+# for the PRs that MERGED and no others. A PR this run refused is left exactly as
+# it was found: its worktree and its branch are the only copy of that work, and
+# the epilogue is the one place in this script that destroys things.
 #
 # When the worktree field is empty a temporary worktree is created for the refresh and
 # removed afterwards, so EVERY pr is refreshed and re-verified — never merged stale.
@@ -45,16 +73,135 @@ MAIN=${MAIN_BRANCH:-main}
 
 die() { echo "ERROR: $*" >&2; exit 1 }
 
-# A leading --logdir names the wave log directory outright, for every spec in
-# this run that carries a lane. Omitted, `pre-pr-check` resolves it itself —
-# the same resolution wave-event.sh uses — so this script never invents a
-# default of its own to drift from that one.
+# Leading flags, parsed in a loop so their order is not a rule a caller has to
+# know: `--logdir X --continue` and `--continue --logdir X` are the same run.
+# The first argument that is not a flag is a spec, and everything from there on
+# belongs to the loop.
+#
+# --logdir names the wave log directory outright, for every spec in this run
+# that carries a lane. Omitted, `pre-pr-check` resolves it itself — the same
+# resolution wave-event.sh uses — so this script never invents a default of its
+# own to drift from that one.
 LOGDIR_OVERRIDE=""
-if [[ $# -ge 1 && "$1" == "--logdir" ]]; then
-  [[ $# -ge 2 ]] || die "--logdir requires a directory"
-  LOGDIR_OVERRIDE="$2"
-  shift 2
-fi
+# With --continue, a refused PR is one line in the closing summary instead of
+# the end of the run. Empty means "stop at the first refusal", which is what
+# every caller that does not ask for it gets.
+CONTINUE=""
+while [[ $# -ge 1 ]]; do
+  case "$1" in
+    --logdir)
+      [[ $# -ge 2 ]] || die "--logdir requires a directory"
+      LOGDIR_OVERRIDE="$2"
+      shift 2
+      ;;
+    --continue)
+      CONTINUE=1
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+# ONE RUN AT A TIME. The lock is a directory at ${TMPDIR:-/tmp}/cf-merge-prs.lock
+# holding one file, `pid`. `mkdir` is the atomic step — it either creates the
+# name or fails, and no read-then-write can lose the race the way a test for the
+# file's existence and a write of it can. The pid goes INSIDE it, so a holder is
+# identifiable from the moment the name exists.
+#
+# A holder is alive if `ps -p <pid>` succeeds. NEVER `pgrep`: it matches
+# process command lines, so it matches the very caller waiting on it — that is
+# what deadlocked the orchestrator's chained runs for hours. `kill -0` is no
+# better here, because it answers EPERM as a line of locale-dependent text to
+# parse, and a process this user may not signal is alive.
+LOCK_DIR="${TMPDIR:-/tmp}/cf-merge-prs.lock"
+# 75 is BUSY, the same contract scripts/gate-lock.sh defines: this run is not
+# wrong and the host is not broken, there is simply another run in the way.
+BUSY=75
+
+# Drop the lock, and this run's scratch with it. On every exit: the end of the
+# loop, a refusal, a signal, a failed `mktemp` — a lock that only the happy path
+# releases is a lock the next run has to reclaim.
+#
+# The pid check is the guard that matters: this only ever removes a lock that
+# still names THIS process, so a run that was refused the lock (exit 75, someone
+# else's lock at the name) cannot delete the holder that is still working, and a
+# holder whose lock was reclaimed underneath it cannot delete its replacement.
+# The INT and TERM traps below end in `exit`, which runs this again — hence the
+# no-op when the lock is already gone.
+release_lock() {
+  local pid
+  if [[ -f "$LOCK_DIR/pid" ]]; then
+    pid=$(<"$LOCK_DIR/pid")
+    if [[ "$pid" == "$$" ]]; then
+      rm -rf "$LOCK_DIR"
+    fi
+  fi
+  if [[ -n "$RUN_TMP" ]]; then
+    rm -rf "$RUN_TMP"
+  fi
+}
+
+# Take the lock, or answer 75 and do nothing else. Never `pgrep` (see above).
+# It installs NO trap: see the call site below for why that is not an oversight.
+acquire_lock() {
+  local holder
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo "$$" >"$LOCK_DIR/pid"
+    return 0
+  fi
+  holder=$(<"$LOCK_DIR/pid" 2>/dev/null)
+  # Only a lock that is PROVABLY abandoned is taken. A readable pid whose process
+  # is gone is a crashed holder. Anything else is a live run and is waited out:
+  # a lock with no readable pid is a holder caught between the `mkdir` above and
+  # its own write, and taking that is the double merge this lock exists to
+  # prevent. (scripts/gate-lock.sh pays for the same window differently, by
+  # renaming a fully written directory onto the name; `mkdir` is what the plan
+  # asks for here, so the window is closed on the reading side instead.)
+  if [[ "$holder" != <-> ]] || ps -p "$holder" >/dev/null 2>&1; then
+    [[ "$holder" == <-> ]] || holder="unknown"
+    echo "merge-prs: another run holds the lock (pid $holder)" >&2
+    exit $BUSY
+  fi
+  # A dead holder. Move the lock aside before retrying, so two reclaimers cannot
+  # both decide the stale lock was theirs and both win the mkdir: only one
+  # rename lands, and the loser falls through to the retry, which finds the
+  # winner's live lock and answers 75 like anyone else.
+  mv "$LOCK_DIR" "$LOCK_DIR.stale.$$" 2>/dev/null && rm -rf "$LOCK_DIR.stale.$$"
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo "$$" >"$LOCK_DIR/pid"
+    return 0
+  fi
+  echo "merge-prs: another run holds the lock (pid unknown) at $LOCK_DIR" >&2
+  exit $BUSY
+}
+
+# One stderr capture and one marker file, reused by every PR in the run. Named
+# before the lock is taken so the EXIT trap can always read it.
+RUN_TMP=""
+# The traps go on HERE, at the top level of the script, and never inside
+# acquire_lock — because in zsh a trap set in a function belongs to that
+# function: it FIRES when the function returns, and is gone afterwards.
+# Measured here on zsh 5.9, an EXIT trap installed inside a function ran the
+# moment that function returned (with every variable the run had not yet
+# assigned still empty) and left no trap behind, so the lock was taken and
+# released again before the first PR and the whole run was unprotected — with
+# no symptom except that nothing was ever locked. A lock that does not survive
+# its own acquire is worse than no lock, because every caller now believes
+# there is one.
+#
+# Before the acquire rather than after it, so the window between holding a lock
+# and being ready to give it back is not a signal-shaped hole. A run refused the
+# lock (exit 75) runs this trap on its way out too, and the `$$` check in
+# release_lock is what stops it deleting the live holder's lock.
+trap 'release_lock' EXIT
+trap 'release_lock; exit 130' INT
+trap 'release_lock; exit 143' TERM
+acquire_lock
+RUN_TMP=$(mktemp -d "${TMPDIR:-/tmp}/merge-prs-run-XXXXXX") || die "mktemp failed"
+MARK_FILE="$RUN_TMP/marker"
+ERR_FILE="$RUN_TMP/stderr"
 
 # Files where two branches legitimately append and both sides must survive.
 # Extend for your repo (a session log, a hand-maintained barrel, a changelog).
@@ -123,17 +270,17 @@ refresh_here() {
   git merge -q --no-edit "origin/$MAIN" || resolve_append_only_or_die
 }
 
-typeset -a WORKTREES BRANCHES
-for spec in "$@"; do
-  # Array-split on "|", not the old ${%%|*}/${#*|} chain: that chain reused
-  # trailing text for a field a shorter spec never gave it, once a fourth and
-  # fifth field existed to fall into. An out-of-range element is a parameter
-  # not set under `set -u`, so every field defaults explicitly instead.
-  typeset -a fields
-  fields=("${(@s:|:)spec}")
-  pr="${fields[1]:-}"; worktree="${fields[2]:-}"; branch="${fields[3]:-}"
-  lane="${fields[4]:-}"; wave="${fields[5]:-}"
-  WORKTREES+=("$worktree"); BRANCHES+=("$branch")
+# Merge ONE PR, or refuse it. Every refusal in this file is a `die` or an
+# `exit 1`, and every one of them is inside here — which is the point: run as a
+# subshell, a refusal ends this PR and nothing else, with the same message and
+# the same exit code it has always had, and the `cd`s it does along the way die
+# with it instead of being left behind for the next PR.
+#
+# The five spec fields arrive already split. The caller parses them once,
+# because it needs the PR number for its own summary either way, and passing
+# them in keeps the split from being written down twice.
+pr_body() {
+  local pr="$1" worktree="$2" branch="$3" lane="$4" wave="$5"
 
   # D184's merge gate — before ANY of this PR's own work, so a refusal costs
   # no fetch, no push and no CI run. An empty lane is today's behaviour
@@ -277,6 +424,95 @@ for spec in "$@"; do
 
   gh pr merge "$pr" --squash || die "squash-merge failed for #$pr"
   echo "merged #$pr"
+
+  # Announce the merge on fd 3, the body's own channel, which is the ONLY way
+  # the caller learns what to clean up afterwards: this runs in a subshell, so
+  # the arrays it appended to are gone by the time it returns, and the epilogue
+  # removes worktrees and DELETES BRANCHES ON THE FORGE. For a refused PR that
+  # is the one thing this script must never do — the refused work is the only
+  # copy left, and a branch deleted here is a lane's PR gone from under it.
+  # So the appends below are driven by this line and by nothing else, not even
+  # by an exit status of 0. `-` stands in for an empty field, which no worktree
+  # path or branch name can be and which must never reach `git worktree remove`.
+  echo "MERGED $pr ${worktree:--} ${branch:--}" >&3
+  # Explicitly zero, because the marker is bookkeeping: a failed write to it
+  # must not turn a merge that happened into a refusal.
+  return 0
+}
+
+# The run. Each PR is a subshell so a refusal costs that PR and no other, and
+# the epilogue below sees only the PRs that announced a merge.
+typeset -a WORKTREES BRANCHES
+# One line per PR for the closing summary, and the two counts it ends with.
+typeset -a RESULTS
+merged_count=0
+refused_count=0
+# `pr_status`, never `status`: zsh's `status` is a read-only special parameter
+# (it is `?` under its other name), and assigning to it fails the whole script
+# with "read-only variable: status" — mid-run, on the first PR, with the lock
+# held and the message naming a line that looks like an ordinary assignment.
+for spec in "$@"; do
+  # Array-split on "|", not the old ${%%|*}/${#*|} chain: that chain reused
+  # trailing text for a field a shorter spec never gave it, once a fourth and
+  # fifth field existed to fall into. An out-of-range element is a parameter
+  # not set under `set -u`, so every field defaults explicitly instead.
+  typeset -a fields
+  fields=("${(@s:|:)spec}")
+  pr="${fields[1]:-}"; worktree="${fields[2]:-}"; branch="${fields[3]:-}"
+  lane="${fields[4]:-}"; wave="${fields[5]:-}"
+
+  : >"$MARK_FILE"
+  if [[ -n "$CONTINUE" ]]; then
+    # --continue has to be able to say WHY a PR was refused, and the reason is
+    # the last thing that PR wrote to stderr — so this PR's stderr is captured
+    # and replayed at the end of it. Per PR, not for the run: the next PR's
+    # output can never land between one PR's message and the PR it belongs to.
+    ( pr_body "$pr" "$worktree" "$branch" "$lane" "$wave" 2>"$ERR_FILE" ) 3>"$MARK_FILE"
+    pr_status=$?
+    cat "$ERR_FILE" >&2
+  else
+    # Without --continue, stderr is not captured at all and the body writes
+    # straight through to the terminal, in the order it wrote it. Today's
+    # output, byte for byte, on the path that did not ask to change.
+    ( pr_body "$pr" "$worktree" "$branch" "$lane" "$wave" ) 3>"$MARK_FILE"
+    pr_status=$?
+  fi
+
+  # Stop at the first refusal, as this script always has, and before the
+  # epilogue below can remove anything: a run that ended at a refusal has
+  # appended nothing, so there is nothing for it to clean up either way.
+  if [[ -z "$CONTINUE" && $pr_status -ne 0 ]]; then
+    exit $pr_status
+  fi
+
+  # What the epilogue may touch. A PR that announced a merge is the only kind
+  # that goes in, whatever it exited with.
+  if read -r marker marker_pr marker_wt marker_br <"$MARK_FILE" \
+    && [[ "$marker" == "MERGED" && "$marker_pr" == "$pr" ]]; then
+    [[ "$marker_wt" == "-" ]] || WORKTREES+=("$marker_wt")
+    [[ "$marker_br" == "-" ]] || BRANCHES+=("$marker_br")
+    merged=1
+  else
+    merged=0
+  fi
+
+  if [[ -n "$CONTINUE" ]]; then
+    if [[ "$merged" -eq 1 ]]; then
+      merged_count=$((merged_count + 1))
+      RESULTS+=("#$pr ($branch): merged")
+    else
+      refused_count=$((refused_count + 1))
+      # The last non-blank line this PR wrote to stderr is its reason. The
+      # three refusals that report on stdout rather than stderr (no checks
+      # registered, checks still pending, checks failed) have already said
+      # theirs above, so the summary falls back to the exit code rather than
+      # printing a blank where the reason should be.
+      reason=$(grep -v '^[[:space:]]*$' "$ERR_FILE" | tail -1)
+      [[ -n "$reason" ]] || reason="exited $pr_status after saying nothing on stderr"
+      RESULTS+=("#$pr ($branch): REFUSED — $reason")
+      echo "=== PR #$pr REFUSED — $reason" >&2
+    fi
+  fi
 done
 
 cd "$REPO" || die "cannot cd to $REPO"
@@ -290,4 +526,22 @@ for branch in $BRANCHES; do
   git push -q origin --delete "$branch" 2>/dev/null && echo "deleted origin/$branch"
 done
 git checkout -q "$MAIN" && git pull -q --ff-only origin "$MAIN" && git log --oneline -8
+
+# The closing summary, and only with --continue. Without the flag this run never
+# got past a refusal, so the epilogue above never ran and there is nothing to
+# report. It is printed AFTER the epilogue on purpose: "2 of 3 merged" is a claim
+# about what was just cleaned up, and a reader who has seen the cleanup should
+# not have to scroll back for the verdict.
+if [[ -n "$CONTINUE" ]]; then
+  echo "=== summary"
+  for line in "${(@)RESULTS}"; do
+    echo "  $line"
+  done
+  echo "=== $merged_count merged, $refused_count refused"
+  # 1, and only here: after the epilogue, so a refused PR has kept its worktree
+  # and its branch for whoever picks it up next, and never on the path that
+  # merged everything. ALL DONE is not printed when a PR was refused — the run
+  # is not done, and saying so is the one lie this summary exists to prevent.
+  [[ "$refused_count" -eq 0 ]] || exit 1
+fi
 echo "ALL DONE"

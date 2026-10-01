@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "HXF10-merge-prs-continue",
+  "mutations": [
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "  if [[ -z \"$CONTINUE\" && $pr_status -ne 0 ]]; then\n    exit $pr_status\n  fi",
+      "after": "  if [[ $pr_status -ne 0 ]]; then\n    exit $pr_status\n  fi",
+      "because": "dropping $CONTINUE from the guard makes --continue behave exactly as the run behaved before the flag existed: the first PR whose body refused ends the whole run, so #103 is never attempted, the closing summary is never printed, and exit 1 stops meaning \"one PR of three was refused\" and goes back to meaning \"nothing after the second was tried\". It is the mutation the row names for the flag, and it is invisible to every other test in the file for a reason worth stating: the WITHOUT-flag test already stops at the second PR, so the mutant agrees with it exactly, and the three lock tests either plant a lock or plant a dead pid before a single-PR run that never reaches this line at all. Only the three-PR test can see it, because it is the only one that requires a PR AFTER a refused one to be merged. The refusal it plants is the row's own case — one unresolved review thread in the middle — so the mutant loses a real merge (#103) rather than only a summary line",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "merges the first and third PRs"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "  if [[ \"$holder\" != <-> ]] || ps -p \"$holder\" >/dev/null 2>&1; then",
+      "after": "  if [[ \"$holder\" != <-> ]]; then",
+      "because": "the liveness test is the whole of the busy answer, and this is the mutation the row names for the lock. With `ps -p` gone, a lock whose pid names a LIVE process falls past the guard into the reclaim below: this run mv's a running run's lock aside, deletes it, takes the name and merges. The holder does not stop — it is mid-run, it still believes it holds the lock, and its own release at exit finds the name already re-taken, which release_lock's `$$` check then declines to remove. Two runs merge at once, which is the entire failure the lock was added for, and it is silent: both exit 0. The dead-pid reclaim test cannot see this, because that lock's pid really is gone and the mutant takes the same path it always took; the three-PR test never starts a second run; and the INT test plants nothing, so it too agrees with the mutant. The test that sees it plants a lock holding THIS test process's own pid — alive, so the honest script must answer 75 — and then asserts the refused run did no work at all: no PR banner, no merge, and the holder's lock still on disk afterwards",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "live holder's lock exits 75"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
