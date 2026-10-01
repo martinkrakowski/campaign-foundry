@@ -45,7 +45,7 @@ Flags below were read from each CLI's `--help` on 2026-08-26. Re-check after upg
 |---|---|---|
 | **grok** | `grok --prompt-file BRIEF.md --always-approve --effort high --output-format plain --max-turns 600` | **Use `--prompt-file`, never `-p`** — long briefs are truncated through `-p`. |
 | **claude** | `claude -p "$(cat BRIEF.md)" --permission-mode acceptEdits --output-format text` | `--dangerously-skip-permissions` only in a sandbox. `--bg` returns immediately. |
-| **agy** | `agy --print "$(cat BRIEF.md)" --dangerously-skip-permissions --effort high --output-format text --print-timeout 60m` | No `--prompt-file`; raise `--print-timeout` (default 5 m) or long lanes are cut off. |
+| **agy** | `agy --print "$(cat review-prompt.txt)" --model gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json` | **Reviewer only** (no implementer seat; Gemini only through agy). NEVER `--dangerously-skip-permissions` for a review. No `--prompt-file`: pass the prompt through `$(cat file)`, never by interpolating a diff into the command string. An empty `response` is a failed review. |
 | **opencode** | `opencode run --auto --model openrouter/z-ai/glm-5.3-flash --variant high "$(cat BRIEF.md)"` | **`-p` is `--password` here, not print.** `--auto` is the permission bypass. **`--model` is required.** *"User not found."* means a **stale stored credential** in `~/.local/share/opencode/auth.json`, not a broken prefix (corrected 2026-09-04) — and the environment variable does not override a stored key. Never start two `opencode run` invocations in the same instant: they collide on its SQLite store and the second dies with `database is locked`. See the model-id table in `orchestrator-kickoff-prompt.md`. |
 
 Launch each one **detached from the orchestrator's task runner**, or a harness timeout
@@ -843,9 +843,8 @@ seat. Two swaps worth knowing:
 - **Claude Code as the host.** Run the orchestrator interactively and use its subagents for
   stage 2 instead of a separate `claude -p` — cheaper and context-rich, at the cost of
   reviewer independence (§1).
-- **agy as implementer.** `agy --print "$(cat brief.md)" --dangerously-skip-permissions
-  --effort high --print-timeout 60m` — it has no `--prompt-file`, and the default 5-minute
-  print timeout will truncate a lane, so raise it explicitly.
+- **agy is not an implementer seat** (owner, 2026-10-01): it is the read-only second-pass reviewer.
+  See the reviewer seat above and `references/cast.md`.
 
 ---
 
