@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "HXF5-sweep-post-schema",
+  "mutations": [
+    {
+      "file": "tools/sweep/lib/sweep.ts",
+      "before": "  addComment(input: { subjectId: $subject, body: $body }) {\n    commentEdge { node { url } }\n  }",
+      "after": "  addComment(input: { subjectId: $subject, body: $body }) {\n    comment { url }\n  }",
+      "because": "`comment` is not a field of `AddCommentPayload`. The payload carries `commentEdge`, and `IssueCommentEdge` carries `node`, so the url is three levels down — which is why this ran for a month against a schema that rejects it: GitHub refuses the WHOLE mutation document over one unknown selection, so the write that was supposed to post the class comment and resolve every thread posted nothing, resolved nothing, and reported a refusal the operator had to read as a permissions problem. Nothing else in the suite notices, and that is the part worth saying: the fetch-and-reader tests answer their own fixtures, so the reader and the mutation can be wrong in the same direction and stay green together — a test that feeds `addComment { comment { url } }` to a reader that reads `.comment.url` proves only that they agree. What catches it is the offline shape test, which asks the introspected schema whether `AddCommentPayload` declares the field the mutation names, and can fail with no network and no gh",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/sweep/__tests__/schema.test.ts",
+        "-t",
+        "a class of 1 selects only fields the schema declares"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

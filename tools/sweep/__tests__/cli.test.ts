@@ -26,7 +26,7 @@ const ok = (over: Partial<SweepCliIo> = {}): { io: SweepCliIo; log: string[]; er
         args.some((a) => a.includes("mutation"))
           ? JSON.stringify({
               data: {
-                addComment: { comment: { url: "https://gh/issuecomment-1" } },
+                addComment: { commentEdge: { node: { url: "https://gh/issuecomment-1" } } },
                 resolve0: { thread: { isResolved: true } },
                 resolve1: { thread: { isResolved: true } },
               },
@@ -133,7 +133,7 @@ describe("runCli", () => {
         return args.some((a) => a.includes("mutation"))
           ? JSON.stringify({
               data: {
-                addComment: { comment: { url: "https://gh/issuecomment-bodyfile" } },
+                addComment: { commentEdge: { node: { url: "https://gh/issuecomment-bodyfile" } } },
                 resolve0: { thread: { isResolved: true } },
                 resolve1: { thread: { isResolved: true } },
               },
@@ -237,6 +237,56 @@ describe("runCli", () => {
     expect(err.join("\n")).toContain("did not report a url");
   });
 
+  test("a comment answered in the shape this tool used to ask for exits 1, not 0", async () => {
+    // `AddCommentPayload` has no `comment` field — GitHub's schema offers the
+    // url as `commentEdge { node { url } }` — so a response shaped the old way is
+    // one this run cannot account for. It must not be read as a posted comment:
+    // the operator would see "class disposed" and a url, and the resolves below
+    // it may be the only thing that ever landed.
+    const { io, err, log } = ok({
+      argv: [
+        "threads",
+        "--pr",
+        "361",
+        "--thread",
+        "PRRT_a",
+        "--thread",
+        "PRRT_b",
+        "--body",
+        "x",
+        "--post",
+      ],
+      gh: async (args) =>
+        args.some((a) => a.includes("mutation"))
+          ? JSON.stringify({
+              data: {
+                addComment: { comment: { url: "https://gh/issuecomment-old-shape" } },
+                resolve0: { thread: { isResolved: true } },
+                resolve1: { thread: { isResolved: true } },
+              },
+            })
+          : JSON.stringify({
+              data: {
+                repository: {
+                  pullRequest: {
+                    id: "PR_I_1",
+                    reviewThreads: {
+                      pageInfo: { hasNextPage: false, endCursor: null },
+                      nodes: [
+                        { id: "PRRT_a", isResolved: false },
+                        { id: "PRRT_b", isResolved: false },
+                      ],
+                    },
+                  },
+                },
+              },
+            }),
+    });
+    expect(await runCli(io)).toBe(1);
+    expect(err.join("\n")).toContain("did not report a url");
+    expect(log.join("\n")).not.toContain("class disposed");
+  });
+
   test("a blank body-file is refused with exit 2", async () => {
     const { io, err } = ok({
       argv: ["threads", "--pr", "361", "--thread", "PRRT_a", "--body-file", "empty.md"],
@@ -264,7 +314,7 @@ describe("runCli", () => {
         args.some((a) => a.includes("mutation"))
           ? JSON.stringify({
               data: {
-                addComment: { comment: { url: "u" } },
+                addComment: { commentEdge: { node: { url: "u" } } },
                 resolve0: { thread: { isResolved: true } },
                 resolve1: { thread: { isResolved: false } },
               },
