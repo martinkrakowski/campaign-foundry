@@ -542,6 +542,71 @@ Run the gate in the foreground and read its exit code. A task you launched is no
 After the round, close the threads with Template D's `yarn sweep`, naming the fix commit in the
 disposition and passing the brief's thread ids as the class.
 
+### Template F — Lane brief for a sandboxed lane (the text `yarn brief:new` drafts)
+
+Template A is prose the orchestrator writes every time, and it has drifted: the header, the working
+rules and the environment are the same on every lane. This one is drafted instead. `yarn brief:new`
+writes the block below with `<LANE>`, `<PLAN>`, `<WORKTREE>`, `<BRANCH>`, `<TIP>`, `<ENV>` and
+`<VERIFICATION>` filled in, and leaves `<gap>`, `<notes>`, `<targeted commands>` and
+`<commit subject>` for the orchestrator, because those four are the lane's own work. `--env-file`
+supplies `<ENV>`, one line at a time and indented into the block, so the node path and `TMPDIR` of
+the host a lane runs on are read from a file instead of written into a template that lives in the
+repository.
+
+````markdown
+# Lane <LANE> — brief
+
+- **Worktree (absolute, on this server):** <WORKTREE>
+- **Branch:** <BRANCH>, checked out at origin/main <TIP> (the plan row is current in this tree). Read the row IN FULL: `grep -n '<LANE>' <PLAN>`, then read that whole line. It is long; do not stop at the first 2,000 characters. No PR exists; you do NOT push or open one.
+- **The row is the spec:** its enumerated items, tests, mutation, Owns and Must-not are all required. The notes below are clarifications, and the row wins on any conflict.
+
+Environment, for every shell call:
+
+<ENV>
+
+## First: prove the gap
+
+<gap>
+
+## Notes
+<notes>
+
+## Working rules
+- `.agents/briefs/` is gitignored; run `mkdir -p .agents/briefs/scratch` first. Put scratch files there, and never stage anything under `.agents/briefs/`.
+- **The host lock is shared** (other lanes run here). On exit 75 with `gate-lock: busy`, sleep 60 and retry, up to 20 times; if still busy, report the timeout and `sh scripts/gate-lock.sh status` output. NEVER remove a lock: a lock is released by its own `run`, and a child you started is released in a `finally`.
+- **Mutations** go through `sh scripts/gate-lock.sh run <LANE> -- yarn mutate …`, writing `--because` FIRST. `command` is an argv array; see `.agents/manifests/<LANE>.json`. Each `before` must be a unique anchor.
+- **Coverage:** under an agent, vitest's coverage TEXT table hides fully covered files, so read `coverage/coverage-summary.json` (`--coverage.reporter=json-summary`).
+- Never call the real GitHub API or `gh`, and never spawn a CLI under test: call it in-process with injected I/O.
+
+## Verification
+<VERIFICATION>
+
+## Commit
+
+Commit only the row's Owns paths. Stage explicit paths, never `git add -A`. Conventional Commits, e.g. `<commit subject>`. No trailers. Never use `-c core.hooksPath` or `--no-verify`.
+
+## Must not
+
+- anything in the row's Must-not column;
+- push, open a PR, rebase, merge or stash;
+- edit `AGENTS.md`, `.agents/*.md` or `yarn.lock`;
+- add a dependency.
+
+## Report
+
+Report the commit SHA(s), each command's exit code and key output, the coverage rows, every mutation verdict, and the wall time per step.
+
+If a finding is wrong, say so with the mechanism rather than changing code to match it.
+Run every verification command in the foreground and read its exit code. A task you launched is not a result.
+````
+
+The two hosts differ in exactly one place: the block under `## Verification`. `--host midnight` puts
+"do NOT run `yarn gate` or `yarn test:cov`; targeted only" there, because that host cannot pass the
+full suite; `--host mac` puts the same targeted commands and then `yarn gate --lane <LANE>`, in the
+foreground. Neither variant is written out twice — each is one constant in
+`tools/brief-new/lib/template.ts`, with the lane's own id already in place before the single
+substitution pass runs.
+
 ---
 
 ## 4. Invariants (each one learned the hard way)

@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "HXF7-brief-generator",
+  "mutations": [
+    {
+      "file": "tools/brief-new/lib/template.ts",
+      "before": "  const block = host === \"midnight\" ? VERIFICATION_MIDNIGHT : VERIFICATION_MAC;",
+      "after": "  const block = host === \"midnight\" ? VERIFICATION_MAC : VERIFICATION_MIDNIGHT;",
+      "because": "the swap is silent in every shape a naive check would take: both hosts still return a block, both blocks still differ from each other, so the 'differ in exactly one place' comparison — which compares the two briefs' HEAD and TAIL and only asserts that the blocks are not equal — passes with the hosts reversed. What it costs is the whole point of the flag. A lane on midnight is told to run `yarn gate --lane <id>` in the foreground, and midnight is the host whose CPU cannot pass the full suite: the brief sends it at the one command that cannot succeed there, and the run ends as STUCK with a gate failure instead of as a verified lane. A lane on mac is told never to run the gate at all, and goes to CI with no local gate behind it — the exact state the plan row calls 'the lane is unverified until CI's full gate passes'. The two tests that name each variant's own content ('midnight is told not to run the gate' and 'mac runs the same targeted commands and then the whole gate') are the ones that fail; the section-presence test, the drift test, the environment block and the argument rules all still pass, which is why the anchor is the ternary line and not the block each host returns",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/brief-new/__tests__/render.test.ts",
+        "-t",
+        "(told not to run the gate|then the whole gate)"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/brief-new/lib/draft.ts",
+      "before": "  await deps.mkdir(dirname(request.out));",
+      "after": "  // await deps.mkdir(dirname(request.out));",
+      "because": "the parent directory is the whole of the fix, and it is the line a later reader is most likely to remove as redundant: on the machine that reported the bug the directory was already there, every existing run went through the same line, and no test failure pointed at it. What it buys is visible in exactly one place — the documented target is `.agents/briefs/<LANE>.md` and `.agents/briefs/` is gitignored, so on a fresh checkout `writeFile` with `wx` fails ENOENT on a path the caller spelled correctly and the tool advertised, and there is nothing upstream to create it because the scratch-directory `mkdir -p` is a working rule of the lane, not a step of the tool. The test that fails is the one that names the directory rather than the brief: it asserts the exact parent the run asked for, so commenting the call out leaves the write mocked and passing while `dirs` is empty. The 'bare --out creates .' test fails too, on the same assertion for the other parent; every render, drift, section and argument test still passes, which is why the anchor is the call and not the signature it is called through",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/brief-new/__tests__/cli.test.ts",
+        "-t",
+        "a missing parent directory is created"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
