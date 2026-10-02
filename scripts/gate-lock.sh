@@ -547,7 +547,7 @@ if [ -n "$GATE_LOCK_DIR" ]; then
     walk="${walk%/*}"
     [ -n "$walk" ] || walk="/"
     if [ -L "$walk" ]; then
-      printf '%s\n' "gate-lock: GATE_LOCK_DIR=$GATE_LOCK_DIR runs through $walk, which is a symlink — a pool path must be plain and every component above it a real directory this user owns, because every check that walks the path resolves that link first and then judges whatever it points at; it was refused and no lock was taken" >&2
+      printf '%s\n' "gate-lock: GATE_LOCK_DIR=$GATE_LOCK_DIR runs through $walk, which is a symlink — a pool path must be plain and every component above it a real directory this user owns, because every check that walks the path resolves that link first and then judges whatever it points at; it was refused and no lock was taken. When the link is the caller's own TMPDIR rather than somebody else's pool — a Mac's is /var/folders/… behind /var — the answer is to say where it really is: name the pool by its resolved path (cd <dir> && pwd -P)" >&2
       exit 2
     fi
   done

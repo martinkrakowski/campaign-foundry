@@ -50,8 +50,29 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
+/**
+ * A scratch directory, RESOLVED.
+ *
+ * The resolution is not tidiness, it is the pool path rule. A pool must have no
+ * symlinked ancestor, and every pool in this file is built inside a scratch — so a
+ * scratch reached through a link hands every pool test a path the lock refuses.
+ * `os.tmpdir()` is not a resolved path on either of the two hosts that matter: a
+ * Mac's is `/var/folders/…` and `/var` is a symlink to `/private/var`, while a
+ * Linux seat may export TMPDIR through one itself. 26 of these tests failed on the
+ * Mac for that reason alone, and a Linux run could not see it because
+ * `/tmp` and `/mnt/pool` are real directories here.
+ *
+ * So the scratch is resolved once, here, where it is made — which is also the only
+ * place a test can fix it. `realpathSync` on a path `mkdtempSync` just created is
+ * the same answer `cd "$dir" && pwd -P` gives, and it is what the refusal message
+ * tells an operator to name their pool by.
+ *
+ * Deliberately NOT applied to the symlinks this file builds on purpose: those are
+ * refused for being symlinks, and resolving them would resolve away the case. They
+ * are made INSIDE a resolved scratch, so the link is the only link in the path.
+ */
 function scratch(): string {
-  const dir = mkdtempSync(join(tmpdir(), "cf-gate-lock-"));
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "cf-gate-lock-")));
   dirs.push(dir);
   return dir;
 }
@@ -2702,9 +2723,12 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
     // spelling rule can catch and which every check below the ancestor misses,
     // because that directory really is ours and really is 0700.
     //
-    // The links live INSIDE a mkdtemp scratch rather than under /tmp, because on a
-    // Mac /tmp is itself a symlink and every path through it would be a walk of
-    // links for a reason that has nothing to do with this case.
+    // The links live INSIDE a mkdtemp scratch, which is RESOLVED (see scratch) and
+    // therefore has no symlink of its own in it — so each of these is refused for
+    // the component it names, and not for whatever the host's TMPDIR is reached
+    // through. A Mac's /var is itself a link, which is the case the next test
+    // guards; putting these links under an unresolved scratch would have made all
+    // four fail for the host's reasons instead of their own.
     const dir = scratch();
     const host = scratch();
     const target = join(host, "real");
@@ -2738,6 +2762,10 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
     const walked = runLockIn(dir, ["status"], { GATE_LOCK_DIR: join(link, "below", "pool") });
     expect(walked.stderr).toContain(link);
     expect(walked.stderr).toContain("is a symlink");
+    // And it says what to do about it, because the link is very often the
+    // caller's own TMPDIR rather than somebody else's pool: the answer is the
+    // resolved path, and an operator who is not told that has nothing to change.
+    expect(walked.stderr).toContain("name the pool by its resolved path (cd <dir> && pwd -P)");
     const spelled = runLockIn(dir, ["status"], { GATE_LOCK_DIR: `${link}/./pool` });
     expect(spelled.stderr).toContain("plain absolute path");
 
@@ -2747,6 +2775,63 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
     const ok = runLockIn(dir, ["status"], { GATE_LOCK_DIR: join(below, "pool") });
     expect({ status: ok.status, stderr: ok.stderr }).toEqual({ status: 0, stderr: "" });
     expect(existsSync(join(below, "pool", ".format"))).toBe(true);
+  });
+
+  test("a symlinked ancestor is refused with the hint, and its resolved path is accepted", () => {
+    // The regression guard for a failure a Linux-only run cannot see. scratch() is
+    // RESOLVED (see it), so on this host every pool above is already a plain path
+    // and every ancestor-walk test proves only what it says. It was not true on a
+    // Mac: os.tmpdir() there is /var/folders/…, /var is a symlink, so every pool
+    // built from scratch() — and every pool a mac test seeds — was refused by the
+    // walk, 26 cases of them, and 13 of the lane's mutations could not be checked
+    // because the unmutated suite was already red.
+    //
+    // So the shape is built by hand here, inside a resolved scratch: one real
+    // directory with a link to a sibling, and the SAME pool addressed through
+    // each. The rule is not weakened — the link is still refused — and the
+    // refusal now carries the hint that says how to name a pool reached through
+    // one.
+    //
+    // One real level below the link, so the LINK is an ancestor rather than the
+    // parent and the WALK is what answers. A link AT the parent is a different
+    // refusal with a different message, covered in the parent test above, and this
+    // case is the Mac's: /var/folders/… puts the link two levels above the pool,
+    // which is why every one of those 26 failures came out of the walk and not
+    // out of the parent's own check.
+    const dir = scratch();
+    const target = join(dir, "real");
+    const alias = join(dir, "alias");
+    mkdirSync(target);
+    symlinkSync(target, alias);
+    const below = join(target, "below");
+    mkdirSync(below);
+    chmodSync(below, 0o700);
+
+    const through = join(alias, "below", "pool");
+    const refused = runLockIn(dir, ["status"], { GATE_LOCK_DIR: through });
+    expect(refused.status).toBe(2);
+    expect(refused.stderr).toContain(through);
+    expect(refused.stderr).toContain(alias);
+    expect(refused.stderr).toContain("is a symlink");
+    expect(refused.stderr).toContain("name the pool by its resolved path (cd <dir> && pwd -P)");
+    // Nothing was created through the link: the refusal is asked before the mkdir,
+    // so the pool does not exist on the far side either.
+    expect(existsSync(join(target, "below", "pool"))).toBe(false);
+
+    // The same pool, named by its resolved path — what the hint tells an operator
+    // to do, and what a caller whose TMPDIR is reached through a link must set.
+    const resolved = join(below, "pool");
+    // `below` is already a resolved path — the scratch is, and everything made
+    // inside it inherits that — so this name needs no resolution to be the
+    // resolved one. (`realpathSync` on the POOL itself would throw: it does not
+    // exist yet, which is the point.)
+    expect(below).toBe(realpathSync(below));
+    const accepted = runLockIn(dir, ["status"], { GATE_LOCK_DIR: resolved });
+    expect({ status: accepted.status, stderr: accepted.stderr }).toEqual({
+      status: 0,
+      stderr: "",
+    });
+    expect(existsSync(join(resolved, ".format"))).toBe(true);
   });
 
   test("a symlinked pool cannot be smuggled in behind a trailing slash", () => {
