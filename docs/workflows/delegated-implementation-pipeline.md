@@ -187,6 +187,19 @@ The status page shows the same gate from the other side: a lane whose row was ne
 or whose row changed after its review — is flagged **"dispatched on an unreviewed row"**, and the
 flag is never resolved into a lane state; it is a disagreement, left showing.
 
+### Pushing the wave's status
+
+When `WAVES_URL` is set, start `yarn wave:status --push --watch` in the background before the
+first dispatch. It is a second process beside `yarn wave:status` and serves no page: it collects
+what the local page shows and pushes each wave with activity in the last seven days to the waves
+service, one wave at a time; `--wave <id>` narrows it. A failed push warns and never fails a
+stage, and the wave must run correctly with the service down. Stop the watch once the wave's
+record is committed, `record settled` has been emitted and one more interval has passed: stopped
+earlier, the wave's last event is never sent; left running, the wave keeps reading fresh after
+the work has ended. The client is a devDependency, so a checkout needs `yarn install` before its
+first push. `WAVES_URL=<service> yarn waves:register --admin-token-file <path>` registers the
+project once and is the operator's step, not an agent's.
+
 ### Stage 1 — Delegate
 
 Split the wave into **file-disjoint lanes**. Two lanes may not own the same file; where a
