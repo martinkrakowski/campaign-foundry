@@ -820,6 +820,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@hexagen-monaco/waves-client@npm:^0.1.1":
+  version: 0.1.1
+  resolution: "@hexagen-monaco/waves-client@npm:0.1.1"
+  dependencies:
+    "@hexagen-monaco/waves-contract": "npm:^0.1.1"
+  bin:
+    waves: dist/cli.js
+  checksum: 10c0/fe6125ad4f97ee7ad641c240dcf350c7b0486a53adcdb5f5667bc0e0f376fb8584019a4929e93fc0cf78a8fe6c4367e8ca5b4272df7c64b2cd89c27cdeb1226f
+  languageName: node
+  linkType: hard
+
+"@hexagen-monaco/waves-contract@npm:^0.1.1":
+  version: 0.1.1
+  resolution: "@hexagen-monaco/waves-contract@npm:0.1.1"
+  checksum: 10c0/5c6abe127c4fe034fda55ddc0872c4710f65e6c2988b42b79741151ee15c6ec9309f7ffd32d6ff552d96c9387db24ffc86863854f2c0f4659a8e184207f9cfca
+  languageName: node
+  linkType: hard
+
 "@humanfs/core@npm:^0.19.2":
   version: 0.19.2
   resolution: "@humanfs/core@npm:0.19.2"
@@ -3304,6 +3322,7 @@ __metadata:
   dependencies:
     "@hexagen-monaco/arch-linter": "npm:^0.12.1"
     "@hexagen-monaco/sync": "npm:^0.12.1"
+    "@hexagen-monaco/waves-client": "npm:^0.1.1"
     "@testing-library/dom": "npm:^10.4.1"
     "@testing-library/react": "npm:^16.3.2"
     "@testing-library/user-event": "npm:^14.6.1"

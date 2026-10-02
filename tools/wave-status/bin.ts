@@ -20,6 +20,17 @@ export function resolveLegacyRoots(env: MainEnv): readonly string[] | undefined 
   return [LEGACY_WAVE_LOG_ROOT];
 }
 
+/**
+ * `yarn wave:status --push` is a one-shot push of the collected status, not a
+ * server: the read-only page has nothing to add to a snapshot on its way out.
+ * The flag is read here rather than parsed, because bin.ts must not import
+ * cli.ts — cli.ts imports bin.ts for `resolveRoot`, and a static import back
+ * would close a cycle.
+ */
+export function pushRequested(argv: readonly string[]): boolean {
+  return argv.includes("--push");
+}
+
 export async function main(env: MainEnv): Promise<ServerHandle> {
   const port = resolvePort(env);
   const handle = await startServer({
@@ -33,10 +44,24 @@ export async function main(env: MainEnv): Promise<ServerHandle> {
   return handle;
 }
 
-/* istanbul ignore next -- CLI entry guard; main() is covered directly in tests */
+/* istanbul ignore next -- CLI entry guard; main() and pushRequested() are covered directly in tests */
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main(process.env).catch((error: unknown) => {
-    console.error(error);
-    process.exitCode = 1;
-  });
+  const argv = process.argv.slice(2);
+  if (pushRequested(argv)) {
+    // No top-level `await` here: cli.ts imports this module, so awaiting its import
+    // while this module is still evaluating is a cycle that never settles (Node
+    // exits 13). Let this module finish first; the import resolves afterwards.
+    void import("./cli.js").then(
+      ({ runFromProcess }) => runFromProcess(argv),
+      (error: unknown) => {
+        console.error(error);
+        process.exitCode = 1;
+      },
+    );
+  } else {
+    main(process.env).catch((error: unknown) => {
+      console.error(error);
+      process.exitCode = 1;
+    });
+  }
 }
