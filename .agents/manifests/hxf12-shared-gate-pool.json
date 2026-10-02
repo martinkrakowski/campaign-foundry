@@ -6,7 +6,7 @@
       "file": "scripts/gate-lock.sh",
       "before": "  if [ -L \"$GATE_LOCK_DIR\" ] || [ ! -d \"$GATE_LOCK_DIR\" ] ||\n    ! find \"$GATE_LOCK_DIR\" -prune -user \"$pool_uid\" ! -perm -g+w ! -perm -o+w -print 2>/dev/null |\n      grep -q .; then",
       "after": "  if false; then",
-      "because": "the whole judgement of the pool directory: existence, symlink, uid and mode in one condition. Every lock decision this script makes is a rename INTO that directory, so a pool that is a world-writable or somebody-else's directory is not a lock parent, it is a name other users can take. The test creates the directory and chmods it to 0775 and 0777 after the fact (mkdirSync's mode option is filtered by umask 022, so the mode asked for would never be the mode checked), and expects exit 2 with the refusal naming the variable. The uid half of this predicate is reached by the seam case, which now answers on the PARENT — the same find -user, the same pool_uid, judged first — so the owner half of the question is not left untested by the two being asked separately. Note what is NOT the mutation: dropping only the `[ -L ]` term. On Linux a symlink's own mode is 0777, so the `-perm -o+w` predicate still refuses it and the suite stays green — that is why the symlink case below is mutated by following the link instead",
+      "because": "the whole judgement of the pool directory: existence, symlink, uid and mode in one condition. Every lock decision this script makes is a rename INTO that directory, so a pool that is a world-writable or somebody-else's directory is not a lock parent, it is a name other users can take. The test creates the directory and chmods it to 0775 and 0777 after the fact (mkdirSync's mode option is filtered by umask 022, so the mode asked for would never be the mode checked), and expects exit 2 with the refusal naming the variable. Its uid arm is claimed by a mutation of its own — the one that drops `-user` from this find and nothing else — because with one seam for the pool and its parent the parent was judged first and answered first, so this condition's uid half was reachable only through the parent's refusal. Note what is NOT the mutation here: dropping only the `[ -L ]` term. On Linux a symlink's own mode is 0777, so the `-perm -o+w` predicate still refuses it and the suite stays green — that is why the symlink case is mutated by following the link instead",
       "command": [
         "yarn",
         "vitest",
@@ -158,8 +158,8 @@
     {
       "file": "scripts/gate-lock.sh",
       "before": "while :; do\n    case \"$GATE_LOCK_DIR\" in\n      ?*/) GATE_LOCK_DIR=\"${GATE_LOCK_DIR%/}\" ;;\n      *) break ;;\n    esac\n  done",
-      "after": "while :; do\n    case \"$GATE_LOCK_DIR\" in\n      ?*/) : ;;\n      *) break ;;\n    esac\n  done",
-      "because": "the trailing-slash reduction stops reducing, and the pool is judged at the name as given. A slash is not a spelling of the same pool here: every test that walks to a path ending in `/` resolves a symlink first, so `[ -L \"$d/link/\" ]` is FALSE for a link to a directory (measured on this host) and `find \"$d/link/\"` descends through it and reports the TARGET's uid and mode. So a symlinked pool named with one slash is judged through what it points at, passes all three questions, and every slot is then written into a directory another user can re-point at any time — the symlink refusal this lane exists for, with a `/` typed on the end. The test drives one symlink three ways — bare, one slash, two — and requires the same refusal and the same reduced name out of all three, with the target left holding nothing",
+      "after": "# the trailing slashes are not reduced away",
+      "because": "the trailing slashes stop being reduced, which is the one spelling this file cannot afford to accept as a spelling. Every test that walks to a path ending in `/` resolves a symlink first, so `[ -d \"$d/link/\" ]` is true for a link to a directory and `find \"$d/link/\"` descends through it and reports the TARGET's uid and mode: the pool is then judged through what it points at and accepted, which makes one trailing slash the cheapest bypass of the whole provenance argument. The test drives the same symlink with no slash, one slash and two, and requires exit 2 naming the reduced path each time — under this mutation the one-slash and two-slash spellings are taken, so the case fails on the status rather than on a message. It replaces an earlier form of this mutation, which turned the reduction arm into a no-op and so spun forever inside the loop and was caught only by the spawn's own timeout; a claim that a test fails by hanging is a claim about the harness, not about the code",
       "command": [
         "yarn",
         "vitest",
@@ -174,9 +174,9 @@
     },
     {
       "file": "scripts/gate-lock.sh",
-      "before": "if [ -L \"$pool_parent\" ] || [ ! -d \"$pool_parent\" ] ||\n    ! find \"$pool_parent\" -prune -user \"$pool_uid\" ! -perm -g+w ! -perm -o+w -print 2>/dev/null |\n      grep -q .; then",
+      "before": "if [ -L \"$pool_parent\" ] || [ ! -d \"$pool_parent\" ] ||\n    ! find \"$pool_parent\" -prune -user \"$parent_uid\" ! -perm -g+w ! -perm -o+w -print 2>/dev/null |\n      grep -q .; then",
       "after": "if false; then",
-      "because": "the pool's parent is not looked at, which is the check the leaf's own mode cannot make. The pool's 0700 protects the names inside it and nothing about the name itself, and the name is a directory entry in the parent: in a parent another user can write, that user renames the pool away between one acquirer's mkdir and the next one's rename, onto a directory they own holding a `.format` they wrote and slots they seeded — and by the time anything looks at the pool again it has moved, so nothing at the leaf can say so. The test chmods the parent to 0777 and to 0775 and expects exit 2 naming the parent, and requires that no pool directory was created under it; the same test drives the foreign-owner case through CF_GATE_TEST_EXPECT_UID and a symlinked parent, and ends with a 0700 parent accepted — mkdtemp's mode, which is what every other pool test in the file runs under and what midnight's /run/user/1000 is",
+      "because": "the pool's parent is not looked at, which is the check the leaf's own mode cannot make. The pool's 0700 protects the names inside it and nothing about the name itself, and the name is a directory entry in the parent: in a parent another user can write, that user renames the pool away between one acquirer's mkdir and the next one's rename, onto a directory they own holding a `.format` they wrote and slots they seeded — and by the time anything looks at the pool again it has moved, so nothing at the leaf can say so. The test chmods the parent to 0777 and to 0775 and expects exit 2 naming the parent, and requires that no pool directory was created under it; the same test drives the foreign-owner case through CF_GATE_TEST_PARENT_UID — a seam of its own since this round, so that moving one claim cannot answer for the other — and a symlinked parent, and ends with a 0700 parent accepted, which is mkdtemp's mode, what every other pool test in the file runs under, and what midnight's /run/user/1000 is",
       "command": [
         "yarn",
         "vitest",
@@ -203,6 +203,40 @@
         "tools/gate/__tests__/gate-lock.test.ts",
         "-t",
         "the pool's slots and its workers must multiply out"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "if [ -L \"$walk\" ]; then",
+      "after": "if false; then",
+      "because": "no component above the pool is looked at, so a symlink anywhere higher up becomes invisible while every check below it still answers. `[ -L ]` reads only the LAST component of a path and `find` resolves every other one on the way down, so `/scratch/link/b/pool` — where `link` points at a directory this user owns — passes the parent's own check on all three counts: that directory really is ours, and really is 0700. What it does not say is that the pool is a directory in whatever tree `link` names, which is a directory another user can re-point between one acquirer's mkdir and the next one's rename. The test builds exactly that path inside a mkdtemp scratch (not under /tmp, which is itself a symlink on a Mac, or every case there would be a walk of links) and expects exit 2 naming the component that is the link; the same test covers the three SPELLINGS that reach the same place — `link//pool`, `link/./pool`, `link/../pool`, each of which leaves `${GATE_LOCK_DIR%/*}` as a path whose `-L` is false and whose `find` descends — and ends with a real nested pool accepted, because a walk that refused ordinary directories would be as wrong as one that accepts links",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "a pool path that is not plain, or that runs through a symlink above it, is refused"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "! find \"$GATE_LOCK_DIR\" -prune -user \"$pool_uid\" ! -perm -g+w ! -perm -o+w -print 2>/dev/null |",
+      "after": "! find \"$GATE_LOCK_DIR\" -prune ! -perm -g+w ! -perm -o+w -print 2>/dev/null |",
+      "because": "the pool's own uid arm goes and nothing else does, so a directory belonging to somebody else is judged on its MODE alone — and 0700 is exactly what such a directory has. A pool this user does not own is then a pool it will rename slots into and publish a `.format` in, on the strength of a permission test that a stranger's private directory passes. The two directories have separate uid claims now (CF_GATE_TEST_EXPECT_UID for the pool, CF_GATE_TEST_PARENT_UID for the parent) precisely so that this one is reachable from a test: with a single seam the parent's refusal answered first and this arm was covered only through a message about a different directory. The test creates the pool 0700 so the mkdir above the check is a no-op, moves only the POOL's claim to a foreign uid, and requires exit 2 naming the pool and that uid — and that the directory is left with nothing in it, because a refusal must not publish a marker into a pool this user does not hold",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "a pool owned by somebody else is refused"
       ],
       "verdict": "caught"
     }

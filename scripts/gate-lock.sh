@@ -110,6 +110,16 @@
 # even though the leaf check would pass it, and the fix is a parent under
 # $XDG_RUNTIME_DIR or a home directory, not a mode on the pool.
 #
+# And the PATH is plain, and every component above the pool is a real directory:
+# absolute, no `//`, `/./` or `/../`, no trailing `.` or `..` beyond the slashes
+# that are reduced away, and no symlink anywhere above the leaf. Each of those
+# walks past a check rather than naming the directory it lands on — `${…%/*}`
+# leaves `<link>/` for `<link>//pool`, whose `[ -L ]` is false and whose `find`
+# descends — and `[ -L ]` on the path says nothing about what the path runs THROUGH.
+# A pool path names ONE directory, so a spelling that can be walked is refused
+# rather than normalised, and the ancestor walk is the only thing that can see a
+# link two levels up.
+#
 # Trailing slashes are reduced away before either is judged, and `/` is refused.
 # A slash is not a spelling here: every test that walks to a path ending in `/`
 # resolves a symlink first, so `[ -L "$d/link/" ]` is false for a link to a
@@ -442,6 +452,21 @@ if [ -n "$GATE_LOCK_DIR" ]; then
     printf '%s\n' "gate-lock: GATE_LOCK_DIR must name a pool directory of its own, not the filesystem root: $GATE_LOCK_DIR" >&2
     exit 2
   fi
+  # And PLAIN: no empty component, no `.`, no `..`, no trailing `.`/`..`. The
+  # reduction above only removes slashes at the END, so an interior `//`, `/./` or
+  # `/../` survives it — and each of those walks past a check rather than naming
+  # the directory it lands on. `/x/link//pool` leaves the parent as `/x/link/`,
+  # whose `[ -L ]` is FALSE because of the trailing slash and whose `find` descends
+  # through the link; `/x/link/./pool` and `/x/link/../pool` reach the same place
+  # with no trailing slash at all. A pool path is a name for ONE directory, so a
+  # spelling that can be walked is refused rather than normalised: there is no
+  # case here where resolving it is worth the arithmetic.
+  case "$GATE_LOCK_DIR" in
+    *//* | */./* | */../* | */. | */..)
+      printf '%s\n' "gate-lock: GATE_LOCK_DIR must be a plain absolute path — no '//', '/./' or '/../' component, and no trailing '.' or '..': $GATE_LOCK_DIR" >&2
+      exit 2
+      ;;
+  esac
   LOCK_BASE="$GATE_LOCK_DIR/gate.lock"
 else
   LOCK_BASE="${TMPDIR:-/tmp}/cf-gate.lock"
@@ -472,6 +497,15 @@ if [ -n "$GATE_LOCK_DIR" ]; then
     slot_uid="${CF_GATE_TEST_EXPECT_UID:-$(id -u)}"
   fi
   pool_uid="$slot_uid"
+  # The PARENT is asked about a uid of its own, which is this one unless a test
+  # says otherwise. It has to be a separate seam because the two directories are
+  # separate claims: with one variable, a case that made the pool foreign also made
+  # the parent foreign, and the parent is judged FIRST — so the pool's own owner
+  # check became unreachable from a test, and "somebody else's pool" was covered
+  # only in the one refusal that names the parent. CF_GATE_TEST_PARENT_UID makes
+  # the parent's claim alone foreign; CF_GATE_TEST_EXPECT_UID now reaches the pool
+  # again, which is where a slot's own uid check is read from.
+  parent_uid="${CF_GATE_TEST_PARENT_UID:-$pool_uid}"
   # The PARENT, judged with the same three questions and refused with the same
   # exit 2, BEFORE anything is created under it. This is the check the header
   # promises and the leaf's own mode cannot do: the pool's 0700 protects the names
@@ -490,11 +524,33 @@ if [ -n "$GATE_LOCK_DIR" ]; then
   pool_parent="${GATE_LOCK_DIR%/*}"
   [ -n "$pool_parent" ] || pool_parent="/"
   if [ -L "$pool_parent" ] || [ ! -d "$pool_parent" ] ||
-    ! find "$pool_parent" -prune -user "$pool_uid" ! -perm -g+w ! -perm -o+w -print 2>/dev/null |
+    ! find "$pool_parent" -prune -user "$parent_uid" ! -perm -g+w ! -perm -o+w -print 2>/dev/null |
       grep -q .; then
-    printf '%s\n' "gate-lock: GATE_LOCK_DIR's parent $pool_parent must be owned by uid $pool_uid and not writable by group or others; it is refused and no lock was taken" >&2
+    printf '%s\n' "gate-lock: GATE_LOCK_DIR's parent $pool_parent must be owned by uid $parent_uid and not writable by group or others; it is refused and no lock was taken" >&2
     exit 2
   fi
+  # Every component ABOVE the pool must then be a real directory, which is a
+  # separate question from the parent's own three and the only way to see a link
+  # anywhere higher up. `[ -L ]` reads the LAST component of a path and `find`
+  # resolves every other one on the way, so the parent's check above says nothing
+  # about what the path runs THROUGH: `/scratch/link/b/pool`, where `link` points
+  # at a directory this user owns, passes that check — the directory really is ours
+  # and really is 0700 — while the pool is a directory in whatever tree `link`
+  # names. Walking up and testing each component costs one `-L` per level on a
+  # path that is short.
+  #
+  # It runs after the parent's own check so that a symlinked PARENT is still
+  # answered by the message that names the parent, and before the mkdir so that
+  # neither answer leaves a directory behind.
+  walk="$GATE_LOCK_DIR"
+  while [ "$walk" != "/" ]; do
+    walk="${walk%/*}"
+    [ -n "$walk" ] || walk="/"
+    if [ -L "$walk" ]; then
+      printf '%s\n' "gate-lock: GATE_LOCK_DIR=$GATE_LOCK_DIR runs through $walk, which is a symlink — a pool path must be plain and every component above it a real directory this user owns, because every check that walks the path resolves that link first and then judges whatever it points at; it was refused and no lock was taken" >&2
+      exit 2
+    fi
+  done
   mkdir -m 0700 "$GATE_LOCK_DIR" 2>/dev/null || true
   # The mode test is a `find` predicate for the same reason the uid test is:
   # POSIX sh has no portable `stat`, and `test -w` would answer "this user can
@@ -693,14 +749,27 @@ arithmetic_safe() {
 # /proc/cpuinfo is Linux-only.
 #
 # A value that is not a number is a refusal rather than a guess in both places
-# that need it, and the message says which decision wanted it. Inventing a
-# processor count would be inventing the host's budget, and a budget nobody wrote
-# down is how a host ends up oversubscribed by a factor with no red anywhere.
+# that need it, and the message says WHICH of the two wanted it. They are not the
+# same question and the operator fixes them differently: the DERIVATION wants
+# nproc to turn a worker budget into a slot count, and is answered by naming
+# GATE_HOST_SLOTS or by leaving GATE_HOST_WORKERS unset; the BUDGET check wants it
+# to measure slots against workers the host has already declared, and is answered
+# by lowering GATE_HOST_SLOTS or raising GATE_HOST_WORKERS. Inventing a processor
+# count would be inventing the host's budget, and a budget nobody wrote down is
+# how a host ends up oversubscribed by a factor with no red anywhere.
 read_host_nproc() {
+  nproc_wanted_for=$1
   host_nproc="${CF_GATE_TEST_NPROC:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)}"
   case "$host_nproc" in
     ''|*[!0-9]*)
-      printf '%s\n' "gate-lock: GATE_HOST_WORKERS=$HOST_WORKERS needs this host's processor count to derive a slot count, and getconf _NPROCESSORS_ONLN printed '$host_nproc'; set GATE_HOST_SLOTS on the host, or unset GATE_HOST_WORKERS to fall back to CF_GATE_SLOTS" >&2
+      case "$nproc_wanted_for" in
+        budget)
+          printf '%s\n' "gate-lock: GATE_HOST_SLOTS=$SLOTS with GATE_HOST_WORKERS=$HOST_WORKERS can only be checked against this host's processor count, and getconf _NPROCESSORS_ONLN printed '$host_nproc'; lower GATE_HOST_SLOTS, raise GATE_HOST_WORKERS, or unset GATE_HOST_WORKERS and let the slot count be derived from it" >&2
+          ;;
+        *)
+          printf '%s\n' "gate-lock: GATE_HOST_WORKERS=$HOST_WORKERS needs this host's processor count to derive a slot count, and getconf _NPROCESSORS_ONLN printed '$host_nproc'; set GATE_HOST_SLOTS on the host, or unset GATE_HOST_WORKERS to fall back to CF_GATE_SLOTS" >&2
+          ;;
+      esac
       exit 2
       ;;
   esac
@@ -770,7 +839,7 @@ else
     # 24/5 = 4, 3/4 = 1 — the last of which is the point. A host with fewer
     # threads than one worker's worth still gets ONE gate, because a pool with
     # zero slots is a host on which nothing is ever gated.
-    read_host_nproc
+    read_host_nproc derivation
     HOST_SLOTS=$(( $(arithmetic_safe "$HOST_NPROC") / $(arithmetic_safe "$HOST_WORKERS") ))
     if [ "$HOST_SLOTS" -lt 1 ]; then
       HOST_SLOTS=1
@@ -800,7 +869,7 @@ else
   # nobody wrote down.
   if [ -n "$HOST_SLOTS_SOURCE" ] && [ "$HOST_SLOTS_SOURCE" = GATE_HOST_SLOTS ] &&
     [ -n "$GATE_HOST_WORKERS" ]; then
-    read_host_nproc
+    read_host_nproc budget
     if [ "$SLOTS" -gt $(( $(arithmetic_safe "$HOST_NPROC") / $(arithmetic_safe "$HOST_WORKERS") )) ]; then
       printf '%s\n' "gate-lock: GATE_HOST_SLOTS=$SLOTS with GATE_HOST_WORKERS=$HOST_WORKERS asks for more workers than this host's $HOST_NPROC processors; a pool's slots and a run's workers are one budget, so the two must multiply out to at most the thread count. Lower GATE_HOST_SLOTS, raise GATE_HOST_WORKERS, or unset GATE_HOST_WORKERS and let the slot count be derived from it." >&2
       exit 2

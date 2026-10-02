@@ -2626,28 +2626,32 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
 
   test("a pool owned by somebody else is refused, through the uid seam a slot is judged by", () => {
     // The seam is the whole mechanism: `find -user` is how this lock decides who
-    // owns a directory it will rename into, and both directories it judges — the
-    // pool and its parent — are asked through the same variable, so a seam that
-    // moved one would leave the other untestable, and "somebody else's pool" is
-    // exactly what must never be silent.
-    //
-    // It answers on the PARENT, which is judged first and which the seam also
-    // makes foreign: a pool under a directory that is not this user's is not
-    // taken either, and that is the more useful refusal of the two — it names the
-    // thing the operator has to change.
+    // owns a directory it will rename into, and the pool and its parent are two
+    // separate claims — so they have two seams, and each test moves one. This one
+    // moves the POOL's, and pins the parent's claim to the real uid, because the
+    // parent is judged FIRST: with one variable for both, every case that made a
+    // pool foreign also made its parent foreign, the parent's refusal answered
+    // first, and the pool's own owner check became unreachable from a test. That
+    // is the defect this test exists to prevent, and CF_GATE_TEST_PARENT_UID is
+    // what makes it reachable.
     const dir = scratch();
-    const parent = scratch();
-    const pool = join(parent, "pool");
+    // The pool exists first, so the mkdir above the check is a no-op: a refusal
+    // then leaves the directory exactly as it was, with no `.format` published
+    // into a pool this user does not own.
+    const pool = madePool();
     const result = runLockIn(dir, ["status"], {
       GATE_LOCK_DIR: pool,
       CF_GATE_TEST_EXPECT_UID: "65534",
+      CF_GATE_TEST_PARENT_UID: String(process.getuid?.() ?? 0),
     });
     expect(result.status).toBe(2);
-    expect(result.stderr).toContain(`GATE_LOCK_DIR's parent ${parent}`);
+    // The refusal names the POOL, not the parent: that is the directory the
+    // operator has to change here, and the uid is the one the seam named.
+    expect(result.stderr).toContain(`GATE_LOCK_DIR=${pool}`);
     expect(result.stderr).toContain("owned by uid 65534");
-    // Nothing was created on the way past, and the pool's own check is not what
-    // answered: a directory this user does not own is not created at all.
-    expect(existsSync(pool)).toBe(false);
+    expect(result.stderr).not.toContain("'s parent");
+    // And it is untouched: no marker, no slot, nothing published.
+    expect(readdirSync(pool)).toEqual([]);
   });
 
   test("a group- or world-writable pool is refused", () => {
@@ -2685,6 +2689,64 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
     expect(relative.status).toBe(2);
     expect(relative.stderr).toContain("must be an absolute path");
     expect(relative.stderr).toContain("relative/pool");
+  });
+
+  test("a pool path that is not plain, or that runs through a symlink above it, is refused", () => {
+    // Four ways past a check that only ever looks at the last component of a path.
+    // The first three are SPELLINGS: `//`, `/./` and `/../` all name a directory
+    // that is somewhere else, and `${GATE_LOCK_DIR%/*}` leaves the parent as
+    // `<link>/`, `<link>/.` or `<link>/..` — paths whose `[ -L ]` is false and
+    // whose `find` descends through the link, so the pool and its parent would be
+    // judged through whatever the link points at and accepted. The fourth is not a
+    // spelling at all: a real pool two levels below a symlinked ancestor, which no
+    // spelling rule can catch and which every check below the ancestor misses,
+    // because that directory really is ours and really is 0700.
+    //
+    // The links live INSIDE a mkdtemp scratch rather than under /tmp, because on a
+    // Mac /tmp is itself a symlink and every path through it would be a walk of
+    // links for a reason that has nothing to do with this case.
+    const dir = scratch();
+    const host = scratch();
+    const target = join(host, "real");
+    mkdirSync(target);
+    const link = join(host, "link");
+    symlinkSync(target, link);
+    const below = join(target, "below");
+    mkdirSync(below);
+    chmodSync(below, 0o700);
+
+    for (const name of [
+      `${link}//pool`,
+      `${link}/./pool`,
+      `${link}/../pool`,
+      join(link, "below", "pool"),
+    ]) {
+      const result = runLockIn(dir, ["status"], { GATE_LOCK_DIR: name });
+      expect({ name, status: result.status }).toEqual({ name, status: 2 });
+      // Every refusal names the value the caller passed, so the operator can see
+      // which of the four was the one that did not run.
+      expect(result.stderr).toContain(name);
+      // Nothing was created anywhere on the way past, in the target or beside the
+      // link: all four are refused before the mkdir.
+      expect(existsSync(join(target, "pool"))).toBe(false);
+      expect(existsSync(join(below, "pool"))).toBe(false);
+      expect(readdirSync(target).sort()).toEqual(["below"]);
+    }
+    // The ancestor refusal says WHICH component was the link; the plain-path one
+    // says what a pool path may not contain. Two answers because they are two
+    // faults, and the operator cannot act on "refused" alone.
+    const walked = runLockIn(dir, ["status"], { GATE_LOCK_DIR: join(link, "below", "pool") });
+    expect(walked.stderr).toContain(link);
+    expect(walked.stderr).toContain("is a symlink");
+    const spelled = runLockIn(dir, ["status"], { GATE_LOCK_DIR: `${link}/./pool` });
+    expect(spelled.stderr).toContain("plain absolute path");
+
+    // And a REAL nested pool still works: two real levels down, no link, nothing
+    // to refuse. A path walk that refused ordinary directories would be as wrong
+    // as one that accepts links.
+    const ok = runLockIn(dir, ["status"], { GATE_LOCK_DIR: join(below, "pool") });
+    expect({ status: ok.status, stderr: ok.stderr }).toEqual({ status: 0, stderr: "" });
+    expect(existsSync(join(below, "pool", ".format"))).toBe(true);
   });
 
   test("a symlinked pool cannot be smuggled in behind a trailing slash", () => {
@@ -2768,16 +2830,21 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
       expect(existsSync(pool)).toBe(false);
     }
 
-    // Somebody else's parent, through the same uid seam a slot is judged by — so
-    // the seam reaches this check rather than only the leaf's.
+    // Somebody else's parent, through the PARENT's own seam — so a case that moves
+    // one claim cannot answer for the other. The pool is created first here too,
+    // and the pool's own uid claim is left alone: this case is about the parent.
     const ours = scratch();
     const foreign = runLockIn(dir, ["status"], {
       GATE_LOCK_DIR: join(ours, "pool"),
-      CF_GATE_TEST_EXPECT_UID: "65534",
+      CF_GATE_TEST_PARENT_UID: "65534",
     });
     expect(foreign.status).toBe(2);
     expect(foreign.stderr).toContain(`GATE_LOCK_DIR's parent ${ours}`);
     expect(foreign.stderr).toContain("owned by uid 65534");
+    // The parent's check is asked BEFORE the mkdir, so a refusal here leaves no
+    // directory behind in a parent nobody may write — which is the whole reason
+    // it is asked first.
+    expect(existsSync(join(ours, "pool"))).toBe(false);
 
     // A symlinked parent, for the same reason a symlinked pool is refused: the
     // entry above the pool is then somebody else's link.
@@ -3004,6 +3071,11 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
     });
     expect(noCount.status).toBe(2);
     expect(noCount.stderr).toContain("_NPROCESSORS_ONLN");
+    // And it names the DECISION that wanted the count, which is not the derivation
+    // and is fixed differently: this one is answered by lowering the slot count or
+    // raising the worker cap, not by setting GATE_HOST_SLOTS.
+    expect(noCount.stderr).toContain("GATE_HOST_SLOTS=6 with GATE_HOST_WORKERS=4");
+    expect(noCount.stderr).toContain("checked against");
 
     // GATE_HOST_SLOTS ALONE stays allowed, as the row says — and it leaves the
     // vitest worker count uncapped, which is the operator's trade: a host that
@@ -3041,9 +3113,13 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
     expect(result.status).toBe(2);
     // Naming GATE_HOST_WORKERS and the count it needs: without nproc the only
     // answers are a guessed budget or no pool at all, and a guessed one is how a
-    // host ends up oversubscribed by a factor nobody wrote down.
+    // host ends up oversubscribed by a factor nobody wrote down. And it names the
+    // DERIVATION as the decision that wanted the count, which the budget check's
+    // own refusal above does not — the two are answered differently and an
+    // operator who cannot tell them apart fixes the wrong one.
     expect(result.stderr).toContain("GATE_HOST_WORKERS=4");
     expect(result.stderr).toContain("_NPROCESSORS_ONLN");
+    expect(result.stderr).toContain("derive a slot count");
   });
 
   test("CF_GATE_SLOTS=3 beside GATE_HOST_SLOTS=6 is refused under a pool, naming both", () => {
@@ -3061,6 +3137,13 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
       // CF_TEST_MAX_WORKERS=3 on a 7x3 host would refuse here and the test would
       // be reading a worker refusal as a slot one.
       CF_TEST_MAX_WORKERS: "4",
+      // And the host this pool claims to be, because the budget check runs on both
+      // counts BEFORE the slot disagreement: 6 × 4 is exactly midnight's 24
+      // threads, and a 16-thread Mac or a 4-core runner would refuse this
+      // invocation as oversubscribed before reaching the refusal under test. Every
+      // pool case that names BOTH host counts pins this, so no result here depends
+      // on the machine it runs on.
+      CF_GATE_TEST_NPROC: "24",
       CF_GATE_SLOTS: "3",
     });
     expect(refused.status).toBe(2);
@@ -3119,6 +3202,10 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
       GATE_HOST_SLOTS: "6",
       CF_GATE_SLOTS: "6",
       CF_TEST_MAX_WORKERS: "4",
+      // The host these two counts describe: 6 × 4 is 24, which the budget check
+      // compares against the processor count, and it would refuse on a 16-thread
+      // Mac or a 4-core runner — the agreeing case would read as a disagreement.
+      CF_GATE_TEST_NPROC: "24",
     });
     expect(agreed.status).toBe(0);
   });
@@ -3134,11 +3221,16 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
     const dir = scratch();
     const pool = madePool();
     const sixSlots = { GATE_HOST_SLOTS: "6", CF_GATE_SLOTS: "6" };
+    // The host those six slots and four workers are six-and-four OF: 24 threads.
+    // Unpinned, the budget check reads this machine's real count and the whole
+    // case becomes a statement about the runner — refused on a 16-thread Mac and
+    // a 4-core one, accepted on midnight.
+    const on24 = { ...sixSlots, CF_GATE_TEST_NPROC: "24" };
     const spelled = runLockIn(dir, ["status"], {
       GATE_LOCK_DIR: pool,
       GATE_HOST_WORKERS: "4",
       CF_TEST_MAX_WORKERS: "04",
-      ...sixSlots,
+      ...on24,
     });
     expect({ status: spelled.status, stderr: spelled.stderr }).toEqual({
       status: 0,
@@ -3150,7 +3242,7 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
       GATE_LOCK_DIR: pool,
       GATE_HOST_WORKERS: "4",
       CF_TEST_MAX_WORKERS: "3",
-      ...sixSlots,
+      ...on24,
     });
     expect(refused.status).toBe(2);
     expect(refused.stderr).toContain("CF_TEST_MAX_WORKERS=3");
@@ -3161,7 +3253,7 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
       GATE_LOCK_DIR: pool,
       GATE_HOST_WORKERS: "04",
       CF_TEST_MAX_WORKERS: "4",
-      ...sixSlots,
+      ...on24,
     });
     expect(other.status).toBe(0);
   });
