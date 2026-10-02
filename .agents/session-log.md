@@ -6713,3 +6713,41 @@ and source formatting, recorded here rather than fixed.
 - Midnight's global git email is now noreply.
 - User-level `~/.claude/CLAUDE.md` created (midnight dispatch rules).
 - **Open:** the opencode proposals (session resume, a step cap, sharing disabled) and `CF_GATE_SLOTS=3` on midnight.
+
+## 2026-10-02 — wave `waves-client-w01` (WS1-push, WS5-docs): campaign-foundry pushes its waves to the waves service
+
+**Merged:**
+
+| PR | What | Merge SHA |
+|---|---|---|
+| #651 | WS1-push, `yarn wave:status --push [--wave <id>] [--watch[=s]]` | bf00502f |
+| #652 | WS5-docs, the AGENTS.md "Wave Observability" section, the skill and the pipeline doc | 137628c4 |
+
+**Who ran it.** The waves orchestrator (a separate session, at the owner's instruction that all waves work moves to it). WS1 ran on midnight's opencode server (space-bunny, `--agent lane`) with one fix round on a forked resume; WS5 was written by the orchestrator. Every review pass was Fable.
+
+**What shipped.** The print face pipes each recent wave to the published `waves` client (0.1.1), one wave at a time, 1.1 s apart. A failed push only warns. The mapping to the service's lane shape is explicit key lists at every level; the log tail is never sent. The reported interval is the larger of the computed spacing and the measured previous cycle.
+
+**Owner decision.** The charter test (D106) allows one more subprocess: the `waves` client, by its pinned path `node_modules/.bin/waves`, from `lib/push.ts` only, never through a shell. The status server still imports no push module.
+
+**What the review layer bought:**
+
+- The row-and-brief review found the charter conflict before dispatch, and that the brief told the lane to hide `realPushDeps` from coverage on a false premise (collect.ts tests its real deps through a mocked `child_process`).
+- A REAL run found what no test could: `bin.ts` awaited its dynamic import of `cli.ts` at the top level while `cli.ts` imports `bin.ts`, a cycle that never settles (Node exit 13, nothing pushed). The entry guard is coverage-ignored. The charter now refuses the awaited form.
+- Qodo found three defects after Fable's "merge": one refused lane id cost its whole wave; a refused wave id warned on every tick; the reported interval left out collection time. All fixed in the fix round, with one mutation each.
+- CodeRabbit found that the docs' stop rule could still drop a wave's last event. The rule is now a one-shot push after `record settled`.
+
+**Refuted, and why:**
+
+- "Push warnings should use the structured logger" — the rule exempts scripts, and this tool's CLI entry sites already printed.
+
+**Process findings, and the rule each leaves:**
+
+- **`yarn plan:review check` was not run before WS1's dispatch.** The row and brief were reviewed, but the gate that makes that structural was skipped. Run it; a reviewed row with no recorded review is, to the page, an unreviewed row.
+- **A watch started for a test and stopped with a parent-process alarm kept running** as an orphan for 34 minutes, pushing every 14 s and calling `gh` each time. A watch is stopped by its own task handle, and its absence is checked (`ps`), not assumed. The skill now says to hold the task and to close with a one-shot push.
+- **An orchestrator fix was committed with half of it missing** after a `git checkout` used to undo a mutation also undid uncommitted work in the same file. Commit before mutating.
+- **Local gates on a loaded Mac timed out in unrelated suites** (load average 13). The loaded-host rule held: the isolated pass was shown and CI decided.
+- **merge-prs.sh refused #652 for one unresolved thread**, correctly. The settle period had passed; the bot had posted.
+
+**Deferred (recorded, not chased):** the near-cap warning test would pass without the code it names; the refused-lane warning does not name the wave; the charter's source scan does not see a namespace import of `child_process` (pre-existing); the near-cap warning repeats every tick.
+
+**Definition of done (plan §4):** `yarn waves:register` exists (the operator appends `--admin-token-file`); a `--watch` push updated the service within one interval and read fresh; a stopped push reads stale after the service's threshold. **Still open:** hexagen-monaco registering and pushing as a second project.
