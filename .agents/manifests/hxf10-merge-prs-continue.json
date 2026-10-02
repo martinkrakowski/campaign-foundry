@@ -154,6 +154,23 @@
         "never waits on a terminal"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "        ;;\n      unrecorded)\n        # Counted and listed above, in BOTH modes, because a run with no summary\n        # still has to have said it. Nothing to add here — and in particular\n        # nothing that says refused.\n        ;;\n      refused)",
+      "after": "        ;;\n      *)",
+      "because": "dropping the unrecorded arm from the --continue block's dispatch, so the refusal arm becomes the default for every outcome that is not `merged` — which is the shape the file had before the outcome was decided once, and the bug this row exists for. A merge whose marker could not be written sets the outcome to `unrecorded` on purpose, because the epilogue must not touch a PR this run cannot account for; anything that reads `merged` as a synonym for `merged-and-recorded` therefore catches it. So the same PR was counted in unrecorded_count and listed as merged-but-not-recorded, and then counted AGAIN in refused_count and listed a second time as REFUSED — with an `=== PR #N REFUSED` line on stderr sending an operator after a gate that passed. That is what the marker-write comment forbids in as many words, and under --continue it was doing. The arm has to be a no-op rather than absent here: with the label simply missing and `refused)` left as a plain label, `unrecorded` matches nothing and is still counted once — which is correct behaviour, and a mutation that deletes a line without deleting the dispatch's default proves nothing. The test is three PRs where the middle one merges with its marker unwritable, and it wants that PR in the summary exactly once as merged-but-not-recorded, no REFUSED anywhere, and `0 refused` beside a non-zero exit",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "unrecorded merge is listed once"
+      ],
+      "verdict": "caught"
     }
   ]
 }

@@ -250,6 +250,24 @@ function makeHarness(): Harness {
     "    fi",
     "    ;;",
     '  "pr merge")',
+    "    # STUB_LOCK_MARKER_ON_PRMERGE names a PR whose marker write should fail. It",
+    "    # has to remove the marker FILE and then make its directory read-only, and",
+    "    # both halves are needed: an append to an existing file needs no permission",
+    "    # on the directory, so locking the directory alone does nothing once an",
+    "    # earlier PR has created the file, and it is the create that fails — which is",
+    "    # the shape a full disk gives. RUN_TMP and MARK_FILE are both exported to",
+    "    # the body and this stub inherits them, so the knob is a PR number and",
+    "    # nothing else; any other PR puts the directory back, so one unrecordable",
+    "    # merge does not make the rest of the run unrecordable too.",
+    '    if [ -n "${STUB_LOCK_MARKER_ON_PRMERGE:-}" ]; then',
+    '      if [ "${3:-}" = "$STUB_LOCK_MARKER_ON_PRMERGE" ]; then',
+    '        chmod 0755 "${RUN_TMP:?}" 2>/dev/null',
+    '        rm -f "${MARK_FILE:?}" 2>/dev/null',
+    '        chmod 0555 "${RUN_TMP:?}" 2>/dev/null',
+    "      else",
+    '        chmod 0755 "${RUN_TMP:?}" 2>/dev/null',
+    "      fi",
+    "    fi",
     "    # Park HERE, on the merge call itself rather than on every gh call, so",
     "    # a signal test can land while the merge is in flight — which is the one",
     "    # moment where a gh left running could still land a merge after this run",
@@ -445,7 +463,16 @@ async function waitFor(
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (!condition()) {
-    if (Date.now() > deadline) return false;
+    // Gives up by THROWING rather than returning false, so that `what` reaches
+    // the reader. Returning false left the failure to the caller's
+    // `expect(...).toBe(true)`, which says "expected false to be true" and names
+    // neither the thing waited for nor the bound — and in a file where a dozen
+    // tests wait on a dozen different handshakes, that is the whole diagnosis.
+    // Every call site is `expect(await waitFor(…)).toBe(true)`, which a throw
+    // satisfies just as well, and a failure now arrives with a sentence on it.
+    if (Date.now() > deadline) {
+      throw new Error(`timed out after ${timeoutMs}ms waiting for ${what}`);
+    }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   return true;
@@ -666,9 +693,19 @@ async function waitForContent(path: string, timeoutMs = 5_000): Promise<boolean>
   }
 }
 
-/** The pid of a process, or undefined if it is gone. */ function pidAlive(pid: number): boolean {
+/**
+ * Is any process still in this PROCESS GROUP?
+ *
+ * Signal 0 to a negative pid asks about the group as a whole, and answers
+ * ESRCH only once it has no members left — which is the question a teardown or a
+ * sweep actually has. Asking about one pid is the weaker question: a body can be
+ * gone while the `gh` it exec'd, or a child that was re-parented out of it, is
+ * still running, and a body that has died is not the same as a PR that has
+ * stopped.
+ */
+function groupAlive(pgid: number): boolean {
   try {
-    process.kill(pid, 0);
+    process.kill(-pgid, 0);
     return true;
   } catch {
     return false;
@@ -1354,7 +1391,7 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       // the only state a crashed run can leave, and the one every planted lock
       // was standing in for.
       expect(existsSync(harness.lockDir)).toBe(true);
-      expect(pidAlive(Number(holder))).toBe(false);
+      expect(isAlive(Number(holder))).toBe(false);
 
       // And the next run reclaims it and does the work, instead of answering 75
       // for ever. A token with no space in it parses as no pid at all, so this is
@@ -1399,7 +1436,7 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
         parentPidOf(survivor),
         "the orphan was not re-parented, so the walk would find it",
       ).not.toBe(child.pid as number);
-      expect(pidAlive(survivor)).toBe(true);
+      expect(isAlive(survivor)).toBe(true);
 
       process.kill(child.pid as number, "SIGTERM");
       const finished = await Promise.race([
@@ -1413,7 +1450,7 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       // The whole point: the process that is in the group and in nobody's tree
       // went with the group. A walk leaves it running for its full 300s.
       expect(
-        await waitFor(() => !pidAlive(survivor), 5_000, "the re-parented process to be gone"),
+        await waitFor(() => !isAlive(survivor), 5_000, "the re-parented process to be gone"),
       ).toBe(true);
       // And the lock is still handed back on the way out.
       expect(existsSync(harness.lockDir)).toBe(false);
@@ -1462,7 +1499,7 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       expect(await waitForContent(termproofOut, 5_000), "the stub published no sleeper").toBe(true);
       sleeper = Number(readFileSync(termproofOut, "utf8").trim());
       expect(sleeper).toBeGreaterThan(0);
-      expect(pidAlive(sleeper)).toBe(true);
+      expect(isAlive(sleeper)).toBe(true);
       expect(existsSync(harness.lockDir)).toBe(true);
 
       process.kill(child.pid as number, "SIGTERM");
@@ -1482,7 +1519,7 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       // was not there. The sleeper is 300s long, so without the sweep this does
       // not pass by luck — it cannot pass at all.
       expect(
-        pidAlive(sleeper),
+        isAlive(sleeper),
         "a process that ignored SIGTERM outlived the release of the lock",
       ).toBe(false);
       // Nothing was merged: the stub never got past its own park.
@@ -1563,8 +1600,12 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       expect(
         await waitFor(() => existsSync(parked.calledOut), 5_000, "the PR to be in flight"),
       ).toBe(true);
-      const pgid = readPidFile(join(harness.stateDir, "gh-pgid"));
-      expect(pgid, "the body published no process group").toBeGreaterThan(0 as number);
+      // `?? 0` so this is a plain number: readPidFile answers `number | undefined`
+      // and an assertion that "it is defined" does not narrow the type, so the
+      // call below would not typecheck. 0 is not a pid, so a stub that never
+      // published one fails the next line with a message that says so.
+      const pgid = readPidFile(join(harness.stateDir, "gh-pgid")) ?? 0;
+      expect(pgid, "the body published no process group").toBeGreaterThan(0);
 
       process.kill(child.pid as number, "SIGHUP");
       const finished = await Promise.race([
@@ -1576,12 +1617,18 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       expect(finished.kind, "the run did not answer SIGHUP").toBe("exited");
       // 129 is SIGHUP's number: the signal reached the run and named itself.
       expect(finished.kind === "exited" ? finished.result.status : -1).toBe(129);
-      // The body's whole group is gone — that is the order forward_signal works in
-      // — and nothing was merged.
-      expect(pgid !== undefined && pidAlive(pgid), "the body's group outlived the lock").toBe(
-        false,
+      // The body's whole PROCESS GROUP is empty, not merely the body itself. The
+      // body is the group's leader, so a leader that has been killed can still
+      // have members: the `gh` it exec'd, a child of that, anything re-parented
+      // out of it. Signalling the pid is what this test used to assert, and it
+      // passes for a group with a live `gh` under it — which is the one thing the
+      // group kill and the sweep exist to prevent. `groupAlive` asks the group.
+      expect(await waitFor(() => !groupAlive(pgid), 5_000, "the body's group to be empty")).toBe(
+        true,
       );
       expect(mergedByStub(harness)).toBe("");
+      // And the lock is gone, which is the ordering forward_signal works in: the
+      // group is swept before the lock is handed back.
       expect(existsSync(harness.lockDir)).toBe(false);
     } finally {
       await stopRun(child);
@@ -1706,6 +1753,63 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       expect(orphaned.stdout).not.toContain("=== PR #42");
       expect(mergedByStub(harness)).toBe("");
     } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("under --continue an unrecorded merge is listed once, as merged-but-not-recorded, and never as a refusal", () => {
+    // The one PR whose merge happened and could not be written down. Under
+    // --continue that was counted twice: once as unrecorded and listed, and then
+    // AGAIN as a refusal, because the block that builds the summary decided a
+    // second time on `merged` alone — and merged=0 is exactly what this outcome
+    // sets, so the refusal arm caught it. The contract at the marker write says an
+    // unrecorded merge is never counted as a refusal, and it was counted as one
+    // and printed "REFUSED" about it.
+    const harness = makeHarness();
+    const runTmp = join(harness.root, "marker-locked-run");
+    try {
+      mkdirSync(runTmp, { recursive: true });
+      const result = runMergePrs(
+        harness,
+        ["--continue", specOf(PR_ONE), specOf(PR_MIDDLE), specOf(PR_THREE)],
+        { MERGE_PRS_TEST_RUN_TMP: runTmp, STUB_LOCK_MARKER_ON_PRMERGE: PR_MIDDLE.pr },
+      );
+
+      // The run as a whole fails, because a merge nobody recorded is a failure.
+      expect(result.status).toBe(1);
+      expect(result.stdout).not.toContain("ALL DONE");
+
+      // The two that recorded merged, and the unrecorded one did not stop the
+      // third — an unrecorded merge is not a refusal, so it does not end the run.
+      expect(result.stdout).toContain("merged #101");
+      expect(result.stdout).toContain("merged #103");
+
+      // Listed EXACTLY ONCE, and as what it is. The filter is the summary's own
+      // shape — an indented `#<pr> (` line — so the run's per-PR banner
+      // (`=== PR #102 (…)`, unindented) cannot be mistaken for a summary entry and
+      // make this pass by counting the wrong line.
+      const listed = result.stdout.split("\n").filter((line) => /^\s+#102 \(/.test(line));
+      expect(listed).toHaveLength(1);
+      expect(listed[0]).toContain(
+        `#${PR_MIDDLE.pr} (${PR_MIDDLE.branch}): merged, but NOT recorded`,
+      );
+
+      // Never as a refusal, in the summary or on stderr — that is the whole bug.
+      expect(result.stdout).not.toContain("REFUSED");
+      expect(result.stderr).not.toContain("REFUSED");
+      // And the tally says so in numbers, rather than exiting 1 beside "0 refused"
+      // and leaving the reader to guess which count was wrong.
+      expect(result.stdout).toContain("2 merged, 0 refused, 1 merged but not recorded");
+
+      // The epilogue cleaned up the two it could account for and left the one it
+      // could not: the branch is named for the operator in the message above.
+      expect(branchExistsOnOrigin(harness, PR_ONE.branch)).toBe(false);
+      expect(branchExistsOnOrigin(harness, PR_THREE.branch)).toBe(false);
+      expect(branchExistsOnOrigin(harness, PR_MIDDLE.branch)).toBe(true);
+    } finally {
+      // The run could not remove a scratch directory it had made read-only, so it
+      // is made removable again — guarded, because the run may have removed it.
+      if (existsSync(runTmp)) chmodSync(runTmp, 0o755);
       harness.cleanup();
     }
   });

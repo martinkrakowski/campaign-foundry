@@ -43,11 +43,11 @@
 # login session: two runs from different sessions do not see each other's lock
 # at all, and the single-run rule is only as good as the session it is run in.
 #
-# SIGNALS, and one dependency they need. Each PR runs as a process in a process
-# group of its own, so `kill -TERM` on this script stops that PR — its `gh`, its
-# `yarn`, everything under it — and then releases the lock and exits 143 (130 for
-# INT). Making that group costs one `perl -MPOSIX -e 'POSIX::setpgid(0,0)'` per
-# PR, because zsh will not give a backgrounded subshell a group of its own
+# SIGNALS, and one dependency they need. Each PR runs in a process group — and a
+# SESSION — of its own, so `kill -TERM` on this script stops that PR (its `gh`,
+# its `yarn`, everything under it) and then releases the lock and exits 143
+# (130 for INT). Making that costs one `perl -MPOSIX -e 'POSIX::setsid()'` per PR,
+# because zsh will not give a backgrounded subshell a group of its own
 # (`setopt monitor` is refused in a non-interactive script), and a run without
 # that group can only be taken down by walking process ids, which misses anything
 # that is no longer somebody's child. perl ships with macOS and ubuntu-latest; if
@@ -177,16 +177,16 @@ if [[ -z "$PR_BODY_MODE" ]]; then
   done
 fi
 
-# perl is here for exactly one line — the `setpgid` in launch_pr_body — and that one
+# perl is here for exactly one line — the `setsid` in launch_pr_body — and that one
 # line is what lets a signal reach a `gh` the body has already exec'd, which is the
 # difference between stopping a run and leaving it to finish merging. perl ships
 # with macOS and with ubuntu-latest, so this is a check rather than a dependency;
 # the message says what is missing and what it is needed for, because the failure
 # mode without it is not a crash here but a signal this script silently cannot
 # deliver later, when a merge is already in flight. The POSIX module is checked too,
-# since a perl without it cannot setpgid at all (see launch_pr_body).
+# since a perl without it cannot setsid at all (see launch_pr_body).
 perl -MPOSIX -e 1 >/dev/null 2>&1 \
-  || die "merge-prs: perl with the POSIX module is required — each PR body is launched through 'perl -MPOSIX -e setpgid' so a signal can reach the whole process group, and this perl cannot load POSIX"
+  || die "merge-prs: perl with the POSIX module is required — each PR body is launched through 'perl -MPOSIX -e setsid' so a signal can reach the whole process group, and this perl cannot load POSIX"
 
 # ONE RUN AT A TIME. The lock is a directory at ${TMPDIR:-/tmp}/cf-merge-prs.lock
 # holding one file, `pid`, and it is taken by a CANDIDATE DIRECTORY renamed onto
@@ -730,19 +730,19 @@ forward_signal() {
     # now the body itself is reaped.
     pr_child=""
     kill -TERM -- "-$group" 2>/dev/null
-    # The group's LEADER'S PID as well, and the window is why. `&` returns as soon
-    # as the fork is done, and the child is not in a group of its own until perl
-    # has run setpgid — so a TERM that lands in that window finds no group with
-    # that id, the group kill fails silently, and `wait` below then blocks for the
-    # whole PR: the signal is answered only once the merge it was meant to stop
-    # has finished, and the lock is released after it.
-    #
-    # Signalling the pid closes that window from both sides and is safe on both:
-    # before setpgid it kills perl, whose TERM disposition is still the default
-    # (nothing has trapped it yet — the exec that installs zsh's has not run); after
-    # setpgid it kills the body, which the group kill is also doing to the children
-    # it cannot reach any other way. And this pid cannot be recycled: it is an
-    # unreaped child of this shell, so the kernel still has its entry.
+# The group's LEADER'S PID as well, and the window is why. `&` returns as soon
+      # as the fork is done, and the child is not in a group of its own until perl
+      # has run setsid — so a TERM that lands in that window finds no group with
+      # that id, the group kill fails silently, and `wait` below then blocks for the
+      # whole PR: the signal is answered only once the merge it was meant to stop
+      # has finished, and the lock is released after it.
+      #
+      # Signalling the pid closes that window from both sides and is safe on both:
+      # before setsid it kills perl, whose TERM disposition is still the default
+      # (nothing has trapped it yet — the exec that installs zsh's has not run); after
+      # setsid it kills the body, which the group kill is also doing to the children
+      # it cannot reach any other way. And this pid cannot be recycled: it is an
+      # unreaped child of this shell, so the kernel still has its entry.
     kill -TERM "$group" 2>/dev/null
     wait "$group" 2>/dev/null
     # AND THEN SWEEP, because one TERM is not the end of a group. A fork
@@ -840,31 +840,39 @@ export MERGE_PRS_PARENT=$$
 # Start one PR's body in a process group of its own, and set pr_child to its pid —
 # which is also that group's id, because the group is made before the exec.
 #
-# `setpgid(0,0)` makes the perl process a group leader and `exec` then replaces it
-# with zsh WITHOUT changing pid, so the group survives the handover and holds
-# nothing but this body and whatever it starts. zsh cannot do this itself:
-# `setopt monitor` is refused outright in a non-interactive script ("can't change
-# option: monitor", measured on zsh 5.9), so without job control a backgrounded
-# subshell stays in its PARENT's group — measured here, parent and child both at
-# pgid 4136593 — and there would be no group of the body's own to signal without
-# signalling this run along with it.
-#
-# `POSIX::setpgid` and not a bare `setpgid`: perl has no such builtin, and the
-# bare spelling dies with "Undefined subroutine &main::setpgid" before the `or
-# die` beside it can run — so the failure is a compile-time death in the child,
-# not a diagnosable one here. setsid(1) would do the same job and is NOT the
-# choice: it is util-linux, and this script has to work on macOS, whose perl does
-# carry POSIX::setpgid.
+# `POSIX::setsid()` makes the perl process a session AND group leader, and `exec`
+  # then replaces it with zsh WITHOUT changing pid — so pid, pgid and sid are all
+  # equal after the handover, the group survives it, and it holds nothing but this
+  # body and whatever it starts. zsh cannot do this itself: `setopt monitor` is
+  # refused outright in a non-interactive script ("can't change option: monitor",
+  # measured on zsh 5.9), so without job control a backgrounded subshell stays in
+  # its PARENT's group — measured here, parent and child both at pgid 4136593 — and
+  # there would be no group of the body's own to signal without signalling this run
+  # along with it.
+  #
+  # `!= -1`, and not a bare truthiness test: POSIX::setsid returns the new session
+  # id — the pid — on success and exactly -1 on failure, never undef. `or die` would
+  # therefore never fire, because -1 is true, and a body that silently ended up in
+  # its parent's group is a body whose sweep signals this run.
+  #
+  # And it is `POSIX::setsid`, not a bare `setsid`: perl has no such builtin, and
+  # the bare spelling dies with "Undefined subroutine &main::setsid" before the
+  # check beside it can run. setsid(1) would do the same job and is NOT the choice:
+  # it is util-linux, and this script has to work on macOS, whose perl carries
+  # POSIX::setsid.
 #
 # "$MERGE_PRS_SELF" is this script, re-entered at the internal entry point, and the
 # parent's cwd does not change inside the loop, so a relative path still resolves
 # for the body.
 launch_pr_body() {
-  # MERGE_PRS_TEST_PRE_SETPGID_SLEEP widens the window between the fork and the
-  # setsid, so a test can land a signal inside it on purpose. Unset in every real
-  # run, and the sleep is the only thing this one-liner reads from the
-  # environment: a body configurable by whoever launched the run would be a body
-  # whose behaviour the run does not control.
+# MERGE_PRS_TEST_PRE_SETPGID_SLEEP widens the window between the fork and the
+    # setsid, so a test can land a signal inside it on purpose. The name still says
+    # SETPGID because that is what the hook was called when the launcher used
+    # setpgid(0,0), and a test already sets it: renaming the variable would break
+    # that test for a word. Unset in every real run, and the sleep is the only
+    # thing this one-liner reads from the environment: a body configurable by
+    # whoever launched the run would be a body whose behaviour the run does not
+    # control.
   #
   # `</dev/null` because this body runs unattended and must never wait for a
   # person. It inherits this run's stdin, which on a terminal is a tty, and the
@@ -881,7 +889,7 @@ launch_pr_body() {
   # nobody can see. The process group id is still the pid (measured: pid, pgid and
   # sid all equal after the exec), so every `kill -- -$group` above and the sweep
   # in forward_signal are unchanged by this.
-  perl -MPOSIX -e 'sleep $ENV{MERGE_PRS_TEST_PRE_SETPGID_SLEEP} // 0; POSIX::setsid() or die "setsid: $!"; exec @ARGV' \
+  perl -MPOSIX -e 'sleep $ENV{MERGE_PRS_TEST_PRE_SETPGID_SLEEP} // 0; POSIX::setsid() != -1 or die "setsid: $!"; exec @ARGV' \
     zsh "$MERGE_PRS_SELF" __pr_body "$@" < /dev/null &
   pr_child=$!
 }
@@ -952,50 +960,66 @@ for spec in "$@"; do
     exit $pr_status
   fi
 
-  # What the epilogue may touch. A PR that announced a merge is the only kind
-  # that goes in, whatever it exited with — and the fields appended are THIS
-  # spec's own, already split above, never anything read back out of the marker.
-  # A refused PR is in neither list, so the epilogue canNOT remove its worktree
-  # or delete its branch on the forge: that is the one thing which must not
-  # happen to the only copy of the work.
+  # ONE outcome per PR, decided here and reported from below. The --continue
+  # block used to decide a second time, on `merged` alone — and that is the whole
+  # bug: a merge whose marker could not be written sets merged=0 on purpose,
+  # because the epilogue must not touch it, so the same PR was counted in
+  # unrecorded_count and listed as merged-but-not-recorded, and then ALSO counted
+  # in refused_count and listed a second time as REFUSED. The contract at the
+  # marker write says such a merge is never counted as a refusal, and under
+  # --continue it was counted as one and said so on stderr.
   #
   # `grep -qx` and not `read`: the test is for one whole line ANYWHERE in the
   # file, so anything written to the marker path ahead of the merge cannot hide
   # the real line by being the first one.
   if grep -qx "MERGED $pr" "$MARK_FILE" 2>/dev/null; then
+    # A PR that announced a merge is the only kind the epilogue may touch, whatever
+    # it exited with — and the fields appended are THIS spec's own, already split
+    # above, never anything read back out of the marker. A refused PR is in neither
+    # list, so the epilogue canNOT remove its worktree or delete its branch on the
+    # forge: that is the one thing which must not happen to the only copy of the
+    # work.
     [[ -n "$worktree" ]] && WORKTREES+=("$worktree")
     [[ -n "$branch" ]] && BRANCHES+=("$branch")
-    merged=1
+    outcome=merged
   elif [[ $pr_status -eq $EXIT_MERGED_UNRECORDED ]]; then
     # Merged, and the marker says so by its absence — the only way it can.
     # Deliberately NOT appended to either list: the epilogue is the one place
     # that destroys things, and this is the path where this run's own record of
     # what it did is known to be incomplete. The worktree and the branch are
     # named for the operator instead.
-    merged=0
+    outcome=unrecorded
     unrecorded_count=$((unrecorded_count + 1))
     RESULTS+=("#$pr ($branch): merged, but NOT recorded — its marker could not be written")
     echo "=== PR #$pr merged but NOT recorded" >&2
   else
-    merged=0
+    outcome=refused
   fi
 
   if [[ -n "$CONTINUE" ]]; then
-    if [[ "$merged" -eq 1 ]]; then
-      merged_count=$((merged_count + 1))
-      RESULTS+=("#$pr ($branch): merged")
-    else
-      refused_count=$((refused_count + 1))
-      # The last non-blank line this PR wrote to stderr is its reason. The
-      # three refusals that report on stdout rather than stderr (no checks
-      # registered, checks still pending, checks failed) have already said
-      # theirs above, so the summary falls back to the exit code rather than
-      # printing a blank where the reason should be.
-      reason=$(grep -v '^[[:space:]]*$' "$ERR_FILE" | tail -1)
-      [[ -n "$reason" ]] || reason="exited $pr_status after saying nothing on stderr"
-      RESULTS+=("#$pr ($branch): REFUSED — $reason")
-      echo "=== PR #$pr REFUSED — $reason" >&2
-    fi
+    case "$outcome" in
+      merged)
+        merged_count=$((merged_count + 1))
+        RESULTS+=("#$pr ($branch): merged")
+        ;;
+      unrecorded)
+        # Counted and listed above, in BOTH modes, because a run with no summary
+        # still has to have said it. Nothing to add here — and in particular
+        # nothing that says refused.
+        ;;
+      refused)
+        refused_count=$((refused_count + 1))
+        # The last non-blank line this PR wrote to stderr is its reason. The
+        # three refusals that report on stdout rather than stderr (no checks
+        # registered, checks still pending, checks failed) have already said
+        # theirs above, so the summary falls back to the exit code rather than
+        # printing a blank where the reason should be.
+        reason=$(grep -v '^[[:space:]]*$' "$ERR_FILE" | tail -1)
+        [[ -n "$reason" ]] || reason="exited $pr_status after saying nothing on stderr"
+        RESULTS+=("#$pr ($branch): REFUSED — $reason")
+        echo "=== PR #$pr REFUSED — $reason" >&2
+        ;;
+    esac
   fi
 done
 
@@ -1021,7 +1045,15 @@ if [[ -n "$CONTINUE" ]]; then
   for line in "${(@)RESULTS}"; do
     echo "  $line"
   done
-  echo "=== $merged_count merged, $refused_count refused"
+  # The unrecorded merges are named in the tally only when there are any. Without
+  # that, the one case that is neither merged-and-recorded nor refused prints
+  # "0 refused" and then exits 1, and the exit looks like a bug in the counting
+  # rather than the statement it is.
+  if [[ "$unrecorded_count" -gt 0 ]]; then
+    echo "=== $merged_count merged, $refused_count refused, $unrecorded_count merged but not recorded"
+  else
+    echo "=== $merged_count merged, $refused_count refused"
+  fi
   # 1, and only here: after the epilogue, so a refused PR has kept its worktree
   # and its branch for whoever picks it up next, and never on the path that
   # merged everything. ALL DONE is not printed when a PR was refused — the run
