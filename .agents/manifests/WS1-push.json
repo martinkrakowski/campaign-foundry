@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "lane": "WS1-push",
+  "mutations": [
+    {
+      "file": "tools/wave-status/lib/push.ts",
+      "before": "      derived: pushDerived(lane.derived),",
+      "after": "      derived: { ...lane.derived },",
+      "because": "toPushLanes is a whitelist, not a projection: the client refuses any key it did not name, and the whole point of writing `derived` key by key is that a key DerivedLane gains later does not reach the wire by accident. Spreading lane.derived restores exactly that accident — every future key rides out, unfiltered and untested. The test that feeds a lane a `backlog` key outside the list and asserts the pushed derived equals { alive: false } sees the spread's { alive: false, backlog: [...], coverage: 1 } and fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/push.test.ts",
+        "-t",
+        "a derived key outside the list does not reach the wire"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/push.ts",
+      "before": "      if (run.code !== 0) warn(refusedLine(wave.id, run.code, run.stderr));\n      else pushed += 1;",
+      "after": "      if (run.code !== 0) return refusedLine(wave.id, run.code, run.stderr);\n      pushed += 1;",
+      "because": "D197: a push failure warns and never fails a stage. One wave the service refused — a validation error on its envelope, a network blip — must not cost the operator the other four, and a refusing `return` is how that regression arrives: the loop stops at the first non-zero exit and every later wave silently goes unpushed, which is worse than the failure it was hiding. The test that makes wave A exit 2, wave B reject and wave C succeed, and asserts the runner still saw all three, fails on `seen`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/push.test.ts",
+        "-t",
+        "a run that fails — a non-zero exit, or a rejection — never stops the next wave"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/cli.ts",
+      "before": "    try {\n      await io.push(status, { waves: args.waves, watch: args.watch });\n    } catch (error: unknown) {\n      io.logError(error instanceof Error ? error.message : String(error));\n    }",
+      "after": "    await io.push(status, { waves: args.waves, watch: args.watch });",
+      "because": "The push is the one thing in a tick that leaves the machine, so it is the one thing that can fail for reasons the collector never saw. Unguarded, a refused push rejects `print`, and on the first print that rejection propagates out of runCli into the entry guard's catch — which prints the message AND sets process.exitCode = 1. `yarn wave:status --push --watch=1` would exit non-zero for a wave-status snapshot it printed perfectly, and D197 says a push failure never fails a stage. The test that makes io.push reject on the INITIAL print and awaits runCli sees a rejected promise rather than a resolved one.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/__tests__/cli.test.ts",
+        "-t",
+        "a push that rejects is logged, runCli still resolves, and the loop still ticks"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/push.ts",
+      "before": "const child = execFile(WAVES_BIN, args, options, (error, _stdout, stderr) => {",
+      "after": "const child = execFile(\"sh\", args, options, (error, _stdout, stderr) => {",
+      "because": "The owner's 2026-10-02 charter decision allows exactly one binary — the published `waves` client, by its pinned path — and D106 exists because a shell here would take a premise read out of a status file the collector wrote. `sh` is neither an allowed command nor an allowed binary, so the charter test that requires every subprocess's first argument to be a quoted pgrep/gh/git or the bare WAVES_BIN identifier fails on this call.",
+      "command": ["yarn", "vitest", "run", "tools/wave-status/__tests__/charter.test.ts"],
+      "verdict": "caught"
+    }
+  ]
+}
