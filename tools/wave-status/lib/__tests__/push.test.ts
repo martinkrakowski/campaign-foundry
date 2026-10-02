@@ -55,6 +55,11 @@ function named(...waves: readonly string[]): PushOptions {
 /** The default: every wave with activity in the last week. */
 const none: PushOptions = { waves: [], watch: false };
 
+/** The default push reports: a throwaway, for the cases that are not about warnings. */
+function quiet(): (text: string) => void {
+  return () => undefined;
+}
+
 interface Recorded {
   readonly deps: PushDeps;
   readonly runs: { readonly args: readonly string[]; readonly stdin: string }[];
@@ -139,16 +144,28 @@ const fullBody = {
 };
 
 describe("toPushLanes", () => {
+  test("a lane id the service would refuse never reaches the wire, and is named once", () => {
+    const warns: string[] = [];
+    const body = toPushLanes(
+      [lane({ lane: "good" }), lane({ lane: "-lead" }), lane({ lane: "" })],
+      (text) => warns.push(text),
+    );
+    expect(body.lanes).toEqual([{ id: "good", derived: { alive: true }, disagreements: [] }]);
+    expect(warns).toHaveLength(2);
+    expect(warns[0]).toContain('"-lead"');
+    expect(warns[1]).toContain('""');
+  });
+
   test("every key the client accepts, and nothing else", () => {
-    expect(toPushLanes([full])).toEqual(fullBody);
+    expect(toPushLanes([full], quiet())).toEqual(fullBody);
   });
 
   test("the body is the literal the client reads on stdin", () => {
-    expect(JSON.stringify(toPushLanes([full]))).toBe(JSON.stringify(fullBody));
+    expect(JSON.stringify(toPushLanes([full], quiet()))).toBe(JSON.stringify(fullBody));
   });
 
   test("a lane that gathered nothing optional omits every optional key", () => {
-    const body = toPushLanes([lane({ lane: "bare" })]);
+    const body = toPushLanes([lane({ lane: "bare" })], quiet());
     expect(body.lanes[0]).toEqual({ id: "bare", derived: { alive: true }, disagreements: [] });
     const keys = Object.keys(body.lanes[0] as object);
     expect(keys).not.toContain("seat");
@@ -156,7 +173,9 @@ describe("toPushLanes", () => {
   });
 
   test("each derived key is omitted when the lane never gathered it", () => {
-    const { derived } = toPushLanes([lane()]).lanes[0] as { derived: Record<string, unknown> };
+    const { derived } = toPushLanes([lane()], quiet()).lanes[0] as {
+      derived: Record<string, unknown>;
+    };
     for (const key of ["exit", "gate", "pr", "diff", "log", "planReview", "risk"]) {
       expect(Object.keys(derived)).not.toContain(key);
     }
@@ -165,19 +184,20 @@ describe("toPushLanes", () => {
 
   test("a derived key outside the list does not reach the wire", () => {
     const surprise = { alive: false, backlog: ["nope"], coverage: 1 } as unknown as DerivedLane;
-    const derived = (toPushLanes([lane({ derived: surprise })]).lanes[0] as { derived: unknown })
-      .derived;
+    const derived = (
+      toPushLanes([lane({ derived: surprise })], quiet()).lanes[0] as { derived: unknown }
+    ).derived;
     expect(derived).toEqual({ alive: false });
   });
 
   test("the log tail is dropped: the client strips it and it is 16 KiB a lane", () => {
-    const derived = (toPushLanes([full]).lanes[0] as { derived: { log: object } }).derived;
+    const derived = (toPushLanes([full], quiet()).lanes[0] as { derived: { log: object } }).derived;
     expect(derived.log).toEqual({ bytes: 4096, mtimeMs: NOW - 1000 });
     expect(Object.keys(derived.log)).not.toContain("tail");
   });
 
   test("id is the lane's lane; wave and lane are never keys", () => {
-    const body = toPushLanes([lane({ wave: "W1", lane: "l2" })]).lanes[0] as Record<
+    const body = toPushLanes([lane({ wave: "W1", lane: "l2" })], quiet()).lanes[0] as Record<
       string,
       unknown
     >;
@@ -187,7 +207,7 @@ describe("toPushLanes", () => {
   });
 
   test("no wave is a lane key either — it is the --wave argument", () => {
-    const keys = Object.keys(toPushLanes([full]).lanes[0] as object);
+    const keys = Object.keys(toPushLanes([full], quiet()).lanes[0] as object);
     expect(keys).toEqual(["id", "seat", "reported", "derived", "disagreements"]);
   });
 });
@@ -333,6 +353,47 @@ describe("intervalFor", () => {
 });
 
 describe("pushStatus", () => {
+  test("one refused lane costs its wave only that lane", async () => {
+    const { deps, runs, warns } = fakeDeps();
+    const status = statusOf([
+      wave("W", [lane({ lane: "good" }), lane({ lane: "-lead" }), lane({ lane: "other" })]),
+    ]);
+    await pushStatus(deps, status, named("W"));
+    expect(runs).toHaveLength(1);
+    expect(JSON.parse(runs[0]!.stdin)).toEqual({
+      lanes: [
+        { id: "good", derived: { alive: true }, disagreements: [] },
+        { id: "other", derived: { alive: true }, disagreements: [] },
+      ],
+    });
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain('"-lead"');
+  });
+
+  test("a wave whose every lane is refused is not pushed, and run is never called for it", async () => {
+    const { deps, runs, warns } = fakeDeps();
+    const status = statusOf([
+      wave("W", [lane({ lane: "-lead" }), lane({ lane: "" })]),
+      wave("V", [lane({ lane: "v1" })]),
+    ]);
+    const pushed = await pushStatus(deps, status, named("W", "V"));
+    expect(runs.map((r) => r.args[2])).toEqual(["V"]);
+    expect(pushed).toBe(1);
+    expect(warns.filter((text) => text.includes("nothing pushed"))).toEqual([
+      "waves push: W: no lane the service would accept; nothing pushed",
+    ]);
+  });
+
+  test("a wave nothing can be pushed for is not even spaced for", async () => {
+    const { deps, sleeps } = fakeDeps();
+    const status = statusOf([
+      wave("W", [lane({ lane: "-lead" })]),
+      wave("V", [lane({ lane: "v1" })]),
+    ]);
+    await pushStatus(deps, status, named("W", "V"));
+    expect(sleeps).toEqual([]);
+  });
+
   test("the arguments are exactly the client's, with no interval on a one-shot", async () => {
     const { deps, runs } = fakeDeps();
     await pushStatus(deps, statusOf([wave("W", [lane()])]), named("W"));

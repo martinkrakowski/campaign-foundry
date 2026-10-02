@@ -73,16 +73,36 @@ function pushDerived(lane: DerivedLane): Record<string, unknown> {
   return out;
 }
 
-/** The one wave's `{"lanes":[…]}` body. `wave` is the `--wave` argument, so it is never a lane key. */
-export function toPushLanes(lanes: readonly LaneStatus[]): { readonly lanes: readonly unknown[] } {
+/**
+ * The one wave's `{"lanes":[…]}` body. `wave` is the `--wave` argument, so it is
+ * never a lane key.
+ *
+ * A lane whose id the service would refuse is left out and named, because the
+ * envelope is refused whole: one `-lead` — an id `scripts/wave-event.sh` accepts
+ * — would cost every other lane of its wave its update on every tick.
+ */
+export function toPushLanes(
+  lanes: readonly LaneStatus[],
+  warn: (text: string) => void,
+): { readonly lanes: readonly unknown[] } {
   return {
-    lanes: lanes.map((lane) => ({
-      id: lane.lane,
-      ...(lane.seat === undefined ? {} : { seat: lane.seat }),
-      ...(lane.reported === undefined ? {} : { reported: lane.reported }),
-      derived: pushDerived(lane.derived),
-      disagreements: lane.disagreements,
-    })),
+    lanes: lanes.flatMap((lane) => {
+      if (!WAVE_ID_PATTERN.test(lane.lane)) {
+        warn(
+          `waves push: skipping lane ${JSON.stringify(lane.lane)}: the service would refuse that id`,
+        );
+        return [];
+      }
+      return [
+        {
+          id: lane.lane,
+          ...(lane.seat === undefined ? {} : { seat: lane.seat }),
+          ...(lane.reported === undefined ? {} : { reported: lane.reported }),
+          derived: pushDerived(lane.derived),
+          disagreements: lane.disagreements,
+        },
+      ];
+    }),
   };
 }
 
@@ -218,26 +238,39 @@ export async function pushStatus(
 ): Promise<number> {
   const warn = (text: string): void => quietly(deps.warn, text);
   const selected = selectWaves(status, options, deps.nowMs(), warn);
-  const interval = intervalFor(options.watch, selected.length);
+
+  // A wave whose every lane was refused is not pushed and not spaced for: there
+  // is nothing to send, so there is nothing to wait between.
+  const planned: { readonly wave: WaveStatus["waves"][number]; readonly stdin: string }[] = [];
+  for (const wave of selected) {
+    const body = toPushLanes(wave.lanes, warn);
+    if (body.lanes.length === 0) {
+      warn(`waves push: ${wave.id}: no lane the service would accept; nothing pushed`);
+      continue;
+    }
+    planned.push({ wave, stdin: JSON.stringify(body) });
+  }
+
+  const interval = intervalFor(options.watch, planned.length);
   if (
     options.watch !== false &&
-    spacingSeconds(options.watch, selected.length) > MAX_INTERVAL_SECONDS
+    spacingSeconds(options.watch, planned.length) > MAX_INTERVAL_SECONDS
   ) {
     warn(
-      `waves push: --watch ${options.watch} over ${selected.length} wave(s) reports at most ` +
+      `waves push: --watch ${options.watch} over ${planned.length} wave(s) reports at most ` +
         `${MAX_INTERVAL_SECONDS}s, so the service will read them stale between pushes`,
     );
   }
 
   let pushed = 0;
-  for (let index = 0; index < selected.length; index++) {
-    const wave = selected[index]!;
+  for (let index = 0; index < planned.length; index++) {
+    const { wave, stdin } = planned[index]!;
     // Spacing goes BETWEEN two pushes: not before the first, not after the last.
     if (index > 0) await sleepQuietly(deps.sleep, PUSH_SPACING_MS);
     const args = ["push", "--wave", wave.id, "--stdin"];
     if (interval !== undefined) args.push("--interval", String(interval));
     try {
-      const run = await deps.run(args, JSON.stringify(toPushLanes(wave.lanes)));
+      const run = await deps.run(args, stdin);
       if (run.code !== 0) warn(refusedLine(wave.id, run.code, run.stderr));
       else pushed += 1;
     } catch (error: unknown) {
