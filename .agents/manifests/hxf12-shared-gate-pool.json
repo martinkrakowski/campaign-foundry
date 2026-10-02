@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "lane": "HXF12-shared-gate-pool",
+  "mutations": [
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "  if [ -L \"$GATE_LOCK_DIR\" ] || [ ! -d \"$GATE_LOCK_DIR\" ] ||\n    ! find \"$GATE_LOCK_DIR\" -prune -user \"$pool_uid\" ! -perm -g+w ! -perm -o+w -print 2>/dev/null |\n      grep -q .; then",
+      "after": "  if false; then",
+      "because": "the whole judgement of the pool directory: existence, symlink, uid and mode in one condition. Every lock decision this script makes is a rename INTO that directory, so a pool that is a world-writable or somebody-else's directory is not a lock parent, it is a name other users can take. The test creates the directory and chmods it to 0775 and 0777 after the fact (mkdirSync's mode option is filtered by umask 022, so the mode asked for would never be the mode checked), and expects exit 2 with the refusal naming the variable; the companion case in the same block — CF_GATE_TEST_EXPECT_UID naming a different uid — is caught by the same mutation, so the owner half is not silently untested. Note what is NOT the mutation: dropping only the `[ -L ]` term. On Linux a symlink's own mode is 0777, so the `-perm -o+w` predicate still refuses it and the suite stays green — that is why the symlink case below is mutated by following the link instead",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "a group- or world-writable pool is refused"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "    HOST_SLOTS=$(( $(arithmetic_safe \"$host_nproc\") / $(arithmetic_safe \"$HOST_WORKERS\") ))\n    if [ \"$HOST_SLOTS\" -lt 1 ]; then",
+      "after": "    HOST_SLOTS=$(( $(arithmetic_safe \"$host_nproc\") / 1 ))\n    if [ \"$HOST_SLOTS\" -lt 1 ]; then",
+      "because": "the derivation still asks the host how many processors it has and no longer asks how many workers a run may spawn — which is the whole input. A pool sized by nproc alone is one gate per thread: on midnight, 24 gates each entitled to 4 workers, or 24 gates each entitled to whatever a run asks for. The clamp above it cannot see the difference, and the ceiling is 64, so 24 is accepted as a legitimate answer. The test injects nproc (CF_GATE_TEST_NPROC) and reads the derived count back through the only place a count is observable without taking seats: CF_GATE_SLOTS=6 with GATE_HOST_WORKERS=4 on 24 processors is accepted because it agrees, while 5 and 7 are refused naming both variables. Under the mutation the derived count is 24, so the agreeing case refuses and the test fails on the case it was written for",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "derives 6 slots"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "  if [ \"$format_found\" != 1 ]; then",
+      "after": "  if [ -z \"$format_found\" ]; then",
+      "because": "the marker check reads as \"is it there\" instead of \"is it 1\" — the shape a reviewer mistakes for a defensive guard. It is the one check standing between two projects with different lock semantics and one shared pool: hexagen reimplementing this script with a different reclaim rule or a different slot file count would be admitted, publish its own holders, and the two would judge each other's locks with incompatible rules. The test writes 2 into `.format` and expects exit 2 naming the pool and the number; it also writes an empty marker, which is the arm that survives this mutation and which is why the mutation claims only the first",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "format holding '2' is refused"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "  beat_new=\"$LOCK.beatnew.$$\"",
+      "after": "  beat_new=\"${TMPDIR:-/tmp}/cf-gate.beatnew.$$\"",
+      "because": "the staged beat goes back to TMPDIR, which is where it was before the pool existed and where it is a cross-device rename away from the lock. The rename then becomes copy-then-unlink, the beat is briefly absent at the name, beat_is_stale reads absent as stale, and the next acquire reclaims a lock whose holder is alive and heartbeating — on midnight, where the pool is tmpfs and TMPDIR is mergerfs. The test gives the run a TMPDIR and a GATE_LOCK_DIR in two DIFFERENT scratch directories (one directory could not tell a staged beat from one that landed in the right place), parks a refresh in CF_GATE_TEST_PAUSE_BEFORE_BEAT_MV, and reads the pool for gate.lock.beatnew.<pid> while asserting TMPDIR holds no cf-gate.beatnew*",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "the staged beat is inside the pool"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "  if [ -L \"$GATE_LOCK_DIR\" ] || [ ! -d \"$GATE_LOCK_DIR\" ] ||\n    ! find \"$GATE_LOCK_DIR\" -prune -user \"$pool_uid\" ! -perm -g+w ! -perm -o+w -print 2>/dev/null |\n      grep -q .; then",
+      "after": "  if [ ! -d \"$GATE_LOCK_DIR\" ] ||\n    ! find -L \"$GATE_LOCK_DIR\" -prune -user \"$pool_uid\" ! -perm -g+w ! -perm -o+w -print 2>/dev/null |\n      grep -q .; then",
+      "because": "the pool is judged THROUGH the symlink: `[ -L ]` is gone and find is given -L, so the uid and the mode are read off whatever the link points at. This is the shape an operator produces when told the pool is \"wrong\" and told to check where it points — and it is the cheapest forgery there is, because a link needs no write access to the parent beyond the link itself, so a pool name can be re-pointed at a directory somebody else controls between one acquire and the next. The test symlinks a 0700 directory this user owns at the pool's name and expects exit 2. It is mutated by following the link rather than by deleting the `[ -L ]` test: on Linux a symlink's own mode is 0777, so the `-perm -o+w` predicate refuses it anyway and dropping only `[ -L ]` leaves the suite green",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "a symlinked or relative GATE_LOCK_DIR is refused by name"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "  if [ -n \"$PROJECT_SLOTS\" ] && [ -n \"$HOST_SLOTS_SOURCE\" ] && [ \"$PROJECT_SLOTS\" != \"$SLOTS\" ]; then",
+      "after": "  if [ -n \"$PROJECT_SLOTS\" ]; then\n    SLOTS=\"$PROJECT_SLOTS\"\n  fi\n  if [ -n \"$PROJECT_SLOTS\" ] && [ -n \"$HOST_SLOTS_SOURCE\" ] && [ \"$PROJECT_SLOTS\" != \"$SLOTS\" ]; then",
+      "because": "the project's own count quietly becomes the pool's, and the refusal that followed is then dead code — after the override the two are equal by construction, so a seat that believes the host has three gates on a host that says six keeps that belief and takes gate number 4 of 6 beside three holders it cannot see. Lock correctness survives; the thread budget, which is slots × workers, does not. The test asks for CF_GATE_SLOTS=3 beside GATE_HOST_SLOTS=6 under a pool and expects exit 2 naming both variables, and it also asserts the pool was left holding nothing but its `.format`. The second half of the test — the same numbers with no pool, where CF_GATE_SLOTS wins and nothing is refused — is what makes the mutation a defect rather than the documented one-release behaviour",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "beside GATE_HOST_SLOTS=6 is refused under a pool"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate-lock.sh",
+      "before": "    if [ -n \"${CF_TEST_MAX_WORKERS:-}\" ] && [ \"$CF_TEST_MAX_WORKERS\" != \"$HOST_WORKERS\" ]; then",
+      "after": "    if [ -n \"${CF_TEST_MAX_WORKERS:-}\" ] && [ \"$CF_TEST_MAX_WORKERS\" = \"$HOST_WORKERS\" ]; then",
+      "because": "the polarity of the worker comparison: the refusal now fires when the two AGREE, so a host whose two variables match is locked out of its own pool and a host whose two variables disagree — six slots on 24 threads with a cap of 3 — is let in with the budget it asked for. Both halves of that are wrong and both are what the test sees: it asks for CF_TEST_MAX_WORKERS=3 against GATE_HOST_WORKERS=4 under a pool and expects exit 2 naming both, then asks for 4 against 4 and expects a clean status. Inverting the comparison rather than deleting the clause keeps the message and its two names in the file, so the mutation cannot be mistaken for a rewrite of the refusal",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "CF_TEST_MAX_WORKERS that disagrees with GATE_HOST_WORKERS is refused"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

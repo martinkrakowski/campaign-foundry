@@ -446,6 +446,28 @@ Rules:
   timeout budget nobody else is running under. Do not also set `VITEST_MAX_WORKERS`: vitest applies
   it over `test.maxWorkers` after the config is resolved, and unvalidated, so it silently wins and
   the number validated above becomes the one that is ignored.
+- The host-wide gate POOL (format 1) is the HOST's, never a lane's and never a project's, and no lane sets any of
+  it. On midnight that is `GATE_LOCK_DIR=/run/user/1000/gate-lock` (local tmpfs, 0700, survives logout under
+  linger) with `GATE_HOST_WORKERS=4`, and `max(1, nproc / workers)` makes that **six slots** — six × four workers =
+  the host's 24 threads. With `GATE_LOCK_DIR` set, every project draws its slots from ONE directory, as `gate.lock`
+  and `gate.lock.<n>`, instead of `${TMPDIR:-/tmp}/cf-gate.lock`; the directory must be an absolute path, must
+  exist (it is created 0700 if missing — its parent must exist), must not be a symlink, must be owned by you and
+  must be neither group- nor world-writable, or it is refused by name with exit 2. It must **not** be on mergerfs
+  or NFS: a pool there merges branches, two candidates on two branches can both win one name, and a cross-branch
+  rename can fall back to copy+delete — the race that reclaims a live holder. Midnight's TMPDIR **is** mergerfs,
+  which is exactly why the pool is not TMPDIR. Its `.format` file holds the number the pool speaks (`1`) and is
+  published with `ln`, so two projects whose lock semantics differ cannot share one pool; any other value is
+  refused (`gate-lock: GATE_LOCK_DIR holds lock format X; this gate speaks 1`). A held slot holds six files —
+  `owner pid started beat worktree project` — and `gate-lock status` prints the `project`, so a slot held by
+  another project reads as such (a slot without the file prints `unknown`, and validation still keys on owner and
+  pid alone). Under a pool, a `CF_GATE_SLOTS` that disagrees with `GATE_HOST_SLOTS` (or with the count derived
+  from `GATE_HOST_WORKERS`) is refused naming both, and so is a `CF_TEST_MAX_WORKERS` that disagrees with
+  `GATE_HOST_WORKERS`; `CF_GATE_STALE_SECONDS` below 600 is refused there too, because that threshold is part of
+  the format and every reader judges every other project's holder by it. `CF_GATE_SLOTS` and
+  `CF_TEST_MAX_WORKERS` are kept for ONE release and still win when `GATE_LOCK_DIR` is unset, so an operator who
+  has not migrated keeps a working host — **never** set any of these in a repo file, a script or a workflow, and
+  never per seat. `tools/gate/lib/max-workers.ts` reads `GATE_HOST_WORKERS` as its fallback, so a project that
+  sets no worker cap still spends the host's budget the way the host intends.
 - Tests live <WHERE>, one behaviour per test, no real clock/network/filesystem in unit tests.
 - The database tests run on PGlite unless `TEST_PG_URL` is set. On midnight it should be set, to
   `TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres`. The server uses SCRAM, so the

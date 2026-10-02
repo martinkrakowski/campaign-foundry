@@ -1,21 +1,51 @@
 import { availableParallelism } from "node:os";
 
 /**
- * `CF_TEST_MAX_WORKERS` — how many workers ONE vitest run may spawn.
+ * The worker cap for ONE vitest run: `CF_TEST_MAX_WORKERS` if it is set, and
+ * `GATE_HOST_WORKERS` if it is not.
  *
  * The problem is arithmetic, and it is host-wide rather than per lane. Vitest's
  * default is `availableParallelism() - 1`, so on a 24-thread host every run
- * asks for ~23 workers. `CF_GATE_SLOTS` decides how many runs happen at once:
- * three slots already give ~69 workers, and seven would ask for ~160 — tens of
- * gigabytes of RSS against ~40 free, and false timeouts on the CPU-bound tests,
+ * asks for ~23 workers. The gate's slot count decides how many runs happen at
+ * once: three slots already give ~69 workers, and seven would ask for ~160 — tens
+ * of gigabytes of RSS against ~40 free, and false timeouts on the CPU-bound tests,
  * which fail on their own internal deadlines and cannot be saved by a larger
  * `--testTimeout`.
  *
- * So the two variables are ONE decision, made once, for the host:
- * `CF_GATE_SLOTS × CF_TEST_MAX_WORKERS ≤ threads`. On midnight that is 6 × 4
- * or 7 × 3. Both are set in `/etc/environment`, never in one seat's environment
- * — a seat that disagrees does not get a smaller host, it gets a seat running
+ * So the slot count and the worker count are ONE decision, made once, for the
+ * host: `slots × CF_TEST_MAX_WORKERS ≤ threads`. On midnight that is 6 × 4 or
+ * 7 × 3. Both are set in `/etc/environment`, never in one seat's environment —
+ * a seat that disagrees does not get a smaller host, it gets a seat running
  * beside a host it cannot see.
+ *
+ * THE HOST-WIDE POOL (format 1) renames where that decision is recorded. With
+ * `GATE_LOCK_DIR` set, every project on the host draws its gate slots from one
+ * directory — `gate.lock` and `gate.lock.<n>` — marked with a `.format` file
+ * holding `1`, so two projects cannot share a pool whose lock semantics they
+ * disagree about. On midnight that is:
+ *
+ *   GATE_LOCK_DIR=/run/user/1000/gate-lock   local tmpfs, 0700, under linger
+ *   GATE_HOST_WORKERS=4                      workers one run may spawn
+ *   GATE_HOST_SLOTS=6                        optional; otherwise derived as
+ *                                            max(1, nproc / workers), capped 64
+ *
+ * 24 / 4 = six slots, six × four workers = the host's 24 threads. `scripts/gate-lock.sh`
+ * is where that is enforced: under a pool, a `CF_GATE_SLOTS` that disagrees with
+ * the host's count, and a `CF_TEST_MAX_WORKERS` that disagrees with
+ * `GATE_HOST_WORKERS`, are both refused by name rather than obeyed. This file is
+ * the other half of the same rule — it reads `GATE_HOST_WORKERS` as the fallback,
+ * applies the validation below to whichever variable supplied the value, and says
+ * so in every message, so the operator is told which one to fix.
+ *
+ * NEVER on mergerfs or NFS. A pool there merges branches: two candidates on two
+ * branches can both win one name, and a cross-branch rename can fall back to
+ * copy+delete — which is the race that reclaims a live holder. Midnight's TMPDIR
+ * is mergerfs, which is why the pool is not TMPDIR.
+ *
+ * `CF_TEST_MAX_WORKERS` is kept for ONE release and still wins when it is set, so
+ * an operator who set it before the pool existed keeps a working host; the two are
+ * NOT compared here, because `scripts/gate-lock.sh` is where the comparison
+ * belongs — it is the layer that knows whether this run is on a pool at all.
  *
  * Unset is the default and means unset: CI and the Mac pass nothing and get
  * vitest's own behaviour, byte for byte as it is today. That is the whole
@@ -29,9 +59,25 @@ import { availableParallelism } from "node:os";
  * config's single call.
  */
 export function resolveMaxWorkers(
-  env: NodeJS.ProcessEnv = process.env,
+  host: NodeJS.ProcessEnv = process.env,
   cpus: number = availableParallelism(),
 ): number | undefined {
+  // Which variable supplied the value, asked BEFORE the two are folded together:
+  // every refusal below has to name the one the operator actually set, and a
+  // message that said CF_TEST_MAX_WORKERS on a host that only sets
+  // GATE_HOST_WORKERS sends them to edit a variable nobody set.
+  const name =
+    host["CF_TEST_MAX_WORKERS"] === undefined ? "GATE_HOST_WORKERS" : "CF_TEST_MAX_WORKERS";
+  // CF_TEST_MAX_WORKERS wins when it is set — including when it is set to
+  // something unusable, which is refused below rather than quietly answered from
+  // the host's variable: an operator who typed it deserves to be told, not to
+  // have their value disappear and a different one take its place. Folding the
+  // two into one name here means the validation, both refusals and the answer are
+  // the same code whichever variable arrived.
+  const env: NodeJS.ProcessEnv = {
+    ...host,
+    CF_TEST_MAX_WORKERS: host["CF_TEST_MAX_WORKERS"] ?? host["GATE_HOST_WORKERS"],
+  };
   const raw = env["CF_TEST_MAX_WORKERS"];
   if (raw === undefined) return undefined;
 
@@ -40,9 +86,9 @@ export function resolveMaxWorkers(
   // would reach vitest as a worker pool sized by a reader's guess.
   if (!/^\d+$/.test(raw) || Number(raw) < 1) {
     throw new Error(
-      `CF_TEST_MAX_WORKERS must be a positive whole number, got '${raw}'. ` +
+      `${name} must be a positive whole number, got '${raw}'. ` +
         `It caps the workers one vitest run spawns, so it is set HOST-WIDE beside ` +
-        `CF_GATE_SLOTS, never per seat.`,
+        `the host's gate slot count (GATE_HOST_SLOTS), never per seat.`,
     );
   }
 
@@ -53,9 +99,9 @@ export function resolveMaxWorkers(
   // rather than quietly rounded down to something they did not ask for.
   if (workers > cpus) {
     throw new Error(
-      `CF_TEST_MAX_WORKERS=${workers} is above this host's availableParallelism() (${cpus}). ` +
+      `${name}=${workers} is above this host's availableParallelism() (${cpus}). ` +
         `A cap above the thread count is not a cap; pick a number at or below ${cpus} so that ` +
-        `CF_GATE_SLOTS × CF_TEST_MAX_WORKERS stays within the host's threads.`,
+        `the host's gate slot count × ${name} stays within the host's threads.`,
     );
   }
 
