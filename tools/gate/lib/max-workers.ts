@@ -37,6 +37,14 @@ import { availableParallelism } from "node:os";
  * applies the validation below to whichever variable supplied the value, and says
  * so in every message, so the operator is told which one to fix.
  *
+ * The pool directory is judged, not assumed: absolute, created 0700 if missing,
+ * not a symlink, owned by you, and neither group- nor world-writable. Its PARENT
+ * must be too — owned by you and not writable by others — and midnight's
+ * `/run/user/1000` is: the leaf's own mode protects the names inside it and
+ * nothing about the name itself, which is a directory entry in the parent, so a
+ * parent another user can write lets them rename the pool away and hand the next
+ * acquirer a pool of their own.
+ *
  * NEVER on mergerfs or NFS. A pool there merges branches: two candidates on two
  * branches can both win one name, and a cross-branch rename can fall back to
  * copy+delete — which is the race that reclaims a live holder. Midnight's TMPDIR
@@ -68,15 +76,30 @@ export function resolveMaxWorkers(
   // GATE_HOST_WORKERS sends them to edit a variable nobody set.
   const name =
     host["CF_TEST_MAX_WORKERS"] === undefined ? "GATE_HOST_WORKERS" : "CF_TEST_MAX_WORKERS";
+  // Which slot variable the operator's own naming of the decision uses, so that a
+  // message on a pool-less host is not sent to a variable it does not have: the
+  // two refusals below both name the slot count beside the cap, and
+  // GATE_HOST_SLOTS only exists on a host that runs the pool.
+  const slots = name === "GATE_HOST_WORKERS" ? "GATE_HOST_SLOTS" : "CF_GATE_SLOTS";
   // CF_TEST_MAX_WORKERS wins when it is set — including when it is set to
   // something unusable, which is refused below rather than quietly answered from
   // the host's variable: an operator who typed it deserves to be told, not to
   // have their value disappear and a different one take its place. Folding the
   // two into one name here means the validation, both refusals and the answer are
   // the same code whichever variable arrived.
+  //
+  // The fold is `??` and NOT `||`: CF_TEST_MAX_WORKERS="" is a variable the
+  // operator believes they set, and it has always been refused by name, so an
+  // empty one must not fall through to the host's value either. GATE_HOST_WORKERS
+  // is the other way round, because an empty value there counts as UNSET — the
+  // same rule scripts/gate-lock.sh applies to all three of its variables, and the
+  // same wrapper that exports it unconditionally on a host with nothing to say
+  // about it is the one that would export "".
   const env: NodeJS.ProcessEnv = {
     ...host,
-    CF_TEST_MAX_WORKERS: host["CF_TEST_MAX_WORKERS"] ?? host["GATE_HOST_WORKERS"],
+    CF_TEST_MAX_WORKERS:
+      host["CF_TEST_MAX_WORKERS"] ??
+      (host["GATE_HOST_WORKERS"] === "" ? undefined : host["GATE_HOST_WORKERS"]),
   };
   const raw = env["CF_TEST_MAX_WORKERS"];
   if (raw === undefined) return undefined;
@@ -88,7 +111,7 @@ export function resolveMaxWorkers(
     throw new Error(
       `${name} must be a positive whole number, got '${raw}'. ` +
         `It caps the workers one vitest run spawns, so it is set HOST-WIDE beside ` +
-        `the host's gate slot count (GATE_HOST_SLOTS), never per seat.`,
+        `${slots}, never per seat.`,
     );
   }
 
@@ -101,7 +124,7 @@ export function resolveMaxWorkers(
     throw new Error(
       `${name}=${workers} is above this host's availableParallelism() (${cpus}). ` +
         `A cap above the thread count is not a cap; pick a number at or below ${cpus} so that ` +
-        `the host's gate slot count × ${name} stays within the host's threads.`,
+        `${slots} × ${name} stays within the host's threads.`,
     );
   }
 

@@ -2836,6 +2836,12 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
     const result = runLockIn(dir, ["status"], {
       GATE_LOCK_DIR: pool,
       GATE_HOST_WORKERS: "4",
+      // Beside the host's own cap, because this suite inherits
+      // CF_TEST_MAX_WORKERS from the seat and the pool compares the two FIRST:
+      // on a 7x3 host the inherited 3 would refuse this invocation before the
+      // processor count was ever read, and the case would be asserting about the
+      // wrong refusal.
+      CF_TEST_MAX_WORKERS: "4",
       CF_GATE_TEST_NPROC: "many",
     });
     expect(result.status).toBe(2);
@@ -2856,6 +2862,11 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
       GATE_LOCK_DIR: pool,
       GATE_HOST_SLOTS: "6",
       GATE_HOST_WORKERS: "4",
+      // The seat's own cap, agreeing with the host's: this case is about the SLOT
+      // counts, and the worker comparison runs first, so an inherited
+      // CF_TEST_MAX_WORKERS=3 on a 7x3 host would refuse here and the test would
+      // be reading a worker refusal as a slot one.
+      CF_TEST_MAX_WORKERS: "4",
       CF_GATE_SLOTS: "3",
     });
     expect(refused.status).toBe(2);
@@ -2916,6 +2927,49 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
       CF_TEST_MAX_WORKERS: "4",
     });
     expect(agreed.status).toBe(0);
+  });
+
+  test("two spellings of one worker cap are one cap, not a disagreement", () => {
+    // `04` is four workers, exactly as `006` is six slots above and as
+    // max-workers.ts already accepts it. Compared as strings, the seat that writes
+    // `CF_TEST_MAX_WORKERS=04` beside a host's `GATE_HOST_WORKERS=4` is refused
+    // for a disagreement that does not exist — and it is the worst kind of
+    // refusal, because neither value is wrong and there is nothing the operator
+    // can change to satisfy it except the spelling, which is not what they asked
+    // about.
+    const dir = scratch();
+    const pool = madePool();
+    const sixSlots = { GATE_HOST_SLOTS: "6", CF_GATE_SLOTS: "6" };
+    const spelled = runLockIn(dir, ["status"], {
+      GATE_LOCK_DIR: pool,
+      GATE_HOST_WORKERS: "4",
+      CF_TEST_MAX_WORKERS: "04",
+      ...sixSlots,
+    });
+    expect({ status: spelled.status, stderr: spelled.stderr }).toEqual({
+      status: 0,
+      stderr: "",
+    });
+    // And the normalisation is on the SPELLING, not a widening of what counts as
+    // agreement: a cap of three beside four is still refused, and still named.
+    const refused = runLockIn(dir, ["status"], {
+      GATE_LOCK_DIR: pool,
+      GATE_HOST_WORKERS: "4",
+      CF_TEST_MAX_WORKERS: "3",
+      ...sixSlots,
+    });
+    expect(refused.status).toBe(2);
+    expect(refused.stderr).toContain("CF_TEST_MAX_WORKERS=3");
+    expect(refused.stderr).toContain("GATE_HOST_WORKERS=4");
+    // Leading zeros the other way round are the same agreement, and the strip is
+    // the same loop read_slot_count uses for a slot count.
+    const other = runLockIn(dir, ["status"], {
+      GATE_LOCK_DIR: pool,
+      GATE_HOST_WORKERS: "04",
+      CF_TEST_MAX_WORKERS: "4",
+      ...sixSlots,
+    });
+    expect(other.status).toBe(0);
   });
 
   test("CF_GATE_STALE_SECONDS below 600 is refused under a pool, and free without one", () => {

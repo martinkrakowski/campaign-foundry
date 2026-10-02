@@ -452,10 +452,13 @@ Rules:
   the host's 24 threads. With `GATE_LOCK_DIR` set, every project draws its slots from ONE directory, as `gate.lock`
   and `gate.lock.<n>`, instead of `${TMPDIR:-/tmp}/cf-gate.lock`; the directory must be an absolute path, must
   exist (it is created 0700 if missing — its parent must exist), must not be a symlink, must be owned by you and
-  must be neither group- nor world-writable, or it is refused by name with exit 2. It must **not** be on mergerfs
-  or NFS: a pool there merges branches, two candidates on two branches can both win one name, and a cross-branch
-  rename can fall back to copy+delete — the race that reclaims a live holder. Midnight's TMPDIR **is** mergerfs,
-  which is exactly why the pool is not TMPDIR. Its `.format` file holds the number the pool speaks (`1`) and is
+  must be neither group- nor world-writable, or it is refused by name with exit 2. Its **parent must be owned by
+  you and not writable by others** as well, and midnight's `/run/user/1000` is: the leaf's own mode protects the
+  names inside it and nothing about the name itself, which is an entry in the parent, so a parent another user can
+  write lets them rename the pool away and hand the next acquirer a pool of their own. It must **not** be on
+  mergerfs or NFS: a pool there merges branches, two candidates on two branches can both win one name, and a
+  cross-branch rename can fall back to copy+delete — the race that reclaims a live holder. Midnight's TMPDIR **is**
+  mergerfs, which is exactly why the pool is not TMPDIR. Its `.format` file holds the number the pool speaks (`1`) and is
   published with `ln`, so two projects whose lock semantics differ cannot share one pool; any other value is
   refused (`gate-lock: GATE_LOCK_DIR holds lock format X; this gate speaks 1`). A held slot holds six files —
   `owner pid started beat worktree project` — and `gate-lock status` prints the `project`, so a slot held by

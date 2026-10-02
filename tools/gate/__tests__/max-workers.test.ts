@@ -90,10 +90,29 @@ describe("resolveMaxWorkers", () => {
     test("a CF_TEST_MAX_WORKERS that is set but unusable is refused, not answered from the host", () => {
       // It was set, so it is the value — and an empty one is a variable the
       // operator believes they set. Falling through to GATE_HOST_WORKERS here
-      // would make a typo look like it worked.
+      // would make a typo look like it worked. The asymmetry with GATE_HOST_WORKERS
+      // below is deliberate and is what the empty-value rule says: a project
+      // variable is the operator's own hand, and a host variable is a wrapper's.
       expect(() =>
         resolveMaxWorkers({ CF_TEST_MAX_WORKERS: "", GATE_HOST_WORKERS: "4" }, CPUS),
       ).toThrowError(/CF_TEST_MAX_WORKERS must be a positive whole number, got ''/);
+    });
+
+    test("an empty GATE_HOST_WORKERS is unset, exactly as an absent one", () => {
+      // The host variable has the OPPOSITE rule, and the fold has to carry it. An
+      // empty value counts as unset for every one of gate-lock.sh's pool
+      // variables, and the thing that exports "" is the wrapper a host sets up to
+      // be explicit about having nothing to say. Read as a value instead, `""`
+      // reaches the validation below and the config throws at load on a host that
+      // has configured nothing at all — which is the one host that cannot run a
+      // test suite.
+      expect(resolveMaxWorkers({ GATE_HOST_WORKERS: "" }, CPUS)).toEqual(
+        resolveMaxWorkers({}, CPUS),
+      );
+      expect(resolveMaxWorkers({ GATE_HOST_WORKERS: "" }, CPUS)).toBeUndefined();
+      // And the empty host variable never displaces a project's own: the project
+      // variable is read first, and "" is not "absent" there.
+      expect(resolveMaxWorkers({ CF_TEST_MAX_WORKERS: "3", GATE_HOST_WORKERS: "" }, CPUS)).toBe(3);
     });
 
     test.each([

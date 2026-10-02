@@ -16,12 +16,17 @@
 #   gate-lock.sh heartbeat        refresh the beat — only on the caller's own lock
 #
 # There is one host-wide lock per SLOT, and CF_GATE_SLOTS says how many there are
-# (default 1, which is every behaviour below as it was before slots existed).
+# (default 1, which is every behaviour below as it was before slots existed) —
+# unless GATE_LOCK_DIR is set, in which case the count is the POOL's:
+# GATE_HOST_SLOTS, else the one derived from GATE_HOST_WORKERS, and a
+# CF_GATE_SLOTS that disagrees with it is refused. See the pool below; everything
+# in this paragraph describes the pool-less host, which is what CI and the Mac
+# run and what the paragraph has always described.
 # Slot 0 keeps the unsuffixed name and slots 1..N-1 are `cf-gate.lock.<n>`, so at
 # SLOTS=1 the lock is byte-identical to the one every caller, message and test
 # already names, and a slot's transients (`cf-gate.lock.<n>.cand.<pid>`,
-# `cf-gate.lock.<n>.reclaim.<pid>.<x>`) are derived from that slot's own path and
-# are never slots themselves.
+# `cf-gate.lock.<n>.reclaim.<pid>.<x>`, `cf-gate.lock.<n>.beatnew.<pid>`) are
+# derived from that slot's own path and are never slots themselves.
 #
 # CF_GATE_SLOTS SAYS HOW MANY GATES MAY RUN AT ONCE, and CF_TEST_MAX_WORKERS
 # SAYS HOW MANY WORKERS ONE OF THEM MAY SPAWN — so the two are one decision,
@@ -81,6 +86,20 @@
 # last one is not tidiness — every lock decision here is a rename into that
 # directory, and in a directory another user can write, another user can be the
 # one holding the slot.
+#
+# AND THE PARENT IS PART OF THE SAME CLAIM, even though nothing below walks up to
+# check it: the leaf's own 0700 protects the NAMES inside it and nothing about
+# the name itself, and the name is a directory entry in the parent. A parent
+# another user can write lets that user rename the pool away between one
+# acquirer's mkdir and the next one's rename — onto a directory they own, holding
+# a `.format` they wrote and slots they seeded — and there is nothing the leaf can
+# say about it afterwards, because by then the leaf has moved. So the pool's
+# parent must be owned by this uid and must not be group- or world-writable, and
+# midnight's /run/user/1000 is exactly that: a per-user tmpfs the user owns,
+# created by the session's own runtime directory. A pool at a shared, writable
+# parent (/tmp, a group-writable spool) is refused by the operator's judgement
+# even though the leaf check would pass it, and the fix is a parent under
+# $XDG_RUNTIME_DIR or a home directory, not a mode on the pool.
 #
 # `.format` in it holds the number this script speaks — 1 — written as a temp
 # file and `ln`ed onto the name, because link(2) refuses to replace and that is
@@ -633,9 +652,27 @@ else
     # the same disagreement as a slot count that differs, and it costs the same
     # budget. Refused here rather than left to vitest, because the party that can
     # fix it is the one that set the variable, and it is a host-wide value.
-    if [ -n "${CF_TEST_MAX_WORKERS:-}" ] && [ "$CF_TEST_MAX_WORKERS" != "$HOST_WORKERS" ]; then
-      printf '%s\n' "gate-lock: CF_TEST_MAX_WORKERS=$CF_TEST_MAX_WORKERS does not match GATE_HOST_WORKERS=$HOST_WORKERS on a host with GATE_LOCK_DIR set; a run's worker cap and the host's worker budget are one decision, and a seat that disagrees gets a lane running beside a host it cannot see" >&2
-      exit 2
+    #
+    # COMPARED AS NUMBERS, through the same leading-zero strip read_host_workers
+    # applies to its own side: `04` is four workers, exactly as read_slot_count
+    # says `006` is six slots, and max-workers.ts already accepts `04` as four.
+    # A string compare here would refuse two spellings of the same decision —
+    # which is the refusal the operator cannot act on, because there is nothing
+    # wrong with either value.
+    if [ -n "${CF_TEST_MAX_WORKERS:-}" ]; then
+      case_max_workers="$CF_TEST_MAX_WORKERS"
+      while :; do
+        case "$case_max_workers" in
+          0?*) case_max_workers="${case_max_workers#0}" ;;
+          *) break ;;
+        esac
+      done
+      if [ "$case_max_workers" != "$HOST_WORKERS" ]; then
+        # Named AS GIVEN, not normalised: the operator has to be able to find the
+        # spelling in the message about it.
+        printf '%s\n' "gate-lock: CF_TEST_MAX_WORKERS=$CF_TEST_MAX_WORKERS does not match GATE_HOST_WORKERS=$HOST_WORKERS on a host with GATE_LOCK_DIR set; a run's worker cap and the host's worker budget are one decision, and a seat that disagrees gets a lane running beside a host it cannot see" >&2
+        exit 2
+      fi
     fi
   fi
   if [ -n "$GATE_HOST_SLOTS" ]; then
