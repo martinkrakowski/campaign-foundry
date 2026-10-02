@@ -193,10 +193,11 @@ When `WAVES_URL` is set, start `yarn wave:status --push --watch` in the backgrou
 first dispatch. It is a second process beside `yarn wave:status` and serves no page: it collects
 what the local page shows and pushes each wave with activity in the last seven days to the waves
 service, one wave at a time; `--wave <id>` narrows it. A failed push warns and never fails a
-stage, and the wave must run correctly with the service down. Stop the watch once the wave's
-record is committed, `record settled` has been emitted and one more interval has passed: stopped
-earlier, the wave's last event is never sent; left running, the wave keeps reading fresh after
-the work has ended. The client is a devDependency, so a checkout needs `yarn install` before its
+stage, and the wave must run correctly with the service down. Once the wave's record is
+committed and `record settled` has been emitted, stop the watch and run
+`yarn wave:status --push --wave <wave>` once, waiting for it to exit: a watch stopped
+mid-interval or mid-push has not sent the wave's last event, and the one-shot push sends it for
+certain. Left running, the watch keeps the wave reading fresh after the work has ended. The client is a devDependency, so a checkout needs `yarn install` before its
 first push. `WAVES_URL=<service> yarn waves:register --admin-token-file <path>` registers the
 project once and is the operator's step, not an agent's.
 

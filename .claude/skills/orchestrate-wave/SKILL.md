@@ -214,9 +214,10 @@ stoppable by you, so it is a task you hold. If the task ends before the wave doe
 again. It re-collects and pushes each recent wave to the waves service every interval: the
 events you emit, and the facts derived beside them. A push that fails only warns and must never
 hold a stage up: if the service is unreachable, carry on. **Stop it at stage 6**, after
-`record settled` has been emitted and one more interval has passed, so the wave's last event is
-sent — a watch left running keeps calling `gh` and keeps the wave reading fresh on the service
-after the work has ended. With `WAVES_URL` unset, skip this; nothing is pushed.
+`record settled` has been emitted, and then run `yarn wave:status --push --wave <wave>` once and
+wait for it to exit: a watch stopped mid-interval, or mid-push, has not sent the wave's last
+event, and the one-shot push sends it for certain. A watch left running keeps calling `gh` and
+keeps the wave reading fresh on the service after the work has ended. With `WAVES_URL` unset, skip this; nothing is pushed.
 
 1. **Implement.** One lane = one worktree = one branch = one PR. `yarn install` per worktree
    yourself — **one at a time, never in parallel, and only where the lane actually needs one.**
