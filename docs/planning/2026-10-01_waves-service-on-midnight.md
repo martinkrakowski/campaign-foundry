@@ -59,6 +59,8 @@ Order (r5, deploy early as a walking skeleton): WV0 (merged, waves #1) â†’ WV1 â
 
 hexagen-monaco adds the same client step to its orchestration package (its own lane), so every generated project can push.
 
+**Status, 2026-10-02.** WS1-push merged as #651 (`bf00502f`), against the published client 0.1.1. Three things differ from the row above, each by decision: `bin.ts` also changed, because `yarn wave:status` runs it and `--push` has to be recognised there; the charter test (D106) now allows one more subprocess, the `waves` client by its pinned path, by the owner's decision of 2026-10-02; and `prs` and `backlog` are not sent, because the published contract carries lanes only. WS5-docs follows in its own PR.
+
 ## 3. Owner actions and decisions
 
 1. **The CA issuer (D193): DONE 2026-10-01** (applied by the orchestrator at the owner's request). WV4's README carries the YAML for other hosts. It can also fix the Harbor trust problem in `deploy/staging/README.md:49-56` (a later, separate change).

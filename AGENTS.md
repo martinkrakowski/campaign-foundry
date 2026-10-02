@@ -97,11 +97,14 @@ Deeper guidance lives in `.agents/`:
 ## Wave Observability
 
 When you are running the delegated pipeline (`/orchestrate-wave`), a read-only status
-server can show every lane's stage, liveness, PR and gate at a glance.
+server can show every lane's stage, liveness, PR and gate at a glance, and the same
+status can be pushed to the shared waves service, where every project's waves are on
+one page.
 
 | Trigger | Command | Notes |
 | --- | --- | --- |
 | Starting a wave | `yarn wave:status` | Serves `http://127.0.0.1:4317`. Read-only; it starts, kills and merges nothing. |
+| Starting a wave, when `WAVES_URL` is set | `yarn wave:status --push --watch` | A second process, which serves no page: it pushes each recent wave's status to the waves service on an interval. A push that fails only warns; it never fails a stage. Stop it when the wave closes. |
 | Any stage transition | append an event (`scripts/wave-event.sh`) | **Emitting is part of the stage, not a courtesy** — see the skill. |
 
 **Emit, do not infer.** Log sizes, `EXIT` markers and PR checks are derivable; which stage
@@ -113,9 +116,19 @@ events side by side and **flags disagreement rather than resolving it**: a lane 
 The server never binds `3000` or `3001` — those are the operator's `next dev` and API, and
 it refuses them by construction.
 
+**The push sends out a subset of what the local page shows, and nothing else.** It carries
+the derived facts and the reported events of each wave — never a log tail — to the service named by
+`WAVES_URL`, through the published `waves` client. With `WAVES_URL` unset it pushes
+nothing and says so once. The project's token lives in a `0600` file under
+`~/.config/waves/` and is never read, passed or printed by an agent. The service computes
+staleness from when it last heard from the wave: a push that stops makes the wave read
+stale there, and a live lane read `unknown`, which is the same *emit, do not infer* rule
+seen from the other side.
+
 Two constraints on that text, both deliberate. It **never says the dashboard is required** —
-a wave must run correctly with nothing watching, and an agent that cannot start the server
-should proceed, not stop. And it repeats *emitting is part of the stage* in the contract as
-well as the skill, because the one thing this session proved is that a duty defined as a
-separate final step is the duty that slides.
+neither the local page nor the service: a wave must run correctly with nothing watching, and
+an agent that cannot start the server or reach the service should proceed, not stop. And it
+repeats *emitting is part of the stage* in the contract as well as the skill, because the one
+thing this session proved is that a duty defined as a separate final step is the duty that
+slides.
 
