@@ -351,6 +351,40 @@ describe("selectWaves", () => {
     return selected.map((w) => w.id);
   }
 
+  test("a refused wave nobody asked for and that has gone quiet says nothing", () => {
+    warns.length = 0;
+    // A stale directory with a bad name is not news every tick, for hours.
+    const old = wave("bad name", [laneAt(new Date(NOW - 8 * DAY).toISOString())]);
+    const selected = selectWaves(statusOf([old, wave("U", [freshLane()])]), none, NOW, warn);
+    expect(ids(selected)).toEqual(["U"]);
+    expect(warns).toEqual([]);
+  });
+
+  test("a refused wave that IS recent is named once, because it would have gone out", () => {
+    warns.length = 0;
+    const selected = selectWaves(statusOf([wave("bad name", [freshLane()])]), none, NOW, warn);
+    expect(ids(selected)).toEqual([]);
+    expect(warns).toEqual([
+      'waves push: skipping wave "bad name": the service would refuse that id',
+    ]);
+  });
+
+  test("a refused wave named with --wave is named, whatever its activity", () => {
+    warns.length = 0;
+    const old = wave("bad name", [laneAt(new Date(NOW - 8 * DAY).toISOString())]);
+    const selected = selectWaves(statusOf([old]), named("bad name"), NOW, warn);
+    expect(ids(selected)).toEqual([]);
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain('"bad name"');
+  });
+
+  test("a refused wave with no lanes is not worth a line: it was never going out", () => {
+    warns.length = 0;
+    const selected = selectWaves(statusOf([wave("bad name", [])]), none, NOW, warn);
+    expect(ids(selected)).toEqual([]);
+    expect(warns).toEqual([]);
+  });
+
   test("a wave with no lanes is never selected", () => {
     warns.length = 0;
     const selected = selectWaves(
@@ -482,6 +516,46 @@ describe("intervalFor", () => {
 });
 
 describe("pushStatus", () => {
+  test("a refused id is named once for the life of a caller, not once a tick", async () => {
+    const { deps, runs, warns } = fakeDeps({ warned: new Set<string>() });
+    const status = statusOf([wave("bad name", [freshLane()]), wave("W", [freshLane()])]);
+    await pushStatus(deps, status, none);
+    await pushStatus(deps, status, none);
+    expect(warns.filter((text) => text.includes("the service would refuse that id"))).toHaveLength(
+      1,
+    );
+    expect(runs).toHaveLength(2);
+  });
+
+  test("a refused LANE is named once too, for the same reason", async () => {
+    const { deps, warns } = fakeDeps({ warned: new Set<string>() });
+    const status = statusOf([wave("W", [lane({ lane: "good" }), lane({ lane: "-lead" })])]);
+    await pushStatus(deps, status, named("W"));
+    await pushStatus(deps, status, named("W"));
+    expect(warns.filter((text) => text.includes('"-lead"'))).toHaveLength(1);
+  });
+
+  test("a push failure is news every time and is never de-duplicated", async () => {
+    const { deps, warns } = fakeDeps({
+      warned: new Set<string>(),
+      run: async () => ({ code: 2, stderr: "waves push: the envelope is not valid:" }),
+    });
+    const status = statusOf([wave("W", [freshLane()])]);
+    await pushStatus(deps, status, none);
+    await pushStatus(deps, status, none);
+    expect(warns.filter((text) => text.includes("exit 2"))).toHaveLength(2);
+  });
+
+  test("with no warned set the caller keeps its own memory, so nothing is suppressed", async () => {
+    const { deps, warns } = fakeDeps();
+    const status = statusOf([wave("bad name", [freshLane()])]);
+    await pushStatus(deps, status, none);
+    await pushStatus(deps, status, none);
+    expect(warns.filter((text) => text.includes("the service would refuse that id"))).toHaveLength(
+      2,
+    );
+  });
+
   test("one refused lane costs its wave only that lane", async () => {
     const { deps, runs, warns } = fakeDeps();
     const status = statusOf([
@@ -824,6 +898,14 @@ describe("realPushDeps — the process-level wiring", () => {
     const read = wired.nowMs();
     expect(read).toBeGreaterThanOrEqual(before);
     expect(read).toBeLessThanOrEqual(Date.now());
+  });
+
+  test("one warned set for the life of the process, so a refusal is said once", async () => {
+    const wired = realPushDeps({}, quiet());
+    expect(wired.warned).toBeInstanceOf(Set);
+    // The same deps object every tick is what makes this stick; a fresh set per
+    // call would put the same line on stderr once per interval for hours.
+    expect(realPushDeps({}, quiet()).warned).not.toBe(wired.warned);
   });
 
   test("sleep waits the interval it is given", async () => {

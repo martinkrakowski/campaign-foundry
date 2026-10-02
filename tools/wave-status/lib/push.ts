@@ -45,6 +45,13 @@ export interface PushDeps {
   readonly sleep: (ms: number) => Promise<void>;
   readonly warn: (text: string) => void;
   readonly nowMs: () => number;
+  /**
+   * What has already been said to `warn` by an earlier call, when the caller
+   * keeps the memory. A refused wave id or lane is the same sentence every tick
+   * and must not scroll past the operator once an interval; a push that failed
+   * is news each time and never consults this.
+   */
+  readonly warned?: Set<string>;
 }
 
 export interface PushOptions {
@@ -182,8 +189,10 @@ function isRecent(lanes: readonly LaneStatus[], nowMs: number): boolean {
 }
 
 /**
- * The waves a push may draw from: an id the service would refuse is skipped and
- * named, and a wave with no lanes has nothing to say.
+ * The waves a push may draw from. A wave with no lanes has nothing to say, and a
+ * wave whose id the service would refuse is skipped — but it is named only when
+ * it would otherwise have gone out: one stale log directory with a bad name is
+ * not the operator's news, once a tick, for the length of a `--watch`.
  */
 export function selectWaves(
   status: WaveStatus,
@@ -191,31 +200,33 @@ export function selectWaves(
   nowMs: number,
   warn: (text: string) => void,
 ): WaveStatus["waves"] {
+  const named = new Set(options.waves);
   const pushable = new Set<string>();
   const refused = new Set<string>();
   for (const wave of status.waves) {
+    const inScope = named.size === 0 ? isRecent(wave.lanes, nowMs) : named.has(wave.id);
     if (!WAVE_ID_PATTERN.test(wave.id)) {
       refused.add(wave.id);
-      warn(
-        `waves push: skipping wave ${JSON.stringify(wave.id)}: the service would refuse that id`,
-      );
-    } else if (wave.lanes.length > 0) {
+      if (inScope) {
+        warn(
+          `waves push: skipping wave ${JSON.stringify(wave.id)}: the service would refuse that id`,
+        );
+      }
+    } else if (wave.lanes.length > 0 && inScope) {
       pushable.add(wave.id);
     }
   }
 
-  if (options.waves.length === 0) {
-    return status.waves.filter((wave) => pushable.has(wave.id) && isRecent(wave.lanes, nowMs));
-  }
+  if (named.size === 0) return status.waves.filter((wave) => pushable.has(wave.id));
 
-  // One warn per DISTINCT id the operator named, never one per repetition of it —
-  // and an id already named as refused is not named a second time as unknown.
-  for (const id of new Set(options.waves)) {
+  // A Set, so one line per DISTINCT id the operator named and never one per
+  // repetition of it — and an id already named as refused is not named again.
+  for (const id of named) {
     if (!pushable.has(id) && !refused.has(id)) {
       warn(`waves push: --wave ${JSON.stringify(id)} names no wave with lanes to push`);
     }
   }
-  return status.waves.filter((wave) => pushable.has(wave.id) && options.waves.includes(wave.id));
+  return status.waves.filter((wave) => pushable.has(wave.id));
 }
 
 /** What one wave really waits between two of its own pushes: the watch interval plus this tick's spacing. */
@@ -291,15 +302,23 @@ export async function pushStatus(
   options: PushOptions,
 ): Promise<number> {
   const warn = (text: string): void => quietly(deps.warn, text);
-  const selected = selectWaves(status, options, deps.nowMs(), warn);
+  // A refusal is one fact about the tree, not news that arrives every interval.
+  // The caller owns the memory; a dep set without one repeats, as it always did.
+  const said = deps.warned ?? new Set<string>();
+  const once = (text: string): void => {
+    if (said.has(text)) return;
+    said.add(text);
+    quietly(deps.warn, text);
+  };
+  const selected = selectWaves(status, options, deps.nowMs(), once);
 
   // A wave whose every lane was refused is not pushed and not spaced for: there
   // is nothing to send, so there is nothing to wait between.
   const planned: { readonly wave: WaveStatus["waves"][number]; readonly stdin: string }[] = [];
   for (const wave of selected) {
-    const body = toPushLanes(wave.lanes, warn);
+    const body = toPushLanes(wave.lanes, once);
     if (body.lanes.length === 0) {
-      warn(`waves push: ${wave.id}: no lane the service would accept; nothing pushed`);
+      once(`waves push: ${wave.id}: no lane the service would accept; nothing pushed`);
       continue;
     }
     planned.push({ wave, stdin: JSON.stringify(body) });
@@ -376,5 +395,8 @@ export function realPushDeps(env: NodeJS.ProcessEnv, logError: (text: string) =>
     sleep: (ms) => new Promise<void>((done) => setTimeout(done, ms)),
     warn: logError,
     nowMs: () => Date.now(),
+    // One set for the life of the process: the same deps object is handed to
+    // every tick, so a refusal stays said instead of scrolling past every interval.
+    warned: new Set<string>(),
   };
 }
