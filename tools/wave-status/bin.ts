@@ -48,8 +48,16 @@ export async function main(env: MainEnv): Promise<ServerHandle> {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const argv = process.argv.slice(2);
   if (pushRequested(argv)) {
-    const { runFromProcess } = await import("./cli.js");
-    runFromProcess(argv);
+    // No top-level `await` here: cli.ts imports this module, so awaiting its import
+    // while this module is still evaluating is a cycle that never settles (Node
+    // exits 13). Let this module finish first; the import resolves afterwards.
+    void import("./cli.js").then(
+      ({ runFromProcess }) => runFromProcess(argv),
+      (error: unknown) => {
+        console.error(error);
+        process.exitCode = 1;
+      },
+    );
   } else {
     main(process.env).catch((error: unknown) => {
       console.error(error);
