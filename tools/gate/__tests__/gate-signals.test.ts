@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
+import { gateEnv } from "./gate-env.js";
 
 // D188 (lane MH2-gate-lock-slots) — a SECOND signal arriving while scripts/gate.sh
 // is releasing the gate lock. `cleanup` used to reset INT/TERM to their DEFAULT
@@ -95,7 +96,7 @@ interface GateRun {
 /** Start the gate without waiting for it, so a test can signal it in a window. */
 function startGate(dir: string, env: Record<string, string>, shell: string): GateRun {
   const child = spawn(shell, [gateSh, "--lane", "lane-a"], {
-    env: { ...process.env, TMPDIR: dir, ...env },
+    env: gateEnv(dir, env),
   });
   let stdout = "";
   let stderr = "";
@@ -467,7 +468,7 @@ describe("gate.sh lock", () => {
   ): { status: number; stdout: string; stderr: string } {
     const result = spawnSync(shell, [gateSh, "--lane", "lane-a"], {
       encoding: "utf8",
-      env: { ...process.env, TMPDIR: dir, ...env },
+      env: gateEnv(dir, env),
       timeout,
     });
     return {

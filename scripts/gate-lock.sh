@@ -16,12 +16,17 @@
 #   gate-lock.sh heartbeat        refresh the beat — only on the caller's own lock
 #
 # There is one host-wide lock per SLOT, and CF_GATE_SLOTS says how many there are
-# (default 1, which is every behaviour below as it was before slots existed).
+# (default 1, which is every behaviour below as it was before slots existed) —
+# unless GATE_LOCK_DIR is set, in which case the count is the POOL's:
+# GATE_HOST_SLOTS, else the one derived from GATE_HOST_WORKERS, and a
+# CF_GATE_SLOTS that disagrees with it is refused. See the pool below; everything
+# in this paragraph describes the pool-less host, which is what CI and the Mac
+# run and what the paragraph has always described.
 # Slot 0 keeps the unsuffixed name and slots 1..N-1 are `cf-gate.lock.<n>`, so at
 # SLOTS=1 the lock is byte-identical to the one every caller, message and test
 # already names, and a slot's transients (`cf-gate.lock.<n>.cand.<pid>`,
-# `cf-gate.lock.<n>.reclaim.<pid>.<x>`) are derived from that slot's own path and
-# are never slots themselves.
+# `cf-gate.lock.<n>.reclaim.<pid>.<x>`, `cf-gate.lock.<n>.beatnew.<pid>`) are
+# derived from that slot's own path and are never slots themselves.
 #
 # CF_GATE_SLOTS SAYS HOW MANY GATES MAY RUN AT ONCE, and CF_TEST_MAX_WORKERS
 # SAYS HOW MANY WORKERS ONE OF THEM MAY SPAWN — so the two are one decision,
@@ -52,6 +57,112 @@
 # workers below the host's cap does not get a quieter machine; it gets a lane
 # whose timeout budget nobody else is running under, and a slot it believes is
 # cheaper than it is.
+#
+# ── THE HOST-WIDE POOL, AND ITS FORMAT ─────────────────────────────────────
+# Everything above decides how many gates THIS project may run. The block below
+# decides where they live, so that two projects on one host draw from ONE pool
+# and spend the thread budget once between them — which is the whole reason
+# GATE_LOCK_DIR exists: today every project has its own lock directory
+# (${TMPDIR:-/tmp}/cf-gate.lock) and its own count, so two pools never see each
+# other and the budget is oversubscribed as soon as both run. On midnight:
+#
+#   GATE_LOCK_DIR=/run/user/1000/gate-lock   the pool: local tmpfs, 0700, and
+#                                            it survives logout under linger
+#   GATE_HOST_WORKERS=4                      workers ONE vitest run may spawn
+#   GATE_HOST_SLOTS=6                        optional — the count is otherwise
+#                                            derived: max(1, nproc / workers)
+#
+# SET, every slot lives in that directory as `gate.lock` and `gate.lock.<n>`,
+# with its transients derived from its own path as they always were. UNSET —
+# the default, and what CI and the Mac run — and nothing changes: the lock is
+# ${TMPDIR:-/tmp}/cf-gate.lock, named byte for byte as it has always been. An
+# EMPTY value counts as unset for all three variables, so a wrapper that always
+# exports them is not a broken host.
+#
+# GIVEN BOTH host counts, they must multiply out to the host's processors — 24 =
+# 6 × 4 on midnight, and `GATE_HOST_SLOTS=7` with `GATE_HOST_WORKERS=4` on a
+# 24-thread host is refused by name, because seven gates of four workers is 28
+# runnable workers asked of 24 threads and the failure is not a message but tens
+# of gigabytes of RSS and false timeouts on tests that fail on their own internal
+# deadlines. A `GATE_HOST_SLOTS` on its OWN stays allowed, as the row has it, and
+# leaves vitest's worker count uncapped: that is a host which has decided its own
+# default is the cap, and this check has no second number to check it against.
+#
+# THE DIRECTORY IS JUDGED, NOT ASSUMED, and refused by name (exit 2) when it is
+# not: it must be absolute; it is created 0700 if missing (its parent must
+# exist, and this script does not create parents); it must not be a symlink; it
+# must be owned by this uid; and it must not be group- or world-writable. That
+# last one is not tidiness — every lock decision here is a rename into that
+# directory, and in a directory another user can write, another user can be the
+# one holding the slot.
+#
+# AND THE PARENT IS PART OF THE SAME CLAIM, and is judged before anything is
+# created under it: the leaf's own 0700 protects the NAMES inside it and nothing
+# about the name itself, and the name is a directory entry in the parent. A parent
+# another user can write lets that user rename the pool away between one
+# acquirer's mkdir and the next one's rename — onto a directory they own, holding
+# a `.format` they wrote and slots they seeded — and there is nothing the leaf can
+# say about it afterwards, because by then the leaf has moved. So the pool's
+# parent must be owned by this uid and must not be group- or world-writable, and
+# midnight's /run/user/1000 is exactly that: a per-user tmpfs the user owns,
+# created by the session's own runtime directory. A pool at a shared, writable
+# parent (/tmp, a group-writable spool) is refused by the operator's judgement
+# even though the leaf check would pass it, and the fix is a parent under
+# $XDG_RUNTIME_DIR or a home directory, not a mode on the pool.
+#
+# And the PATH is plain, and every component above the pool is a real directory:
+# absolute, no `//`, `/./` or `/../`, no trailing `.` or `..` beyond the slashes
+# that are reduced away, and no symlink anywhere above the leaf. Each of those
+# walks past a check rather than naming the directory it lands on — `${…%/*}`
+# leaves `<link>/` for `<link>//pool`, whose `[ -L ]` is false and whose `find`
+# descends — and `[ -L ]` on the path says nothing about what the path runs THROUGH.
+# A pool path names ONE directory, so a spelling that can be walked is refused
+# rather than normalised, and the ancestor walk is the only thing that can see a
+# link two levels up.
+#
+# Trailing slashes are reduced away before either is judged, and `/` is refused.
+# A slash is not a spelling here: every test that walks to a path ending in `/`
+# resolves a symlink first, so `[ -L "$d/link/" ]` is false for a link to a
+# directory and `find "$d/link/"` descends through it — the pool is then judged
+# through its target and a symlinked pool is accepted.
+#
+# `.format` in it holds the number this script speaks — 1 — written as a temp
+# file and `ln`ed onto the name, because link(2) refuses to replace and that is
+# the portable atomic no-replace (`mv -n` is not atomic on macOS, so a `mv`
+# would let two acquirers each believe they published it). It is then READ BACK
+# and compared, because `ln` failing on an existing file is the other acquirer's
+# success, not an error. A pool holding any other value is refused: two projects
+# on different lock semantics must never share one pool, and a project that
+# vendors this script has to declare which format it speaks before it may take a
+# slot in one.
+#
+# FORMAT 1 IS FROZEN. Changing any line of this list bumps the number:
+#   slots         gate.lock and gate.lock.1 .. .63
+#   transients    .cand.<pid>, .reclaim.<pid>.<pass>, .beatnew.<pid>
+#   files         owner pid started beat worktree project
+#   liveness      kill -0 succeeds AND the beat is younger than the threshold
+#   heartbeat     every holder beats at least every 60s; no reader's threshold
+#                 is below 600s (CF_GATE_STALE_SECONDS under that is refused
+#                 when GATE_LOCK_DIR is set)
+#   reclaim       rename aside, verify what moved, then delete
+#   MAX_SLOTS     64
+#   pid namespace ONE for every participant — a containerised gate reads every
+#                 pid as dead and reclaims holders that are running
+#
+# NEVER on mergerfs or NFS. A pool there merges branches: two candidates on two
+# branches can both win one name, and a cross-branch rename can fall back to
+# copy+delete, which is the race that reclaims a live holder (see the beat,
+# below). Midnight's TMPDIR is mergerfs over three disks, which is exactly why
+# the heartbeat stages its beat INSIDE the pool beside its own slot instead of
+# on TMPDIR.
+#
+# CF_GATE_SLOTS and CF_TEST_MAX_WORKERS are kept for ONE release and mean what
+# they always meant — one project's own view of the host — so an operator who
+# set them before the pool existed keeps a working host. Under GATE_LOCK_DIR
+# the host variables are the pool's, and a project variable that disagrees with
+# them is refused rather than obeyed: a seat's view of the host is the thing that
+# is wrong, and lock correctness survives the disagreement while the thread
+# budget does not.
 #
 # ONE GATE PER WORKTREE, even at SLOTS>1, because the lock is per host and not
 # per checkout: `verify-manifests` mutates the tree it is verifying, so two
@@ -97,8 +208,9 @@
 # come from an acquire — still scan, but only over slots that pass those same
 # two filters.
 #
-# The lock is a directory at ${TMPDIR:-/tmp}/cf-gate.lock — mkdir is the
-# atomic test-and-set, there is nothing else in POSIX sh — holding five files:
+# The lock is a directory at ${TMPDIR:-/tmp}/cf-gate.lock — or, under
+# GATE_LOCK_DIR, at $GATE_LOCK_DIR/gate.lock (see the pool above) — and mkdir is
+# the atomic test-and-set, there is nothing else in POSIX sh. It holds six files:
 #   owner    the lane id that took it
 #   pid      the HOLDER's pid (the shell that runs the locked steps, or `run`)
 #   started  epoch second of acquisition
@@ -107,6 +219,12 @@
 #            (see the header: one gate per worktree, and this is what "the same
 #            worktree" is compared against — written last because a lock that
 #            cannot answer it simply never blocks)
+#   project  the repository the holder was standing in, for DISPLAY only: it is
+#            what `status` prints so a slot held by another project reads as one,
+#            and nothing validates or compares it. Slot validation keys on owner
+#            and pid (see slot_is_provenance and MH2's forged-slot rules), and a
+#            slot without the file prints `unknown` rather than being rejected —
+#            a lock written before this file existed is not a forgery.
 # The pid is the HOLDER's, and a holder only holds while it is alive: a lock
 # whose recorded pid is gone is reclaimed by the next acquire, so the pid has
 # to name a process that outlives the work. It is therefore never guessed.
@@ -174,85 +292,17 @@ set -u
 # directory must not be able to take those invocations with it.
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-LOCK_BASE="${TMPDIR:-/tmp}/cf-gate.lock"
 BUSY=75
 
-# The slot this invocation is working on. It is slot 0's path until an acquire
-# takes another one, and from then on the caller's OWN slot: every read, write
-# and message below names this variable, so a holder with SLOTS>1 touches its own
-# slot and nothing else.
-LOCK="$LOCK_BASE"
-
-STALE_SECONDS="${CF_GATE_STALE_SECONDS:-600}"
-case "$STALE_SECONDS" in
-  ''|*[!0-9]*)
-    printf '%s\n' "gate-lock: CF_GATE_STALE_SECONDS must be a number of seconds: $STALE_SECONDS" >&2
-    exit 2
-    ;;
-esac
-
-# How many slots this host has. Validated exactly like CF_GATE_STALE_SECONDS —
-# a value that cannot be a count is a broken invocation whichever subcommand it
-# arrived on. The two range tests that follow are separate on purpose, and the
-# ceiling is judged FIRST and BY DIGITS, because neither a shell's integer test
-# nor a count with more slots than the host has gates for is a report of busy:
-#
-#   0            is not a host with no gates, it is a host where every caller
-#                is silently unprotected  -> exit 2, "at least one slot"
-#   1..64        is a host with that many  -> accepted
-#   65+          is a broken invocation    -> exit 2, "at most 64 slots"
-#   99999…       (20 or 30 digits) is not a comparison any shell can make. `[`
-#                answers false and says so — `Illegal number` under dash,
-#                `integer expression expected` under bash — so BOTH range tests
-#                fall through, the slot loop is entered with a count nothing can
-#                bound, and an idle host is reported as `busy` with exit 75 —
-#                telling the caller to sleep and retry a host that is not
-#                holding anything, forever. So a value of three or more digits
-#                is over the ceiling whatever it is, and is answered before any
-#                `[` sees it; only a one- or two-digit value (at most 99) is
-#                handed to the tests below.
-#
-# Leading zeros are a SPELLING, not a count, and they are stripped before any of
-# that: `064` is sixty-four slots and must be accepted, not read as the
-# three-digit value the ceiling test below exists to refuse. Stripping also
-# keeps the ceiling test honest for a padded value — `00000000000000065` is
-# sixty-five slots, not a number no shell can compare — and the loop keeps at
-# least one digit, so `0` and `00` are the "at least one slot" refusal rather
-# than an empty string that `[` cannot compare with anything. The refusals name
-# the value AS GIVEN (`065`, not `65`): the caller has to be able to find the
-# spelling it set wrong in the message about it.
-MAX_SLOTS=64
-SLOTS="${CF_GATE_SLOTS:-1}"
-case "$SLOTS" in
-  ''|*[!0-9]*)
-    printf '%s\n' "gate-lock: CF_GATE_SLOTS must be a number of slots: $SLOTS" >&2
-    exit 2
-    ;;
-esac
-SLOTS_GIVEN="$SLOTS"
-while :; do
-  case "$SLOTS" in
-    0?*) SLOTS="${SLOTS#0}" ;;
-    *) break ;;
-  esac
-done
-case "$SLOTS" in
-  [0-9][0-9][0-9]*) slots_over_cap=yes ;;
-  *)
-    slots_over_cap=no
-    if [ "$SLOTS" -gt "$MAX_SLOTS" ]; then
-      slots_over_cap=yes
-    fi
-    ;;
-esac
-if [ "$slots_over_cap" = yes ]; then
-  printf '%s\n' "gate-lock: CF_GATE_SLOTS must be at most $MAX_SLOTS slots: $SLOTS_GIVEN" >&2
-  exit 2
-fi
-if [ "$SLOTS" -lt 1 ]; then
-  printf '%s\n' "gate-lock: CF_GATE_SLOTS must be at least one slot: $SLOTS_GIVEN" >&2
-  exit 2
-fi
+# Where the slots live (LOCK_BASE), how many there are (SLOTS), how stale a beat
+# may be (STALE_SECONDS) and which format the pool speaks are ONE decision, and
+# they are made in a single block far below — after slot_is_provenance, because
+# the check that GATE_LOCK_DIR itself goes through is that same function's: a
+# pool directory is judged exactly as a slot is judged, by the same uid seam and
+# by the same "[ ! -L ], [ -d ], find … -user" idiom, and it has to be DEFINED
+# before it can be used. LOCK and MAX_SLOTS are assigned there too. Nothing
+# between here and there reads them: they are only ever read inside functions,
+# which the shell does not execute until a subcommand reaches them.
 
 # A slot's path. Slot 0 is unsuffixed so that SLOTS=1 leaves the historical name
 # exactly as it was; every later slot is the base plus its number.
@@ -266,15 +316,21 @@ slot_path() {
 
 # Is this path one of the slots? A slot is `cf-gate.lock`, or `cf-gate.lock.<n>`
 # where `<n>` is 1..MAX_SLOTS-1 — that is, ONE or TWO digits with no leading
-# zero, and no greater than the last slot.
+# zero, and no greater than the last slot. Under GATE_LOCK_DIR the base is
+# `$GATE_LOCK_DIR/gate.lock`, and the same shape applies there.
 #
 # Both halves of that are load-bearing, and neither is "digits and nothing else":
 #   the shape      is what keeps a slot's own transients out of the slot set:
-#                  `cf-gate.lock.1.cand.999` and `cf-gate.lock.1.reclaim.999.x`
-#                  both start with a digit, so a `cf-gate.lock.[0-9]*` glob
-#                  would read them as slots 1 and 1 — a status that listed a
-#                  candidate directory as a holder, and a scan that would
-#                  happily release or heartbeat one;
+#                  `cf-gate.lock.1.cand.999`, `cf-gate.lock.1.reclaim.999.x` and
+#                  `cf-gate.lock.1.beatnew.999` all start with a digit, so a
+#                  `cf-gate.lock.[0-9]*` glob would read them as slots 1 and 1 — a
+#                  status that listed a candidate directory as a holder, and a
+#                  scan that would happily release or heartbeat one. The staged
+#                  beat is the one that has to be right by NAME rather than by
+#                  where it lives, because it is written beside the lock (under
+#                  TMPDIR by default, inside the pool when GATE_LOCK_DIR is set)
+#                  rather than inside the lock directory, so the shape is all
+#                  that keeps it out of the slot set;
 #   below MAX_SLOTS is what keeps a name nobody could have taken from being acted
 #                  on. MAX_SLOTS is a COUNT, so the slots are 0..MAX_SLOTS-1 and
 #                  `cf-gate.lock.64` is not one of them even at
@@ -324,7 +380,15 @@ slot_uid=""
 #
 # `-prune` is the POSIX spelling of "do not go below this", and it works on GNU
 # and BSD find alike: the point is to read the directory's own uid without
-# walking a holder's five files (or anything else it may since have grown).
+# walking a holder's six files (or anything else it may since have grown).
+#
+# The uid is resolved HERE, into the one `slot_uid` this script caches it in, and
+# the pool directory below resolves it the same way — through the same variable
+# and the same CF_GATE_TEST_EXPECT_UID seam. They are two copies of three lines
+# rather than one shared function, and that is deliberate: it keeps this
+# function's text exactly as MH2's manifest anchors it, so the claim that
+# provenance is what makes a planted directory unusable is still replayable.
+# Change one and the other must change with it.
 slot_is_provenance() {
   [ ! -L "$1" ] || return 1
   [ -d "$1" ] || return 1
@@ -333,6 +397,495 @@ slot_is_provenance() {
   fi
   find "$1" -prune -user "$slot_uid" -print 2>/dev/null | grep -q .
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# THE POOL: where the slots live, what format it speaks, and how many it has.
+#
+# All of it is here, at top level, ONCE per invocation — including for `status`
+# and for the heartbeat child `run` re-invokes — because every one of these is a
+# property of the pool rather than of the call, and a subcommand that answered
+# about a differently-configured pool than the one its acquirer saw would be
+# reading a lock it cannot interpret. The block sits after slot_is_provenance
+# rather than beside LOCK_BASE because it USES it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# An empty value is an unset one, for all three of the pool's variables: a
+# wrapper that exports them unconditionally on a host that has nothing to say
+# about them must not be told it is misconfigured.
+GATE_LOCK_DIR="${GATE_LOCK_DIR:-}"
+GATE_HOST_SLOTS="${GATE_HOST_SLOTS:-}"
+GATE_HOST_WORKERS="${GATE_HOST_WORKERS:-}"
+
+# Where the slots live. GATE_LOCK_DIR is the HOST's pool, project-neutral, and
+# its slots are named for the pool rather than for a project's TMPDIR; unset is
+# today's path, byte for byte, which is what every caller, message and test
+# outside this file already names.
+#
+# The trailing slashes go FIRST, and before LOCK_BASE is built from it, because a
+# trailing slash is not a spelling here — it is a way past the checks below. Every
+# test that walks to a path ending in `/` RESOLVES the link first: `[ -L
+# "$d/link/" ]` is false for a symlink to a directory, and `find "$d/link/"`
+# descends through it rather than reporting the link's own owner and mode. So a
+# pool named as a symlink plus one slash is judged through its target and
+# accepted, and the name is compared with a truth test rather than as a name. The
+# one value that cannot be reduced is `/`, which is the filesystem root and not a
+# pool anybody may take a slot in.
+if [ -n "$GATE_LOCK_DIR" ]; then
+  case "$GATE_LOCK_DIR" in
+    /*) ;;
+    *)
+      # A relative path would resolve against whatever directory the caller's
+      # command happens to leave it in, and two seats standing in two
+      # directories would then be in two pools that cannot see each other — the
+      # exact failure GATE_LOCK_DIR exists to remove.
+      printf '%s\n' "gate-lock: GATE_LOCK_DIR must be an absolute path: $GATE_LOCK_DIR" >&2
+      exit 2
+      ;;
+  esac
+  while :; do
+    case "$GATE_LOCK_DIR" in
+      ?*/) GATE_LOCK_DIR="${GATE_LOCK_DIR%/}" ;;
+      *) break ;;
+    esac
+  done
+  if [ -z "$GATE_LOCK_DIR" ] || [ "$GATE_LOCK_DIR" = "/" ]; then
+    printf '%s\n' "gate-lock: GATE_LOCK_DIR must name a pool directory of its own, not the filesystem root: $GATE_LOCK_DIR" >&2
+    exit 2
+  fi
+  # And PLAIN: no empty component, no `.`, no `..`, no trailing `.`/`..`. The
+  # reduction above only removes slashes at the END, so an interior `//`, `/./` or
+  # `/../` survives it — and each of those walks past a check rather than naming
+  # the directory it lands on. `/x/link//pool` leaves the parent as `/x/link/`,
+  # whose `[ -L ]` is FALSE because of the trailing slash and whose `find` descends
+  # through the link; `/x/link/./pool` and `/x/link/../pool` reach the same place
+  # with no trailing slash at all. A pool path is a name for ONE directory, so a
+  # spelling that can be walked is refused rather than normalised: there is no
+  # case here where resolving it is worth the arithmetic.
+  case "$GATE_LOCK_DIR" in
+    *//* | */./* | */../* | */. | */..)
+      printf '%s\n' "gate-lock: GATE_LOCK_DIR must be a plain absolute path — no '//', '/./' or '/../' component, and no trailing '.' or '..': $GATE_LOCK_DIR" >&2
+      exit 2
+      ;;
+  esac
+  LOCK_BASE="$GATE_LOCK_DIR/gate.lock"
+else
+  LOCK_BASE="${TMPDIR:-/tmp}/cf-gate.lock"
+fi
+
+# The slot this invocation is working on. It is slot 0's path until an acquire
+# takes another one, and from then on the caller's OWN slot: every read, write
+# and message below names this variable, so a holder with SLOTS>1 touches its own
+# slot and nothing else.
+LOCK="$LOCK_BASE"
+
+# Judge the pool directory before anything else uses it, because everything else
+# is a rename INTO it. Two directories are judged: its PARENT, which nothing at
+# the leaf can see, and then the pool itself.
+#
+# `mkdir -m 0700` before the pool's own checks, and the failures of the mkdir are
+# swallowed: EEXIST from a concurrent acquirer, from a directory the operator
+# made, and from a symlink are all the same situation from here — the name
+# exists and the verify is the only thing that can say what it is. Creating it
+# first is what makes a missing pool directory a non-event rather than a refusal
+# an operator has to answer with a mkdir.
+if [ -n "$GATE_LOCK_DIR" ]; then
+  # The pool's owner, resolved first: both checks below name it, and a refusal
+  # message that carries an empty uid tells the operator nothing about what to fix.
+  # It comes through the same cache and the same seam slot_is_provenance fills —
+  # see that function for why these three lines are written twice.
+  if [ -z "$slot_uid" ]; then
+    slot_uid="${CF_GATE_TEST_EXPECT_UID:-$(id -u)}"
+  fi
+  pool_uid="$slot_uid"
+  # The PARENT is asked about a uid of its own, which is this one unless a test
+  # says otherwise. It has to be a separate seam because the two directories are
+  # separate claims: with one variable, a case that made the pool foreign also made
+  # the parent foreign, and the parent is judged FIRST — so the pool's own owner
+  # check became unreachable from a test, and "somebody else's pool" was covered
+  # only in the one refusal that names the parent. CF_GATE_TEST_PARENT_UID makes
+  # the parent's claim alone foreign; CF_GATE_TEST_EXPECT_UID now reaches the pool
+  # again, which is where a slot's own uid check is read from.
+  parent_uid="${CF_GATE_TEST_PARENT_UID:-$pool_uid}"
+  # The PARENT, judged with the same three questions and refused with the same
+  # exit 2, BEFORE anything is created under it. This is the check the header
+  # promises and the leaf's own mode cannot do: the pool's 0700 protects the names
+  # INSIDE it and nothing about the name itself, which is a directory entry in the
+  # parent. A parent another user can write lets that user rename the pool away
+  # between one acquirer's mkdir and the next one's rename, onto a directory they
+  # own holding a `.format` they wrote and slots they seeded — and by the time
+  # anything looks at the pool again it has moved, so nothing at the leaf can say
+  # so. It is asked first so that a refusal leaves no directory behind: creating a
+  # pool inside a parent nobody may write is not a small thing to undo, and there
+  # is nothing to gain by discovering the parent is wrong after doing it.
+  #
+  # `${GATE_LOCK_DIR%/*}` is the parent, and empty means the root: a pool directly
+  # under `/` has no parent but `/`, which is not writable by this user, so it is
+  # refused here rather than by a check that has to know it.
+  pool_parent="${GATE_LOCK_DIR%/*}"
+  [ -n "$pool_parent" ] || pool_parent="/"
+  if [ -L "$pool_parent" ] || [ ! -d "$pool_parent" ] ||
+    ! find "$pool_parent" -prune -user "$parent_uid" ! -perm -g+w ! -perm -o+w -print 2>/dev/null |
+      grep -q .; then
+    printf '%s\n' "gate-lock: GATE_LOCK_DIR's parent $pool_parent must be owned by uid $parent_uid and not writable by group or others; it is refused and no lock was taken" >&2
+    exit 2
+  fi
+  # Every component ABOVE the pool must then be a real directory, which is a
+  # separate question from the parent's own three and the only way to see a link
+  # anywhere higher up. `[ -L ]` reads the LAST component of a path and `find`
+  # resolves every other one on the way, so the parent's check above says nothing
+  # about what the path runs THROUGH: `/scratch/link/b/pool`, where `link` points
+  # at a directory this user owns, passes that check — the directory really is ours
+  # and really is 0700 — while the pool is a directory in whatever tree `link`
+  # names. Walking up and testing each component costs one `-L` per level on a
+  # path that is short.
+  #
+  # It runs after the parent's own check so that a symlinked PARENT is still
+  # answered by the message that names the parent, and before the mkdir so that
+  # neither answer leaves a directory behind.
+  walk="$GATE_LOCK_DIR"
+  while [ "$walk" != "/" ]; do
+    walk="${walk%/*}"
+    [ -n "$walk" ] || walk="/"
+    if [ -L "$walk" ]; then
+      printf '%s\n' "gate-lock: GATE_LOCK_DIR=$GATE_LOCK_DIR runs through $walk, which is a symlink — a pool path must be plain and every component above it a real directory this user owns, because every check that walks the path resolves that link first and then judges whatever it points at; it was refused and no lock was taken. When the link is the caller's own TMPDIR rather than somebody else's pool — a Mac's is /var/folders/… behind /var — the answer is to say where it really is: name the pool by its resolved path (cd <dir> && pwd -P)" >&2
+      exit 2
+    fi
+  done
+  mkdir -m 0700 "$GATE_LOCK_DIR" 2>/dev/null || true
+  # The mode test is a `find` predicate for the same reason the uid test is:
+  # POSIX sh has no portable `stat`, and `test -w` would answer "this user can
+  # write it" — which is true for the owner of a world-writable directory, and
+  # is exactly the answer that must not be taken here.
+  if [ -L "$GATE_LOCK_DIR" ] || [ ! -d "$GATE_LOCK_DIR" ] ||
+    ! find "$GATE_LOCK_DIR" -prune -user "$pool_uid" ! -perm -g+w ! -perm -o+w -print 2>/dev/null |
+      grep -q .; then
+    printf '%s\n' "gate-lock: GATE_LOCK_DIR=$GATE_LOCK_DIR is not a lock directory this user can hold alone — it must exist (its parent must exist too), be a directory, not a symlink, be owned by uid $pool_uid, and be neither group- nor world-writable; it was refused and no lock was taken" >&2
+    exit 2
+  fi
+fi
+
+# The format marker, `1`. Written as a temp file and `ln`ed onto the name
+# because link(2) refuses to replace an existing file and that is the portable
+# atomic no-replace; `mv -n` is a no-op that reports success on some hosts and a
+# rename on others, and on macOS it is not atomic. A `ln` that FAILS is not an
+# error: it means somebody else published first, or published before this
+# process looked — so the temp file goes away and the answer is read back from
+# the name either way. That read-back is the check, and it is what makes two
+# acquirers racing into an empty pool a non-event rather than a corrupt marker:
+# whichever `ln` lost, both read `1`.
+if [ -n "$GATE_LOCK_DIR" ]; then
+  format_path="$GATE_LOCK_DIR/.format"
+  if [ ! -e "$format_path" ]; then
+    format_tmp="$format_path.tmp.$$"
+    if printf '1\n' > "$format_tmp" 2>/dev/null; then
+      # Test hook (CF_GATE_TEST_PAUSE_BEFORE_FORMAT_LN): between the temp file and
+      # the `ln`, and reached only when `.format` is absent, which is the only
+      # state in which the two acquirers can overlap at all. Parking it here is
+      # what turns "two processes raced" from something a test cannot schedule
+      # into a window it holds open on both sides.
+      if [ -n "${CF_GATE_TEST_PAUSE_BEFORE_FORMAT_LN:-}" ]; then
+        touch "$CF_GATE_TEST_PAUSE_BEFORE_FORMAT_LN" 2>/dev/null
+        while [ -f "$CF_GATE_TEST_PAUSE_BEFORE_FORMAT_LN" ]; do sleep 1; done
+      fi
+      ln "$format_tmp" "$format_path" 2>/dev/null || true
+    fi
+    rm -f "$format_tmp" 2>/dev/null
+  fi
+  format_found=$(cat "$format_path" 2>/dev/null)
+  # Anything but 1 is refused, including a marker this very process could not
+  # read or write: two projects on different lock semantics must never share a
+  # pool, and a project that cannot read the marker cannot know whether it can.
+  if [ "$format_found" != 1 ]; then
+    printf '%s\n' "gate-lock: GATE_LOCK_DIR holds lock format ${format_found:-nothing}; this gate speaks 1" >&2
+    exit 2
+  fi
+fi
+
+STALE_SECONDS="${CF_GATE_STALE_SECONDS:-600}"
+case "$STALE_SECONDS" in
+  ''|*[!0-9]*)
+    printf '%s\n' "gate-lock: CF_GATE_STALE_SECONDS must be a number of seconds: $STALE_SECONDS" >&2
+    exit 2
+    ;;
+esac
+# 600s is part of FORMAT 1, not a default anyone may lower: the threshold is
+# what every READER judges a foreign holder by, and a pool shared by several
+# projects is a pool where one project lowering it reclaims holders belonging to
+# the projects that did not — from a lock that is perfectly alive.
+if [ -n "$GATE_LOCK_DIR" ] && [ "$STALE_SECONDS" -lt 600 ]; then
+  printf '%s\n' "gate-lock: CF_GATE_STALE_SECONDS=$STALE_SECONDS is below the 600s a shared pool requires; every reader judges every other project's holder by this number, so a seat that lowers it reclaims locks that are alive. Set it host-wide, or leave it unset." >&2
+  exit 2
+fi
+
+# How many slots this host has. Validated exactly like CF_GATE_STALE_SECONDS —
+# a value that cannot be a count is a broken invocation whichever subcommand it
+# arrived on. The two range tests that follow are separate on purpose, and the
+# ceiling is judged FIRST and BY DIGITS, because neither a shell's integer test
+# nor a count with more slots than the host has gates for is a report of busy:
+#
+#   0            is not a host with no gates, it is a host where every caller
+#                is silently unprotected  -> exit 2, "at least one slot"
+#   1..64        is a host with that many  -> accepted
+#   65+          is a broken invocation    -> exit 2, "at most 64 slots"
+#   99999…       (20 or 30 digits) is not a comparison any shell can make. `[`
+#                answers false and says so — `Illegal number` under dash,
+#                `integer expression expected` under bash — so BOTH range tests
+#                fall through, the slot loop is entered with a count nothing can
+#                bound, and an idle host is reported as `busy` with exit 75 —
+#                telling the caller to sleep and retry a host that is not
+#                holding anything, forever. So a value of three or more digits
+#                is over the ceiling whatever it is, and is answered before any
+#                `[` sees it; only a one- or two-digit value (at most 99) is
+#                handed to the tests below.
+#
+# Leading zeros are a SPELLING, not a count, and they are stripped before any of
+# that: `064` is sixty-four slots and must be accepted, not read as the
+# three-digit value the ceiling test below exists to refuse. Stripping also
+# keeps the ceiling test honest for a padded value — `00000000000000065` is
+# sixty-five slots, not a number no shell can compare — and the loop keeps at
+# least one digit, so `0` and `00` are the "at least one slot" refusal rather
+# than an empty string that `[` cannot compare with anything. The refusals name
+# the value AS GIVEN (`065`, not `65`): the caller has to be able to find the
+# spelling it set wrong in the message about it.
+#
+# It takes the VARIABLE'S NAME, because CF_GATE_SLOTS and GATE_HOST_SLOTS are
+# the same count arriving by two roads and each refusal has to name the one the
+# operator actually set.
+MAX_SLOTS=64
+read_slot_count() {
+  slots_name=$1
+  slots_given=$2
+  case "$slots_given" in
+    ''|*[!0-9]*)
+      printf '%s\n' "gate-lock: $slots_name must be a number of slots: $slots_given" >&2
+      exit 2
+      ;;
+  esac
+  slots_count="$slots_given"
+  while :; do
+    case "$slots_count" in
+      0?*) slots_count="${slots_count#0}" ;;
+      *) break ;;
+    esac
+  done
+  case "$slots_count" in
+    [0-9][0-9][0-9]*) slots_over_cap=yes ;;
+    *)
+      slots_over_cap=no
+      if [ "$slots_count" -gt "$MAX_SLOTS" ]; then
+        slots_over_cap=yes
+      fi
+      ;;
+  esac
+  if [ "$slots_over_cap" = yes ]; then
+    printf '%s\n' "gate-lock: $slots_name must be at most $MAX_SLOTS slots: $slots_given" >&2
+    exit 2
+  fi
+  if [ "$slots_count" -lt 1 ]; then
+    printf '%s\n' "gate-lock: $slots_name must be at least one slot: $slots_given" >&2
+    exit 2
+  fi
+  SLOTS="$slots_count"
+}
+
+# GATE_HOST_WORKERS — the host's worker budget — is a positive whole number and
+# nothing else. It is NOT bounded by MAX_SLOTS (that ceiling is about slots) and
+# it is NOT compared against nproc here either: the thread count this host
+# reports and the one a container or a cpuset hands the same kernel are
+# different numbers, and refusing a host because its two disagree would stop the
+# gate on the very hosts that need it most. The comparison belongs where the
+# workers are actually spent — tools/gate/lib/max-workers.ts, which refuses a
+# cap above availableParallelism() at config load, naming this variable.
+#
+# The same digit rule as a slot count, and the same reason: a 30-digit spelling
+# is not a comparison `[` can make, and it is judged by its digits before any
+# test sees it.
+read_host_workers() {
+  host_workers_name=$1
+  host_workers_given=$2
+  case "$host_workers_given" in
+    ''|*[!0-9]*)
+      printf '%s\n' "gate-lock: $host_workers_name must be a number of workers: $host_workers_given" >&2
+      exit 2
+      ;;
+  esac
+  host_workers_count="$host_workers_given"
+  while :; do
+    case "$host_workers_count" in
+      0?*) host_workers_count="${host_workers_count#0}" ;;
+      *) break ;;
+    esac
+  done
+  case "$host_workers_count" in
+    # Three or more digits is certainly at least one worker, and is not a
+    # comparison this shell may make — see read_slot_count for the whole story.
+    [0-9][0-9][0-9]*) ;;
+    *)
+      if [ "$host_workers_count" -lt 1 ]; then
+        printf '%s\n' "gate-lock: $host_workers_name must be at least one worker: $host_workers_given" >&2
+        exit 2
+      fi
+      ;;
+  esac
+  HOST_WORKERS="$host_workers_count"
+}
+
+# A count clamped to what `$(( ))` can hold on every POSIX shell, because an
+# overflowed arithmetic expansion wraps rather than failing: a host that reports
+# more processors than a 32-bit int could name would otherwise answer a slot
+# count of whatever the wrapped remainder happened to be. A clamped count is
+# still over MAX_SLOTS either way, which is the only thing it is used for.
+arithmetic_safe() {
+  case "$1" in
+    [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]*) printf '%s\n' 999999999 ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+# This host's processor count, read once per invocation and normalised the same
+# way every other count here is. `CF_GATE_TEST_NPROC` injects it, because a test
+# on a 4-core runner cannot otherwise ask what a 24-core host would derive — and
+# getconf is the only portable source there is: nproc(1) is not in POSIX, and
+# /proc/cpuinfo is Linux-only.
+#
+# A value that is not a number is a refusal rather than a guess in both places
+# that need it, and the message says WHICH of the two wanted it. They are not the
+# same question and the operator fixes them differently: the DERIVATION wants
+# nproc to turn a worker budget into a slot count, and is answered by naming
+# GATE_HOST_SLOTS or by leaving GATE_HOST_WORKERS unset; the BUDGET check wants it
+# to measure slots against workers the host has already declared, and is answered
+# by lowering GATE_HOST_SLOTS or raising GATE_HOST_WORKERS. Inventing a processor
+# count would be inventing the host's budget, and a budget nobody wrote down is
+# how a host ends up oversubscribed by a factor with no red anywhere.
+read_host_nproc() {
+  nproc_wanted_for=$1
+  host_nproc="${CF_GATE_TEST_NPROC:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)}"
+  case "$host_nproc" in
+    ''|*[!0-9]*)
+      case "$nproc_wanted_for" in
+        budget)
+          printf '%s\n' "gate-lock: GATE_HOST_SLOTS=$SLOTS with GATE_HOST_WORKERS=$HOST_WORKERS can only be checked against this host's processor count, and getconf _NPROCESSORS_ONLN printed '$host_nproc'; lower GATE_HOST_SLOTS, raise GATE_HOST_WORKERS, or unset GATE_HOST_WORKERS and let the slot count be derived from it" >&2
+          ;;
+        *)
+          printf '%s\n' "gate-lock: GATE_HOST_WORKERS=$HOST_WORKERS needs this host's processor count to derive a slot count, and getconf _NPROCESSORS_ONLN printed '$host_nproc'; set GATE_HOST_SLOTS on the host, or unset GATE_HOST_WORKERS to fall back to CF_GATE_SLOTS" >&2
+          ;;
+      esac
+      exit 2
+      ;;
+  esac
+  while :; do
+    case "$host_nproc" in
+      0?*) host_nproc="${host_nproc#0}" ;;
+      *) break ;;
+    esac
+  done
+  HOST_NPROC="$host_nproc"
+}
+
+SLOTS=""
+PROJECT_SLOTS=""
+HOST_SLOTS=""
+HOST_SLOTS_SOURCE=""
+if [ -z "$GATE_LOCK_DIR" ]; then
+  # No pool: today's precedence exactly. The host's variables are not consulted
+  # at all, so an operator who has both the old and the new settings exported
+  # during the release gets the lock this file has always taken, and gets no
+  # refusal for the settings they have not migrated yet.
+  read_slot_count CF_GATE_SLOTS "${CF_GATE_SLOTS:-1}"
+else
+  # The PROJECT's own count is read first and on its own, so that the
+  # disagreement below is a comparison of two numbers rather than of two
+  # spellings — and so that a value that is not a count is refused as one,
+  # whatever the host's variables happen to say about the pool.
+  if [ -n "${CF_GATE_SLOTS:-}" ]; then
+    read_slot_count CF_GATE_SLOTS "$CF_GATE_SLOTS"
+    PROJECT_SLOTS="$SLOTS"
+  fi
+  if [ -n "$GATE_HOST_WORKERS" ]; then
+    read_host_workers GATE_HOST_WORKERS "$GATE_HOST_WORKERS"
+    # One host, one worker budget: a per-run cap that differs from the host's is
+    # the same disagreement as a slot count that differs, and it costs the same
+    # budget. Refused here rather than left to vitest, because the party that can
+    # fix it is the one that set the variable, and it is a host-wide value.
+    #
+    # COMPARED AS NUMBERS, through the same leading-zero strip read_host_workers
+    # applies to its own side: `04` is four workers, exactly as read_slot_count
+    # says `006` is six slots, and max-workers.ts already accepts `04` as four.
+    # A string compare here would refuse two spellings of the same decision —
+    # which is the refusal the operator cannot act on, because there is nothing
+    # wrong with either value.
+    if [ -n "${CF_TEST_MAX_WORKERS:-}" ]; then
+      case_max_workers="$CF_TEST_MAX_WORKERS"
+      while :; do
+        case "$case_max_workers" in
+          0?*) case_max_workers="${case_max_workers#0}" ;;
+          *) break ;;
+        esac
+      done
+      if [ "$case_max_workers" != "$HOST_WORKERS" ]; then
+        # Named AS GIVEN, not normalised: the operator has to be able to find the
+        # spelling in the message about it.
+        printf '%s\n' "gate-lock: CF_TEST_MAX_WORKERS=$CF_TEST_MAX_WORKERS does not match GATE_HOST_WORKERS=$HOST_WORKERS on a host with GATE_LOCK_DIR set; a run's worker cap and the host's worker budget are one decision, and a seat that disagrees gets a lane running beside a host it cannot see" >&2
+        exit 2
+      fi
+    fi
+  fi
+  if [ -n "$GATE_HOST_SLOTS" ]; then
+    read_slot_count GATE_HOST_SLOTS "$GATE_HOST_SLOTS"
+    HOST_SLOTS_SOURCE=GATE_HOST_SLOTS
+  elif [ -n "$GATE_HOST_WORKERS" ]; then
+    # The derivation, which is a NAMED FALLBACK rather than the way midnight is
+    # configured: slots = max(1, nproc / workers), capped at MAX_SLOTS. 24/4 = 6,
+    # 24/5 = 4, 3/4 = 1 — the last of which is the point. A host with fewer
+    # threads than one worker's worth still gets ONE gate, because a pool with
+    # zero slots is a host on which nothing is ever gated.
+    read_host_nproc derivation
+    HOST_SLOTS=$(( $(arithmetic_safe "$HOST_NPROC") / $(arithmetic_safe "$HOST_WORKERS") ))
+    if [ "$HOST_SLOTS" -lt 1 ]; then
+      HOST_SLOTS=1
+    fi
+    if [ "$HOST_SLOTS" -gt "$MAX_SLOTS" ]; then
+      HOST_SLOTS="$MAX_SLOTS"
+    fi
+    SLOTS="$HOST_SLOTS"
+    HOST_SLOTS_SOURCE=GATE_HOST_WORKERS
+  else
+    # Neither host variable: this project's own count, as it has always been, and
+    # nothing for it to disagree with.
+    read_slot_count CF_GATE_SLOTS "${CF_GATE_SLOTS:-1}"
+  fi
+  # BOTH counts given: the budget they multiply into has to fit the host. This is
+  # the one refusal here that needs no second opinion from anybody's seat, because
+  # both numbers are the host's own and their product is checkable against the
+  # host's own processors: seven gates of four workers each is 28 runnable
+  # workers asked of 24 threads, and the failure mode is not a refusal but tens of
+  # gigabytes of RSS and false timeouts on the tests that fail on their own
+  # internal deadlines.
+  #
+  # The product is never computed, because it does not have to be: slots ×
+  # workers > nproc is the same question as slots > floor(nproc / workers), and
+  # the second one divides two clamped values rather than multiplying them, so a
+  # 30-digit spelling on either side cannot overflow the arithmetic into an answer
+  # nobody wrote down.
+  if [ -n "$HOST_SLOTS_SOURCE" ] && [ "$HOST_SLOTS_SOURCE" = GATE_HOST_SLOTS ] &&
+    [ -n "$GATE_HOST_WORKERS" ]; then
+    read_host_nproc budget
+    if [ "$SLOTS" -gt $(( $(arithmetic_safe "$HOST_NPROC") / $(arithmetic_safe "$HOST_WORKERS") )) ]; then
+      printf '%s\n' "gate-lock: GATE_HOST_SLOTS=$SLOTS with GATE_HOST_WORKERS=$HOST_WORKERS asks for more workers than this host's $HOST_NPROC processors; a pool's slots and a run's workers are one budget, so the two must multiply out to at most the thread count. Lower GATE_HOST_SLOTS, raise GATE_HOST_WORKERS, or unset GATE_HOST_WORKERS and let the slot count be derived from it." >&2
+      exit 2
+    fi
+  fi
+  # A project variable that disagrees with the pool's own count is refused, and
+  # names both. It is exit 2 and not a preference because the pool is shared: the
+  # seat that disagrees does not get a different pool, it gets a seat that
+  # believes the host holds fewer gates than it does — and takes one anyway,
+  # beside a holder it cannot see. Lock correctness survives the disagreement;
+  # the thread budget the two counts multiply into does not.
+  if [ -n "$PROJECT_SLOTS" ] && [ -n "$HOST_SLOTS_SOURCE" ] && [ "$PROJECT_SLOTS" != "$SLOTS" ]; then
+    printf '%s\n' "gate-lock: CF_GATE_SLOTS=$PROJECT_SLOTS does not match the host's pool, where $HOST_SLOTS_SOURCE gives $SLOTS slots on a host with GATE_LOCK_DIR=$GATE_LOCK_DIR; the count is a property of the host and every project in the pool shares it. Set CF_GATE_SLOTS host-wide to the same number, or unset it and let the host variables decide." >&2
+    exit 2
+  fi
+fi
 
 # Every slot that EXISTS, whatever CF_GATE_SLOTS says — a host whose slots were
 # lowered underneath a holder still has that holder's lock, and a caller that
@@ -487,6 +1040,19 @@ caller_worktree() {
   printf '%s\n' "$worktree"
 }
 
+# The project the CALLER is standing in, for DISPLAY only. It is the basename of
+# the same answer worktree is: `campaign-foundry` from
+# `/…/campaign-foundry`, and in a linked worktree the worktree directory's own
+# name, which is the more useful half of the answer for a pool several projects
+# share. Nothing validates it and nothing compares it — a slot without the file
+# prints `unknown` — so an empty answer is recorded as an empty file rather than
+# refused, exactly as a display field should be. It is `${worktree##*/}` rather
+# than `basename` because that is the same answer with no fork, and this block
+# is resolved once per acquire beside the `git` call it reuses.
+caller_project() {
+  project="${worktree##*/}"
+}
+
 # The first OTHER slot that is in the caller's own worktree and whose holder is
 # still answering for it, or 1. Prints the slot; nothing else.
 #
@@ -581,6 +1147,12 @@ try_create() {
   # before: a slot that exists is a slot whose worktree is already known, which
   # is what lets the check after this decide on it without a second wait.
   printf '%s\n' "$worktree" > "$cand/worktree" 2>/dev/null || { rm -rf "$cand"; return 1; }
+  # The sixth file, and the only one nothing judges: `status` prints it so a slot
+  # held by another PROJECT in a shared pool reads as such, which is the whole
+  # question an operator has when the pool is the host's rather than their own.
+  # It is written inside the candidate like the rest, so a slot that exists has
+  # already answered it.
+  printf '%s\n' "$project" > "$cand/project" 2>/dev/null || { rm -rf "$cand"; return 1; }
   # Test hook (CF_GATE_TEST_PAUSE_BEFORE_MV): a pause point between the fully
   # written temp directory and the rename, so a test can prove no partial
   # lock ever appears at the name and can race a contender in.
@@ -773,6 +1345,10 @@ acquire() {
   # Every slot it could take is the same caller's, so this is one answer asked
   # once rather than a fork per pass.
   worktree=$(caller_worktree)
+  # The display name of the same tree, resolved once beside it — see
+  # caller_project. `try_create` writes it into every slot this caller takes, and
+  # nothing reads it back to make a decision.
+  caller_project
   # No identity, no lock — fail CLOSED, and before the slot loop, so nothing has
   # been taken and nothing has to be given back. `caller_worktree` asks git and
   # then `pwd -P`, and both can come back empty: the cwd has been deleted or
@@ -1299,10 +1875,13 @@ verify() {
   return 0
 }
 
-# Every slot that exists, whatever CF_GATE_SLOTS says — a status that only looked
-# at 0..N-1 would report a host free while a slot is taken, which is the one
-# answer an operator must never be given. Slot 0 keeps its unsuffixed name, so a
-# single-slot host prints the same line it always did with the slot named.
+# Every slot that exists, whatever the count says — a host whose slots were
+# lowered underneath a holder still has that holder's lock, and a caller that
+# only looked at 0..N-1 would report the host free while a slot is taken. The
+# one answer an operator must never be given. Slot 0 keeps its unsuffixed name,
+# so a single-slot host prints the same line it always did with the slot named,
+# and `project` sits between the owner and the timestamps: a pool shared by
+# several projects is exactly the case where "who" is not enough.
 status() {
   slots_listed=0
   while IFS= read -r slot_path_seen; do
@@ -1313,6 +1892,7 @@ status() {
     pid=$(cat "$LOCK/pid" 2>/dev/null)
     started=$(cat "$LOCK/started" 2>/dev/null)
     beat=$(cat "$LOCK/beat" 2>/dev/null)
+    project=$(cat "$LOCK/project" 2>/dev/null)
     if pid_alive "$pid"; then
       life="pid $pid alive"
     else
@@ -1323,7 +1903,7 @@ status() {
     else
       heart="heartbeat fresh (beat $beat)"
     fi
-    printf '%s\n' "gate-lock: slot $LOCK held by ${owner:-unknown} (started ${started:-?}, $life, $heart)"
+    printf '%s\n' "gate-lock: slot $LOCK held by ${owner:-unknown} project ${project:-unknown} (started ${started:-?}, $life, $heart)"
   done <<EOF
 $(existing_slots)
 EOF
@@ -1371,11 +1951,20 @@ heartbeat() {
   # saw an empty value 10 times in 7 seconds.
   #
   # The new value is staged BESIDE THE LOCK, not inside it, so the lock
-  # directory holds nothing but the five files try_create wrote: a removal never
+  # directory holds nothing but the six files try_create wrote: a removal never
   # has to unlink a file that is still being written, and the only entry that
   # can appear after creation is the finished one this rename delivers.
-  # Same filesystem by construction — the lock is itself
-  # ${TMPDIR:-/tmp}/cf-gate.lock, so a file in ${TMPDIR:-/tmp} renames onto it.
+  # Same filesystem by construction — the staged file is a sibling of the lock
+  # directory itself, so it renames onto $LOCK/beat whatever the lock's parent
+  # is. That is the whole reason it is not `${TMPDIR}/cf-gate.beatnew.$$`, which
+  # is what this used to stage: once the pool lives on /run/user/1000 and TMPDIR
+  # is mergerfs, a rename from TMPDIR onto the pool crosses a filesystem, and a
+  # cross-device rename is not a rename — it is copy-then-unlink, so the beat is
+  # briefly ABSENT at the name, and the readers above judge an absent beat as
+  # stale and reclaim a holder that is alive and heartbeating (see
+  # beat_is_stale). This is exactly the shape mergerfs merges on top of: two
+  # candidates can both win one name, and a cross-branch rename can fall back to
+  # copy+delete.
   #
   # What staging beside the lock does NOT do is make the removal safe: this
   # rename's TARGET is inside the lock, so a `rm -rf` of the lock that is in
@@ -1387,7 +1976,12 @@ heartbeat() {
   # directory was read-only from try_create onward, with "nothing in it for a
   # removal to race" — and the directory this function writes into is exactly
   # the thing a removal races.
-  beat_new="${TMPDIR:-/tmp}/cf-gate.beatnew.$$"
+  #
+  # `$$` is this heartbeat's own pid, so a refresh that is killed between the
+  # write and the rename leaves one file named after a pid that is not there —
+  # which is the same shape as `.cand.<pid>` and is kept out of the slot set by
+  # the suffix rule in is_slot_path, not by where it sits.
+  beat_new="$LOCK.beatnew.$$"
   if ! printf '%s\n' "$(date +%s)" > "$beat_new" 2>/dev/null; then
     printf '%s\n' "gate-lock: heartbeat — cannot write $LOCK/beat" >&2
     return 1

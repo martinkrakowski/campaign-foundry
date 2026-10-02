@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import vitestConfig from "../../../vitest.config";
+import { gateEnv } from "./gate-env.js";
 
 // D183 (lane HX3-gate-in-repo) — `yarn gate`. Every test drives the real
 // script with CF_GATE_STEPS (one name<TAB>command line per step) and a fresh
@@ -75,13 +76,14 @@ function runGate(args: string[], env: Record<string, string> = {}, timeout = 15_
   const dir = scratch();
   const result = spawnSync("sh", [gateSh, ...args], {
     encoding: "utf8",
-    // CF_GATE_SLOTS is pinned HERE, between the inherited environment and the
-    // per-test one, because D188 sets it host-wide (/etc/environment) and these
-    // tests are written against the default of one slot: a host with three hands
-    // this acquirer slot 1 instead of answering busy, and the test is asserting
-    // about busy. A test that means more slots still says so in its own env,
-    // which is spread last and therefore wins.
-    env: { ...process.env, CF_GATE_SLOTS: "1", TMPDIR: dir, ...env },
+    // The shared environment (tools/gate/__tests__/gate-env.ts): CF_GATE_SLOTS is
+    // pinned to 1 and the three pool variables are deleted, because all four are
+    // host-wide. D188 sets the first (/etc/environment) and a host that has
+    // adopted the shared pool exports the rest, and a test that inherits any of
+    // them either plants a slot in the operator's real pool or is handed slot 1
+    // where the test is asserting about busy. A test that means more slots, or a
+    // different pool, still says so in its own env, which is spread last.
+    env: gateEnv(dir, env),
     timeout,
   });
   return {
@@ -121,8 +123,8 @@ function runGateAsyncIn(
 ): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn("sh", [gateSh, ...args], {
-      // The same host-wide pin as runGate above — see there for why.
-      env: { ...process.env, CF_GATE_SLOTS: "1", TMPDIR: dir, ...env },
+      // The same shared environment as runGate above — see there for why.
+      env: gateEnv(dir, env),
     });
     let stdout = "";
     let stderr = "";
