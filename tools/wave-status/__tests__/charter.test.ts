@@ -98,9 +98,12 @@ describe("the status server's charter (D106, S5)", () => {
   test("the server imports no push module — it still starts nothing new", () => {
     expect(importsOf(join(WAVE_STATUS, "server.ts")).filter(isPushModule)).toEqual([]);
     // bin.ts reaches the print face only through the dynamic import: cli.ts
-    // imports bin.ts, so a static import back would close a cycle.
+    // imports bin.ts, so a static import back would close a cycle. And it must
+    // not AWAIT that import at the top level: awaited while bin.ts is still
+    // evaluating, the cycle never settles and Node exits 13 with nothing pushed.
     const bin = readFileSync(join(WAVE_STATUS, "bin.ts"), "utf8");
-    expect(bin).toContain('await import("./cli.js")');
+    expect(bin).toContain('import("./cli.js")');
+    expect(bin).not.toContain('await import("./cli.js")');
     expect(/^import\s[^\n]*from\s+["']\.\/cli\.js["']/m.test(bin)).toBe(false);
   });
 
