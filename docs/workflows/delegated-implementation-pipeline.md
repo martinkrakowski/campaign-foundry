@@ -469,7 +469,9 @@ Rules:
   must be neither group- nor world-writable, or it is refused by name with exit 2. Its **parent must be owned by
   you and not writable by others** as well, and midnight's `/run/user/1000` is: the leaf's own mode protects the
   names inside it and nothing about the name itself, which is an entry in the parent, so a parent another user can
-  write lets them rename the pool away and hand the next acquirer a pool of their own. It must **not** be on
+  write lets them rename the pool away and hand the next acquirer a pool of their own. A trailing slash is
+  reduced away before either is judged — `[ -L "$d/link/" ]` is false for a symlink to a directory and
+  `find "$d/link/"` follows it, so `link/` would pass every check — and `/` is refused. It must **not** be on
   mergerfs or NFS: a pool there merges branches, two candidates on two branches can both win one name, and a
   cross-branch rename can fall back to copy+delete — the race that reclaims a live holder. Midnight's TMPDIR **is**
   mergerfs, which is exactly why the pool is not TMPDIR. Its `.format` file holds the number the pool speaks (`1`) and is
@@ -480,7 +482,10 @@ Rules:
   pid alone). Under a pool, a `CF_GATE_SLOTS` that disagrees with `GATE_HOST_SLOTS` (or with the count derived
   from `GATE_HOST_WORKERS`) is refused naming both, and so is a `CF_TEST_MAX_WORKERS` that disagrees with
   `GATE_HOST_WORKERS`; `CF_GATE_STALE_SECONDS` below 600 is refused there too, because that threshold is part of
-  the format and every reader judges every other project's holder by it. `CF_GATE_SLOTS` and
+  the format and every reader judges every other project's holder by it. With BOTH host counts set,
+  `GATE_HOST_SLOTS × GATE_HOST_WORKERS` must not exceed the host's processors — 24 = 6 × 4 — and 7 × 4 on a
+  24-thread host is refused naming all three numbers; `GATE_HOST_SLOTS` on its own stays allowed and leaves
+  vitest's worker count uncapped. `CF_GATE_SLOTS` and
   `CF_TEST_MAX_WORKERS` are kept for ONE release and still win when `GATE_LOCK_DIR` is unset, so an operator who
   has not migrated keeps a working host — **never** set any of these in a repo file, a script or a workflow, and
   never per seat. `tools/gate/lib/max-workers.ts` reads `GATE_HOST_WORKERS` as its fallback, so a project that
