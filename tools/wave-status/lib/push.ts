@@ -55,17 +55,71 @@ export interface PushOptions {
 }
 
 /**
+ * `reported` as the service accepts it. Not `lane.reported` itself: the shape is
+ * closed, so `wave` and `lane` — which the collector's own event carries and a
+ * reader of the page would expect here — would refuse the whole wave.
+ */
+function pushReported(reported: NonNullable<LaneStatus["reported"]>): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    stage: reported.stage,
+    event: reported.event,
+    ts: reported.ts,
+  };
+  if (reported.pr !== undefined) out.pr = reported.pr;
+  if (reported.round !== undefined) out.round = reported.round;
+  if (reported.detail !== undefined) out.detail = reported.detail;
+  return out;
+}
+
+/** `derived.pr`: four keys, each left out when the read did not read it. */
+function pushPr(pr: NonNullable<DerivedLane["pr"]>): Record<string, unknown> {
+  const out: Record<string, unknown> = { number: pr.number, state: pr.state, checks: pr.checks };
+  if (pr.unresolvedThreads !== undefined) out.unresolvedThreads = pr.unresolvedThreads;
+  return out;
+}
+
+/** `derived.gate.coverage`: four numbers, no key the collector ever adds. */
+function pushCoverage(
+  coverage: NonNullable<NonNullable<DerivedLane["gate"]>["coverage"]>,
+): Record<string, unknown> {
+  return {
+    statements: coverage.statements,
+    branches: coverage.branches,
+    functions: coverage.functions,
+    lines: coverage.lines,
+  };
+}
+
+/** `derived.gate`: the exit, and the coverage when the gate reported one. */
+function pushGate(gate: NonNullable<DerivedLane["gate"]>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (gate.exit !== undefined) out.exit = gate.exit;
+  if (gate.coverage !== undefined) out.coverage = pushCoverage(gate.coverage);
+  return out;
+}
+
+/** `derived.diff`: three counts. */
+function pushDiff(diff: NonNullable<DerivedLane["diff"]>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (diff.files !== undefined) out.files = diff.files;
+  if (diff.insertions !== undefined) out.insertions = diff.insertions;
+  if (diff.deletions !== undefined) out.deletions = diff.deletions;
+  return out;
+}
+
+/**
  * `derived` as the client accepts it: a whitelist of eight keys, each left out
  * when the lane never gathered it. Never a spread of `lane.derived` — a key
  * `DerivedLane` gains later must not reach the wire by accident, which is the
- * only thing this list is for.
+ * only thing this list is for. Neither may a nested shape: the service closes
+ * `pr`, `gate`, `gate.coverage` and `diff` too.
  */
 function pushDerived(lane: DerivedLane): Record<string, unknown> {
   const out: Record<string, unknown> = { alive: lane.alive };
   if (lane.exit !== undefined) out.exit = lane.exit;
-  if (lane.gate !== undefined) out.gate = lane.gate;
-  if (lane.pr !== undefined) out.pr = lane.pr;
-  if (lane.diff !== undefined) out.diff = lane.diff;
+  if (lane.gate !== undefined) out.gate = pushGate(lane.gate);
+  if (lane.pr !== undefined) out.pr = pushPr(lane.pr);
+  if (lane.diff !== undefined) out.diff = pushDiff(lane.diff);
   // The tail never goes: the client strips it anyway, and it is up to 16 KiB a lane.
   if (lane.log !== undefined) out.log = { bytes: lane.log.bytes, mtimeMs: lane.log.mtimeMs };
   if (lane.planReview !== undefined) out.planReview = lane.planReview;
@@ -97,7 +151,7 @@ export function toPushLanes(
         {
           id: lane.lane,
           ...(lane.seat === undefined ? {} : { seat: lane.seat }),
-          ...(lane.reported === undefined ? {} : { reported: lane.reported }),
+          ...(lane.reported === undefined ? {} : { reported: pushReported(lane.reported) }),
           derived: pushDerived(lane.derived),
           disagreements: lane.disagreements,
         },

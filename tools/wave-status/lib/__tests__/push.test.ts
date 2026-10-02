@@ -210,6 +210,135 @@ describe("toPushLanes", () => {
     const keys = Object.keys(toPushLanes([full], quiet()).lanes[0] as object);
     expect(keys).toEqual(["id", "seat", "reported", "derived", "disagreements"]);
   });
+
+  // F2 — the service closes every nested shape too, so a key any of them gains
+  // later would refuse the whole wave on every tick. Each one is built from a
+  // list, never forwarded as it is.
+  test("reported carries exactly stage, event, ts, pr, round and detail", () => {
+    const surprise = {
+      stage: "gate",
+      event: "settled",
+      ts: NOW_ISO,
+      pr: 42,
+      round: 2,
+      detail: { fixed: 1 },
+      wave: "W",
+      lane: "l1",
+    } as unknown as NonNullable<LaneStatus["reported"]>;
+    const pushed = toPushLanes([lane({ reported: surprise })], quiet()).lanes[0] as {
+      reported: object;
+    };
+    expect(pushed.reported).toEqual({
+      stage: "gate",
+      event: "settled",
+      ts: NOW_ISO,
+      pr: 42,
+      round: 2,
+      detail: { fixed: 1 },
+    });
+    expect(Object.keys(pushed.reported)).not.toContain("wave");
+  });
+
+  test("every reported key is omitted when the event carried none", () => {
+    const bare = toPushLanes(
+      [lane({ reported: { stage: "gate", event: "failed", ts: NOW_ISO } })],
+      quiet(),
+    ).lanes[0] as { reported: object };
+    expect(bare.reported).toEqual({ stage: "gate", event: "failed", ts: NOW_ISO });
+  });
+
+  test("derived.pr carries exactly number, state, checks and unresolvedThreads", () => {
+    const surprise = {
+      number: 42,
+      state: "open",
+      checks: "pending",
+      unresolvedThreads: 3,
+      headRefName: "lane",
+      mergedBy: "someone",
+    } as unknown as NonNullable<DerivedLane["pr"]>;
+    const { derived } = toPushLanes([lane({ derived: { alive: true, pr: surprise } })], quiet())
+      .lanes[0] as { derived: { pr: object } };
+    expect(derived.pr).toEqual({
+      number: 42,
+      state: "open",
+      checks: "pending",
+      unresolvedThreads: 3,
+    });
+    expect(Object.keys(derived.pr)).not.toContain("headRefName");
+  });
+
+  test("an absent unresolvedThreads is left out, not sent as undefined", () => {
+    const { derived } = toPushLanes([full], quiet()).lanes[0] as {
+      derived: { pr: object };
+    };
+    expect(Object.keys(derived.pr)).toEqual(["number", "state", "checks", "unresolvedThreads"]);
+    const minimal = toPushLanes(
+      [
+        lane({
+          derived: {
+            alive: true,
+            pr: { number: 1, state: "open", checks: "pass" },
+          },
+        }),
+      ],
+      quiet(),
+    ).lanes[0] as { derived: { pr: object } };
+    expect(minimal.derived.pr).toEqual({ number: 1, state: "open", checks: "pass" });
+  });
+
+  test("derived.gate carries exit and coverage, and coverage its four numbers", () => {
+    const surprise = {
+      exit: 0,
+      coverage: { statements: 1, branches: 1, functions: 1, lines: 1, uncovered: 3 },
+      log: "gate.log",
+      durationMs: 9,
+    } as unknown as NonNullable<DerivedLane["gate"]>;
+    const { derived } = toPushLanes([lane({ derived: { alive: false, gate: surprise } })], quiet())
+      .lanes[0] as { derived: { gate: { exit?: number; coverage?: object } } };
+    expect(derived.gate).toEqual({
+      exit: 0,
+      coverage: { statements: 1, branches: 1, functions: 1, lines: 1 },
+    });
+    expect(derived.gate.coverage && Object.keys(derived.gate.coverage)).not.toContain("uncovered");
+  });
+
+  test("a gate with neither an exit nor a coverage is an empty object, not a refused key", () => {
+    const { derived } = toPushLanes([lane({ derived: { alive: false, gate: {} } })], quiet())
+      .lanes[0] as { derived: { gate: object } };
+    expect(derived.gate).toEqual({});
+  });
+
+  test("derived.diff carries exactly files, insertions and deletions", () => {
+    const surprise = {
+      files: 2,
+      insertions: 10,
+      deletions: 1,
+      binaries: 0,
+      generated: false,
+    } as unknown as NonNullable<DerivedLane["diff"]>;
+    const { derived } = toPushLanes([lane({ derived: { alive: true, diff: surprise } })], quiet())
+      .lanes[0] as { derived: { diff: object } };
+    expect(derived.diff).toEqual({ files: 2, insertions: 10, deletions: 1 });
+    expect(Object.keys(derived.diff)).not.toContain("binaries");
+  });
+
+  test("a diff with a count missing omits only that key", () => {
+    // Nothing gathers `diff` yet; when the numstat reader lands, a file with only
+    // insertions has no deletions column. The type promises three, so each absent
+    // side is reached the only honest way: a value that is not quite that type.
+    const onlyInserts = { files: 1, insertions: 2 } as unknown as NonNullable<DerivedLane["diff"]>;
+    const onlyFiles = { files: 3 } as unknown as NonNullable<DerivedLane["diff"]>;
+    const onlyDeletes = { deletions: 9 } as unknown as NonNullable<DerivedLane["diff"]>;
+    const wire = (diff: NonNullable<DerivedLane["diff"]>): object =>
+      (
+        toPushLanes([lane({ derived: { alive: true, diff } })], quiet()).lanes[0] as {
+          derived: { diff: object };
+        }
+      ).derived.diff;
+    expect(wire(onlyInserts)).toEqual({ files: 1, insertions: 2 });
+    expect(wire(onlyFiles)).toEqual({ files: 3 });
+    expect(wire(onlyDeletes)).toEqual({ deletions: 9 });
+  });
 });
 
 describe("selectWaves", () => {
