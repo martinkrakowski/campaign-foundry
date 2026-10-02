@@ -507,11 +507,28 @@ describe("intervalFor", () => {
   });
 
   test("the watch interval carries the tick's own spacing", () => {
-    expect(intervalFor(10, 3)).toBe(14);
+    expect(intervalFor(10, 3, undefined)).toBe(14);
+  });
+
+  test("a slow tick wins: the gap also holds the collection and the client runs", () => {
+    // A collection that took 40s makes the real gap 40s whatever --watch said.
+    expect(intervalFor(10, 3, 40_000)).toBe(40);
+  });
+
+  test("a cycle long enough to overflow the cap is capped", () => {
+    expect(intervalFor(10, 3, 400_000)).toBe(MAX_INTERVAL_SECONDS);
   });
 
   test("a value past the cap is capped", () => {
     expect(intervalFor(300, 10)).toBe(MAX_INTERVAL_SECONDS);
+  });
+
+  test("a cycle shorter than the spacing floor changes nothing", () => {
+    expect(intervalFor(10, 3, 1_000)).toBe(14);
+  });
+
+  test("a cycle shorter than the watch floor is not reported at all", () => {
+    expect(intervalFor(60, 3, 2_000)).toBe(64);
   });
 });
 
@@ -608,6 +625,38 @@ describe("pushStatus", () => {
     await pushStatus(deps, statusOf([wave("W", [full])]), { waves: ["W"], watch: 10 });
     expect(runs[0]?.args).toEqual(["push", "--wave", "W", "--stdin", "--interval", "12"]);
     expect(runs[0]?.stdin).toBe(JSON.stringify(fullBody));
+  });
+
+  test("the interval a slow tick reports is the real gap, not the watch interval", async () => {
+    const { deps, runs } = fakeDeps();
+    await pushStatus(deps, statusOf([wave("W", [full])]), {
+      waves: ["W"],
+      watch: 10,
+      lastCycleMs: 40_000,
+    });
+    expect(runs[0]?.args).toEqual(["push", "--wave", "W", "--stdin", "--interval", "40"]);
+  });
+
+  test("the near-cap warning counts a slow cycle too", async () => {
+    // 299 + 2 = 301 already exceeds the cap; a 250s cycle on top makes the real
+    // gap five minutes and the report would claim 300s, so the operator is told.
+    const over = fakeDeps();
+    await pushStatus(over.deps, statusOf([wave("W", [lane()])]), {
+      waves: ["W"],
+      watch: 299,
+      lastCycleMs: 250_000,
+    });
+    expect(over.warns).toHaveLength(1);
+    expect(over.runs[0]?.args).toContain("300");
+
+    const under = fakeDeps();
+    await pushStatus(under.deps, statusOf([wave("W", [lane()])]), {
+      waves: ["W"],
+      watch: 10,
+      lastCycleMs: 250_000,
+    });
+    expect(under.warns).toEqual([]);
+    expect(under.runs[0]?.args).toContain("250");
   });
 
   test("waves are pushed one at a time, in the order selected", async () => {

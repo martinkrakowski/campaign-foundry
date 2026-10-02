@@ -98,6 +98,8 @@ export interface CliIo {
   readonly collect: (root: string) => Promise<WaveStatus>;
   readonly push: (status: WaveStatus, options: PushOptions) => Promise<number>;
   readonly schedule: (fn: () => void, ms: number) => unknown;
+  /** The wall clock, injected so a test can state how long a cycle took. */
+  readonly nowMs: () => number;
 }
 
 /**
@@ -115,13 +117,20 @@ export async function runCli(io: CliIo): Promise<void> {
   // would otherwise print the same line every interval for hours.
   const mayPush = args.push && io.WAVES_URL !== undefined && io.WAVES_URL !== "";
   if (args.push && !mayPush) io.logError(WAVES_URL_UNSET);
+  // When the last push started. The gap between two of these is the real cycle —
+  // the interval, the collection and every client run — and the service marks a
+  // wave stale after three reported intervals, so it is told the truth.
+  let cycleStart: number | undefined;
   const print = async (): Promise<void> => {
     // ONE collection per tick: what is rendered and what is pushed are the same status.
     const status = await io.collect(root);
     io.log(renderStatus(status, { color }));
     if (!mayPush) return;
+    const startedAt = io.nowMs();
+    const lastCycleMs = cycleStart === undefined ? undefined : startedAt - cycleStart;
+    cycleStart = startedAt;
     try {
-      await io.push(status, { waves: args.waves, watch: args.watch });
+      await io.push(status, { waves: args.waves, watch: args.watch, lastCycleMs });
     } catch (error: unknown) {
       io.logError(error instanceof Error ? error.message : String(error));
     }
@@ -159,6 +168,7 @@ export function runFromProcess(argv: readonly string[]): void {
     collect: (root) => collect(realDeps, root, new Date().toISOString()),
     push: (status, options) => pushStatus(deps, status, options),
     schedule: (fn, ms) => setTimeout(fn, ms),
+    nowMs: () => Date.now(),
   }).catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

@@ -59,6 +59,13 @@ export interface PushOptions {
   readonly waves: readonly string[];
   /** The --watch seconds, or false for a one-shot push. */
   readonly watch: number | false;
+  /**
+   * How long the previous cycle took, from the start of one `pushStatus` call to
+   * the start of the next. Measured by the caller, which is the only thing that
+   * knows when its own tick began; absent on the first tick, which has no
+   * previous one.
+   */
+  readonly lastCycleMs?: number;
 }
 
 /**
@@ -229,20 +236,37 @@ export function selectWaves(
   return status.waves.filter((wave) => pushable.has(wave.id));
 }
 
-/** What one wave really waits between two of its own pushes: the watch interval plus this tick's spacing. */
+/** The watch interval plus this tick's own spacing between pushes: the floor. */
 function spacingSeconds(watch: number, waveCount: number): number {
   return watch + Math.ceil((waveCount * PUSH_SPACING_MS) / 1000);
 }
 
 /**
- * The interval to report: how long one wave really waits between two of its own
- * pushes, which is what the server uses to decide a wave has gone stale — capped
- * at what the client accepts.
+ * The gap one wave really waits between two of its own pushes, before the cap.
+ * It is not only the watch interval: the tick in between collects (`pgrep`, `gh`,
+ * `git`) and runs the client once per wave, and the service marks a wave stale
+ * after three REPORTED intervals — so a slow tick under a small `--watch` reads
+ * stale while the watch is plainly alive. `lastCycleMs` is the caller's
+ * measurement of one such cycle, absent on the first tick that has none.
  */
-export function intervalFor(watch: number | false, waveCount: number): number | undefined {
+function realGapSeconds(watch: number, waveCount: number, lastCycleMs: number | undefined): number {
+  const cycle = lastCycleMs === undefined ? 0 : Math.ceil(lastCycleMs / 1000);
+  return Math.max(spacingSeconds(watch, waveCount), cycle);
+}
+
+/**
+ * The interval to report: the real gap between two of one wave's own pushes —
+ * what the server uses to decide a wave has gone stale — capped at what the
+ * client accepts.
+ */
+export function intervalFor(
+  watch: number | false,
+  waveCount: number,
+  lastCycleMs?: number,
+): number | undefined {
   return watch === false
     ? undefined
-    : Math.min(MAX_INTERVAL_SECONDS, spacingSeconds(watch, waveCount));
+    : Math.min(MAX_INTERVAL_SECONDS, realGapSeconds(watch, waveCount, lastCycleMs));
 }
 
 /** How much of another program's stderr one warn line may carry. */
@@ -324,14 +348,15 @@ export async function pushStatus(
     planned.push({ wave, stdin: JSON.stringify(body) });
   }
 
-  const interval = intervalFor(options.watch, planned.length);
+  const interval = intervalFor(options.watch, planned.length, options.lastCycleMs);
   if (
     options.watch !== false &&
-    spacingSeconds(options.watch, planned.length) > MAX_INTERVAL_SECONDS
+    realGapSeconds(options.watch, planned.length, options.lastCycleMs) > MAX_INTERVAL_SECONDS
   ) {
     warn(
-      `waves push: --watch ${options.watch} over ${planned.length} wave(s) reports at most ` +
-        `${MAX_INTERVAL_SECONDS}s, so the service will read them stale between pushes`,
+      `waves push: --watch ${options.watch} over ${planned.length} wave(s) leaves more than ` +
+        `${MAX_INTERVAL_SECONDS}s between two pushes, but only ${MAX_INTERVAL_SECONDS}s can be ` +
+        `reported, so the service will read them stale between pushes`,
     );
   }
 

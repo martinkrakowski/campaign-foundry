@@ -26,9 +26,19 @@ function makeIo(argv: readonly string[], overrides: Partial<CliIo> = {}) {
     collect,
     push,
     schedule,
+    nowMs: () => 0,
     ...overrides,
   };
   return { io, log, logError, collect, push, schedule };
+}
+
+/** A clock the test moves by hand, so `lastCycleMs` is a fact and not a race. */
+function stubClock(ticks: readonly number[]): () => number {
+  let read = -1;
+  return () => {
+    read = Math.min(read + 1, ticks.length - 1);
+    return ticks[read] as number;
+  };
 }
 
 /** The two fields `--push` adds to every parse. */
@@ -278,7 +288,40 @@ describe("runCli", () => {
     fn();
     await vi.waitFor(() => expect(collect).toHaveBeenCalledTimes(2));
     expect(push).toHaveBeenCalledTimes(2);
-    expect(push).toHaveBeenLastCalledWith(status, { waves: [], watch: 2 });
+    // The default stubbed clock does not move, so this tick's real cycle is 0 —
+    // still a measurement, not the absence of one.
+    expect(push).toHaveBeenLastCalledWith(status, { waves: [], watch: 2, lastCycleMs: 0 });
+  });
+
+  test("the second push carries how long the first cycle really took", async () => {
+    // 1_000 → 41_000 is one collection plus the first tick's push: 40s of work the
+    // --watch interval of 2s does not account for, and the server must be told.
+    const { io, push, schedule } = makeIo(["--push", "--watch=2"], {
+      WAVES_URL: "https://waves.example",
+      nowMs: stubClock([1_000, 41_000]),
+    });
+    await runCli(io);
+    expect(push.mock.calls[0]?.[1]).toEqual({ waves: [], watch: 2, lastCycleMs: undefined });
+    const [fn] = schedule.mock.calls[0] as [() => void, number];
+    fn();
+    await vi.waitFor(() => expect(push).toHaveBeenCalledTimes(2));
+    expect(push.mock.calls[1]?.[1]).toEqual({ waves: [], watch: 2, lastCycleMs: 40_000 });
+  });
+
+  test("a one-shot push has no previous cycle to report", async () => {
+    const { io, push } = makeIo(["--push"], {
+      WAVES_URL: "https://waves.example",
+      nowMs: stubClock([5_000]),
+    });
+    await runCli(io);
+    expect(push.mock.calls[0]?.[1]).toEqual({ waves: [], watch: false, lastCycleMs: undefined });
+  });
+
+  test("without --push the clock is never read", async () => {
+    const nowMs = vi.fn(() => 0);
+    const { io } = makeIo(["--watch=2"], { nowMs });
+    await runCli(io);
+    expect(nowMs).not.toHaveBeenCalled();
   });
 
   test("no WAVES_URL pushes nothing and says so once for the whole run", async () => {
