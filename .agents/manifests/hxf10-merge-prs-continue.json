@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "lane": "HXF10-merge-prs-continue",
+  "mutations": [
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "  if [[ -z \"$CONTINUE\" && $pr_status -ne 0 && $pr_status -ne $EXIT_MERGED_UNRECORDED ]]; then\n    exit $pr_status\n  fi",
+      "after": "  if [[ $pr_status -ne 0 && $pr_status -ne $EXIT_MERGED_UNRECORDED ]]; then\n    exit $pr_status\n  fi",
+      "because": "dropping $CONTINUE from the guard makes --continue behave exactly as the run behaved before the flag existed: the first PR whose body refused ends the whole run, so #103 is never attempted, the closing summary is never printed, and exit 1 stops meaning \"one PR of three was refused\" and goes back to meaning \"nothing after the second was tried\". It is the mutation the row names for the flag, and it is invisible to every other test in the file for a reason worth stating: the WITHOUT-flag test already stops at the second PR, so the mutant agrees with it exactly, and the three lock tests either plant a lock or plant a dead pid before a single-PR run that never reaches this line at all. Only the three-PR test can see it, because it is the only one that requires a PR AFTER a refused one to be merged. The refusal it plants is the row's own case — one unresolved review thread in the middle — so the mutant loses a real merge (#103) rather than only a summary line",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "merges the first and third PRs"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "trap 'forward_signal 129' HUP\nacquire_lock",
+      "after": "trap 'forward_signal 129' HUP\n: # MUTATION: no lock check at all",
+      "because": "the run never consults the lock at all, which is the mutation the row names for the lock. Every other guard in acquire_lock is defence in depth and deliberately redundant — the judgement refuses a live holder, the rename is arbitrated, the nesting of a candidate inside an existing lock is detected, and the read-back insists the name carries this run's own pid — so weakening any ONE of them still leaves an answer and still exits 75. Removing the call is the only way to show what the lock is actually for: with it gone, a second run starts beside a live holder, takes the same TMPDIR, refreshes and merges the same branches concurrently, and exits 0. Nothing in the script notices, because nothing is left to notice. The planted holder in the test is THIS test process's own pid, so the honest script must answer 75 and name it; the mutant instead merges PR #101 and deletes its branch on the forge",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "live holder's lock exits 75"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "  moved=$(cat \"$aside/pid\" 2>/dev/null)\n  if [[ \"$moved\" == \"$judged\" ]]; then",
+      "after": "  moved=$(cat \"$aside/pid\" 2>/dev/null)\n  if true; then",
+      "because": "the check that the lock moved aside is the one that judged dead is the whole of the reclaim's safety, and the `mv` cannot do it alone: the rename is what arbitrates between two reclaimers, but it happily renames a LIVE run's lock out of the way when that lock replaced the dead one between this run's `ps` and this run's `mv`. With the comparison gone, the live lock is deleted, the name is free, and this run takes it and merges — while the run that was holding it merges too, still believing it holds the lock, and its release at exit declines to remove a name this run now owns. Two runs merge at once and both exit 0, which is the one outcome the lock exists to make impossible, and it is silent. The other lock tests cannot see it: the plain dead-pid test has no replacement to confuse it, and the live-holder test never reaches a reclaim. The test that sees it uses the MERGE_PRS_TEST_PAUSE_AFTER_LIVENESS hook to hold this run between the judgement and the `mv`, swaps in a lock carrying a LIVE pid, and then requires 75 plus that live lock still on disk",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "replaced by a LIVE one between the liveness check"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "  if ! print -r -- \"MERGED $pr\" >>\"$MARK_FILE\"; then",
+      "after": "  if ! print -r -- \"MERGED $pr $worktree $branch\" >>\"$MARK_FILE\"; then",
+      "because": "putting the worktree and the branch back into the marker is the regression this lane was sent back for, and it is one line: a worktree path may contain a space, so the moment the marker carries one again, the line stops being a line the caller can match whole. Here the caller matches with `grep -qx \"MERGED $pr\"`, so the extra fields make every match fail and a PR that merged is treated as one that did not — its worktree is never removed and its branch is never deleted on the forge, which is the silent half of a refusal. Under the old `read -r` parse the same marker was worse rather than better: it split into four fields, so a path like `/x/My Work/wt` became `/x/My` in WORKTREES and the rest in BRANCHES. The test is the one that merges a PR from a worktree whose path contains a space and then requires the worktree gone and the branch deleted, which is the only assertion in the file that can tell a marker carrying a path from one that does not",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "worktree path contains a space is still cleaned up"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "  if [[ \"$moved\" == \"$judged\" ]]; then",
+      "after": "  if [[ \"${moved%% *}\" == \"${judged%% *}\" ]]; then",
+      "because": "the reclaim then compares only the pid halves of the two tokens, which is the decision the nonce exists to overrule. A stale lock and the live lock that replaced it are then free to agree about the pid - which is the whole of what a stale lock and its replacement can be relied on to agree about, because the kernel recycles pids and hands a crashed holder's number to somebody else - and the mv that arbitrates between two reclaimers is perfectly happy to rename a LIVE run's lock out of the way and delete it. Both runs then merge, both exit 0, and the run whose lock was deleted never learns it had one. The nonce is what makes the two distinguishable, and trimming it off both sides of the comparison is exactly the regression. No other test can see it: the plain dead-pid reclaim has no replacement to confuse it, the live-holder test is refused before any reclaim, and the earlier race test swaps in a lock with a DIFFERENT pid, which a pid-only comparison already rejects. The test that sees it plants the same pid with a different nonce at the pause hook, and requires 75 with the replacement still on disk carrying its own nonce",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "SAME pid but a different nonce"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "  print -r -- \"$$ $$-$RANDOM-$(date +%s%N 2>/dev/null || date +%s)\"",
+      "after": "  print -r -- \"$$-$$-$RANDOM-$(date +%s%N 2>/dev/null || date +%s)\"",
+      "because": "one missing space, and the lock becomes unreclaimable for the rest of the host's life. Every reader takes the pid half with `${token%% *}`: a token written `$$-$$-<nonce>` has no space in it, so that expansion returns the WHOLE string, `1234-1234-99-1699…`, which is not `<->` — so the liveness branch is never entered, the run falls through to the `-d $LOCK_DIR` test, and answers 75. Forever, to every run, including the one that owns the crashed lock: nothing can ever judge it dead, and the nonce that would have made two tokens distinguishable is welded to the pid instead of separated from it. This shipped once already, and every test in the file agreed with it, because every reclaim test PLANTS a lock file and the harness wrote `<pid> <nonce>` — the documented shape, not the shape the script produced. That is why the test this mutation is aimed at exists: it starts a real run, lets the script's own acquire write the token, SIGKILLs the holder, and asks the next run to cope with what was actually written. It fails here on the format itself, before the reclaim is even attempted, which is the earliest the defect is visible at all",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "left by a crashed run"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "    for sweep in {1..20}; do\n      kill -0 -- \"-$group\" 2>/dev/null || break\n      kill -KILL -- \"-$group\" 2>/dev/null\n      sleep 0.1\n    done",
+      "after": "    : # MUTATION: the sweep is gone",
+      "because": "removing the sweep leaves one TERM as the whole of the teardown, and a TERM is only ever enough for a process that handles it. Anything still answering in that group when the signal has been delivered and has done everything a signal can do — a `gh` or a tool that traps or ignores TERM, which is ordinary and not exotic — stays running, and the run then hands back a lock that a process is still sitting under. The next runner is told the host is free, takes the lock, and merges beside it: the exact failure the lock exists to prevent, arrived at from the other end. The loop is bounded and it comes BEFORE release_lock, which is the ordering the test asserts: it asks whether the process is dead at the moment the lock directory disappears, because a process still alive then is a process this run told the next one was not there. The survivor in the test ignores TERM outright, so the assertion cannot pass by luck and does not depend on how fast the signal arrives",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "a process the signal cannot kill"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "    kill -TERM \"$group\" 2>/dev/null",
+      "after": "    : # MUTATION: the group kill alone, as it was before the pid kill",
+      "because": "the group's leader's PID is the only handle that exists before perl has run setpgid, and `&` returns before that. A TERM landing in that window finds no process group with that id, so the group kill fails silently — it is redirected to /dev/null, so nothing says so — and the `wait` two lines below then blocks for the whole PR. The signal is not lost exactly, it is deferred past the thing it was sent to stop: the run goes on to squash-merge, and only when the merge is a fact on the forge does the trap run, release the lock and exit 143. A run told to stop that merges anyway and reports 143 while doing it is worse than a run that ignored the signal, because the exit code agrees with the operator and the forge does not. Signalling the pid closes the window from both sides and is safe on both: before the exec it kills perl, whose TERM disposition is still the default, and after setpgid it kills the body that the group kill is already reaching. It cannot hit a stranger either — the pid is an unreaped child of this shell, so the kernel still holds its entry. The test widens that window to three seconds with MERGE_PRS_TEST_PRE_SETPGID_SLEEP and sends the TERM into it, then requires the run to answer inside two and a half: without this line it is still blocked in `wait` when the deadline lands",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "inside the window before the body has a process group"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "    zsh \"$MERGE_PRS_SELF\" __pr_body \"$@\" < /dev/null &",
+      "after": "    zsh \"$MERGE_PRS_SELF\" __pr_body \"$@\" &",
+      "because": "the body then inherits this run's stdin, and the first thing in it that reads — a git credential prompt, a gh auth question, a pager — blocks on a human who is not there, holding the lock, with the run indistinguishable from a slow test. This is the one mutation here that needed a TEST to be fixed before it could be trusted: the test for the redirect used runMergePrs, and spawnSync hands a child a pipe it has already closed, so the body saw EOF on stdin whether or not this redirect existed and the test passed with the line deleted. It is now given a real pipe, held open and never written to, which is the only stdin that distinguishes the two: with the redirect the stub's read returns EOF at once and the run finishes; without it the read blocks on an answer that is never coming and the run does not finish inside ten seconds",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "never waits on a terminal"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "        ;;\n      unrecorded)\n        # Counted and listed above, in BOTH modes, because a run with no summary\n        # still has to have said it. Nothing to add here — and in particular\n        # nothing that says refused.\n        ;;\n      refused)",
+      "after": "        ;;\n      *)",
+      "because": "dropping the unrecorded arm from the --continue block's dispatch, so the refusal arm becomes the default for every outcome that is not `merged` — which is the shape the file had before the outcome was decided once, and the bug this row exists for. A merge whose marker could not be written sets the outcome to `unrecorded` on purpose, because the epilogue must not touch a PR this run cannot account for; anything that reads `merged` as a synonym for `merged-and-recorded` therefore catches it. So the same PR was counted in unrecorded_count and listed as merged-but-not-recorded, and then counted AGAIN in refused_count and listed a second time as REFUSED — with an `=== PR #N REFUSED` line on stderr sending an operator after a gate that passed. That is what the marker-write comment forbids in as many words, and under --continue it was doing. The arm has to be a no-op rather than absent here: with the label simply missing and `refused)` left as a plain label, `unrecorded` matches nothing and is still counted once — which is correct behaviour, and a mutation that deletes a line without deleting the dispatch's default proves nothing. The test is three PRs where the middle one merges with its marker unwritable, and it wants that PR in the summary exactly once as merged-but-not-recorded, no REFUSED anywhere, and `0 refused` beside a non-zero exit",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "unrecorded merge is listed once"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
