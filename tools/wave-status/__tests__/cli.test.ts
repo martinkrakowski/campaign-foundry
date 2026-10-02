@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { parseArgs, runCli, type CliIo } from "../cli.js";
 import { WAVE_LOG_ROOT } from "../lib/collect.js";
+import type { PushOptions } from "../lib/push.js";
 import type { WaveStatus } from "../lib/types.js";
 
 const status: WaveStatus = {
@@ -14,6 +15,7 @@ function makeIo(argv: readonly string[], overrides: Partial<CliIo> = {}) {
   const log = vi.fn((_text: string): void => undefined);
   const logError = vi.fn((_text: string): void => undefined);
   const collect = vi.fn(async (_root: string): Promise<WaveStatus> => status);
+  const push = vi.fn(async (_status: WaveStatus, _options: PushOptions): Promise<number> => 1);
   const schedule = vi.fn((_fn: () => void, _ms: number): void => undefined);
   const io: CliIo = {
     argv,
@@ -22,29 +24,109 @@ function makeIo(argv: readonly string[], overrides: Partial<CliIo> = {}) {
     log,
     logError,
     collect,
+    push,
     schedule,
+    nowMs: () => 0,
     ...overrides,
   };
-  return { io, log, logError, collect, schedule };
+  return { io, log, logError, collect, push, schedule };
 }
+
+/** A clock the test moves by hand, so `lastCycleMs` is a fact and not a race. */
+function stubClock(ticks: readonly number[]): () => number {
+  let read = -1;
+  return () => {
+    read = Math.min(read + 1, ticks.length - 1);
+    return ticks[read] as number;
+  };
+}
+
+/** The two fields `--push` adds to every parse. */
+const NO_PUSH = { push: false, waves: [] } as const;
 
 describe("parseArgs", () => {
   test("no arguments is a one-shot render at the default root", () => {
-    expect(parseArgs([])).toEqual({ watch: false, root: undefined });
+    expect(parseArgs([])).toEqual({ watch: false, root: undefined, ...NO_PUSH });
   });
 
   test("--watch defaults to 10 seconds; --watch=N overrides it", () => {
-    expect(parseArgs(["--watch"])).toEqual({ watch: 10, root: undefined });
-    expect(parseArgs(["--watch=2"])).toEqual({ watch: 2, root: undefined });
+    expect(parseArgs(["--watch"])).toEqual({ watch: 10, root: undefined, ...NO_PUSH });
+    expect(parseArgs(["--watch=2"])).toEqual({ watch: 2, root: undefined, ...NO_PUSH });
   });
 
   test("--root takes a separate path or an = form", () => {
-    expect(parseArgs(["--root", "/tmp/waves"])).toEqual({ watch: false, root: "/tmp/waves" });
-    expect(parseArgs(["--root=/tmp/waves"])).toEqual({ watch: false, root: "/tmp/waves" });
+    expect(parseArgs(["--root", "/tmp/waves"])).toEqual({
+      watch: false,
+      root: "/tmp/waves",
+      ...NO_PUSH,
+    });
+    expect(parseArgs(["--root=/tmp/waves"])).toEqual({
+      watch: false,
+      root: "/tmp/waves",
+      ...NO_PUSH,
+    });
   });
 
   test("flags combine", () => {
-    expect(parseArgs(["--root", "/w", "--watch=5"])).toEqual({ watch: 5, root: "/w" });
+    expect(parseArgs(["--root", "/w", "--watch=5"])).toEqual({
+      watch: 5,
+      root: "/w",
+      ...NO_PUSH,
+    });
+  });
+
+  test("--push is a flag, and --wave takes a separate id or an = form", () => {
+    expect(parseArgs(["--push", "--wave", "T"])).toEqual({
+      watch: false,
+      root: undefined,
+      push: true,
+      waves: ["T"],
+    });
+    expect(parseArgs(["--push", "--wave=T"])).toEqual({
+      watch: false,
+      root: undefined,
+      push: true,
+      waves: ["T"],
+    });
+  });
+
+  test("--wave may repeat, and the order it was given is kept", () => {
+    expect(parseArgs(["--push", "--wave", "B", "--wave=A", "--wave=B"])).toEqual({
+      watch: false,
+      root: undefined,
+      push: true,
+      waves: ["B", "A", "B"],
+    });
+  });
+
+  test("an 80-character id is the longest accepted", () => {
+    const longest = "w" + "a".repeat(79);
+    expect(parseArgs(["--push", `--wave=${longest}`]).waves).toEqual([longest]);
+  });
+
+  test("an id the service would refuse is refused, in either form", () => {
+    const tooLong = "w" + "a".repeat(80);
+    for (const argv of [
+      ["--push", "--wave="],
+      ["--push", "--wave", ""],
+      ["--push", "--wave", "--push"],
+      ["--push", `--wave=${tooLong}`],
+      ["--push", "--wave", "a/b"],
+      ["--push", "--wave=a.b"],
+      ["--push", "--wave=-lead"],
+      ["--push", `--wave=${"w".repeat(80)}/`],
+    ]) {
+      expect(() => parseArgs(argv), argv.join(" ")).toThrow(/invalid --wave id/);
+    }
+  });
+
+  test("--wave as the last argument has nothing to read", () => {
+    expect(() => parseArgs(["--push", "--wave"])).toThrow("--wave requires an id");
+  });
+
+  test("--wave without --push is refused — there is nothing for it to narrow", () => {
+    expect(() => parseArgs(["--wave", "T"])).toThrow("--wave requires --push");
+    expect(() => parseArgs(["--wave=T"])).toThrow("--wave requires --push");
   });
 
   test("a non-integer or non-positive --watch is refused", () => {
@@ -177,5 +259,130 @@ describe("runCli", () => {
     const [fn3] = schedule.mock.calls[2] as [() => void, number];
     fn3();
     await vi.waitFor(() => expect(log).toHaveBeenCalledTimes(2));
+  });
+
+  test("without --push the status is never sent", async () => {
+    const { io, push } = makeIo([], { WAVES_URL: "https://waves.example" });
+    await runCli(io);
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  test("--push sends the very status it printed, once per collection", async () => {
+    const { io, push, collect } = makeIo(["--push", "--wave", "T"], {
+      WAVES_URL: "https://waves.example",
+    });
+    await runCli(io);
+    expect(collect).toHaveBeenCalledTimes(1);
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(push).toHaveBeenCalledWith(status, { waves: ["T"], watch: false });
+  });
+
+  test("one collection per tick: the printed and the pushed status are one status", async () => {
+    const { io, collect, push, schedule } = makeIo(["--push", "--watch=2"], {
+      WAVES_URL: "https://waves.example",
+    });
+    await runCli(io);
+    expect(collect).toHaveBeenCalledTimes(1);
+    expect(push).toHaveBeenCalledTimes(1);
+    const [fn] = schedule.mock.calls[0] as [() => void, number];
+    fn();
+    await vi.waitFor(() => expect(collect).toHaveBeenCalledTimes(2));
+    expect(push).toHaveBeenCalledTimes(2);
+    // The default stubbed clock does not move, so this tick's real cycle is 0 —
+    // still a measurement, not the absence of one.
+    expect(push).toHaveBeenLastCalledWith(status, { waves: [], watch: 2, lastCycleMs: 0 });
+  });
+
+  test("the second push carries how long the first cycle really took", async () => {
+    // 1_000 → 41_000 is one collection plus the first tick's push: 40s of work the
+    // --watch interval of 2s does not account for, and the server must be told.
+    const { io, push, schedule } = makeIo(["--push", "--watch=2"], {
+      WAVES_URL: "https://waves.example",
+      nowMs: stubClock([1_000, 41_000]),
+    });
+    await runCli(io);
+    expect(push.mock.calls[0]?.[1]).toEqual({ waves: [], watch: 2, lastCycleMs: undefined });
+    const [fn] = schedule.mock.calls[0] as [() => void, number];
+    fn();
+    await vi.waitFor(() => expect(push).toHaveBeenCalledTimes(2));
+    expect(push.mock.calls[1]?.[1]).toEqual({ waves: [], watch: 2, lastCycleMs: 40_000 });
+  });
+
+  test("a one-shot push has no previous cycle to report", async () => {
+    const { io, push } = makeIo(["--push"], {
+      WAVES_URL: "https://waves.example",
+      nowMs: stubClock([5_000]),
+    });
+    await runCli(io);
+    expect(push.mock.calls[0]?.[1]).toEqual({ waves: [], watch: false, lastCycleMs: undefined });
+  });
+
+  test("without --push the clock is never read", async () => {
+    const nowMs = vi.fn(() => 0);
+    const { io } = makeIo(["--watch=2"], { nowMs });
+    await runCli(io);
+    expect(nowMs).not.toHaveBeenCalled();
+  });
+
+  test("no WAVES_URL pushes nothing and says so once for the whole run", async () => {
+    const { io, logError, push, schedule } = makeIo(["--push", "--watch=1"]);
+    await runCli(io);
+    // Two more ticks on top of the first print, on the injected schedule only.
+    for (let tick = 0; tick < 2; tick++) {
+      const armed = schedule.mock.calls.length;
+      const [fn] = schedule.mock.calls[armed - 1] as [() => void, number];
+      fn();
+      await vi.waitFor(() => expect(schedule.mock.calls.length).toBeGreaterThan(armed));
+    }
+    expect(push).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledTimes(1);
+    expect(logError).toHaveBeenCalledWith(
+      "wave:status --push: WAVES_URL is not set; nothing pushed",
+    );
+  });
+
+  test("an empty WAVES_URL is no WAVES_URL at all", async () => {
+    const { io, logError, push } = makeIo(["--push"], { WAVES_URL: "" });
+    await runCli(io);
+    expect(push).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledTimes(1);
+  });
+
+  test("a push that rejects is logged, runCli still resolves, and the loop still ticks", async () => {
+    const push = vi.fn(async (): Promise<number> => {
+      throw new Error("waves push: W: exit 2: the envelope is not valid");
+    });
+    const { io, logError, collect, schedule } = makeIo(["--push", "--watch=1"], {
+      WAVES_URL: "https://waves.example",
+      push,
+    });
+    await expect(runCli(io)).resolves.toBeUndefined();
+    expect(logError).toHaveBeenCalledWith("waves push: W: exit 2: the envelope is not valid");
+    expect(collect).toHaveBeenCalledTimes(1);
+    expect(schedule).toHaveBeenCalledTimes(1);
+    const [fn] = schedule.mock.calls[0] as [() => void, number];
+    fn();
+    await vi.waitFor(() => expect(push).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(schedule).toHaveBeenCalledTimes(2));
+  });
+
+  test("a rejection that is not an Error is still reported, with its text", async () => {
+    const push = vi.fn(async (): Promise<number> => {
+      throw "no waves binary";
+    });
+    const { io, logError } = makeIo(["--push"], {
+      WAVES_URL: "https://waves.example",
+      push,
+    });
+    await runCli(io);
+    expect(logError).toHaveBeenCalledWith("no waves binary");
+  });
+
+  test("a pushed count is the client's business, not this run's exit code", async () => {
+    const { io } = makeIo(["--push"], {
+      WAVES_URL: "https://waves.example",
+      push: vi.fn(async (): Promise<number> => 0),
+    });
+    await expect(runCli(io)).resolves.toBeUndefined();
   });
 });

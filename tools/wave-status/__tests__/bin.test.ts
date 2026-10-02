@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { main, resolveLegacyRoots, resolveRoot } from "../bin.js";
+import { main, pushRequested, resolveLegacyRoots, resolveRoot } from "../bin.js";
 import { LEGACY_WAVE_LOG_ROOT, WAVE_LOG_ROOT } from "../lib/collect.js";
 
 type ExecCallback = (error: Error | null, stdout: string) => void;
@@ -52,6 +52,19 @@ describe("resolveLegacyRoots", () => {
     expect(resolveLegacyRoots({ root: "/injected" })).toEqual([]);
     expect(resolveLegacyRoots({})).toEqual([LEGACY_WAVE_LOG_ROOT]);
     expect(resolveLegacyRoots({ WAVE_LOG_ROOT: "/from-env" })).toEqual([LEGACY_WAVE_LOG_ROOT]);
+  });
+});
+
+describe("pushRequested", () => {
+  test("--push anywhere in the argv turns the server face into the print face", () => {
+    expect(pushRequested(["--push"])).toBe(true);
+    expect(pushRequested(["--watch", "--push"])).toBe(true);
+  });
+
+  test("anything that is not exactly --push starts the server as before", () => {
+    expect(pushRequested([])).toBe(false);
+    expect(pushRequested(["--watch"])).toBe(false);
+    expect(pushRequested(["--pushx"])).toBe(false);
   });
 });
 

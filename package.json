@@ -17,6 +17,7 @@
     "gate": "sh scripts/gate.sh",
     "wave:status": "tsx tools/wave-status/bin.ts",
     "wave:status:print": "tsx tools/wave-status/cli.ts",
+    "waves:register": "waves register campaign-foundry --name \"Campaign Foundry\" --repo https://github.com/martinkrakowski/campaign-foundry",
     "sweep": "tsx tools/sweep/cli.ts",
     "fix-brief": "tsx tools/fix-brief/cli.ts",
     "brief:new": "tsx tools/brief-new/cli.ts",
@@ -52,6 +53,7 @@
   "devDependencies": {
     "@hexagen-monaco/arch-linter": "^0.12.1",
     "@hexagen-monaco/sync": "^0.12.1",
+    "@hexagen-monaco/waves-client": "^0.1.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
