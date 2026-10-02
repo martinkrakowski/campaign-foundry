@@ -11,44 +11,22 @@ fail with a misleading error rather than "no such model".
   - `openrouter/stealth/space-bunny-alpha` is the PRIMARY implementer and remediates its own lanes.
   - `openrouter/z-ai/glm-5.3-flash --variant max` is the fallback (an outage or a failed dispatch; one attempt per wave).
   - Sonnet 5 (subagent) takes high-risk lanes and a fix round that does not converge.
-  - `agy` is NOT dependable here: its daily quota is shared with the owner's other projects, and HX5's dispatch hit `429 … resets in 31h` at its first turn. **On midnight it is not an implementer seat at all** (owner, 2026-10-01) — it is the **second-pass reviewer seat**, below, where that quota buys a read instead of a lane.
+  - `agy` is NOT dependable here: its daily quota is shared with the owner's other projects, and HX5's dispatch hit `429 … resets in 31h` at its first turn. **It is not a default seat at all** (owner, 2026-10-01): it neither implements nor reviews unless the owner asks for a Gemini pass (the Reviewer bullet below).
 - **opencode runs attach to the owner's shared server:**
   - `opencode run --attach http://127.0.0.1:4096 --dir <ABS worktree> --auto --format json -m <model> "<prompt>" < /dev/null`.
   - The owner runs `opencode serve --port 4096` for all four of their projects. Check `curl -s -o /dev/null -w %{http_code} http://127.0.0.1:4096/doc` answers 200 first. If the server is down, ask the owner to restart it; never start one yourself.
   - Attached runs CAN run in parallel. A 2026-09-29 probe ran two at once beside a standalone run: all exited 0, and each wrote only its own `--dir`. Two standalone runs also overlapped fine on 2026-09-29, so the old one-at-a-time rule was a stale artefact of the opencode version current on 2026-09-16, not a standalone-only limit. The server is the recommended shared setup.
-- **Reviewer (grok):** `grok-4.7` only. **Never `grok-4.7-build-fast`**, which consumes 2× the
-  tokens (owner, 2026-09-28). Adopted 2026-09-28 for three jobs:
-  - independent plan review of lane rows before dispatch (first run: the PT-5c2–PT-5e rows);
-  - a pre-PR diff review of high-risk lanes (security, tenancy, persistence);
-  - the second fix round when a lane's first round doesn't converge.
+- **grok-4.7 (an optional extra read, not a seat):** `grok-4.7` only. **Never `grok-4.7-build-fast`**,
+  which consumes 2× the tokens (owner, 2026-09-28). It gives an optional extra opinion on a high-risk
+  row or diff, and takes the second fix round when a lane does not converge. It is never a required
+  pass (superseded 2026-10-01; see the Reviewer bullet below).
 
   It is not a first-pass implementer: the weekly quota drains fast. For reviews, run
   `grok --prompt-file <brief> --model grok-4.7 --effort high --permission-mode plan` (read-only)
   in a detached worktree. Record each call's usage in the wave record.
-- **Stage-2 reviewer (always, every PR):** an in-house `Agent` that is **not** the implementer,
-  read-only, per the skill's Review stage; this is unchanged, and grok's pre-PR review is
-  **in addition** for high-risk lanes, not a replacement.
-- **Second-pass reviewer (owner, 2026-10-01): `gemini-3.1-pro-high` through `agy` ONLY** — never
-  Gemini through opencode or OpenRouter (the owner's plan quota). It runs on midnight, **inside the
-  lane's own worktree**, and the prompt goes in as a **FILE**, never as an argument:
-  `scp <prompt> m:<wt>/.agents/briefs/scratch/review-prompt.txt`, then
-  `ssh m 'cd <wt> && agy --print "$(cat .agents/briefs/scratch/review-prompt.txt)" --model gemini-3.1-pro-high --effort high --print-timeout 30m --output-format json'`
-  - **Never interpolate a diff, or any untrusted text, into a shell command string.** A
-    double-quoted `agy --print "<diff>"` expands every `$(…)` and backtick in that diff on
-    midnight before agy sees it; the single-quoted ssh argument above expands `$(cat …)` remotely,
-    and a command substitution's output is never re-evaluated.
-  - **The prompt embeds the diff and says "read files only with your file-reading tool; run no
-    shell command."** Headless agy auto-denies any shell command outside its allow-list and then
-    answers **EMPTY** — 5 of the 13 reviews on 2026-09-30 came back that way. **An empty response is
-    a failed review to re-run, never a clean verdict.**
-  - **Never `--dangerously-skip-permissions`.** The *Seat defaults — owner's instruction,
-    2026-09-25* table below carries it for implementers; the reviewer must not copy it.
-  - **The reviewer's model is never the implementer's** — on midnight that is
-    `openrouter/stealth/space-bunny-alpha`, so a Gemini pass is an independent read.
-- **Plan reviewer:** `grok-4.7` read-only (above), or the in-house `Plan` agent when grok's weekly
-  quota is spent; required before dispatching any rewritten lane row (SKILL.md, Before you dispatch).
-  **Unchanged by the second-pass seat: `grok-4.7` remains both the plan reviewer and the high-risk
-  pre-PR reviewer** — Gemini took the second pass, not either of those.
+- **Reviewer, every pass (owner, 2026-10-01): Fable**, meaning the in-house `Plan` agent with `model: fable`, read-only. That covers the plan or row, brief, pre-PR, pre-merge and re-check passes. It replaced the short-lived Gemini-through-agy second-pass seat (2026-09-30 to 2026-10-01). If the owner asks for Gemini again: only through `agy`, with the prompt in a FILE that embeds the diff and says: read files only with your file-reading tool; run no shell command, never interpolated into a command, never `--dangerously-skip-permissions`, and an empty response is a failed review.
+- **Plan reviewer:** the in-house `Plan` agent with `model: fable`, read-only; required before
+  dispatching any rewritten lane row (SKILL.md, Before you dispatch).
 - **Local LM Studio models are not a lane seat.** The 30B at 10.10.0.220 runs on the orchestrator's
   own machine and made it unresponsive under memory pressure. Evaluated 2026-09-28; one-off text
   jobs only.
