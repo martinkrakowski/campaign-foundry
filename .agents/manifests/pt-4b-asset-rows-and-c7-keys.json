@@ -106,8 +106,8 @@
     },
     {
       "file": "apps/api/server/lib/ports/object-asset-store.ts",
-      "before": "      if (existing.sha256 === source.sha256) return { name: candidate, reused: true };",
-      "after": "      if (existing.sha256 === source.sha256) return { name: candidate, reused: false };",
+      "before": "      if (existing.sha256 === source.sha256) {\n        return { name: candidate, reused: true, id: existing.id };\n      }",
+      "after": "      if (existing.sha256 === source.sha256) {\n        return { name: candidate, reused: false, id: existing.id };\n      }",
       "because": "the copy runs again when the SUFFIXED name the search landed on already holds these exact bytes (fix round 1, HIGH). A plain re-copy cannot reach it — `logo.png` is taken by different bytes, so the search lands on `logo-<from>.png`, which an earlier copy already filled with the source's bytes. Copying anyway asks the target for a name it already answers: the insert raises a raw `23505`, which is not `code: EEXIST`, so the caller 500s instead of getting the no-op it asked for; and the object the copy just wrote is left under the target's prefix with no row that will ever name it and no `deleteAssets` that will find it, since `briefs.post.ts` runs a copy with no release step. `FsAssetStore` succeeds on identical bytes, so this is a divergence from fs as well. The test builds exactly that pair — target holding `logo.png` (JPEG) and `logo-<from>.png` (PNG), source holding `logo.png` (PNG) — and asserts the mapping, the unchanged row count and the unchanged keys, then runs the copy a second time.",
       "command": [
         "yarn",
