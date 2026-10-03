@@ -1,0 +1,2 @@
+{"identities":[{"name":"admin","credentials":[{"accessKey":"ci-admin-key","secretKey":"ci-admin-secret"}],"actions":["Admin","Read","Write","List","Tagging"]},
+{"name":"app","credentials":[{"accessKey":"ci-app-key","secretKey":"ci-app-secret"}],"actions":["Read:campaign-foundry-test","Write:campaign-foundry-test","List:campaign-foundry-test","Tagging:campaign-foundry-test"]}]}

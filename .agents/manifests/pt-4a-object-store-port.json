@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "lane": "PT-4a-object-store-port",
+  "mutations": [
+    {
+      "file": "packages/CampaignOrchestration/src/application/ports/out/ObjectStorePort.ts",
+      "before": "  if (key.includes(\"//\")) return \"a key must not contain an empty segment\";",
+      "after": "  if (key.includes(\"///\")) return \"a key must not contain an empty segment\";",
+      "because": "the confined-key rule stops catching a doubled separator. On S3 `a//b` is a different key from `a/b` rather than a traversal, but it is the shape that lets two call sites disagree about which object they are talking about, and on the fs backend it collapses two paths into one. `refuses an empty segment` refuses `campaigns//hero.png`, and both adapters call this one guard before signing or writing, so the rule cannot hold on one side only.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration",
+        "-t",
+        "refuses an empty segment"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/list-objects-v2.ts",
+      "before": "  if (/<!DOCTYPE/i.test(xml) || /<!ENTITY/i.test(xml)) {",
+      "after": "  if (/<!ENTITYX/i.test(xml)) {",
+      "because": "the DOCTYPE/ENTITY refusal goes away, so a listing body that declares entities is parsed like any other. That is the XXE and entity-expansion shape: a recursive entity set turns one small response into unbounded work in whatever reads the keys afterwards. The test drives BOTH spellings, so dropping either one is caught.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/S3ObjectStore-listing.test.ts",
+        "-t",
+        "is refused before it is parsed"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/S3ObjectStore.ts",
+      "before": "    if (response.status === 412) {",
+      "after": "    if (response.status === 418) {",
+      "because": "412 stops meaning \"the exclusive create lost\", so a conditional put the store REFUSED is reported as a plain success and the caller walks on believing it took an asset id it never took (D174c's exclusive create). The store keeping the original is not enough when nobody is told. Caught offline: a 412 then falls through to the generic failure path and throws S3RequestError instead of ObjectExistsError.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/S3ObjectStore.test.ts",
+        "-t",
+        "412 as ObjectExistsError"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/S3ObjectStore.ts",
+      "before": "    throw new S3RequestError(operation, response.status, code);",
+      "after": "    throw new S3RequestError(`${operation} ${this.endpoint}/${this.bucket}`, response.status, code);",
+      "because": "the thrown error now carries the endpoint, which names an internal network and — with a real request behind it — sits next to the signed URL. This is the shape the never-echo test exists for, and it is why that test builds the store FROM objectStoreSettings() with S3_ENDPOINT=http://marker-host-7f3a.invalid: a test-local endpoint would leave the mutation unobservable. `the object store never echoes a credential` asserts on the thrown message, on the recursive `cause` chain and on every console argument.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/S3ObjectStore-secrets.test.ts",
+        "-t",
+        "never echoes a credential"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/S3ObjectStore.ts",
+      "before": "      continuationToken = page.truncated ? page.nextContinuationToken : undefined;",
+      "after": "      continuationToken = undefined;",
+      "because": "the listing stops following IsTruncated, so every key past the first page is silently missing: deletePrefix then leaves those objects behind forever, and a package listing built from object prefixes (D203) would ship a subset and say nothing. Caught offline by the two-page test, which asserts the second request carried the store's own continuation token and that all three keys came back.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/S3ObjectStore-listing.test.ts",
+        "-t",
+        "second page is fetched"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

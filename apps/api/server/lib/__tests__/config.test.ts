@@ -21,6 +21,8 @@ import {
   databaseSettings,
   kafkaSettings,
   keyEncryptionSettings,
+  objectStore,
+  objectStoreSettings,
   outputRoot,
   storeBackend,
 } from "../config.js";
@@ -749,5 +751,163 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
 
     process.env.KAFKA_MAX_IN_FLIGHT = String(Number.MAX_SAFE_INTEGER + 1);
     expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
+  });
+});
+
+describe("objectStore (PT-4a, D203)", () => {
+  const saved = process.env.OBJECT_STORE;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.OBJECT_STORE;
+    else process.env.OBJECT_STORE = saved;
+  });
+
+  test("is fs unless OBJECT_STORE says s3, and refuses anything else", () => {
+    delete process.env.OBJECT_STORE;
+    expect(objectStore()).toBe("fs");
+    for (const value of ["", "fs"]) {
+      process.env.OBJECT_STORE = value;
+      expect(objectStore()).toBe("fs");
+    }
+    process.env.OBJECT_STORE = "s3";
+    expect(objectStore()).toBe("s3");
+    process.env.OBJECT_STORE = "b2";
+    expect(() => objectStore()).toThrow('OBJECT_STORE must be "fs" or "s3", not "b2".');
+  });
+});
+
+describe("objectStoreSettings (PT-4a, D201)", () => {
+  const VARS = [
+    "OBJECT_STORE",
+    "STORE_BACKEND",
+    "S3_ENDPOINT",
+    "S3_PUBLIC_ENDPOINT",
+    "S3_REGION",
+    "S3_BUCKET",
+    "S3_ACCESS_KEY_ID",
+    "S3_SECRET_ACCESS_KEY",
+  ] as const;
+  const saved = Object.fromEntries(VARS.map((name) => [name, process.env[name]]));
+
+  const setAll = (overrides: Partial<Record<(typeof VARS)[number], string>> = {}): void => {
+    const values: Record<string, string> = {
+      OBJECT_STORE: "s3",
+      STORE_BACKEND: "postgres",
+      S3_ENDPOINT: "http://seaweedfs-s3:8333",
+      S3_PUBLIC_ENDPOINT: "https://s3.midnight.lan",
+      S3_REGION: "us-east-1",
+      S3_BUCKET: "campaign-foundry-staging",
+      S3_ACCESS_KEY_ID: "app-key",
+      S3_SECRET_ACCESS_KEY: "app-secret",
+      ...overrides,
+    };
+    for (const name of VARS) {
+      const value = values[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  };
+
+  afterEach(() => {
+    for (const name of VARS) {
+      if (saved[name] === undefined) delete process.env[name];
+      else process.env[name] = saved[name];
+    }
+  });
+
+  test("is undefined under fs, whatever the S3_* variables say", () => {
+    setAll({ OBJECT_STORE: "fs" });
+    expect(objectStoreSettings()).toBeUndefined();
+    setAll({ OBJECT_STORE: "" });
+    expect(objectStoreSettings()).toBeUndefined();
+  });
+
+  test("reads all six variables under s3", () => {
+    setAll();
+    expect(objectStoreSettings()).toEqual({
+      endpoint: "http://seaweedfs-s3:8333",
+      publicEndpoint: "https://s3.midnight.lan",
+      region: "us-east-1",
+      bucket: "campaign-foundry-staging",
+      accessKeyId: "app-key",
+      secretAccessKey: "app-secret",
+    });
+  });
+
+  test("s3 refuses without STORE_BACKEND=postgres", () => {
+    setAll({ STORE_BACKEND: "fs" });
+    expect(() => objectStoreSettings()).toThrow(
+      "OBJECT_STORE=s3 requires STORE_BACKEND=postgres: only Postgres knows a campaign uuid, and a render key is derived from one.",
+    );
+  });
+
+  test("every one of the six is required, and the message names the variable", () => {
+    for (const name of [
+      "S3_ENDPOINT",
+      "S3_PUBLIC_ENDPOINT",
+      "S3_REGION",
+      "S3_BUCKET",
+      "S3_ACCESS_KEY_ID",
+      "S3_SECRET_ACCESS_KEY",
+    ] as const) {
+      setAll();
+      delete process.env[name];
+      expect(() => objectStoreSettings()).toThrow(`${name} is required when OBJECT_STORE=s3.`);
+    }
+    setAll();
+    process.env.S3_BUCKET = "   ";
+    expect(() => objectStoreSettings()).toThrow("S3_BUCKET is required when OBJECT_STORE=s3.");
+  });
+
+  test("both endpoints must be absolute http(s) URLs", () => {
+    for (const value of ["s3.midnight.lan", "s3://midnight.lan", "ftp://s3.midnight.lan"]) {
+      setAll({ S3_ENDPOINT: value });
+      expect(() => objectStoreSettings()).toThrow(
+        "S3_ENDPOINT must be an absolute http(s) URL when OBJECT_STORE=s3.",
+      );
+    }
+    for (const value of ["objects.example", "ftp://objects.example"]) {
+      setAll({ S3_PUBLIC_ENDPOINT: value });
+      expect(() => objectStoreSettings()).toThrow(
+        "S3_PUBLIC_ENDPOINT must be an absolute http(s) URL when OBJECT_STORE=s3.",
+      );
+    }
+    setAll({ S3_ENDPOINT: "http://a:1", S3_PUBLIC_ENDPOINT: "https://b:2" });
+    expect(objectStoreSettings()?.endpoint).toBe("http://a:1");
+  });
+
+  test("hazard: no error ever quotes a value, so a key pair cannot reach a log", () => {
+    const secret = "MARKER-SECRET-7f3a";
+    setAll({ S3_SECRET_ACCESS_KEY: secret, S3_ACCESS_KEY_ID: "MARKER-KEYID-7f3a" });
+    const paths: (() => unknown)[] = [
+      () => objectStoreSettings(),
+      () => {
+        delete process.env.S3_SECRET_ACCESS_KEY;
+        return objectStoreSettings();
+      },
+      () => {
+        setAll({ S3_ENDPOINT: `http://${"marker-host-7f3a"}.invalid` });
+        return objectStoreSettings();
+      },
+      () => {
+        setAll({ S3_PUBLIC_ENDPOINT: "not-a-url" });
+        return objectStoreSettings();
+      },
+      () => {
+        setAll({ STORE_BACKEND: "fs" });
+        return objectStoreSettings();
+      },
+    ];
+    for (const path of paths) {
+      try {
+        path();
+        expect.unreachable("objectStoreSettings should have thrown");
+      } catch (error) {
+        const message = (error as Error).message;
+        expect(message).not.toContain(secret);
+        expect(message).not.toContain("MARKER-KEYID-7f3a");
+        expect(message).not.toContain("marker-host-7f3a");
+        expect((error as { cause?: unknown }).cause).toBeUndefined();
+      }
+    }
   });
 });

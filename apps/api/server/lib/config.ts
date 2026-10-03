@@ -43,6 +43,107 @@ export function storeBackend(): StoreBackend {
   throw new Error(`STORE_BACKEND must be "fs" or "postgres", not "${value}".`);
 }
 
+/** Where rendered bytes and proofs live (PT-4a, D203, D204). */
+export type ObjectStoreMode = "fs" | "s3";
+
+/**
+ * `OBJECT_STORE`: `fs` (the default — `GET /output/**` serves the bytes, D204)
+ * or `s3` (a private bucket plus presigned URLs). Explicit like `STORE_BACKEND`,
+ * for the same reason: the presence of an `S3_ENDPOINT` in an operator's
+ * `.env.local` is not a decision to move the app onto a bucket.
+ */
+export function objectStore(): ObjectStoreMode {
+  loadEnv();
+  const value = process.env.OBJECT_STORE;
+  if (value === undefined || value === "" || value === "fs") return "fs";
+  if (value === "s3") return "s3";
+  throw new Error(`OBJECT_STORE must be "fs" or "s3", not "${value}".`);
+}
+
+/** The S3-compatible store's coordinates, read only when `OBJECT_STORE=s3` (D201). */
+export interface S3Settings {
+  /** `S3_ENDPOINT`: the store the API signs its own requests to (e.g. `http://seaweedfs-s3:8333`). */
+  readonly endpoint: string;
+  /** `S3_PUBLIC_ENDPOINT`: the browser-reachable origin presigned URLs are signed for. */
+  readonly publicEndpoint: string;
+  /** `S3_REGION`: the SigV4 region. */
+  readonly region: string;
+  /** `S3_BUCKET`: the one private bucket. */
+  readonly bucket: string;
+  /** `S3_ACCESS_KEY_ID`: an app key scoped to that bucket, never the store's admin identity. */
+  readonly accessKeyId: string;
+  /** `S3_SECRET_ACCESS_KEY`: the app key's secret. Never logged, never echoed in an error. */
+  readonly secretAccessKey: string;
+}
+
+/** The six variables `s3` needs, in the order a missing one is reported in. */
+const S3_VARIABLES = [
+  "S3_ENDPOINT",
+  "S3_PUBLIC_ENDPOINT",
+  "S3_REGION",
+  "S3_BUCKET",
+  "S3_ACCESS_KEY_ID",
+  "S3_SECRET_ACCESS_KEY",
+] as const;
+
+/** Whether `value` is an absolute `http(s)` URL — the shape both endpoints must have. */
+function isAbsoluteHttpUrl(value: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === "http:" || parsed.protocol === "https:";
+}
+
+/**
+ * The object store's settings, or `undefined` under `fs` (D201, D203).
+ *
+ * Under `s3` every one of the six variables is required, both endpoints must be
+ * absolute `http(s)` URLs — a relative or `s3://` endpoint would produce a URL
+ * the signature does not cover — and `STORE_BACKEND` must be `postgres`, because
+ * only Postgres knows a campaign uuid and a render key is built from one
+ * (D203's exclusive-create tenant scoping).
+ *
+ * Every message here names the VARIABLE and never its value. An endpoint carries
+ * a hostname that may be internal, and a key pair is a credential: a message
+ * that quoted one would put it in whatever logged the throw, which is exactly
+ * the log a misconfiguration is read from.
+ */
+export function objectStoreSettings(): S3Settings | undefined {
+  if (objectStore() === "fs") return undefined;
+  if (storeBackend() !== "postgres") {
+    throw new Error(
+      "OBJECT_STORE=s3 requires STORE_BACKEND=postgres: only Postgres knows a campaign uuid, and a render key is derived from one.",
+    );
+  }
+  // Collected first, so the endpoint check below reads the value that was
+  // already found present rather than a second `process.env` lookup that could
+  // in principle see something else.
+  const read: Record<string, string> = {};
+  for (const name of S3_VARIABLES) {
+    const value = process.env[name];
+    if (value === undefined || value.trim() === "") {
+      throw new Error(`${name} is required when OBJECT_STORE=s3.`);
+    }
+    read[name] = value;
+  }
+  for (const name of ["S3_ENDPOINT", "S3_PUBLIC_ENDPOINT"] as const) {
+    if (!isAbsoluteHttpUrl(read[name])) {
+      throw new Error(`${name} must be an absolute http(s) URL when OBJECT_STORE=s3.`);
+    }
+  }
+  return {
+    endpoint: read.S3_ENDPOINT,
+    publicEndpoint: read.S3_PUBLIC_ENDPOINT,
+    region: read.S3_REGION,
+    bucket: read.S3_BUCKET,
+    accessKeyId: read.S3_ACCESS_KEY_ID,
+    secretAccessKey: read.S3_SECRET_ACCESS_KEY,
+  };
+}
+
 /** Who a request is authenticated by (PT-1a, D174b). */
 export type AuthMode = "local" | "better-auth";
 

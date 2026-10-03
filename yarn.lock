@@ -382,6 +382,7 @@ __metadata:
     "@types/pg": "npm:^8.23.1"
     "@typescript-eslint/eslint-plugin": "npm:^8.0.0"
     "@typescript-eslint/parser": "npm:^8.0.0"
+    aws4fetch: "npm:1.0.20"
     better-auth: "npm:^1.7.6"
     eslint: "npm:^9.0.0"
     ffmpeg-static: "npm:5.3.0"
@@ -2934,6 +2935,13 @@ __metadata:
   bin:
     autoprefixer: bin/autoprefixer
   checksum: 10c0/3e1a7bb65ef3a44925d19fd18cbb96a9a73ef1a8bfaa134bc131743787a8983045d6e756cff0204d37c34a52cfc86d79182f444c221b631401f79d7873ae97a8
+  languageName: node
+  linkType: hard
+
+"aws4fetch@npm:1.0.20":
+  version: 1.0.20
+  resolution: "aws4fetch@npm:1.0.20"
+  checksum: 10c0/a4eac7bd0d1c3e611c17ed1ef41ac0b48c0a8e74a985ad968c071e74d94586d3572edc943b43fa5ca756c686ea73baa2f48e264d657bb8c2e95c8e0037d48a87
   languageName: node
   linkType: hard
 

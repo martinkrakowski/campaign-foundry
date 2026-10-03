@@ -239,6 +239,51 @@ jobs:
       - name: Lint
         run: "yarn lint"
 
+      # An S3-compatible store for the ObjectStorePort conformance suite (PT-4a,
+      # D201): SeaweedFS is the store staging runs (D201), and of the three
+      # candidates in the 2026-10-02 spike it is the only one that honours
+      # `If-None-Match: *` (412, original kept) — Garage silently overwrote, so a
+      # conditional create tested against Garage would be testing nothing.
+      #
+      # `.github/seaweedfs/s3.json` holds CI-only literal identities: an admin key
+      # this step uses to create the bucket, and an app key scoped to that one
+      # bucket which the tests use. There is no anonymous identity, so a test that
+      # forgets to sign is refused rather than served.
+      #
+      # It sits here, after the manifest replay and before the Test step, so the
+      # replay keeps running without `TEST_S3_*` (every mutation must be caught
+      # OFFLINE) and the store is up before the first step that needs it.
+      # `-master.dir` is created first: `weed` does not.
+      - name: SeaweedFS 4.48 (S3 conformance)
+        run: |
+          docker run -d --name seaweedfs -p 127.0.0.1:8333:8333 \
+            -v "$PWD/.github/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro" \
+            --entrypoint /bin/sh chrislusf/seaweedfs:4.48 -c \
+            "mkdir -p /data/meta && exec /usr/bin/weed server -dir=/data -master.dir=/data/meta -volume.max=4 -master.volumeSizeLimitMB=256 -filer -s3 -s3.config=/etc/seaweedfs/s3.json -s3.port=8333 -ip=127.0.0.1 -ip.bind=0.0.0.0"
+          healthy=
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8333/healthz >/dev/null; then healthy=1; break; fi
+            sleep 1
+          done
+          if [ -z "$healthy" ]; then
+            echo "::error::SeaweedFS never answered /healthz"
+            docker logs seaweedfs
+            exit 1
+          fi
+          bucketed=
+          code=
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --aws-sigv4 aws:amz:us-east-1:s3 \
+              --user ci-admin-key:ci-admin-secret -X PUT http://127.0.0.1:8333/campaign-foundry-test)
+            if [ "$code" = 200 ]; then bucketed=1; break; fi
+            sleep 1
+          done
+          if [ -z "$bucketed" ]; then
+            echo "::error::SeaweedFS never accepted the bucket create (last status ${code:-none})"
+            docker logs seaweedfs
+            exit 1
+          fi
+
       # run_tests = true; delete this step to skip tests in CI.
       # test:cov enforces the 100% coverage gate (vitest.config.ts thresholds).
       - name: Test
@@ -249,6 +294,16 @@ jobs:
           # else reads it: TEST_PG_URL is the harness's variable, and the step
           # below is the only one that sets it. This run is on PGlite.
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+          # The ObjectStorePort conformance suite's real half. REQUIRED=1 turns a
+          # missing or unreachable store into a FAILURE rather than a skip: this
+          # step just started one, so a skip here would be a claim nothing checked.
+          TEST_S3_ENDPOINT: http://127.0.0.1:8333
+          TEST_S3_PUBLIC_ENDPOINT: http://127.0.0.1:8333
+          TEST_S3_BUCKET: campaign-foundry-test
+          TEST_S3_REGION: us-east-1
+          TEST_S3_ACCESS_KEY_ID: ci-app-key
+          TEST_S3_SECRET_ACCESS_KEY: ci-app-secret
+          TEST_S3_REQUIRED: "1"
 
       # D186: the same API project, with TEST_PG_URL set, so every database test
       # runs against a real server instead of PGlite. PGlite is a real Postgres
@@ -257,11 +312,23 @@ jobs:
       # stays the coverage gate, unchanged and on PGlite; this step is the
       # evidence that the server path works, and has no --coverage because the
       # 100% thresholds are the full run's.
+      #
+      # The TEST_S3_* block is repeated rather than hoisted into `env:` at job
+      # level, because the manifest replay above must run WITHOUT it: every
+      # mutation this change claims is caught by an offline test, and a replay
+      # whose command needed a store would be unrunnable rather than unverified.
       - name: Test (real Postgres backend)
         run: "yarn vitest run --project api"
         env:
           NODE_ENV: test
           TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
+          TEST_S3_ENDPOINT: http://127.0.0.1:8333
+          TEST_S3_PUBLIC_ENDPOINT: http://127.0.0.1:8333
+          TEST_S3_BUCKET: campaign-foundry-test
+          TEST_S3_REGION: us-east-1
+          TEST_S3_ACCESS_KEY_ID: ci-app-key
+          TEST_S3_SECRET_ACCESS_KEY: ci-app-secret
+          TEST_S3_REQUIRED: "1"
 
       # Tests live in __tests__/ next to their modules, but Nitro scans apps/api/server/
       # recursively. A *.test.ts file landing there gets registered as a route and crashes
