@@ -24,6 +24,7 @@ import {
   ProceduralBackgroundGenerator,
 } from "@campaignfoundry/CreativeGeneration";
 import { parseBrief } from "../../lib/load-brief.js";
+import { BriefRefNotFoundError, resolveBriefAssetRefs } from "../../lib/brief-asset-refs.js";
 import { inputAssets } from "../../lib/pipeline.js";
 import { LruCache } from "../../lib/preview-cache.js";
 import { platformZones } from "../../lib/platform-zones.js";
@@ -248,6 +249,27 @@ export default defineEventHandler(async (event) => {
   if ((await getBriefStore(env).campaignMeta(brief.id)) === undefined) {
     setResponseStatus(event, 404);
     return { error: `Campaign "${brief.id}" not found.` };
+  }
+  // PT-4k2a (D208 B, D210 a/d): the gate above answers for the brief's OWN campaign,
+  // and this route renders whatever the body names, refs included — so a body brief
+  // naming another team's (D210 d) or another org's asset gets that campaign's frame.
+  //
+  // **BEFORE `useCase.execute`, which is where the frame cache is consulted** — and that
+  // is the whole of the hazard: the bundle and its cache are keyed per ORG, not per team
+  // (`previewAdapters`), so team B posting team A's body gets a 404 here where a check
+  // after the lookup would have answered A's cached PNG, A's logo composited in.
+  //
+  // The brief handed on is the body's own, byte for byte: the cache keys on the ref
+  // STRING and fingerprints the composite, so rewriting it here would move every cache
+  // key this route has ever emitted. Check only (D210 a); the remap is PT-4k2b.
+  try {
+    await resolveBriefAssetRefs(env, brief, { target: brief.id, mode: "render" });
+  } catch (error) {
+    if (error instanceof BriefRefNotFoundError) {
+      setResponseStatus(event, 404);
+      return { error: `Campaign "${brief.id}" not found.` };
+    }
+    throw error;
   }
   const result = await previewAdapters(env).useCase.execute(brief, selection);
   if (!result.success) {

@@ -29,7 +29,7 @@ export interface ObjectInputAssetsOptions {
 }
 
 /** A safe ref's two halves: the campaign it belongs to, and the asset's name. */
-interface InputRef {
+export interface InputRef {
   readonly slug: string;
   readonly name: string;
 }
@@ -60,6 +60,26 @@ function parseInputRef(rel: string): InputRef | undefined {
   const slash = rest.indexOf("/");
   if (slash < 0) return undefined;
   return { slug: rest.slice(0, slash), name: rest.slice(slash + 1) };
+}
+
+/**
+ * A stored ref's campaign and name, or `undefined` when it names no campaign (PT-4k2a).
+ *
+ * **`undefined` covers the unsafe refs as well as the campaign-less ones**, which is why
+ * {@link ObjectInputAssets.read} keeps its own `resolveAssetPath` gate: a caller that
+ * wants the two apart (only `read` does) asks `resolveAssetPath` itself, and a caller
+ * that only wants to know "does this ref name a campaign to check" — the write-side
+ * checks, which answer "no campaign, nothing to check" for either — asks this.
+ *
+ * **It is the ONE parse of a stored path ref**, deliberately: the normalising
+ * (`resolveAssetPath`) and the splitting are one decision, and a second caller that
+ * re-implemented either would eventually disagree with `read` about which campaign a
+ * ref names — which is exactly the question this lane's 404s turn on.
+ */
+export function parseStoredInputRef(ref: string): InputRef | undefined {
+  const safePath = resolveAssetPath(ref, SYNTHETIC_ROOT);
+  if (safePath === undefined) return undefined;
+  return parseInputRef(relative(SYNTHETIC_ROOT, safePath));
 }
 
 /**
@@ -177,10 +197,14 @@ export class ObjectInputAssets implements InputAssetPort {
       return Buffer.from(await pending);
     }
 
-    const safePath = resolveAssetPath(ref, SYNTHETIC_ROOT);
-    if (safePath === undefined) return undefined;
+    // The SAFETY gate stays its own `resolveAssetPath` call: `read` must tell "unsafe,
+    // skip the asset" (`undefined`) from "safe but unreadable" (ENOENT), and
+    // `parseStoredInputRef` collapses both into `undefined` (see its note). The ref is
+    // pure and the call is a string operation, so the one extra normalisation buys the
+    // write-side checks a parse that cannot drift from this one.
+    if (resolveAssetPath(ref, SYNTHETIC_ROOT) === undefined) return undefined;
 
-    const target = parseInputRef(relative(SYNTHETIC_ROOT, safePath));
+    const target = parseStoredInputRef(ref);
     if (target === undefined) {
       throw absent(ref, "only assets/inputs/<slug>/<name> is a stored ref on this backend.");
     }
