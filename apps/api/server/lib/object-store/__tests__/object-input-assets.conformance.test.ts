@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import type { ObjectStorePort } from "@campaignfoundry/CampaignOrchestration";
 import { resetDatabase, setDatabase } from "../../db/database.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import type { SqlClient } from "../../db/sql-client.js";
 import { getAssetStore, resetAssetStore } from "../../ports/index.js";
 import { ObjectAssetStore } from "../../ports/object-asset-store.js";
 import type { RunEnvironment } from "../../run-environment.js";
-import { resetObjectStoreClient, setObjectStoreClient } from "../index.js";
+import { objectStoreClient, resetObjectStoreClient, setObjectStoreClient } from "../index.js";
 import { ObjectInputAssets } from "../object-input-assets.js";
 import { S3ObjectStore } from "../S3ObjectStore.js";
 
@@ -50,6 +51,8 @@ describe.skipIf(ENDPOINT === undefined && !REQUIRED)(
     let db: SqlClient;
     let assets: ObjectAssetStore;
     let env: RunEnvironment;
+    /** The configured client, kept so a test can spy on the store itself. */
+    let client: ObjectStorePort;
     const SAVED_OBJECT_STORE = process.env.OBJECT_STORE;
     const SAVED_STORE_BACKEND = process.env.STORE_BACKEND;
 
@@ -69,7 +72,7 @@ describe.skipIf(ENDPOINT === undefined && !REQUIRED)(
       // `objectStoreSettings()` only ever reads the six `S3_*`. The registry is
       // also the path a real deployment takes, so this exercises the one the port
       // reads through rather than a hand-wired store.
-      const client = new S3ObjectStore({
+      const configured = new S3ObjectStore({
         settings: {
           endpoint: ENDPOINT,
           publicEndpoint: required("TEST_S3_PUBLIC_ENDPOINT"),
@@ -79,7 +82,7 @@ describe.skipIf(ENDPOINT === undefined && !REQUIRED)(
           secretAccessKey: required("TEST_S3_SECRET_ACCESS_KEY"),
         },
       });
-      setObjectStoreClient(client);
+      setObjectStoreClient(configured);
       // `OBJECT_STORE=s3` picks the object branch of the asset registry, and
       // `STORE_BACKEND=postgres` is what `objectStoreSettings()` demands of it —
       // set for the registry's benefit, and restored below because both are
@@ -92,6 +95,10 @@ describe.skipIf(ENDPOINT === undefined && !REQUIRED)(
       // `getAssetStore` rather than a hand-built store, so the write goes through
       // the same adapter the read does.
       assets = getAssetStore(env0()) as ObjectAssetStore;
+      // Read back through the registry rather than reused from the local: it is
+      // the instance every read in this file reaches, and that is the one a test
+      // has to spy on.
+      client = objectStoreClient();
       await db.query(`insert into org (id, name) values ($1, $1) on conflict do nothing`, [ORG]);
       await db.query(`insert into campaign (org_id, slug) values ($1, $2)`, [ORG, SLUG]);
       env = env0();
@@ -129,8 +136,15 @@ describe.skipIf(ENDPOINT === undefined && !REQUIRED)(
     });
 
     test("an unsafe ref is still undefined, with no store call behind it", async () => {
+      // The store itself is spied on, not the port: against a real bucket the
+      // claim in this test's name is the one that matters, because a ref refused
+      // by `resolveAssetPath` must cost nothing — no key is even built for it. An
+      // assertion on the port's answer alone would pass against a port that
+      // reached the bucket first and then decided to answer `undefined`.
+      const get = vi.spyOn(client, "get");
       expect(await new ObjectInputAssets(env).read("../escape.png")).toBeUndefined();
       expect(await new ObjectInputAssets(env).read("")).toBeUndefined();
+      expect(get).not.toHaveBeenCalled();
     });
 
     test("an org the slug is not in gets ENOENT — never another org's bytes", async () => {

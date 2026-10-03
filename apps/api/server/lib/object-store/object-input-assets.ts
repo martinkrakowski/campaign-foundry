@@ -17,8 +17,12 @@ const INPUTS_PREFIX = "assets/inputs/";
 
 export interface ObjectInputAssetsOptions {
   /**
-   * Cache SUCCESSFUL reads in this instance, keyed by the ref string. Off unless
+   * Read each ref through this instance ONCE — one store fetch, shared by every
+   * caller, including the ones that arrive while it is still in flight. Off unless
    * asked for, and only `buildPipeline` asks (see `inputAssets`).
+   *
+   * A read that fails is not remembered, so a re-run after an upload still sees
+   * it; see {@link ObjectInputAssets.fetch} for the one place that is decided.
    */
   readonly memo?: boolean;
 }
@@ -113,8 +117,17 @@ function absent(ref: string, detail: string): Error {
  * this file directly for the same reason it imports `S3ObjectStore` directly.
  */
 export class ObjectInputAssets implements InputAssetPort {
-  /** Absent unless `memo` was asked for — an off switch that costs no Map. */
-  private readonly memo: Map<string, Uint8Array> | undefined;
+  /**
+   * Absent unless `memo` was asked for — an off switch that costs no Map.
+   *
+   * The IN-FLIGHT promise, not resolved bytes. `GenerateCampaignUseCase` renders
+   * cells through `mapWithConcurrency` with eight in flight, and every one of them
+   * reads the same logo, so the cells that start while the first read is still
+   * waiting on the bucket must JOIN it rather than each open their own: a store
+   * read is a network round trip, and a memo that only remembered answers still
+   * lets a concurrent run open eight of them for one object.
+   */
+  private readonly memo: Map<string, Promise<Uint8Array>> | undefined;
 
   constructor(
     private readonly env: RunEnvironment,
@@ -124,11 +137,12 @@ export class ObjectInputAssets implements InputAssetPort {
   }
 
   async read(ref: string): Promise<Uint8Array | undefined> {
-    const cached = this.memo?.get(ref);
-    // A copy, so a consumer that wrote into what it was handed could not change
-    // what the next consumer reads. `readFile` hands out a fresh Buffer every
-    // time, and this keeps that true for a memoised read too.
-    if (cached !== undefined) return Buffer.from(cached);
+    const inFlight = this.memo?.get(ref);
+    // A COPY, twice over: so a consumer that wrote into what it was handed cannot
+    // change what the next consumer reads, and so a caller that JOINS an in-flight
+    // read cannot change what the others are about to be handed. `readFile` gives
+    // every caller a fresh Buffer, and this keeps that true for a memoised read.
+    if (inFlight !== undefined) return Buffer.from(await inFlight);
 
     // PT-4k note: once a brief's refs become asset ids, the id branch has to come
     // BEFORE this check — `resolveAssetPath` refuses a bare uuid, so an id checked
@@ -142,18 +156,36 @@ export class ObjectInputAssets implements InputAssetPort {
       throw absent(ref, "only assets/inputs/<slug>/<name> is a stored ref on this backend.");
     }
 
-    // The store's own org-scoped resolve → row → `get`. Left to propagate: an
-    // `S3RequestError` or a pg error here is a deployment that cannot answer, and
-    // the caller must hear it as one.
-    const bytes = await getAssetStore(this.env).readAsset(target.slug, target.name);
-    if (bytes === undefined) {
-      throw absent(ref, "no campaign, asset row or object in this org answers it.");
-    }
+    // Stored BEFORE it is awaited, which is the whole of it: the next cell to ask
+    // while this one is still in flight finds the promise and waits on it.
+    const pending = this.fetch(ref, target);
+    if (this.memo !== undefined) this.memo.set(ref, pending);
+    return Buffer.from(await pending);
+  }
 
-    // Only a SUCCESSFUL read is memoised. Caching the refusals above would make a
-    // retry — the re-run after an upload, the second pass of a preview — keep
-    // answering from a cache that was written before the object existed.
-    if (this.memo !== undefined) this.memo.set(ref, Buffer.from(bytes));
-    return bytes;
+  /**
+   * One read of one ref, and the only place the memo is forgotten.
+   *
+   * Everything here is inside a `try` whose `catch` drops the entry, because a
+   * promise that is left in the map after rejecting is a permanent answer: the
+   * bucket that could not be read at the moment the run started, and the asset
+   * that had not been uploaded yet, are both things a LATER read has to be able to
+   * find. Only this caller owns the entry — a caller that joined an in-flight read
+   * never stored it, and so must not delete it.
+   */
+  private async fetch(ref: string, target: InputRef): Promise<Uint8Array> {
+    try {
+      // The store's own org-scoped resolve → row → `get`, left to propagate: an
+      // `S3RequestError` or a pg error is a deployment that cannot answer, and the
+      // caller must hear it as one.
+      const bytes = await getAssetStore(this.env).readAsset(target.slug, target.name);
+      if (bytes === undefined) {
+        throw absent(ref, "no campaign, asset row or object in this org answers it.");
+      }
+      return bytes;
+    } catch (error) {
+      this.memo?.delete(ref);
+      throw error;
+    }
   }
 }

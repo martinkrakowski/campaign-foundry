@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/object-store/object-input-assets.ts",
-      "before": "    if (bytes === undefined) {\n      throw absent(ref, \"no campaign, asset row or object in this org answers it.\");\n    }",
-      "after": "    if (bytes === undefined) {\n      return undefined;\n    }",
-      "because": "a safe ref that nothing answers reports 'there is no such asset' by answering `undefined` — the answer that means 'this ref is unsafe, skip it'. The two are indistinguishable to every consumer, and each of them then does the wrong thing for the operator: a scene and a music bed stop rejecting with 'could not be read' and start refusing a brief that named nothing wrong with it (PT-4c pins that message and its `cause`), while the logo — which only silences itself on ENOENT — starts skipping a campaign's logo for a deployment it cannot see. The test that catches it runs the REAL scene resolver against the object port with a campaign no row belongs to and asserts both the message and that the `cause` is ENOENT; the unsafe ref still answers `undefined` correctly, so the switch is what fails.",
+      "before": "    return Buffer.from(await pending);",
+      "after": "    return pending.then((bytes) => Buffer.from(bytes), () => undefined);",
+      "because": "a safe ref that nothing answers is reported as 'there is no such asset' by answering `undefined` — the answer that means 'this ref is unsafe, skip it'. The two are indistinguishable to every consumer, and each of them then does the wrong thing for the operator: a scene and a music bed stop rejecting with 'could not be read' and start refusing a brief that named nothing wrong with it (PT-4c pins that message and its `cause`), while the logo — which only silences itself on ENOENT — starts skipping a campaign's logo for a deployment it cannot see. The test that catches it runs the REAL scene resolver against the object port with a campaign no row belongs to and asserts both the message and that the `cause` is ENOENT; the unsafe ref still answers `undefined` correctly, so the switch is what fails. Re-anchored in fix round 1: the throw this used to sit next to moved into `fetch`, where a bare `return undefined` would no longer typecheck, so the mutant is now put where it still answers a real `undefined` — the line that hands the read's result to the caller.",
       "command": [
         "yarn",
         "vitest",
@@ -38,9 +38,9 @@
     },
     {
       "file": "apps/api/server/lib/object-store/object-input-assets.ts",
-      "before": "    if (bytes === undefined) {\n      throw absent(ref, \"no campaign, asset row or object in this org answers it.\");\n    }",
-      "after": "    if (bytes === undefined) {\n      if (this.memo !== undefined) this.memo.set(ref, Buffer.alloc(0));\n      throw absent(ref, \"no campaign, asset row or object in this org answers it.\");\n    }",
-      "because": "the memo starts remembering failures, as an empty read rather than as an absence. The run that is waiting on an upload is the case that dies: the preview that ran before the upload, the re-run after it, and every retry in between all get the cached zero-length answer and report a missing logo for the rest of the reader's life — while the store has held the right bytes the whole time. Caching only SUCCESSFUL reads is the whole of the memo's contract; a cache that remembers a refusal is a cache that lies, and the retry test (a MISSING ref, then the upload, then the read) is the only case that can see it, because every other test reads once.",
+      "before": "      this.memo?.delete(ref);\n      throw error;",
+      "after": "      throw error;",
+      "because": "a failed read stays in the memo as a rejected promise, and every later read of that ref joins it and is handed the same failure forever. The run that dies is the one waiting on an upload: the preview that ran before it, the re-run after it, and every retry in between all report a missing logo while the store has held the right bytes the whole time — and a rejected promise has no timeout, so nothing would ever clear it. Forgetting only the failures IS the memo's contract; a cache that remembers a refusal is a cache that lies. The retry test is the only case that can see it (a MISSING ref, then the object arriving, then the read), because every other test reads once.",
       "command": [
         "yarn",
         "vitest",
@@ -50,6 +50,23 @@
         "apps/api/server/lib/object-store/__tests__/object-input-assets.memo.test.ts",
         "-t",
         "the next read retries the store and finds the new object"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/object-input-assets.ts",
+      "before": "    if (this.memo !== undefined) this.memo.set(ref, pending);",
+      "after": "    if (this.memo !== undefined && false) this.memo.set(ref, pending);",
+      "because": "the in-flight promise is never stored, so the memo only ever helps a read that arrives AFTER its answer — which is the rare one. `GenerateCampaignUseCase` renders cells through `mapWithConcurrency` with eight in flight and every cell reads the same logo, so the eight cells of the first wave all miss and all open their own store round trip: a 50-cell run costs ~150 GETs, exactly what the memo exists to prevent, and the loss is invisible to every other test here because each of them reads sequentially and would pass against a memo that only ever stored answers. The N-concurrent test is the one that sees it, and only because it counts store `get` calls across simultaneous reads.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/object-input-assets.memo.test.ts",
+        "-t",
+        "N concurrent reads of one ref cost ONE store get"
       ],
       "verdict": "caught"
     },
