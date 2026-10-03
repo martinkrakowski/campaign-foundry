@@ -2,7 +2,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { basename, dirname, extname, resolve } from "node:path";
 import { resolveConfined } from "../confined-path.js";
 import { ASSET_NAME_PATTERN, assetContentType } from "../asset-files.js";
-import type { AssetEntry, AssetStorePort } from "./asset-store.port.js";
+import type { AssetEntry, AssetOwner, AssetStorePort } from "./asset-store.port.js";
 
 /**
  * Filesystem implementation of AssetStorePort.
@@ -47,6 +47,28 @@ export class FsAssetStore implements AssetStorePort {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * See `AssetStorePort.readAssetById`. Always `undefined`, and that is the
+   * whole answer rather than a missing method: a filesystem asset is NAMED by
+   * its path and nothing else, so there is no id to look one up by and a lookup
+   * that guessed would resolve `assets/inputs/<uuid>/logo.png` — a path the
+   * confined resolve below already refuses for escaping `inputs/`.
+   *
+   * `undefined` is also the answer that keeps `ObjectInputAssets`' id branch
+   * correct on fs: it maps to ENOENT, so a uuid in a brief read through the
+   * object-store adapter is a MISSING asset rather than "unsafe" — which is
+   * exactly what `FileSystemInputAssets` says about the same ref, and is why
+   * that adapter is untouched by PT-4k1.
+   */
+  async readAssetById(_id: string): Promise<Buffer | undefined> {
+    return undefined;
+  }
+
+  /** See `AssetStorePort.assetOwner` — always `undefined`, as above. */
+  async assetOwner(_id: string): Promise<AssetOwner | undefined> {
+    return undefined;
   }
 
   async listAssets(briefId: string): Promise<readonly AssetEntry[]> {

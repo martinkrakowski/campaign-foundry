@@ -52,6 +52,47 @@ describe("FsAssetStore", () => {
     expect(await store.readAsset("../invalid-id", "logo.png")).toBeUndefined();
   });
 
+  // The fs half of PT-4k1: the id-addressed methods exist and answer `undefined`,
+  // which is a DELIBERATE answer rather than a missing method — `FileSystemInputAssets`
+  // maps this to ENOENT, so the two backends agree on a ref neither can read.
+  describe("the id-addressed methods (PT-4k1, D208c)", () => {
+    const ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+
+    test("readAssetById answers undefined for every ref, with a file present", async () => {
+      await store.writeAsset("camp-1", "logo.png", pngBytes);
+      expect(await store.readAssetById(ID)).toBeUndefined();
+      // Even an id that would resolve a directory if it were a slug: fs has no id
+      // concept, and a lookup that guessed would read a path `resolveConfined`
+      // refuses anyway.
+      expect(await store.readAssetById("camp-1")).toBeUndefined();
+      expect(await store.readAssetById("")).toBeUndefined();
+      // The file is untouched and still readable by the path it really has.
+      expect(await store.readAsset("camp-1", "logo.png")).toEqual(pngBytes);
+    });
+
+    test("assetOwner answers undefined for every ref", async () => {
+      await store.writeAsset("camp-1", "logo.png", pngBytes);
+      expect(await store.assetOwner(ID)).toBeUndefined();
+      expect(await store.assetOwner("camp-1")).toBeUndefined();
+      expect(await store.assetOwner("")).toBeUndefined();
+    });
+
+    test("writeAsset answers `{ path }` and NO id key at all", async () => {
+      // `Object.keys`, not `toEqual`: `toEqual` ignores an `undefined` property,
+      // so it cannot tell an absent key from one set to `undefined`. The route
+      // branches on `result.id === undefined` and returns `{ path }` only — and an
+      // fs caller holding this object must find exactly what it found before PT-4k1.
+      const res = await store.writeAsset("camp-1", "logo.png", pngBytes);
+      expect(Object.keys(res)).toEqual(["path"]);
+    });
+
+    test("listAssets entries carry no id key", async () => {
+      await store.writeAsset("camp-1", "logo.png", pngBytes);
+      const [entry] = await store.listAssets("camp-1");
+      expect(Object.keys(entry!)).toEqual(["name", "type", "size", "thumbnailUrl"]);
+    });
+  });
+
   test("listAssets returns empty array for non-existent brief directory or invalid briefId", async () => {
     expect(await store.listAssets("non-existent-brief")).toEqual([]);
     expect(await store.listAssets("../invalid-escape")).toEqual([]);

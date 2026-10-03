@@ -1,6 +1,6 @@
 import { relative } from "node:path";
 import type { InputAssetPort } from "@campaignfoundry/CampaignOrchestration";
-import type { AssetStorePort } from "../ports/asset-store.port.js";
+import { isAssetId, type AssetStorePort } from "../ports/asset-store.port.js";
 import { resolveAssetPath } from "@campaignfoundry/CreativeGeneration";
 import { getAssetStore } from "../ports/index.js";
 import type { RunEnvironment } from "../run-environment.js";
@@ -92,6 +92,14 @@ function absent(ref: string, detail: string): Error {
  * `get`. That adapter already owns the SQL; there is deliberately no second copy
  * of it here.
  *
+ * **A ref is an id or a path, and shape decides (PT-4k1, D203/D208d).** A bare
+ * lower-case uuid is the asset's own id and is read org-scoped through the row
+ * it names; everything else is the path form above. Under `s3` both are
+ * readable, and a stored path ref stays readable with no migration (D208: no
+ * data migration) — which is why the branch is an `if`, not a switch on a
+ * backend. The two branches converge on the same three outcomes below, so a
+ * consumer learns nothing about which form a brief used.
+ *
  * **Three outcomes, byte-identical to fs** — this is the whole contract, because
  * each consumer's failure policy is written against these three:
  * - `undefined` for exactly what `resolveAssetPath` refuses (empty, absolute,
@@ -145,10 +153,30 @@ export class ObjectInputAssets implements InputAssetPort {
     // every caller a fresh Buffer, and this keeps that true for a memoised read.
     if (inFlight !== undefined) return Buffer.from(await inFlight);
 
-    // PT-4k note: once a brief's refs become asset ids, the id branch has to come
-    // BEFORE this check — `resolveAssetPath` refuses a bare uuid, so an id checked
-    // here would read as an unsafe ref and every scene and bed would answer "is
-    // not a valid asset path".
+    // **A ref that is an ASSET ID is read as one, and this check is FIRST**
+    // (PT-4k1, D203's shape rule, D208d). `resolveAssetPath` refuses a bare uuid
+    // — it is not under `<root>/assets` — so an id checked below read as an
+    // UNSAFE ref and every scene and bed reported "is not a valid asset path"
+    // for a brief naming an asset that is right there. `isAssetId` is the one
+    // discriminator, and it is exported from the port so no layer can invent a
+    // second one.
+    //
+    // `FileSystemInputAssets` is deliberately UNTOUCHED and needs no id branch:
+    // on fs a uuid is not a path either, so it answers `undefined` there too —
+    // the two backends agree on a ref neither can read, and no fs caller starts
+    // receiving ids from this lane (D208d: fs stores path refs, unchanged).
+    if (isAssetId(ref)) {
+      // The store is looked up HERE, before the pending promise exists, for the
+      // same reason and with the same wording as the path branch below: a
+      // synchronous throw from `getAssetStore` must reject `read` with nothing
+      // memoised, not run `memo.delete` before the `memo.set` this line's callee
+      // is about to reach (f22778b5).
+      const assets = getAssetStore(this.env);
+      const pending = this.fetchById(ref, assets);
+      if (this.memo !== undefined) this.memo.set(ref, pending);
+      return Buffer.from(await pending);
+    }
+
     const safePath = resolveAssetPath(ref, SYNTHETIC_ROOT);
     if (safePath === undefined) return undefined;
 
@@ -189,6 +217,42 @@ export class ObjectInputAssets implements InputAssetPort {
       const bytes = await assets.readAsset(target.slug, target.name);
       if (bytes === undefined) {
         throw absent(ref, "no campaign, asset row or object in this org answers it.");
+      }
+      return bytes;
+    } catch (error) {
+      this.memo?.delete(ref);
+      throw error;
+    }
+  }
+
+  /**
+   * One read of one asset id, and the id branch's half of "a failed read is not
+   * remembered" (PT-4k1). It is its own method rather than a parameter of
+   * {@link ObjectInputAssets.fetch} because the two have nothing to share but the
+   * memo and the `catch`: an id names a row directly, so there is no slug/name
+   * pair to parse and no `InputRef` to carry — folding them together would mean
+   * a union threading a `undefined` ref through the path branch's SQL.
+   *
+   * **Both paths forget on failure, and that is not a detail.** An id ref is
+   * memoised exactly as a path ref is — same map, keyed by the ref string, so a
+   * brief that mixes both forms keeps one entry per ref — and a cached rejection
+   * would be a permanent answer for the rest of the run: the asset that had not
+   * been uploaded yet is exactly what a re-run has to be able to find.
+   */
+  private async fetchById(ref: string, assets: AssetStorePort): Promise<Uint8Array> {
+    try {
+      // Left to propagate, as on the path branch: a store that refuses is a
+      // deployment that cannot answer, and ENOENT means "this ref names nothing
+      // here" — a different, non-retryable-looking claim than "the bucket is
+      // down", which is what would mislead a consumer that branches on the code.
+      const bytes = await assets.readAssetById(ref);
+      if (bytes === undefined) {
+        // `undefined` covers a row this org does not hold — another org's id
+        // included, which must read as absent rather than forbidden — and a row
+        // whose object is gone. Both are "could not be read", which is what
+        // ENOENT says; `undefined` would say the ref is unsafe, and blame a brief
+        // for naming nothing wrong.
+        throw absent(ref, "no asset row in this org answers it.");
       }
       return bytes;
     } catch (error) {
