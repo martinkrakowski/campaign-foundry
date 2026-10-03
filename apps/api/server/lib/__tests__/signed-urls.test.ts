@@ -9,6 +9,10 @@ import {
 } from "../object-store/index.js";
 import { inputKey, renderPrefix } from "../object-store/object-keys.js";
 import { readReport, reportRevision, writeReport } from "../report.js";
+// The module OBJECT, so `reportRevision` can be spied on: `signed-urls.ts` calls it
+// through this namespace, and these tests need a store whose revision READ fails —
+// the one thing a real fs report store does not do on demand.
+import * as reportModule from "../report.js";
 import { resetAssetStore, setAssetStore, type AssetStorePort } from "../ports/index.js";
 import {
   inputAssetRedirect,
@@ -109,6 +113,21 @@ function withoutUrls(row: unknown): unknown {
   return kept;
 }
 
+/**
+ * The `[result]` lines a `console.warn` spy collected, in order.
+ *
+ * **Filtered, because a global `console.warn` spy catches more than this module.**
+ * The first `objectStore()` read in a worker runs `loadEnv()`, which announces the
+ * absent image-generation keys once — a real `console.warn` on the same method.
+ * Counting raw calls would make the count depend on which test happened to be
+ * first, and the claim under test is about THIS module's lines.
+ */
+function resultWarnings(spy: { mock: { calls: unknown[][] } }): string[] {
+  return spy.mock.calls
+    .map((call) => String(call[0]))
+    .filter((line) => line.startsWith("[result] "));
+}
+
 describe("signed-urls (PT-4f, D204/D209)", () => {
   let harness: FsHarness;
   let store: InMemoryObjectStore;
@@ -127,6 +146,10 @@ describe("signed-urls (PT-4f, D204/D209)", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    // Every spy here is shared state if it outlives its test: a `reportRevision`
+    // left rejecting would make the NEXT test's report lose its version, and a
+    // `console.warn` left mocked would swallow the next test's own line.
+    vi.restoreAllMocks();
     resetAssetStore();
     resetObjectStoreClient();
     if (SAVED_OBJECT_STORE === undefined) delete process.env.OBJECT_STORE;
@@ -164,6 +187,46 @@ describe("signed-urls (PT-4f, D204/D209)", () => {
   });
 
   describe("withAssetUrls on fs (OBJECT_STORE unset)", () => {
+    // Item 1: before this lane the route read no revision at all, so a store that
+    // could not answer one cost the caller nothing. Letting the rejection through
+    // would trade a cosmetic omission for losing a report that READS FINE.
+    test("a revision that cannot be read costs the ?v=, never the report", async () => {
+      delete process.env.OBJECT_STORE;
+      vi.spyOn(reportModule, "reportRevision").mockRejectedValue(
+        new Error("connection reset by peer"),
+      );
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const out = (await withAssetUrls(
+        LOCAL_TENANT,
+        { assets: [fullRow()] },
+        {
+          slug: SLUG,
+          campaignId: undefined,
+        },
+      )) as Answered;
+
+      // Every row, every stored key, and the URL — with no version to sign.
+      expect(out.assets[0]!["productId"]).toBe("p1");
+      expect(out.assets[0]!["outputUrl"]).toBe(`/api/pipeline/output/${OUTPUT}`);
+      expect(out.assets[0]!["proofUrl"]).toBe(`/api/pipeline/output/${PROOF}`);
+      expect(resultWarnings(warn)).toStrictEqual([
+        `[result] could not read the report revision for ${SLUG}: connection reset by peer`,
+      ]);
+      warn.mockRestore();
+    });
+
+    test("'never ran' is answered before the revision is even read", async () => {
+      delete process.env.OBJECT_STORE;
+      const revision = vi.spyOn(reportModule, "reportRevision");
+      // Not an object and no `assets`: there are no rows to carry a URL, so the
+      // revision is not read and cannot fail a report that has nothing to say.
+      for (const report of [null, "text", { halted: false, assets: { rows: [] } }]) {
+        expect(await withAssetUrls(LOCAL_TENANT, report, target)).toStrictEqual(report);
+      }
+      expect(revision).not.toHaveBeenCalled();
+    });
+
     test("every field is the output route plus the path, with the revision as one query", async () => {
       delete process.env.OBJECT_STORE;
       await writeReport(LOCAL_TENANT, resultWith(SLUG, fullRow()));
@@ -253,6 +316,28 @@ describe("signed-urls (PT-4f, D204/D209)", () => {
   describe("withAssetUrls on s3", () => {
     beforeEach(() => {
       process.env.OBJECT_STORE = "s3";
+    });
+
+    // The s3 half of item 1: the same degrade with a signed URL, so the omission
+    // is `v` rather than a whole query.
+    test("a revision that cannot be read signs without `v`, never failing the report", async () => {
+      vi.spyOn(reportModule, "reportRevision").mockRejectedValue(
+        new Error("connection reset by peer"),
+      );
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const out = (await withAssetUrls(LOCAL_TENANT, { assets: [fullRow()] }, target)) as Answered;
+      const parsed = new URL(out.assets[0]!["outputUrl"]!);
+
+      // Signed for its window as usual — only the version is missing.
+      expect(parsed.pathname).toContain(`/${BUCKET}/${RENDERS}`);
+      expect(parsed.searchParams.get("X-Amz-Expires")).toBe("1200");
+      expect(parsed.searchParams.get("v")).toBeNull();
+      expect(out.assets[0]!["productId"]).toBe("p1");
+      expect(resultWarnings(warn)).toStrictEqual([
+        `[result] could not read the report revision for ${SLUG}: connection reset by peer`,
+      ]);
+      warn.mockRestore();
     });
 
     /**
@@ -517,6 +602,69 @@ describe("signed-urls (PT-4f, D204/D209)", () => {
       expect(out.assets[0]!["productId"]).toBe("p1");
       expect(out.assets[0]!["outputPath"]).toBe(OUTPUT);
     });
+
+    // Item 2: a refusal and an outage are DIFFERENT events, and only one of them
+    // is worth a log line.
+    test("a refused key is SILENT — it is expected, and the path is never echoed", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const presign = vi.spyOn(store, "presignGet");
+      // The three refusals `renderObjectKey` makes, in one report.
+      const out = (await withAssetUrls(
+        LOCAL_TENANT,
+        {
+          assets: [
+            { productId: "p1", outputPath: "p1/1x1.png" },
+            { productId: "p2", outputPath: `${OTHER_SLUG}/p2/1x1.png` },
+            { productId: "p3", outputPath: `${SLUG}/../x.png` },
+            { productId: "p6", outputPath: OUTPUT },
+          ],
+        },
+        target,
+      )) as Answered;
+
+      // Nothing was signed, so nothing could fail, and nothing is logged: a report
+      // with one stale path is not an incident.
+      expect(presign).toHaveBeenCalledTimes(1);
+      expect(resultWarnings(warn)).toStrictEqual([]);
+      expect(out.assets.map((row) => row["outputUrl"])).toEqual([
+        undefined,
+        undefined,
+        undefined,
+        expect.stringContaining("/renders/p1/1x1.png"),
+      ]);
+      warn.mockRestore();
+    });
+
+    test("a rejecting presignGet warns ONCE per request, naming no key, prefix or org", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.spyOn(store, "presignGet").mockRejectedValue(
+        new Error("The object store could not be reached for presignGet."),
+      );
+      // FIVE fields on TWO rows: one outage, one line. A line per field would bury
+      // the outage under ten identical copies of itself.
+      const out = (await withAssetUrls(
+        LOCAL_TENANT,
+        { assets: [fullRow(), fullRow()] },
+        target,
+      )) as Answered;
+
+      const lines = resultWarnings(warn);
+      expect(lines).toStrictEqual([
+        `[result] could not sign asset URLs for ${SLUG}: The object store could not be reached for presignGet.`,
+      ]);
+      // The line names the campaign and nothing that locates bytes or a tenancy.
+      expect(lines[0]).not.toContain("org/");
+      expect(lines[0]).not.toContain(CAMPAIGN_ID);
+      expect(lines[0]).not.toContain("renders");
+      // Still 200-shaped: every row, every stored key, every field omitted.
+      expect(out.assets).toHaveLength(2);
+      for (const row of out.assets) {
+        expect(row["outputUrl"]).toBeUndefined();
+        expect(row["productId"]).toBe("p1");
+        expect(row["outputPath"]).toBe(OUTPUT);
+      }
+      warn.mockRestore();
+    });
   });
 
   describe("the shape withAssetUrls preserves", () => {
@@ -594,7 +742,7 @@ describe("signed-urls (PT-4f, D204/D209)", () => {
     test("under s3 it signs the key with no version and no disposition", async () => {
       process.env.OBJECT_STORE = "s3";
       await store.put(KEY, bytesFor("input"), { contentType: "image/png" });
-      const parsed = new URL((await inputAssetUrl(LOCAL_TENANT, KEY))!);
+      const parsed = new URL(await inputAssetUrl(LOCAL_TENANT, KEY));
       expect(parsed.pathname).toBe(`/${BUCKET}/${KEY}`);
       expect(parsed.searchParams.get("X-Amz-Expires")).toBe("1200");
       // An input's bytes change on upload, not on a report revision, and the
@@ -603,17 +751,35 @@ describe("signed-urls (PT-4f, D204/D209)", () => {
       expect(parsed.searchParams.get("response-content-disposition")).toBeNull();
     });
 
-    test("on fs it mints no URL at all — ?name= streams there", async () => {
-      delete process.env.OBJECT_STORE;
-      expect(await inputAssetUrl(LOCAL_TENANT, KEY)).toBeUndefined();
-    });
-
-    test("a store that refuses to sign answers no URL rather than a broken one", async () => {
+    // Item 3: a store that cannot sign is NOT an absence. Mapping the rejection to
+    // `undefined` made `?name=` answer "Asset ... not found." for a row that is
+    // right there — the UI would report a file nobody deleted, and an operator
+    // reading that 404 would go looking for a deletion rather than for a bucket
+    // refusing to sign.
+    test("a store that refuses to sign REJECTS — never a missing asset", async () => {
       process.env.OBJECT_STORE = "s3";
+      setAssetStore(assetStoreAnswering(KEY));
       vi.spyOn(store, "presignGet").mockRejectedValue(
         new Error("The object store could not be reached for presignGet."),
       );
-      expect(await inputAssetUrl(LOCAL_TENANT, KEY)).toBeUndefined();
+      await expect(inputAssetUrl(LOCAL_TENANT, KEY)).rejects.toThrow("could not be reached");
+      // And through the redirect: a row that EXISTS never becomes `missing`.
+      await expect(inputAssetRedirect(LOCAL_TENANT, SLUG, "logo.png")).rejects.toThrow(
+        "could not be reached",
+      );
+    });
+
+    test("on fs the redirect never reaches the presigner — ?name= streams there", async () => {
+      delete process.env.OBJECT_STORE;
+      // fs's `assetObjectKey` answers `undefined` for everything, so the redirect
+      // is `missing` and the route streams the bytes instead. The store is never
+      // asked, which is the point: `objectStoreClient()` throws outright on fs.
+      const presign = vi.spyOn(store, "presignGet");
+      setAssetStore(assetStoreAnswering(undefined));
+      expect(await inputAssetRedirect(LOCAL_TENANT, SLUG, "logo.png")).toStrictEqual({
+        kind: "missing",
+      });
+      expect(presign).not.toHaveBeenCalled();
     });
 
     test("a row answers the redirect to its own key, and no row answers absent", async () => {
@@ -626,19 +792,9 @@ describe("signed-urls (PT-4f, D204/D209)", () => {
         location: await inputAssetUrl(LOCAL_TENANT, KEY),
       });
 
+      // `missing` is ONE answer and it means `assetObjectKey` said `undefined`.
       setAssetStore(assetStoreAnswering(undefined));
       expect(await inputAssetRedirect(LOCAL_TENANT, SLUG, "missing.png")).toStrictEqual({
-        kind: "missing",
-      });
-    });
-
-    test("a key the store cannot sign is absent, not a redirect to nothing", async () => {
-      process.env.OBJECT_STORE = "s3";
-      setAssetStore(assetStoreAnswering(KEY));
-      vi.spyOn(store, "presignGet").mockRejectedValue(
-        new Error("The object store could not be reached for presignGet."),
-      );
-      expect(await inputAssetRedirect(LOCAL_TENANT, SLUG, "logo.png")).toStrictEqual({
         kind: "missing",
       });
     });

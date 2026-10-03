@@ -82,8 +82,11 @@ export default defineEventHandler(async (event) => {
     // deployment's own switch, the same one the asset store's registry is built
     // on, and it is read before any store is asked.
     if (objectStore() === "s3") {
+      // A rejection PROPAGATES out of here and answers 500, like every other
+      // store failure: an asset whose row exists must not read as absent, or the
+      // UI reports a file nobody deleted and an operator goes looking for one.
       const redirect = await inputAssetRedirect(scope, slug, name);
-      if (redirect === undefined || redirect.kind === "missing") {
+      if (redirect.kind === "missing") {
         setResponseStatus(event, 404);
         return { error: `Asset "${name}" not found.` };
       }

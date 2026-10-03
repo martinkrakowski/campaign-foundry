@@ -143,6 +143,30 @@ describe("GET /campaigns/result mints a URL per asset (PT-4f, D204/D209)", () =>
       expect(presign).not.toHaveBeenCalled();
     });
 
+    // Item 1 at the route: a store that cannot answer the revision must not cost
+    // the caller the report. Before this lane the route read no revision at all,
+    // so letting the rejection through would be a NEW way to fail a request that
+    // has always answered 200.
+    test("a revision that cannot be read still answers 200, with the report", async () => {
+      await getBriefStore(LOCAL_TENANT).createBrief(makeBrief(SLUG));
+      await writeReport(LOCAL_TENANT, resultWith(SLUG, fullRow()));
+      vi.spyOn(reportModule, "reportRevision").mockRejectedValue(
+        new Error("connection reset by peer"),
+      );
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const res = await ask(LOCAL_TENANT, SLUG);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Answered;
+      expect(body.assets[0]!["productId"]).toBe("p1");
+      // The URL is there; only the cache-buster is not.
+      expect(body.assets[0]!["outputUrl"]).toBe(`/api/pipeline/output/${OUTPUT}`);
+      const lines = warn.mock.calls.map((call) => String(call[0]));
+      expect(lines.filter((line) => line.startsWith("[result] "))).toStrictEqual([
+        `[result] could not read the report revision for ${SLUG}: connection reset by peer`,
+      ]);
+    });
+
     test("a JSON null report is answered unchanged", async () => {
       await getBriefStore(LOCAL_TENANT).createBrief(makeBrief(SLUG));
       const { getReportStore } = await import("../../../lib/ports/index.js");

@@ -366,6 +366,29 @@ describe("GET /campaigns/assets under s3 (PT-4f, D209b)", () => {
     expect(presign).not.toHaveBeenCalled();
   });
 
+  // Item 3: a row that EXISTS must never read as absent. Mapping a signing
+  // failure onto the 404 told the UI an asset was gone when nobody deleted it,
+  // and pointed an operator at a deletion instead of at a bucket refusing to sign.
+  test("a store that cannot sign answers 500, never 'Asset not found'", async () => {
+    await withOneAsset("unsignable-one");
+    vi.spyOn(store, "presignGet").mockRejectedValue(
+      new Error("The object store could not be reached for presignGet."),
+    );
+
+    const res = await get(local, "?briefId=unsignable-one&name=logo.png");
+
+    // 500, like every other store failure in this codebase — and the body never
+    // says the asset is missing, because it is not.
+    expect(res.status).toBe(500);
+    expect(await res.text()).not.toContain("not found");
+    // And the 404 above is still the answer for a name no row holds, which is what
+    // makes the pair a distinction rather than one answer used twice.
+    vi.restoreAllMocks();
+    const absent = await get(local, "?briefId=unsignable-one&name=absent.png");
+    expect(absent.status).toBe(404);
+    expect(await absent.json()).toEqual({ error: 'Asset "absent.png" not found.' });
+  });
+
   test("a hidden campaign answers today's 404 body with ZERO presignGet calls", async () => {
     await harness.db.query(
       `insert into team (id, name, "memberCount", org_id, created_at) values ('t9', 'Hidden', 0, 'local', now())`,
@@ -395,7 +418,7 @@ describe("GET /campaigns/assets under s3 (PT-4f, D209b)", () => {
     expect(presign).not.toHaveBeenCalled();
   });
 
-  test("another org's same slug is 404 with ZERO presignGet, and never their key", async () => {
+  test("another org's same slug redirects to THAT org's own key, never the first org's", async () => {
     await harness.db.query(
       `insert into org (id, name, slug, created_at) values ('other', 'Other', 'other', now())`,
     );

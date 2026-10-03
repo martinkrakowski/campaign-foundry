@@ -1,3 +1,4 @@
+import { errorMessage } from "@campaignfoundry/shared";
 import { renderObjectKey } from "@campaignfoundry/Distribution";
 import type { ObjectKey } from "@campaignfoundry/CampaignOrchestration";
 import { objectStore } from "./config.js";
@@ -127,35 +128,66 @@ const FIELDS: readonly AssetUrlField[] = [
 ];
 
 /**
+ * One field's signing outcome: the URL to append, and — when signing was
+ * ATTEMPTED and the store REFUSED — the failure to report once.
+ *
+ * The two are separate fields rather than one `undefined` because they are
+ * different events: a field this server will not sign is expected and silent
+ * (a row outside its own campaign), while a store that could not sign is an
+ * outage nobody would otherwise hear about. Folding them together is what made a
+ * bucket outage invisible.
+ */
+interface FieldUrl {
+  readonly url?: string;
+  /** Set ONLY when `presignGet` was called and rejected. Never for a refused key. */
+  readonly signingFailure?: unknown;
+}
+
+/** One row's added fields, plus the first signing failure any of its fields hit. */
+interface RowUrls {
+  readonly fields: Record<string, string>;
+  readonly signingFailure?: unknown;
+}
+
+/**
  * One row's `*Url` fields, each present only when its source path is a non-empty
  * string and the key that path makes is one this server will sign.
  *
- * **A refused path costs that field and nothing else.** `renderObjectKey` throws
- * on a path whose first segment is not this campaign's slug, and on one
- * `assertObjectKey` refuses — a `..` segment, an empty one — so the refusal is
- * caught PER FIELD: one bad path in a report must not cost a sibling's URL, and
- * must not fail the response, because the caller asked for a report and a report
- * without one image is still a report. **Nothing is logged**: the path is the one
- * string here that came out of stored JSON rather than out of anything that vetted
- * it, and it carries the slug a refusal must not echo into a log.
+ * **A refused path costs that field and nothing else**, and it is SILENT.
+ * `renderObjectKey` throws on a path whose first segment is not this campaign's
+ * slug, and on one `assertObjectKey` refuses — a `..` segment, an empty one — so
+ * the refusal is caught PER FIELD: one bad path in a report must not cost a
+ * sibling's URL, and must not fail the response, because the caller asked for a
+ * report and a report without one image is still a report. **Nothing is logged**,
+ * for two reasons. It is expected, so a log line per refused row is noise a real
+ * report with one stale path would fill. And the path is the one string here that
+ * came out of stored JSON rather than out of anything that vetted it, and it
+ * carries the slug a refusal must not echo into a log.
+ *
+ * A store that REFUSED to sign is the opposite case and is carried up in
+ * `signingFailure` — see `withAssetUrls`, which warns once per request.
  */
 async function urlFields(
   scope: StorageScope,
   row: Record<string, unknown>,
   target: UrlTarget,
   revision: string | undefined,
-): Promise<Record<string, string>> {
+): Promise<RowUrls> {
   const fields: Record<string, string> = {};
+  let signingFailure: unknown;
   for (const field of FIELDS) {
     const path = row[field.source];
     // A missing, non-string or empty path has no bytes to name, and every field
     // here is optional in the report — a motion row has no `htmlBundlePath`, and
     // a static row has no `videoPath`.
     if (typeof path !== "string" || path === "") continue;
-    const url = await assetUrl(scope, path, target, revision, field.disposition?.(path));
-    if (url !== undefined) fields[field.field] = url;
+    const answer = await assetUrl(scope, path, target, revision, field.disposition?.(path));
+    if (answer.url !== undefined) fields[field.field] = answer.url;
+    // Keep ONE failure however many fields hit it: five rows of a stalled bucket
+    // are one outage, and five identical lines would bury it.
+    signingFailure ??= answer.signingFailure;
   }
-  return fields;
+  return { fields, signingFailure };
 }
 
 /**
@@ -176,35 +208,47 @@ async function assetUrl(
   target: UrlTarget,
   revision: string | undefined,
   disposition: string | undefined,
-): Promise<string | undefined> {
-  if (objectStore() !== "s3") return outputRouteUrl(path, revision);
+): Promise<FieldUrl> {
+  if (objectStore() !== "s3") return { url: outputRouteUrl(path, revision) };
   // No campaign uuid means no key that could not be shared with another
   // campaign, so there is nothing to sign. Under `s3` this is the case of a ref
   // that resolved to no row — a report stored before the campaign row existed.
-  if (target.campaignId === undefined) return undefined;
+  if (target.campaignId === undefined) return {};
+
+  let key: ObjectKey;
   try {
-    return await objectStoreClient().presignGet(
+    key =
       // THE SAME function the exporter wrote with (`ObjectExporter.keyFor`), so
       // a URL cannot name a key the store does not hold. Never a second
       // implementation, a slice or a `replace`: the segment check inside it is
       // what refuses another campaign's path, and a blind strip after the first
       // `/` would turn `p1/1x1.png` into this campaign's key.
-      renderObjectKey(renderPrefix(scopeTenant(scope).orgId, target.campaignId), target.slug, path),
-      {
-        now: signingInstant(Date.now()),
-        expiresInSeconds: SIGNED_URL_EXPIRES_SECONDS,
-        // D209a: the revision is a SIGNED parameter, so the browser re-fetches
-        // when the bytes behind the object changed rather than on every poll tick,
-        // and no client can edit it into something else.
-        ...(revision === undefined ? {} : { version: revision }),
-        ...(disposition === undefined ? {} : { responseContentDisposition: disposition }),
-      },
-    );
+      renderObjectKey(renderPrefix(scopeTenant(scope).orgId, target.campaignId), target.slug, path);
   } catch {
-    // A key this server will not sign, or a store that could not be asked for a
-    // signature: this field is absent and the report still answers. The path is
-    // never echoed — see `urlFields`.
-    return undefined;
+    // A key THIS SERVER will not sign — an expected, per-row outcome with nothing
+    // to report: the path does not belong to this campaign, or names something
+    // outside `renders/`. Silent by design; `urlFields` says why.
+    return {};
+  }
+
+  try {
+    const url = await objectStoreClient().presignGet(key, {
+      now: signingInstant(Date.now()),
+      expiresInSeconds: SIGNED_URL_EXPIRES_SECONDS,
+      // D209a: the revision is a SIGNED parameter, so the browser re-fetches
+      // when the bytes behind the object changed rather than on every poll tick,
+      // and no client can edit it into something else.
+      ...(revision === undefined ? {} : { version: revision }),
+      ...(disposition === undefined ? {} : { responseContentDisposition: disposition }),
+    });
+    return { url };
+  } catch (error) {
+    // A store that could not sign — an outage, and NOT the same event as a
+    // refused key. The field is omitted and the report still answers, but the
+    // failure is carried up so `withAssetUrls` warns once: a bucket that cannot
+    // sign is an outage, and an outage that returns 200 with images quietly
+    // missing is an outage nobody finds out about.
+    return { signingFailure: error };
   }
 }
 
@@ -254,6 +298,12 @@ function outputRouteUrl(path: string, revision: string | undefined): string {
  * stored JSON, so a non-object (including a JSON `null`) and an `assets` that is
  * not an array are both ordinary answers rather than errors — and both are
  * returned unchanged.
+ *
+ * **Neither the revision nor a signing outage may fail the report.** Before this
+ * lane the route read no revision at all, so a store that could not answer one
+ * cost the caller nothing; a rejection that reached the caller would turn a
+ * perfectly readable report into a 500 — trading a cosmetic omission (no `v`, no
+ * `?v=`) for losing the report entirely. Both degrade and both say so.
  */
 export async function withAssetUrls(
   scope: StorageScope,
@@ -271,12 +321,29 @@ export async function withAssetUrls(
   // The two reads are not atomic and are not made atomic — the race between them
   // heals on the next poll, and closing it would mean a transaction over two
   // stores to save one tick of staleness.
-  const revision = await reportRevision(scope, target.slug);
+  const revision = await readRevision(scope, target.slug);
+  let signingFailure: unknown;
   const rows = await Promise.all(
-    assets.map(async (row) =>
-      isRecord(row) ? { ...row, ...(await urlFields(scope, row, target, revision)) } : row,
-    ),
+    assets.map(async (row) => {
+      if (!isRecord(row)) return row;
+      const answer = await urlFields(scope, row, target, revision);
+      signingFailure ??= answer.signingFailure;
+      return { ...row, ...answer.fields };
+    }),
   );
+  // ONCE for the whole request, not once per field and not once per row: a report
+  // of thirty creatives against a stalled bucket is one outage, and the line that
+  // says so has to be findable in a log rather than lost among thirty copies.
+  if (signingFailure !== undefined) {
+    // The campaign's SLUG and nothing else — never the key this just failed to
+    // sign, never the prefix, never the org id and never the campaign uuid, since
+    // any of those would put an object's location or a tenancy boundary into a
+    // log line. `target.slug` is the brief's own name in the store's terms, and on
+    // fs (D179) it IS the id the caller sent.
+    console.warn(
+      `[result] could not sign asset URLs for ${target.slug}: ${errorMessage(signingFailure)}`,
+    );
+  }
   // `assets` is re-set on a spread of the report, so it keeps ITS position among
   // the top-level keys — a rebuild that appended it would move a key the client
   // may well be reading by index order.
@@ -284,30 +351,50 @@ export async function withAssetUrls(
 }
 
 /**
- * The URL an input asset's bytes are served from: a presigned GET under `s3`, and
- * `undefined` on fs, where `?name=` streams the bytes and no URL is ever minted.
+ * The report's revision, or `undefined` when the store could not say.
+ *
+ * **`undefined` here means "no version to sign", and never "no report".** The
+ * revision only rides the URL as D209a's `v` (and fs's `?v=`) so a browser
+ * re-fetches when the bytes behind an object changed; a report whose revision
+ * cannot be read is still every row, every path and every field — it simply
+ * loses the cache-buster, which costs a redundant download at worst. Failing the
+ * request instead would cost the caller the whole report, so this catches,
+ * reports, and carries on.
+ */
+async function readRevision(scope: StorageScope, slug: string): Promise<string | undefined> {
+  try {
+    return await reportRevision(scope, slug);
+  } catch (error) {
+    // The same rule as the signing line above: the slug, never a key, a prefix,
+    // an org id or a uuid.
+    console.warn(`[result] could not read the report revision for ${slug}: ${errorMessage(error)}`);
+    return undefined;
+  }
+}
+
+/**
+ * The URL an input asset's bytes are served from. `s3` ONLY — the caller
+ * establishes the mode (`assets.get.ts` branches on `objectStore() === "s3"`)
+ * before it asks, which is the same rule the render path follows.
  *
  * **No `version` and no disposition**, deliberately: an input asset's bytes are
  * replaced only by an upload, and the listing's `thumbnailUrl` (D209b) points at
  * this route rather than at a presigned URL — so this one URL is what a browser
  * that was handed the route URL follows, and it is drawn for `GET`, which is not
  * an attachment. A `download` on an input has to come from the client as before.
+ *
+ * **A `presignGet` rejection PROPAGATES, and must.** Mapping it to `undefined`
+ * made `?name=` answer `Asset "<name>" not found.` for an asset whose row is right
+ * there — the UI would report a file nobody deleted, and an operator reading that
+ * 404 would go looking for a deletion rather than for a bucket that is refusing to
+ * sign. The route answers 500 for it, which is what every other store failure in
+ * this codebase answers.
  */
-export async function inputAssetUrl(
-  scope: StorageScope,
-  key: ObjectKey,
-): Promise<string | undefined> {
-  if (objectStore() !== "s3") return undefined;
-  try {
-    return await objectStoreClient().presignGet(key, {
-      now: signingInstant(Date.now()),
-      expiresInSeconds: SIGNED_URL_EXPIRES_SECONDS,
-    });
-  } catch {
-    // A store that could not sign: the route answers its own 404 rather than
-    // redirecting a browser to a URL that is not there. The key is never echoed.
-    return undefined;
-  }
+export async function inputAssetUrl(scope: StorageScope, key: ObjectKey): Promise<string> {
+  return objectStoreClient().presignGet(key, {
+    now: signingInstant(Date.now()),
+    expiresInSeconds: SIGNED_URL_EXPIRES_SECONDS,
+  });
 }
 
 /** What `GET /campaigns/assets?name=` answers under `s3` (D209b). */
@@ -316,15 +403,20 @@ export type InputAssetRedirect =
   | { readonly kind: "missing" };
 
 /**
- * The 302 a `?name=` request is answered with under `s3`, or `undefined` when
- * there is no object to point at — which the caller turns into today's
+ * The 302 a `?name=` request is answered with under `s3`, or `missing` when there
+ * is no row to point at — which the caller turns into today's
  * `Asset "<name>" not found.` body.
  *
+ * **`missing` is ONE answer now, and only that one.** It means
+ * `assetObjectKey` answered `undefined`: a reference that does not resolve, or a
+ * name no row of that campaign carries — ABSENT, never "forbidden", never another
+ * tenant's. A store that could not sign is not an absence and does not come back
+ * as one; it propagates, so a row that EXISTS can never read as missing.
+ *
  * The whole `?name=`-under-`s3` answer lives here rather than in the route so
- * that the two facts it needs are decided in one place: a reference with no row
- * is ABSENT (never "forbidden", never another tenant's), and the row's key is the
- * one the upload wrote. The route keeps the hidden-campaign check above this and
- * answers it before any store is asked.
+ * that the two facts it needs are decided in one place: absence is decided from
+ * rows, and the row's key is the one the upload wrote. The route keeps the
+ * hidden-campaign check above this and answers it before any store is asked.
  *
  * **No HEAD round-trip**, which is a deliberate change from `readAsset`'s 404: an
  * object gone from under a row that exists is the store's own 404 after the
@@ -336,11 +428,10 @@ export async function inputAssetRedirect(
   scope: StorageScope,
   briefId: string,
   name: string,
-): Promise<InputAssetRedirect | undefined> {
+): Promise<InputAssetRedirect> {
   const key = await getAssetStore(scope).assetObjectKey(briefId, name);
   if (key === undefined) return { kind: "missing" };
-  const location = await inputAssetUrl(scope, key);
-  return location === undefined ? { kind: "missing" } : { kind: "redirect", location };
+  return { kind: "redirect", location: await inputAssetUrl(scope, key) };
 }
 
 /**
