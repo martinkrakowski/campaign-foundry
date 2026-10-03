@@ -405,7 +405,8 @@ export default defineEventHandler(async (event) => {
         // ever written), or `releaseCampaign`'s own `rmdir` would refuse a
         // non-empty directory and answer false for no reason.
         await withPoolLock(scope, targetSlug, () => deletePool(scope, targetSlug));
-        // The assets go BEFORE the release, by SLUG, and best-effort (PT-4b).
+        // The assets go BEFORE the release, by SLUG, and only while this slug
+        // still has no version (PT-4b).
         //
         // Before, because the slug is what each backend can actually act on:
         // `FsAssetStore` stores a copied asset under
@@ -417,20 +418,40 @@ export default defineEventHandler(async (event) => {
         // deleted a non-existent uuid directory and left every copied file
         // behind for good.
         //
-        // Best-effort, because the RELEASE is what makes the campaign go away
-        // and a cleanup failure must not stand in its way: on S3 the release's
-        // cascade takes any rows the failed prefix-delete left, which is the
-        // safe direction — objects without rows are unreachable, rows without
-        // objects are a re-upload. The original error is what propagates below,
-        // either way.
+        // The `hasVersion` guard is what keeps this from eating someone else's
+        // work, and the route's own docstring names the race it closes:
+        // `withBriefLock` is IN-PROCESS, so a SECOND API instance can write
+        // version 1 under this slug between this request's `createCampaign` and
+        // its `createBrief`. That campaign is a real, versioned one now, and
+        // emptying its assets would delete the WINNER's uploads — while the
+        // release below goes on to refuse, correctly, because a version exists.
+        // So the free asks first, and `campaignMeta`'s `hasVersion` is exactly
+        // the "any version yet" test `releaseCampaign` guards on: `exists(
+        // select 1 from brief_version …)` on pg, a brief FILE for the id on fs.
+        // One question, asked once, instead of inferred afterwards.
+        //
+        // Best-effort, and NOT freeing is the safe direction: the release is
+        // what makes the campaign go away, so a failure here must not stand in
+        // its way, and on S3 the release's cascade takes any rows the failed
+        // prefix-delete left — objects without rows are unreachable, rows
+        // without objects are a re-upload. The original error is what propagates
+        // below either way, which is also why a `campaignMeta` that THROWS (a
+        // malformed `campaign.json` on fs) is caught here rather than allowed to
+        // replace it: not knowing whether freeing is safe must never be the thing
+        // that destroys a real campaign's assets.
         try {
-          await getAssetStore(scope).deleteAssets(targetSlug);
-        } catch {
-          // Reported by the release that follows, and by nothing else.
+          const meta = await store.campaignMeta(targetSlug);
+          if (meta !== undefined && !meta.hasVersion) {
+            await getAssetStore(scope).deleteAssets(targetSlug);
+          }
+        } catch (cleanup) {
+          console.warn(
+            `[campaigns] could not free the assets of "${targetSlug}" after a failed create: ${errorMessage(cleanup)}`,
+          );
         }
-        // `releaseCampaign` carries its own guard: it refuses once a real,
-        // versioned brief exists for the slug (a concurrent Save won it), so the
-        // reservation it drops is always this request's own.
+        // `releaseCampaign` carries the same guard, independently: it refuses
+        // once a real, versioned brief exists for the slug (a concurrent Save
+        // won it), so the reservation it drops is always this request's own.
         await store.releaseCampaign(targetSlug);
         throw error;
       }

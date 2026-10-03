@@ -165,12 +165,26 @@ export interface BriefStorePort {
    * 2): deletes the Postgres row, or removes the fs reserved directory,
    * ONLY if it still holds no version/brief — never touches one a
    * concurrent writer's own Save has since completed. Answers whether it
-   * actually removed anything, so the caller knows whether to also clean up
-   * copied assets (only ever correct when the campaign itself is gone too —
-   * never after a real, versioned brief). On fs, delete the campaign's pool
-   * first (`deletePool`, a no-op when absent): the pool file lives inside
-   * the same reserved directory this removes, and removing a non-empty
-   * directory must fail closed, not silently take the pool with it.
+   * actually removed anything.
+   *
+   * **That answer no longer tells a caller whether to free copied assets.**
+   * It used to, and it was the wrong way round: by the time it answers, the
+   * decision has already been made too late — the assets have to be freed
+   * BEFORE the release, because on s3 a freed-by-slug store resolves the
+   * slug into the uuid its key prefix is built from and can only do so
+   * while this row still exists (PT-4b). So a caller that wants the assets
+   * gone reads `campaignMeta(slug)?.hasVersion` first and frees only while
+   * that is false — which is the same "any version yet" test this method
+   * guards on, asked once, in the only order in which the answer can still
+   * change what happens. Freeing unconditionally is a data-loss race, not a
+   * leak: `withBriefLock` is in-process, so a second API instance can win
+   * this slug between the create and the failure, and an unconditional free
+   * then empties the WINNER's uploads before this call goes on to refuse.
+   *
+   * On fs, delete the campaign's pool first (`deletePool`, a no-op when
+   * absent): the pool file lives inside the same reserved directory this
+   * removes, and removing a non-empty directory must fail closed, not
+   * silently take the pool with it.
    */
   releaseCampaign(slug: string): Promise<boolean>;
 

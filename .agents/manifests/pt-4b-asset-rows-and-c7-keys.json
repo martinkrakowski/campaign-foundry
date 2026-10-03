@@ -55,9 +55,9 @@
     },
     {
       "file": "apps/api/server/routes/campaigns/index.post.ts",
-      "before": "        try {\n          await getAssetStore(scope).deleteAssets(targetSlug);\n        } catch {\n          // Reported by the release that follows, and by nothing else.\n        }\n        // `releaseCampaign` carries its own guard: it refuses once a real,\n        // versioned brief exists for the slug (a concurrent Save won it), so the\n        // reservation it drops is always this request's own.\n        await store.releaseCampaign(targetSlug);",
-      "after": "        // `releaseCampaign` carries its own guard: it refuses once a real,\n        // versioned brief exists for the slug (a concurrent Save won it), so the\n        // reservation it drops is always this request's own.\n        await store.releaseCampaign(targetSlug);\n        try {\n          await getAssetStore(scope).deleteAssets(targetSlug);\n        } catch {\n          // Reported by the release that follows, and by nothing else.\n        }",
-      "because": "the free goes back AFTER the release (fix round 2, HIGH). `releaseCampaign` deletes the campaign row, and the slug is resolved THROUGH that row, so the free that follows resolves nothing, no-ops, and every object the copy just wrote stays under `org/<org>/campaign/<uuid>/inputs/` with no row left to name it — the one failure path whose whole job is to leave nothing behind. On staging (`STORE_BACKEND=postgres`, `OBJECT_STORE=fs`) this order is invisible, which is why the swap looks harmless: `FsAssetStore` addresses a directory by name and never asks the row. So the mutation is caught only by the postgres+s3 rollback, which asserts the minted campaign's prefix is empty. The OTHER half of the same HIGH — a uuid rather than a slug as the argument — is invisible to the same test (a uuid frees an s3 prefix correctly) and is pinned instead by the postgres+fs rollback tests, where a uuid is a directory that was never written; no mutation can express that half, because reverting it needs a uuid the route no longer holds.",
+      "before": "            await getAssetStore(scope).deleteAssets(targetSlug);",
+      "after": "            await getAssetStore(scope).deleteAssets(minted.campaignId);",
+      "because": "the rollback frees assets by the target SLUG rather than by the campaign uuid `createCampaign` minted. On s3 the two are interchangeable — `ObjectAssetStore.deleteAssets` takes a uuid-shaped ref AS the campaign id with no lookup (C4) — so this is invisible there and it is only the pg+fs combination that shows it: `FsAssetStore` keeps a copied asset under `assets/inputs/<slug>/`, so a uuid names a directory it never wrote, `rm -rf`s nothing, and every copied file survives the one path whose whole job is to leave nothing behind, with no campaign left to ever free them. That is staging's CURRENT configuration, and the create rollback test there is what sees it.",
       "command": [
         "yarn",
         "vitest",
@@ -66,7 +66,7 @@
         "api",
         "apps/api/server/routes/campaigns/__tests__/assets.postgres.test.ts",
         "-t",
-        "a failure after the copy leaves no asset rows and no objects"
+        "the create rollback leaves no copied file under the target slug"
       ],
       "verdict": "caught"
     },
@@ -123,9 +123,9 @@
     },
     {
       "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
-      "before": "        try {\n          await getAssetStore(scope).deleteAssets(targetSlug);\n        } catch {\n          // Reported by the release that follows, and by nothing else.\n        }\n        // `releaseCampaign` carries its own guard: it refuses once a real,\n        // versioned brief exists for the slug (a concurrent Save won it).\n        await getBriefStore(scope).releaseCampaign(targetSlug);",
-      "after": "        // `releaseCampaign` carries its own guard: it refuses once a real,\n        // versioned brief exists for the slug (a concurrent Save won it).\n        await getBriefStore(scope).releaseCampaign(targetSlug);\n        try {\n          await getAssetStore(scope).deleteAssets(targetSlug);\n        } catch {\n          // Reported by the release that follows, and by nothing else.\n        }",
-      "because": "the DUPLICATE route's free goes back AFTER the release (fix round 2, HIGH) — the identical defect on the second of the two routes that mint, copy, release and free in that order. `releaseCampaign` removes the campaign row, so the slug has nothing left to resolve through: the free no-ops and every copied object survives the failure path that exists to remove it. Only the create route's copy of this sequence is caught by the order, which is why this entry exists at all; a fix that lands on one of two identical call sites is the failure mode this manifest exists to make visible.",
+      "before": "            await getAssetStore(scope).deleteAssets(targetSlug);",
+      "after": "            await getAssetStore(scope).deleteAssets(minted.campaignId);",
+      "because": "the rollback frees assets by the target SLUG rather than by the campaign uuid `createCampaign` minted. On s3 the two are interchangeable — `ObjectAssetStore.deleteAssets` takes a uuid-shaped ref AS the campaign id with no lookup (C4) — so this is invisible there and it is only the pg+fs combination that shows it: `FsAssetStore` keeps a copied asset under `assets/inputs/<slug>/`, so a uuid names a directory it never wrote, `rm -rf`s nothing, and every copied file survives the one path whose whole job is to leave nothing behind, with no campaign left to ever free them. That is staging's CURRENT configuration, and the duplicate rollback test there is what sees it.",
       "command": [
         "yarn",
         "vitest",
@@ -134,7 +134,7 @@
         "api",
         "apps/api/server/routes/campaigns/__tests__/assets.postgres.test.ts",
         "-t",
-        "the duplicate route's rollback frees them too"
+        "the duplicate rollback leaves no copied file either"
       ],
       "verdict": "caught"
     },
@@ -152,6 +152,23 @@
         "apps/api/server/lib/ports/__tests__/object-asset-store-copy.test.ts",
         "-t",
         "a copy that WROTE the object and then rejected discards it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/index.post.ts",
+      "before": "          const meta = await store.campaignMeta(targetSlug);\n          if (meta !== undefined && !meta.hasVersion) {",
+      "after": "          const meta = await store.campaignMeta(targetSlug);\n          if (meta !== undefined) {",
+      "because": "the free stops asking whether the campaign is real (fix round 3, MEDIUM). `withBriefLock` is IN-PROCESS, so a second API instance can write version 1 under the target slug between this request's `createCampaign` and its `createBrief`; the campaign is then a real, versioned one, and the free empties the WINNER's uploads — s3 through `deletePrefix` plus the row delete, fs through `rm -rf` — while the release below goes on to refuse, correctly, because a version exists. That is data loss rather than the leak this rollback exists to prevent, and it is why the order is free-then-release but the GUARD is still required: `campaignMeta`'s `hasVersion` is the same \"any version yet\" test `releaseCampaign` guards on, so asking it first asks the one question that can still change what happens. The test simulates the other instance by writing version 1 through a second `PgBriefStore` before raising an EEXIST-coded error, then asserts the campaign row, its asset row, its object and its `brief_version` all survive. The same line in `briefs/[id]/duplicate.post.ts` is the identical defect on the second of the two routes that make this sequence; the duplicate's own test drives it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.postgres.test.ts",
+        "-t",
+        "the create rollback leaves the winner's campaign and its assets alone"
       ],
       "verdict": "caught"
     }

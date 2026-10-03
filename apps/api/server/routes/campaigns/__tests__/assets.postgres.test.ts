@@ -31,8 +31,8 @@ import {
 } from "../../__tests__/tenant-harness.js";
 
 /**
- * `POST /campaigns/assets` on Postgres (PT-4b, DoD 2), and the create
- * rollback's use of the minted campaign id.
+ * `POST /campaigns/assets` on Postgres (PT-4b, DoD 2), and the two routes whose
+ * rollback frees a failed copy's assets.
  *
  * STATIC imports of the handlers, unlike `assets.test.ts`'s `web()` helper: that
  * one calls `vi.resetModules()` and re-imports per request, so the injected
@@ -279,8 +279,9 @@ describe("the create rollback frees the copied assets (PT-4b)", () => {
 
   test("the duplicate route's rollback frees them too", async () => {
     // The identical argument, against the second route that makes the same
-    // sequence: mint, copy, release, free. Both have a rollback, and only one of
-    // them was tested — which is how a fix lands on one of two identical sites.
+    // sequence: mint, copy, check, free, release. Both have a rollback, and only
+    // one of them was tested — which is how a fix lands on one of two identical
+    // sites.
     const tenant: TenantContext = { orgId: "local", userId: "u", roles: [], teamIds: [] };
     const briefs = new PgBriefStore(harness.db, "local", "u", [], []);
     await briefs.createCampaign("source-camp");
@@ -359,6 +360,150 @@ describe("the create rollback frees the copied assets (PT-4b)", () => {
       `select count(*)::int as n from campaign where org_id = 'local' and slug = 'copy'`,
     );
     expect(left[0]!.n).toBe(0);
+  });
+
+  describe("with a SECOND instance winning the slug (fix round 3, MEDIUM)", () => {
+    // The race both routes' docstrings name. `withBriefLock` is IN-PROCESS
+    // (`pg-brief-store.ts`: a map of promise chains on this process), so on
+    // Postgres a second API instance can write version 1 under the target slug
+    // between this request's `createCampaign` and its `createBrief`. That
+    // campaign is a REAL one the moment its first version exists — and an
+    // unconditional free empties its assets while the release, correctly,
+    // refuses to remove it. Data loss, not a leak.
+    const tenant: TenantContext = { orgId: "local", userId: "u", roles: [], teamIds: [] };
+
+    beforeEach(async () => {
+      const briefs = new PgBriefStore(harness.db, "local", "u", [], []);
+      await briefs.createCampaign("source-camp");
+      await briefs.createBrief(brief("source-camp"));
+      await getAssetStore(tenant).writeAsset("source-camp", "logo.png", PNG);
+    });
+
+    /**
+     * Make `createBrief` behave like a losing writer against a campaign another
+     * instance has just finished: write version 1 FIRST, through a store of its
+     * own, then raise the EEXIST a conflict answers with.
+     *
+     * The captured original matters: the spy is on `PgBriefStore.prototype`, so
+     * a second INSTANCE would be intercepted too and the winner's version would
+     * never be written. Calling the original on the other instance is what makes
+     * this a different actor's write rather than this request's own retry.
+     */
+    function competingWriter(): ReturnType<typeof vi.spyOn> {
+      const real = PgBriefStore.prototype.createBrief;
+      return vi.spyOn(PgBriefStore.prototype, "createBrief").mockImplementationOnce(async function (
+        this: PgBriefStore,
+        body,
+        options,
+      ) {
+        const other = new PgBriefStore(harness.db, "local", "other-instance", [], []);
+        await real.call(other, body, options);
+        throw Object.assign(new Error(`Brief "${body.id}" already exists.`), { code: "EEXIST" });
+      });
+    }
+
+    const createCall = () =>
+      mountTenantRoute(createHandler, { method: "POST", path: "/campaigns", tenant })(
+        new Request("http://x/campaigns", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Copy", source: "source-camp" }),
+        }),
+      );
+
+    const duplicateCall = () =>
+      mountTenantRoute(duplicateHandler, {
+        method: "POST",
+        path: "/campaigns/briefs/:id/duplicate",
+        tenant,
+      })(
+        new Request("http://x/campaigns/briefs/source-camp/duplicate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Copy" }),
+        }),
+      );
+
+    /** The winner's campaign, and the asset the copy put into it. */
+    async function won(): Promise<{ campaignId: string; rows: number; objects: number }> {
+      const { rows: campaigns } = await harness.db.query<{ id: string }>(
+        `select id from campaign where org_id = 'local' and slug = 'copy'`,
+      );
+      expect(campaigns, "the winner's campaign row must survive").toHaveLength(1);
+      const { rows: assets } = await harness.db.query<{ n: number }>(
+        `select count(*)::int as n from asset where org_id = 'local' and campaign_id = $1`,
+        [campaigns[0]!.id],
+      );
+      return {
+        campaignId: campaigns[0]!.id,
+        rows: assets[0]!.n,
+        objects: (await store.list(inputPrefix("local", campaigns[0]!.id))).length,
+      };
+    }
+
+    test("the create rollback leaves the winner's campaign and its assets alone", async () => {
+      competingWriter();
+      const res = await createCall();
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: 'Brief "copy" already exists.' });
+
+      const after = await won();
+      expect(after.rows, "the winner's asset row must survive").toBe(1);
+      expect(after.objects, "the winner's object must survive").toBe(1);
+      expect(
+        await store.get((await store.list(inputPrefix("local", after.campaignId)))[0]!.key),
+      ).toBeDefined();
+      // Its first version is what made it a winner, and it is still there.
+      const { rows: versions } = await harness.db.query<{ n: number }>(
+        `select count(*)::int as n from brief_version where campaign_id = $1`,
+        [after.campaignId],
+      );
+      expect(versions[0]!.n).toBe(1);
+      // And the source it was copied from is untouched, as always.
+      expect(await getAssetStore(tenant).readAsset("source-camp", "logo.png")).toEqual(PNG);
+    });
+
+    test("the duplicate rollback leaves them alone too", async () => {
+      competingWriter();
+      const res = await duplicateCall();
+      expect(res.status).toBe(409);
+
+      const after = await won();
+      expect(after.rows).toBe(1);
+      expect(after.objects).toBe(1);
+      expect(await getAssetStore(tenant).readAsset("source-camp", "logo.png")).toEqual(PNG);
+    });
+
+    test("a cleanup failure on the DUPLICATE route still releases, and the original error surfaces", async () => {
+      // The duplicate's half of the best-effort contract. The release is what
+      // makes the campaign go away, so a store that refuses to free must not
+      // stand in its way — and must not become the error the caller hears
+      // either. "boom" is not EEXIST, so a 500 carrying "boom" is the only
+      // acceptable answer: any other status would mean a different error won.
+      vi.spyOn(PgBriefStore.prototype, "createBrief").mockRejectedValueOnce(new Error("boom"));
+      vi.spyOn(ObjectAssetStore.prototype, "deleteAssets").mockRejectedValue(
+        new Error("the cleanup exploded"),
+      );
+      const warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+      const res = await duplicateCall();
+      expect(res.status).toBe(500);
+
+      // The release ran, so the reservation is gone — the thing the
+      // best-effort free exists to protect.
+      const { rows: left } = await harness.db.query<{ n: number }>(
+        `select count(*)::int as n from campaign where org_id = 'local' and slug = 'copy'`,
+      );
+      expect(left[0]!.n).toBe(0);
+      // And the swallowed error is not swallowed SILENTLY: a cleanup nobody can
+      // see failing is how a store's refusal becomes a support ticket instead
+      // of a log line. The message names the slug and the cause, in this
+      // repo's `[x] …: ${errorMessage(error)}` shape.
+      const said = warned.mock.calls.map((args) => args.join(" ")).join("\n");
+      expect(said).toContain('[campaigns] could not free the assets of "copy"');
+      expect(said).toContain("after a failed duplicate");
+      expect(said).toContain("the cleanup exploded");
+    });
   });
 
   describe("with OBJECT_STORE=fs — staging's CURRENT configuration (PT-4b)", () => {
