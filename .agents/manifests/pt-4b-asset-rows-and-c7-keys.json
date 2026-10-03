@@ -56,8 +56,8 @@
     {
       "file": "apps/api/server/routes/campaigns/index.post.ts",
       "before": "            await getAssetStore(scope).deleteAssets(targetSlug);",
-      "after": "            await getAssetStore(scope).deleteAssets(minted.campaignId);",
-      "because": "the rollback frees assets by the target SLUG rather than by the campaign uuid `createCampaign` minted. On s3 the two are interchangeable — `ObjectAssetStore.deleteAssets` takes a uuid-shaped ref AS the campaign id with no lookup (C4) — so this is invisible there and it is only the pg+fs combination that shows it: `FsAssetStore` keeps a copied asset under `assets/inputs/<slug>/`, so a uuid names a directory it never wrote, `rm -rf`s nothing, and every copied file survives the one path whose whole job is to leave nothing behind, with no campaign left to ever free them. That is staging's CURRENT configuration, and the create rollback test there is what sees it.",
+      "after": "            await getAssetStore(scope).deleteAssets(meta.campaignId);",
+      "because": "The free is handed the campaign UUID (meta.campaignId) instead of the slug. On STORE_BACKEND=postgres + OBJECT_STORE=fs (staging today) FsAssetStore keeps copied files under the SLUG directory, so freeing by uuid removes a directory that was never written and the copied files survive a failed create; the pg+fs rollback test sees the file still on disk. (pg+s3 is blind to this mutant: ObjectAssetStore accepts a uuid too.)",
       "command": [
         "yarn",
         "vitest",
@@ -124,8 +124,8 @@
     {
       "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
       "before": "            await getAssetStore(scope).deleteAssets(targetSlug);",
-      "after": "            await getAssetStore(scope).deleteAssets(minted.campaignId);",
-      "because": "the rollback frees assets by the target SLUG rather than by the campaign uuid `createCampaign` minted. On s3 the two are interchangeable — `ObjectAssetStore.deleteAssets` takes a uuid-shaped ref AS the campaign id with no lookup (C4) — so this is invisible there and it is only the pg+fs combination that shows it: `FsAssetStore` keeps a copied asset under `assets/inputs/<slug>/`, so a uuid names a directory it never wrote, `rm -rf`s nothing, and every copied file survives the one path whose whole job is to leave nothing behind, with no campaign left to ever free them. That is staging's CURRENT configuration, and the duplicate rollback test there is what sees it.",
+      "after": "            await getAssetStore(scope).deleteAssets(meta.campaignId);",
+      "because": "The free is handed the campaign UUID (meta.campaignId) instead of the slug. On STORE_BACKEND=postgres + OBJECT_STORE=fs (staging today) FsAssetStore keeps copied files under the SLUG directory, so freeing by uuid removes a directory that was never written and the copied files survive a failed create; the pg+fs rollback test sees the file still on disk. (pg+s3 is blind to this mutant: ObjectAssetStore accepts a uuid too.)",
       "command": [
         "yarn",
         "vitest",
@@ -169,6 +169,40 @@
         "apps/api/server/routes/campaigns/__tests__/assets.postgres.test.ts",
         "-t",
         "the create rollback leaves the winner's campaign and its assets alone"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/index.post.ts",
+      "before": "        try {\n          const meta = await store.campaignMeta(targetSlug);",
+      "after": "        await store.releaseCampaign(targetSlug);\n        try {\n          const meta = await store.campaignMeta(targetSlug);",
+      "because": "The campaign is released BEFORE its assets are freed. The release cascade removes the asset rows and the slug stops resolving, so campaignMeta answers undefined, the free is skipped, and the objects are left with no rows naming them; the pg+s3 rollback test sees objects still under the minted campaign prefix.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.postgres.test.ts",
+        "-t",
+        "a failure after the copy leaves no asset rows and no objects"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "        try {\n          const meta = await getBriefStore(scope).campaignMeta(targetSlug);",
+      "after": "        await getBriefStore(scope).releaseCampaign(targetSlug);\n        try {\n          const meta = await getBriefStore(scope).campaignMeta(targetSlug);",
+      "because": "The campaign is released BEFORE its assets are freed. The release cascade removes the asset rows and the slug stops resolving, so campaignMeta answers undefined, the free is skipped, and the objects are left with no rows naming them; the pg+s3 rollback test sees objects still under the minted campaign prefix.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.postgres.test.ts",
+        "-t",
+        "the duplicate route's rollback frees them too"
       ],
       "verdict": "caught"
     }
