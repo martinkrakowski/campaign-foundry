@@ -851,12 +851,10 @@ describe("ObjectPackageStore", () => {
     );
     expect(await store.get(`${PLATFORM_PREFIX}${EARLY_GEN}/manifest.json`)).toBeUndefined();
 
-    // A re-runs and writes its manifest. A's own generation is the fresh one it
-    // just minted, so this is a complete, readable package — the case the brief
-    // refutes is A holding a generation B swept. Reproduced by writing that
-    // generation's manifest directly, which is what a commit between A's check and
-    // A's PUT would leave behind.
-    await store.put(`${PLATFORM_PREFIX}${LATE_GEN}/manifest.json`, new Uint8Array([1]));
+    // A's manifest PUT lands now, into the generation B already swept — what a
+    // commit between A's claim check and A's PUT leaves behind: a manifest whose
+    // files are gone. Readers still get B's generation.
+    await store.put(`${PLATFORM_PREFIX}${EARLY_GEN}/manifest.json`, new Uint8Array([1]));
     expect(
       await latestCommittedGeneration(await store.list(PLATFORM_PREFIX), PLATFORM_PREFIX),
     ).toBe(LATE_GEN);
@@ -865,6 +863,7 @@ describe("ObjectPackageStore", () => {
     const c = build(store, { at: LATER, hex: "c" });
     await c.writePackaged(PLATFORM, `${SLUG}/alpha/c.png`, PNG);
     await c.writeManifest(PLATFORM, manifest({ items: [] }));
+    expect(await store.get(`${PLATFORM_PREFIX}${EARLY_GEN}/manifest.json`)).toBeUndefined();
     expect(await store.get(`${PLATFORM_PREFIX}${LATE_GEN}/manifest.json`)).toBeUndefined();
     expect(
       await latestCommittedGeneration(await store.list(PLATFORM_PREFIX), PLATFORM_PREFIX),
