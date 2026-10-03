@@ -160,8 +160,19 @@ describe("POST /campaigns/assets on Postgres (PT-4b, DoD 2)", () => {
 
     const created = await post(local, { briefId: "mine" });
     expect(created.status).toBe(201);
-    // The brief-body path is UNCHANGED (C4 is PT-4k's), slug and all.
-    expect(await created.json()).toEqual({ path: "assets/inputs/mine/logo.png" });
+    // The brief-body path is UNCHANGED (the web writes it until PT-4l), slug and
+    // all — and `id` RIDES ALONG with it under `s3` (PT-4k1), read back from the
+    // row rather than matched as a shape, so the response and the table cannot
+    // drift. The fs assertions in `assets.test.ts` stay byte-identical: there the
+    // key is ABSENT, not null, so `toEqual({ path })` still holds.
+    expect(await created.json()).toEqual({
+      path: "assets/inputs/mine/logo.png",
+      id: (
+        await harness.db.query<{ id: string }>(`select id from asset where campaign_id = $1`, [
+          campaignId,
+        ])
+      ).rows[0]!.id,
+    });
 
     const { rows } = await harness.db.query<{ sha256: string; content_type: string }>(
       `select sha256, content_type from asset where campaign_id = $1`,

@@ -75,6 +75,19 @@ describe("POST /campaigns/assets", () => {
     expect(readFileSync(join(dir, "assets", "inputs", "hydra-logo.png"), "utf8")).toBe("DEMO-LOGO");
   });
 
+  // PT-4k1: under `s3` the 201 body also carries the asset's own `id` (asserted in
+  // `assets.postgres.test.ts`). On fs it must stay byte-identical, and this is the
+  // assertion that can actually SEE the difference in the wire form — `res.json()`
+  // cannot, because `JSON.stringify` drops an `undefined` property, so a `toEqual`
+  // on the parsed body passes just as well for a response that had built an
+  // `id: undefined`. The route therefore spreads `id` CONDITIONALLY, and the raw
+  // text is what pins it.
+  test("the 201 body on fs carries the path and NO id key (PT-4k1)", async () => {
+    const res = await post(await web(dir), upload());
+    expect(res.status).toBe(201);
+    expect(await res.text()).toBe('{"path":"assets/inputs/camp/logo.png"}');
+  });
+
   test("stores an asset for a new unsaved brief with no stored brief (H5)", async () => {
     const res = await post(await web(dir), upload({ briefId: "new-unsaved", name: "logo.png" }));
     expect(res.status).toBe(201);

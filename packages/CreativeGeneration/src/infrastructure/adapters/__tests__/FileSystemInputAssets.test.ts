@@ -36,6 +36,21 @@ describe("FileSystemInputAssets (InputAssetPort adapter)", () => {
     await expect(inputs.read("assets")).resolves.toBeUndefined();
   });
 
+  // PT-4k1 added an id branch to the s3 adapter and deliberately NOT to this one:
+  // fs has no asset ids (D208d — fs keeps storing path refs, unchanged), so a bare
+  // uuid is not a path here either and is refused exactly as any other ref outside
+  // `<root>/assets` is. The point of the assertion is that the two backends AGREE
+  // on a ref neither can read: `ObjectInputAssets` maps its own `undefined` to
+  // ENOENT, which is what a fs read of a missing file does too, so a brief that
+  // somehow carried an id fails identically on both.
+  test("returns undefined for a bare uuid: fs has no asset ids (PT-4k1)", async () => {
+    const inputs = new FileSystemInputAssets(projectRoot());
+    // `resolveAssetPath` refuses it — a uuid is not under `<root>/assets` — so it
+    // never reaches the filesystem and is not an ENOENT. `undefined` is therefore
+    // "unsafe / not a stored ref", which is the truth on this backend.
+    await expect(inputs.read("3f2504e0-4f89-41d3-9a0c-0305e82c3301")).resolves.toBeUndefined();
+  });
+
   test("confines to the root it is given, not the process's project root (D167)", async () => {
     // A real scratch root, not a hard-coded name — and a ref that genuinely
     // EXISTS under `projectRoot()`. This ref reading ENOENT here can then only

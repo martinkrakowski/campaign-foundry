@@ -48,6 +48,22 @@ async function rowsOf(db: SqlClient, campaignId: string): Promise<readonly Row[]
   return rows;
 }
 
+/**
+ * One row by its NAME, which is how a copy's map is checked against the asset it
+ * actually made (PT-4k1). `rowsOf` orders by name and the target usually already
+ * holds a row under the plain name, so picking "the first one" would name the
+ * wrong asset — and a wrong id in a `toEqual` is a test that passes for the
+ * wrong reason.
+ */
+async function rowNamed(db: SqlClient, campaignId: string, name: string): Promise<Row> {
+  const { rows } = await db.query<Row>(
+    `select id, name, sha256 from asset
+      where org_id = $1 and campaign_id = $2 and name = $3`,
+    [ORG, campaignId, name],
+  );
+  return rows[0]!;
+}
+
 async function keysUnder(
   store: InMemoryObjectStore,
   campaignId: string,
@@ -95,17 +111,29 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
     await assets.writeAsset(SOURCE, "logo.png", PNG);
     await assets.writeAsset(SOURCE, "bed.mp3", JPEG);
 
-    expect(await assets.copyAssets(SOURCE, "target")).toEqual({
-      // Both entries, always: `rewriteAssetPaths` reads either, so one of them
-      // missing is how a copied brief points at a file that is not there.
-      "bed.mp3": "bed.mp3",
-      "logo.png": "logo.png",
-      [`assets/inputs/${SOURCE}/bed.mp3`]: "assets/inputs/target/bed.mp3",
-      [`assets/inputs/${SOURCE}/logo.png`]: "assets/inputs/target/logo.png",
-    });
-
+    // Read the rows BEFORE asserting the map: under PT-4k1 the map answers in
+    // IDS, so the only way to say what each entry must be is to name the row the
+    // copy wrote — a shape-matched uuid here would prove nothing about whether it
+    // is that row.
+    const map = await assets.copyAssets(SOURCE, "target");
     const sourceRows = await rowsOf(db, sourceId);
     const targetRows = await rowsOf(db, targetId);
+    const [targetBed, targetLogo] = targetRows;
+    const [sourceBed, sourceLogo] = sourceRows;
+    expect(map).toEqual({
+      // The bare name still maps to the bare name: `rewriteAssetPath`'s prefix
+      // branch BUILDS `assets/inputs/<to>/<value>` from this one, and an id here
+      // would make a ref nothing can read.
+      "bed.mp3": "bed.mp3",
+      "logo.png": "logo.png",
+      // The full path maps to the target's id, and the source's own id maps to
+      // that same id — one asset, two refs, both naming what the target holds.
+      [`assets/inputs/${SOURCE}/bed.mp3`]: targetBed!.id,
+      [`assets/inputs/${SOURCE}/logo.png`]: targetLogo!.id,
+      [sourceBed!.id]: targetBed!.id,
+      [sourceLogo!.id]: targetLogo!.id,
+    });
+
     expect(targetRows.map((row) => row.id)).not.toEqual(sourceRows.map((row) => row.id));
     expect(targetRows.map((row) => row.sha256)).toEqual([hashBytes(JPEG), hashBytes(PNG)]);
     // Every target key is built from that row's own id — a copy, never a share.
@@ -117,14 +145,23 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
 
   test("the same hash reuses the name and writes NOTHING — no second object, no second row", async () => {
     const targetId = await seed(db, "target");
-    await seed(db, "twin");
+    const twinId = await seed(db, "twin");
     await assets.writeAsset("twin", "logo.png", PNG);
     await assets.writeAsset("target", "logo.png", PNG);
     const before = await keysUnder(store, targetId);
+    const [theirs] = await rowsOf(db, twinId);
 
-    expect(await assets.copyAssets("twin", "target")).toEqual({
+    const map = await assets.copyAssets("twin", "target");
+    // The REUSED branch maps to the row the TARGET ALREADY HAS (PT-4k1), not to
+    // a fresh id: there is no insert here, so a fresh id would name an object
+    // nobody ever wrote — and a brief copying that name would ENOENT on its own
+    // copy. Read from the target's rows, so this cannot pass on a well-shaped
+    // uuid that names nothing.
+    const [held] = await rowsOf(db, targetId);
+    expect(map).toEqual({
       "logo.png": "logo.png",
-      "assets/inputs/twin/logo.png": "assets/inputs/target/logo.png",
+      "assets/inputs/twin/logo.png": held!.id,
+      [theirs!.id]: held!.id,
     });
     // The asset the target already has IS this asset, byte for byte. Copying it
     // again would leave an object no row could ever name.
@@ -133,12 +170,19 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
   });
 
   test("a different hash suffixes — `-<fromSlug>`, then `-2` — and the target's own bytes stand", async () => {
-    await seed(db, "target");
+    const targetId = await seed(db, "target");
     await assets.writeAsset("target", "logo.png", JPEG);
-    await assets.writeAsset(SOURCE, "logo.png", PNG);
-    expect(await assets.copyAssets(SOURCE, "target")).toEqual({
+    const original = await assets.writeAsset(SOURCE, "logo.png", PNG);
+
+    // Each map is checked against the row that copy ACTUALLY made (PT-4k1), named
+    // rather than picked by position — the target already holds a `logo.png`, and
+    // `rowsOf` orders by name, so the copied row is not the first one.
+    const firstMap = await assets.copyAssets(SOURCE, "target");
+    const firstCopy = await rowNamed(db, targetId, `logo-${SOURCE}.png`);
+    expect(firstMap).toEqual({
       "logo.png": `logo-${SOURCE}.png`,
-      [`assets/inputs/${SOURCE}/logo.png`]: `assets/inputs/target/logo-${SOURCE}.png`,
+      [`assets/inputs/${SOURCE}/logo.png`]: firstCopy.id,
+      [original.id]: firstCopy.id,
     });
 
     // The source's asset is REPLACED — how this actually happens — with bytes
@@ -147,10 +191,14 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
     // target's own bytes would take the same-hash branch instead and reuse
     // `logo.png`, which is fs's rule and is asserted above.)
     await assets.deleteAssets(SOURCE);
-    await assets.writeAsset(SOURCE, "logo.png", JPEG2);
-    expect(await assets.copyAssets(SOURCE, "target")).toEqual({
+    const replacement = await assets.writeAsset(SOURCE, "logo.png", JPEG2);
+    const secondMap = await assets.copyAssets(SOURCE, "target");
+    const secondCopy = await rowNamed(db, targetId, `logo-${SOURCE}-2.png`);
+    expect(secondCopy.id).not.toBe(firstCopy.id);
+    expect(secondMap).toEqual({
       "logo.png": `logo-${SOURCE}-2.png`,
-      [`assets/inputs/${SOURCE}/logo.png`]: `assets/inputs/target/logo-${SOURCE}-2.png`,
+      [`assets/inputs/${SOURCE}/logo.png`]: secondCopy.id,
+      [replacement.id]: secondCopy.id,
     });
 
     expect(await assets.readAsset("target", "logo.png")).toEqual(JPEG);
@@ -168,12 +216,18 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
     const targetId = await seed(db, "target");
     await assets.writeAsset("target", "logo.png", JPEG);
     await assets.writeAsset("target", `logo-${SOURCE}.png`, PNG);
-    await assets.writeAsset(SOURCE, "logo.png", PNG);
+    const source = await assets.writeAsset(SOURCE, "logo.png", PNG);
     const before = await keysUnder(store, targetId);
 
-    expect(await assets.copyAssets(SOURCE, "target")).toEqual({
+    // This is the reused branch reached through a SUFFIXED name, and it maps to
+    // the EXISTING row (PT-4k1) — the row an earlier copy made, named here so a
+    // freshly minted id would fail rather than merely look like one.
+    const held = await rowNamed(db, targetId, `logo-${SOURCE}.png`);
+    const map = await assets.copyAssets(SOURCE, "target");
+    expect(map).toEqual({
       "logo.png": `logo-${SOURCE}.png`,
-      [`assets/inputs/${SOURCE}/logo.png`]: `assets/inputs/target/logo-${SOURCE}.png`,
+      [`assets/inputs/${SOURCE}/logo.png`]: held.id,
+      [source.id]: held.id,
     });
     // The target is exactly as it was: two rows, and the same two objects.
     expect(await rowsOf(db, targetId)).toHaveLength(2);
@@ -181,10 +235,7 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
 
     // And running it again changes nothing either — the idempotency is not a
     // one-shot courtesy to the first copy after the collision was created.
-    expect(await assets.copyAssets(SOURCE, "target")).toEqual({
-      "logo.png": `logo-${SOURCE}.png`,
-      [`assets/inputs/${SOURCE}/logo.png`]: `assets/inputs/target/logo-${SOURCE}.png`,
-    });
+    expect(await assets.copyAssets(SOURCE, "target")).toEqual(map);
     expect(await rowsOf(db, targetId)).toHaveLength(2);
     expect(await keysUnder(store, targetId)).toEqual(before);
   });
@@ -263,12 +314,18 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
     // branch is here anyway because the alternative is SILENTLY dropping the
     // directory: `basename` alone would turn `nested/logo.png` into
     // `logo-x.png` and write the copy somewhere the map never names.
-    await seed(db, "target");
+    const targetId = await seed(db, "target");
     await assets.writeAsset("target", "nested/logo.png", PNG);
-    await assets.writeAsset(SOURCE, "nested/logo.png", JPEG);
-    expect(await assets.copyAssets(SOURCE, "target")).toEqual({
+    const source = await assets.writeAsset(SOURCE, "nested/logo.png", JPEG);
+    const map = await assets.copyAssets(SOURCE, "target");
+    // Read after the copy: this is the row the copy inserted, under the SUFFIXED
+    // name and inside the source's own directory — the whole of what the branch
+    // this test guards is about.
+    const copied = await rowNamed(db, targetId, `nested/logo-${SOURCE}.png`);
+    expect(map).toEqual({
       "nested/logo.png": `nested/logo-${SOURCE}.png`,
-      [`assets/inputs/${SOURCE}/nested/logo.png`]: `assets/inputs/target/nested/logo-${SOURCE}.png`,
+      [`assets/inputs/${SOURCE}/nested/logo.png`]: copied.id,
+      [source.id]: copied.id,
     });
   });
 

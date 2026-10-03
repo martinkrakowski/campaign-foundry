@@ -9,7 +9,12 @@ import { assetContentType } from "../asset-files.js";
 import { hashBytes } from "../brief-files.js";
 import { inputKey, inputPrefix } from "../object-store/object-keys.js";
 import type { SqlClient } from "../db/sql-client.js";
-import type { AssetEntry, AssetStorePort } from "./asset-store.port.js";
+import {
+  isAssetId,
+  type AssetEntry,
+  type AssetOwner,
+  type AssetStorePort,
+} from "./asset-store.port.js";
 
 /** `error.code`, when `error` has one (pg and PGlite both attach the SQLSTATE as a string). */
 function pgErrorCode(error: unknown): string | undefined {
@@ -31,6 +36,16 @@ const CAMPAIGN_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
 
 /** The only `kind` this lane stores; the row's column defaults to it too. */
 const INPUT_KIND = "input";
+
+/**
+ * Where `copyAssets` puts one asset, discriminated on whether the target already
+ * had it (PT-4k1). The `reused` arm carries the id of the row that is ALREADY
+ * there; the fresh arm has none yet, because the id is minted by the caller that
+ * is about to insert the row that will hold it.
+ */
+type CopyDestination =
+  | { readonly name: string; readonly reused: false }
+  | { readonly name: string; readonly reused: true; readonly id: string };
 
 interface AssetRow {
   readonly id: string;
@@ -82,14 +97,21 @@ export class ObjectAssetStore implements AssetStorePort {
    * See `AssetStorePort.assetRelPath` — UNCHANGED, and it stays a BRIEF-BODY
    * path with the slug in it. It is what a stored brief records, so it is what a
    * brief must keep saying; the key is a different thing and never appears in a
-   * brief. Rewriting this into a key shape is PT-4k's job (C4).
+   * brief. PT-4k1 did NOT rewrite it into a key shape, and here is why that is
+   * still right: the web writes this path into the brief until PT-4l teaches it
+   * to send an id, and the SERVER is what normalises such a ref — first
+   * org-scoped against the campaign it names, and then (PT-4k2, D208d) into the
+   * asset's own id at the save-time check. A path this returns is an input to
+   * that check, not an output of it.
    */
   assetRelPath(briefId: string, name: string): string {
     return `assets/inputs/${briefId}/${name}`;
   }
 
   /**
-   * See `AssetStorePort.writeAsset`. The order is the whole contract:
+   * See `AssetStorePort.writeAsset`, and it additionally answers the asset's own
+   * `id` (PT-4k1) — the one ref the web can hand back once PT-4l reads it. The
+   * order is the whole contract:
    *
    * 1. resolve the slug to the campaign's uuid, org-scoped;
    * 2. mint an asset id;
@@ -104,8 +126,17 @@ export class ObjectAssetStore implements AssetStorePort {
    * before the caller is told. `If-None-Match` stays as defence in depth for the
    * one case a key really can be taken: a retry of a write that already
    * succeeded.
+   *
+   * The returned id is the one that was MINTED, not one read back from the row:
+   * it went in as `$1`, so the insert that is the exclusive create is also what
+   * makes the returned id name an object — a row read afterwards could only say
+   * the same thing, one round trip later, and could say a different one.
    */
-  async writeAsset(briefId: string, name: string, bytes: Buffer): Promise<{ path: string }> {
+  async writeAsset(
+    briefId: string,
+    name: string,
+    bytes: Buffer,
+  ): Promise<{ path: string; id: string }> {
     const campaignId = await this.resolveCampaignId(briefId);
     // Before the put, not after: an unresolved reference is the one failure with
     // nothing to undo, and a `23503` from the foreign key would be a genuine
@@ -161,7 +192,7 @@ export class ObjectAssetStore implements AssetStorePort {
       }
       throw error;
     }
-    return { path: this.assetRelPath(briefId, name) };
+    return { path: this.assetRelPath(briefId, name), id: assetId };
   }
 
   /**
@@ -183,23 +214,90 @@ export class ObjectAssetStore implements AssetStorePort {
   }
 
   /**
+   * See `AssetStorePort.readAssetById`, and the three `undefined`s are decided
+   * in this order — which matters, because two of the three cost nothing:
+   *
+   * 1. a ref that is not an id answers `undefined` WITHOUT a query. This is the
+   *    guard `isAssetId` exists for (D203's shape rule, C1): `asset.id` is a
+   *    `uuid` column, so binding `assets/inputs/winter-sale/logo.png` to
+   *    `a.id = $2` raises `22P02` on pg and on PGlite alike, and the promise
+   *    this method makes for a ref it cannot answer is `undefined`, never a
+   *    throw. A query here would also make the shape rule load-bearing twice.
+   * 2. a row no `asset` in THIS org holds answers `undefined` — another org's
+   *    id included, which is why the query carries `org_id`. Another tenant's id
+   *    is ABSENT, never forbidden, for the same reason another tenant's slug is
+   *    (see {@link ObjectAssetStore.resolveCampaignId}).
+   * 3. a row whose object is gone answers `undefined`: the row is not the bytes.
+   *
+   * A store that REFUSES propagates, as it does in `readAsset` — a bucket that
+   * cannot be read is a 500, and turning it into `undefined` would tell a caller
+   * its asset is gone.
+   */
+  async readAssetById(id: string): Promise<Buffer | undefined> {
+    if (!isAssetId(id)) return undefined;
+    const { rows } = await this.db.query<{ campaign_id: string }>(
+      `select campaign_id from asset where org_id = $1 and id = $2`,
+      [this.orgId, id],
+    );
+    const campaignId = rows[0]?.campaign_id;
+    if (campaignId === undefined) return undefined;
+    const object = await this.store.get(inputKey(this.orgId, campaignId, id));
+    return object === undefined ? undefined : Buffer.from(object.bytes);
+  }
+
+  /**
+   * See `AssetStorePort.assetOwner`. Org-scoped like every query here, and the
+   * join is the reason this is not two calls: the slug lives on `campaign` and the
+   * name on `asset`, and asking twice would be two round trips to answer one
+   * question about one row — while a campaign renamed between them would be able
+   * to disagree with itself.
+   *
+   * `kind = 'input'` is carried because the column is CHECK-constrained to
+   * `input` today and `readAssetById` deliberately does NOT narrow by it (an id
+   * is an id; the constraint is not what makes it org-scoped). Pinning it here
+   * would make the two methods answer different questions about the same row the
+   * moment a second kind lands, so the id stays the only selector and the check
+   * stays the only gate. A row that is absent, another org's, or not an id answers
+   * `undefined`, the same three as above.
+   */
+  async assetOwner(id: string): Promise<AssetOwner | undefined> {
+    if (!isAssetId(id)) return undefined;
+    const { rows } = await this.db.query<{ campaign_id: string; slug: string; name: string }>(
+      `select a.campaign_id, c.slug, a.name from asset a
+         join campaign c on c.id = a.campaign_id
+         where a.org_id = $1 and a.id = $2`,
+      [this.orgId, id],
+    );
+    const row = rows[0];
+    return row === undefined
+      ? undefined
+      : { campaignId: row.campaign_id, slug: row.slug, name: row.name };
+  }
+
+  /**
    * See `AssetStorePort.listAssets`. Answered from ROWS, not from a listing of
    * the prefix: `name`, `type` and `size` are all columns, and reading a
    * remote store's metadata per asset would make one listing cost one round
    * trip per asset against a bucket that is not on this host. It also cannot
    * throw for "not found" — `campaignKnown` in `assets.get.ts` depends on an
    * unknown campaign answering `[]` rather than a refusal.
+   *
+   * `id` rides along for free (PT-4k1): it is the row's own primary key, so
+   * carrying it costs one column on a query that already runs rather than a
+   * lookup per entry, and it is what a caller needs to store a ref. fs leaves
+   * the field absent, which is why the port declares it optional.
    */
   async listAssets(briefId: string): Promise<readonly AssetEntry[]> {
     const campaignId = await this.resolveCampaignId(briefId);
     if (campaignId === undefined) return [];
-    const { rows } = await this.db.query<Pick<AssetRow, "name" | "size">>(
-      `select name, size from asset
+    const { rows } = await this.db.query<Pick<AssetRow, "id" | "name" | "size">>(
+      `select id, name, size from asset
         where org_id = $1 and campaign_id = $2 and kind = $3`,
       [this.orgId, campaignId, INPUT_KIND],
     );
     return rows
       .map((row) => ({
+        id: row.id,
         name: row.name,
         type: assetContentType(row.name),
         size: Number(row.size),
@@ -213,8 +311,23 @@ export class ObjectAssetStore implements AssetStorePort {
   }
 
   /**
-   * See `AssetStorePort.copyAssets`, and it returns fs's two-entry map byte for
-   * byte (`rewriteAssetPaths` reads both keys, and C4 is PT-4k's to change).
+   * See `AssetStorePort.copyAssets`, and its map answers to THREE keys per copied
+   * (or reused) asset — `name → destName`, `assets/inputs/<from>/<name> → <target
+   * id>`, and `<source id> → <target id>` (PT-4k1, D208a).
+   *
+   * `rewriteAssetPaths` is unchanged and reads them in that order: `path in
+   * pathMap` FIRST, so a full path ref is answered by the id it must become;
+   * otherwise the `assets/inputs/<from>/` prefix branch looks the bare NAME up
+   * and builds a path from it, which is why the name entry is still
+   * name→name rather than name→id. That asymmetry is deliberate: the name entry
+   * exists to feed a path BUILDER, and an id inside it would produce
+   * `assets/inputs/<to>/<id>` — a ref nothing can read.
+   *
+   * **The target id is decided BEFORE anything is recorded** (PT-4k1), because a
+   * reused asset has no insert to read an id back from: `destination()` answers
+   * the EXISTING row's id when it says `reused`, so a name the target already
+   * holds by these exact bytes maps to the row the target really has rather than
+   * to an id of an object that was never written.
    *
    * The copy is a server-side `copy` to a NEW key with a NEW asset id, plus a
    * new row in the target — a campaign's assets are its own, and a key shared
@@ -231,6 +344,13 @@ export class ObjectAssetStore implements AssetStorePort {
    * the unique index would refuse. Same text as fs for the other case —
    * `<stem>-<from><ext>`, then `-2`, `-3` — so a duplicated campaign's brief
    * names the same files on both backends.
+   *
+   * **Interim, documented, NOT fixed (PT-4k1, C4):** until PT-4k2 lands, an id
+   * ref that reaches a WRITTEN brief bypasses `extractSourceAssetBriefIds`, which
+   * matches paths only — so the save-time team check does not see it, and a
+   * copied brief can carry an id ref whose campaign this caller cannot see. PT-4k2's
+   * `resolveBriefAssetRefs` closes this; until it does, a path ref is the only
+   * form that check has ever covered, and this lane does not widen it.
    */
   async copyAssets(fromBriefId: string, toBriefId: string): Promise<Record<string, string>> {
     if (fromBriefId === toBriefId) return {};
@@ -245,14 +365,18 @@ export class ObjectAssetStore implements AssetStorePort {
     const pathMap: Record<string, string> = {};
     for (const source of sources) {
       const destination = await this.destination(toId, fromBriefId, source);
-      record(pathMap, fromBriefId, toBriefId, source.name, destination.name);
+      // FIRST, so all three entries can name it: a reused asset already has an
+      // id — the target row's own — and a fresh one has to be minted before it
+      // is recorded at all. Recording before this point is what the pre-PT-4k1
+      // body did with a path, and the path is not what the map answers with.
+      const assetId = destination.reused ? destination.id : randomUUID();
+      record(pathMap, fromBriefId, source.name, destination.name, source.id, assetId);
       // The target already holds these exact bytes under this name, so there is
       // nothing to copy and nothing to insert — and copying anyway would be an
       // insert the unique index refuses, which is a 500 rather than the no-op
       // the caller asked for. This is what makes a duplicated campaign, or a
       // replace-save over an already-copied asset, idempotent.
       if (destination.reused) continue;
-      const assetId = randomUUID();
       const targetKey = inputKey(this.orgId, toId, assetId);
       try {
         // INSIDE the try, because a copy can fail AFTER it wrote: S3 answers
@@ -373,6 +497,16 @@ export class ObjectAssetStore implements AssetStorePort {
    * for a name the target already answers. It holds for a SUFFIXED name as much
    * as for the plain one, which is the case a copy that runs twice reaches.
    *
+   * The `reused: true` arm carries the EXISTING row's `id` (PT-4k1), and it is a
+   * discriminated union rather than an optional `id?` for one reason: an optional
+   * field does not narrow on `destination.reused`, so the caller's `destination
+   * .reused ? destination.id : randomUUID()` would be a `string | undefined`
+   * under `exactOptionalPropertyTypes` and the fresh copy's key would be built
+   * from a type that admits nothing. Carrying it on the arm that HAS it is what
+   * makes the caller total — and the caller's map has to name the asset the
+   * target really has, which is this row, not a fresh id for an object nobody
+   * wrote.
+   *
    * fs's decision tree, in fs's order, with "is this candidate taken" answered by
    * a row rather than by `readFile`: the same question with the same answers and
    * no bytes moved. The suffix text is fs's word for word — `<stem>-<from><ext>`,
@@ -382,10 +516,10 @@ export class ObjectAssetStore implements AssetStorePort {
     toId: string,
     fromBriefId: string,
     source: AssetRow,
-  ): Promise<{ readonly name: string; readonly reused: boolean }> {
+  ): Promise<CopyDestination> {
     const taken = await this.assetRow(toId, source.name);
     if (taken === undefined) return { name: source.name, reused: false };
-    if (taken.sha256 === source.sha256) return { name: source.name, reused: true };
+    if (taken.sha256 === source.sha256) return { name: source.name, reused: true, id: taken.id };
     const extension = extname(source.name);
     const stem = basename(source.name, extension);
     const directory = dirname(source.name);
@@ -395,7 +529,9 @@ export class ObjectAssetStore implements AssetStorePort {
       const candidate = directory === "." ? named : `${directory}/${named}`;
       const existing = await this.assetRow(toId, candidate);
       if (existing === undefined) return { name: candidate, reused: false };
-      if (existing.sha256 === source.sha256) return { name: candidate, reused: true };
+      if (existing.sha256 === source.sha256) {
+        return { name: candidate, reused: true, id: existing.id };
+      }
     }
   }
 
@@ -426,19 +562,35 @@ function alreadyExists(path: string): Error {
 }
 
 /**
- * The two entries fs's `copyAssets` records per source asset: the bare
- * `name → destName` a brief body carries, and the repo-relative
- * `assets/inputs/<from>/<name> → assets/inputs/<to>/<destName>` one carries.
- * Both, always — `rewriteAssetPaths` reads either, so returning one of them is
- * how a copied brief ends up pointing at a file that is not there.
+ * The three entries `copyAssets` records per source asset, and each answers a
+ * DIFFERENT reader (PT-4k1):
+ *
+ * - `name → destName`, the bare name a brief body carries. UNCHANGED by this
+ *   lane: `rewriteAssetPath`'s prefix branch finds this key and BUILDS
+ *   `assets/inputs/<toBriefId>/<value>` from it, so an id here would make a ref
+ *   nothing can read.
+ * - `assets/inputs/<fromBriefId>/<name> → <target id>`. The full path a brief
+ *   written before ids existed carries, remapped to what the target's ref must
+ *   become. `rewriteAssetPath` checks `path in pathMap` FIRST, so this is the
+ *   entry that answer wins on.
+ * - `<source id> → <target id>`, the ref of a brief that was ALREADY id-addressed.
+ *   Without it a duplicated campaign's second version would keep naming the
+ *   FIRST campaign's asset — still readable, and now owned by a campaign whose
+ *   `deleteAssets` this caller has no right to lean on.
+ *
+ * All three, always. Returning a subset is how a copied brief ends up naming an
+ * asset that is not there, and the reader that loses is whichever kind of ref
+ * this lane did not think about.
  */
 function record(
   pathMap: Record<string, string>,
   fromBriefId: string,
-  toBriefId: string,
   name: string,
   destName: string,
+  sourceId: string,
+  targetId: string,
 ): void {
   pathMap[name] = destName;
-  pathMap[`assets/inputs/${fromBriefId}/${name}`] = `assets/inputs/${toBriefId}/${destName}`;
+  pathMap[`assets/inputs/${fromBriefId}/${name}`] = targetId;
+  pathMap[sourceId] = targetId;
 }
