@@ -12,6 +12,7 @@ import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creati
 import { NodeCanvasCompositor, scaleBasis, widthTermBasis } from "../NodeCanvasCompositor.js";
 
 import { projectRoot } from "@campaignfoundry/shared";
+import { fsInputs } from "./fs-inputs.js";
 const THREE_LINE =
   "Stay wild, stay hydrated, and never stop exploring the trail ahead of you today";
 
@@ -52,7 +53,7 @@ type LayoutCapture = {
 };
 
 async function captureLayout(req: CompositeRequest): Promise<LayoutCapture> {
-  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   const lines: LayoutCapture["lines"][number][] = [];
@@ -189,7 +190,7 @@ describe("display layout (D114)", () => {
     const prepared = await NodeCanvasCompositor.prepare(
       request({ canvas: { ratio: "9:16" }, pixelSize: { width: 108, height: 192 }, message: "Hi" }),
       "Inter",
-      projectRoot(),
+      fsInputs(projectRoot()),
     );
     expect(prepared.width).toBe(108);
     expect(prepared.height).toBe(192);

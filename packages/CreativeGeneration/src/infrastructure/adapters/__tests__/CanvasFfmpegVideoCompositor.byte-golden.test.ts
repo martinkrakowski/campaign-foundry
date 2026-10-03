@@ -22,6 +22,7 @@ import {
 } from "./compositor-golden-key.js";
 
 import { projectRoot } from "@campaignfoundry/shared";
+import { fsInputs } from "./fs-inputs.js";
 /**
  * VG2 — the MP4 byte golden. D10 claims motion bytes are frozen; the still
  * goldens hash PNGs and C1's motion goldens hash individual frames, but
@@ -161,7 +162,7 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
       // not "the encoder changed". VE3b1's audio golden already had this shape.
       const { video } = await new CanvasFfmpegVideoCompositor({
         ffmpegPath,
-        assetRoot: projectRoot(),
+        inputs: fsInputs(projectRoot()),
       }).compositeVideo(canonicalMp4Request());
       const banner = parseX264Banner(video);
 
@@ -215,7 +216,7 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
         await new CanvasFfmpegVideoCompositor({
           ffmpegPath: alias,
           spawn,
-          assetRoot: projectRoot(),
+          inputs: fsInputs(projectRoot()),
         }).compositeVideo(canonicalMp4Request());
 
         expect(invocations.map((call) => call.command)).toEqual([alias]);

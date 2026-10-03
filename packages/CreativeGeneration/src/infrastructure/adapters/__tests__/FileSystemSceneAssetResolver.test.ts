@@ -5,6 +5,7 @@ import { loadImage } from "@napi-rs/canvas";
 import { projectRoot } from "@campaignfoundry/shared";
 import { AspectRatio } from "@campaignfoundry/CampaignOrchestration";
 import { FileSystemSceneAssetResolver } from "../FileSystemSceneAssetResolver.js";
+import { fsInputs } from "./fs-inputs.js";
 
 const ratio = (v = "1:1") => {
   const r = AspectRatio.create(v);
@@ -23,7 +24,7 @@ const ratio = (v = "1:1") => {
 describe("FileSystemSceneAssetResolver (SceneAssetPort adapter)", () => {
   test("resolves a readable scene, cover-fitted to the target ratio's exact pixel dimensions", async () => {
     const target = ratio("9:16");
-    const out = await new FileSystemSceneAssetResolver(projectRoot()).resolveScene(
+    const out = await new FileSystemSceneAssetResolver(fsInputs(projectRoot())).resolveScene(
       "assets/inputs/reuse-bg.png",
       target,
     );
@@ -40,7 +41,7 @@ describe("FileSystemSceneAssetResolver (SceneAssetPort adapter)", () => {
 
   test("cover-fits to a second, differently-shaped ratio too — the dimensions track the request, not a fixed output size", async () => {
     const target = ratio("16:9");
-    const out = await new FileSystemSceneAssetResolver(projectRoot()).resolveScene(
+    const out = await new FileSystemSceneAssetResolver(fsInputs(projectRoot())).resolveScene(
       "assets/inputs/reuse-bg.png",
       target,
     );
@@ -51,13 +52,16 @@ describe("FileSystemSceneAssetResolver (SceneAssetPort adapter)", () => {
 
   test("rejects an unsafe (absolute) path, never falling through silently", async () => {
     await expect(
-      new FileSystemSceneAssetResolver(projectRoot()).resolveScene("/etc/passwd", ratio()),
+      new FileSystemSceneAssetResolver(fsInputs(projectRoot())).resolveScene(
+        "/etc/passwd",
+        ratio(),
+      ),
     ).rejects.toThrow(/not a valid asset path/);
   });
 
   test("rejects a path that escapes the confined assets tree", async () => {
     await expect(
-      new FileSystemSceneAssetResolver(projectRoot()).resolveScene(
+      new FileSystemSceneAssetResolver(fsInputs(projectRoot())).resolveScene(
         "assets/../secrets.png",
         ratio(),
       ),
@@ -66,7 +70,7 @@ describe("FileSystemSceneAssetResolver (SceneAssetPort adapter)", () => {
 
   test("rejects a missing scene file", async () => {
     await expect(
-      new FileSystemSceneAssetResolver(projectRoot()).resolveScene(
+      new FileSystemSceneAssetResolver(fsInputs(projectRoot())).resolveScene(
         "assets/inputs/does-not-exist.png",
         ratio(),
       ),
@@ -75,7 +79,7 @@ describe("FileSystemSceneAssetResolver (SceneAssetPort adapter)", () => {
 
   test("rejects an undecodable file (not an image)", async () => {
     await expect(
-      new FileSystemSceneAssetResolver(projectRoot()).resolveScene(
+      new FileSystemSceneAssetResolver(fsInputs(projectRoot())).resolveScene(
         "assets/inputs/README.txt",
         ratio(),
       ),
@@ -112,7 +116,7 @@ describe("FileSystemSceneAssetResolver — image-only enforcement against real a
     "a real, valid %s upload named as a beat's background is rejected, never silently accepted as a scene",
     async (name) => {
       await expect(
-        new FileSystemSceneAssetResolver(projectRoot()).resolveScene(
+        new FileSystemSceneAssetResolver(fsInputs(projectRoot())).resolveScene(
           `assets/inputs/ve3b2-image-only-proof-scene/${name}`,
           ratio(),
         ),

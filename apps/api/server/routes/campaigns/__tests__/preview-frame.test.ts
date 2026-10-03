@@ -206,6 +206,22 @@ describe("POST /campaigns/preview-frame", () => {
     expect(previewAdapters({ ...env, assetRoot: "/roots/acme" })).toBe(mine);
   });
 
+  test("the same asset root under two tenants gets different bundles, so one org is never served another's cached frame (PT-4c)", () => {
+    // The org dimension of the cache key. Two tenants may resolve to the SAME
+    // asset root (the local operator's own tree, a shared mount, a root a future
+    // lane points every org at), and a preview reads the brief's logo from it —
+    // so with only font+root in the key these two orgs would share one frame
+    // cache and be served each other's logo. Keeping the root alone does not
+    // separate them; only the org does.
+    const env = runEnvironment(LOCAL_TENANT);
+    const mine = previewAdapters({ ...env, tenant: { ...env.tenant, orgId: "acme" } });
+    const theirs = previewAdapters({ ...env, tenant: { ...env.tenant, orgId: "globex" } });
+    expect(mine).not.toBe(theirs);
+    expect(mine.frameCache).not.toBe(theirs.frameCache);
+    // Each org still reuses its own bundle, so its cache keeps warm.
+    expect(previewAdapters({ ...env, tenant: { ...env.tenant, orgId: "acme" } })).toBe(mine);
+  });
+
   test("a scrub cell with motion, durationSec, atSec renders image/png and returns cache key", async () => {
     const res = await mount()(
       jsonReq({

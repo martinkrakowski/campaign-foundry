@@ -11,6 +11,7 @@ import type { LayerFrame } from "@campaignfoundry/CampaignOrchestration/creative
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
 import { projectRoot } from "@campaignfoundry/shared";
+import { fsInputs } from "./fs-inputs.js";
 /**
  * L10a / D130: a present `layer.frame` is the draw rect (base + byFamily for
  * the current canvas family). Absent is today's geometry, byte-identical —
@@ -79,7 +80,7 @@ interface FramePixels {
 }
 
 async function pixels(req: TemplateRequest): Promise<FramePixels> {
-  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   NodeCanvasCompositor.draw(ctx, prepared, 1);
@@ -88,7 +89,7 @@ async function pixels(req: TemplateRequest): Promise<FramePixels> {
 }
 
 async function timelinePixels(req: TemplateRequest): Promise<FramePixels> {
-  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   NodeCanvasCompositor.draw(ctx, prepared, 1, undefined, 0.5, 1);

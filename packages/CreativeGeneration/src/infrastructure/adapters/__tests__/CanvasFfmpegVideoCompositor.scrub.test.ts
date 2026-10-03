@@ -8,6 +8,7 @@ import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 import { CanvasFfmpegVideoCompositor, type FfmpegSpawn } from "../CanvasFfmpegVideoCompositor.js";
 
 import { projectRoot } from "@campaignfoundry/shared";
+import { fsInputs } from "./fs-inputs.js";
 /**
  * VE2 — the scrub seam's fidelity fence (VE-D6).
  *
@@ -110,7 +111,7 @@ describe("CanvasFfmpegVideoCompositor.compositeFrame — the encoded frame, exac
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: capturingSpawn(chunks),
       ffmpegPath: "/opt/ffmpeg",
-      assetRoot: projectRoot(),
+      inputs: fsInputs(projectRoot()),
     });
     const request = scrubRequest({ durationSec, fps });
 
@@ -167,7 +168,7 @@ describe("CanvasFfmpegVideoCompositor.compositeFrame — the encoded frame, exac
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: capturingSpawn(chunks),
       ffmpegPath: "/opt/ffmpeg",
-      assetRoot: projectRoot(),
+      inputs: fsInputs(projectRoot()),
     });
     const request = scrubRequest();
     const encode = await compositor.compositeVideo(request);
@@ -184,7 +185,7 @@ describe("CanvasFfmpegVideoCompositor.compositeFrame — the encoded frame, exac
         throw new Error("compositeFrame must not spawn ffmpeg");
       }) as FfmpegSpawn,
       ffmpegPath: null,
-      assetRoot: projectRoot(),
+      inputs: fsInputs(projectRoot()),
     });
     const frame = await compositor.compositeFrame(scrubRequest(), 1);
     expect(Array.from(frame.image.slice(0, 4))).toEqual(PNG_MAGIC);
@@ -202,7 +203,7 @@ describe("CanvasFfmpegVideoCompositor.compositeFrame — the encoded frame, exac
         throw new Error("must not spawn");
       }) as FfmpegSpawn,
       ffmpegPath: null,
-      assetRoot: projectRoot(),
+      inputs: fsInputs(projectRoot()),
     });
     await expect(compositor.compositeFrame(scrubRequest(), atSec)).rejects.toThrow(message);
   });
@@ -213,7 +214,7 @@ describe("CanvasFfmpegVideoCompositor.compositeFrame — the encoded frame, exac
         throw new Error("must not spawn");
       }) as FfmpegSpawn,
       ffmpegPath: null,
-      assetRoot: projectRoot(),
+      inputs: fsInputs(projectRoot()),
     });
     await expect(compositor.compositeFrame(scrubRequest({ durationSec: 0.05 }), 0)).rejects.toThrow(
       /durationSec \* fps must yield at least 2 frames|durationSec must be a finite number/,
@@ -229,7 +230,7 @@ describe("CanvasFfmpegVideoCompositor.compositeFrame — the encoded frame, exac
         throw new Error("must not spawn");
       }) as FfmpegSpawn,
       ffmpegPath: null,
-      assetRoot: projectRoot(),
+      inputs: fsInputs(projectRoot()),
     });
     const frame = await compositor.compositeFrame(
       scrubRequest({ logoPath: "assets/inputs/missing-logo.png" }),

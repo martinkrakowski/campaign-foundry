@@ -22,6 +22,7 @@ import {
 } from "./compositor-golden-key.js";
 
 import { projectRoot } from "@campaignfoundry/shared";
+import { fsInputs } from "./fs-inputs.js";
 /**
  * VE3b1 — the audio byte golden.
  *
@@ -184,7 +185,7 @@ describe("CanvasFfmpegVideoCompositor audio byte golden (VE3b1)", () => {
       // not "the encoder changed".
       const { video } = await new CanvasFfmpegVideoCompositor({
         ffmpegPath,
-        assetRoot: projectRoot(),
+        inputs: fsInputs(projectRoot()),
       }).compositeVideo({
         ...request,
         audio,
