@@ -13,14 +13,6 @@ import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
 /**
- * A client-chosen slug (an unsaved draft's id) never looks like this, so a ref
- * shaped like one is a real campaign reference (D178) rather than a brand-new
- * draft id — if it fails to resolve, the campaign genuinely does not exist,
- * unlike a fresh slug (which this route has always accepted, creating the
- * asset directory for a not-yet-saved brief).
- */
-const CAMPAIGN_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/**
  * POST /campaigns/assets — store a PNG/JPEG/MP3/M4A under `assets/inputs/<briefId>/<name>`.
  *
  * Local authoring tool: writes are confined to `assets/inputs/<briefId>/` and never
@@ -84,20 +76,28 @@ export default defineEventHandler(async (event) => {
   const briefs = getBriefStore(scope);
   // On fs the id IS the slug (D179): no lookup runs there at all (no
   // uuid concept exists on that backend either), matching this route's
-  // unconditional-write behaviour from before campaign refs existed.
+  // unconditional-write behaviour from before campaign refs existed — an
+  // unsaved draft's own id creates its asset directory here, which H5
+  // depends on and which the fs backend still does.
   const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(briefId) : undefined;
-  if (!resolved && briefs.supportsTeams && CAMPAIGN_UUID_PATTERN.test(briefId)) {
+  // D166 (PT-2c, PT-4b): a ref that does not resolve and one hidden from this
+  // caller by team answer the SAME 404 with the SAME body, so the answer never
+  // says which applies. `PgBriefStore.resolveCampaign` already refuses a
+  // campaign this caller may not see (it filters on team visibility as it
+  // looks), which is why there is no second `campaignVisibility` check here:
+  // it could only ever repeat the answer below.
+  //
+  // On Postgres this is also no longer a special case for a uuid-shaped ref
+  // (D178). PT-5c2 made every Postgres campaign a minted row, and under
+  // `OBJECT_STORE=s3` an asset is an `asset` row carrying that row's uuid
+  // (C7) — a key built from a slug would put a renameable, user-chosen string
+  // in the object store's namespace. So an unresolved ref is a ref with no
+  // campaign to own the bytes, and it writes nothing.
+  if (briefs.supportsTeams && resolved === undefined) {
     setResponseStatus(event, 404);
     return { error: `Campaign "${briefId}" not found.` };
   }
-  // A slug that did not resolve passes through unchanged (an unsaved draft
-  // has no campaign row yet, and this route has always let a caller create
-  // its asset directory ahead of the brief being saved).
   const slug = resolved?.slug ?? briefId;
-  if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
-    setResponseStatus(event, 404);
-    return { error: `Campaign "${briefId}" not found.` };
-  }
 
   try {
     const result = await getAssetStore(scope).writeAsset(slug, name, bytes);

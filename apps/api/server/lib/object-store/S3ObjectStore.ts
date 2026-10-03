@@ -120,8 +120,18 @@ export class S3ObjectStore implements ObjectStorePort {
     const response = await this.send("put", this.objectUrl(key), "PUT", headers, bytes);
     if (response.status === 412) {
       // Drained before the throw so the connection goes back to the pool; a
-      // `cancel()` on an unread body is not the same promise everywhere.
-      await response.arrayBuffer();
+      // `cancel()` on an unread body is not the same promise everywhere. The
+      // drain is the ONE body read here that swallows a failure: the store's
+      // answer is already in hand — it refused the create — and what is left to
+      // do is throw that answer. A drain that fails mid-stream means the
+      // connection is being torn down anyway, which is the outcome the drain
+      // wanted, so reporting it would replace "this asset already exists" with
+      // a transport error for a caller whose real answer never changed.
+      try {
+        await response.arrayBuffer();
+      } catch {
+        // The exclusive create lost either way; see above.
+      }
       throw new ObjectExistsError(key);
     }
     if (!response.ok) await this.fail("put", response);
@@ -133,7 +143,7 @@ export class S3ObjectStore implements ObjectStorePort {
     if (response.status === 404) return undefined;
     if (!response.ok) await this.fail("get", response);
     return {
-      bytes: new Uint8Array(await response.arrayBuffer()),
+      bytes: new Uint8Array(await this.read("get", () => response.arrayBuffer())),
       contentType: response.headers.get("content-type") ?? undefined,
     };
   }
@@ -170,7 +180,7 @@ export class S3ObjectStore implements ObjectStorePort {
     // evaluated after the status line is already committed. Trusting the status
     // alone reports a failed copy as done. The body is also read here for the
     // ordinary reason: an unread response leaves the connection out of the pool.
-    const body = await response.text();
+    const body = await this.read("copy", () => response.text());
     if (body.includes("<Error>")) throw this.refuse("copy", response.status, body);
     if (!body.includes("<CopyObjectResult>")) {
       throw new Error("Refusing a 200 copy whose body is neither a CopyObjectResult nor an Error.");
@@ -190,7 +200,7 @@ export class S3ObjectStore implements ObjectStorePort {
         url.searchParams.set("continuation-token", continuationToken);
       const response = await this.send("list", url, "GET", {});
       if (!response.ok) await this.fail("list", response);
-      const page = parseListObjectsV2(await response.text());
+      const page = parseListObjectsV2(await this.read("list", () => response.text()));
       listed.push(...page.contents);
       continuationToken = page.truncated ? page.nextContinuationToken : undefined;
     } while (continuationToken !== undefined);
@@ -295,7 +305,42 @@ export class S3ObjectStore implements ObjectStorePort {
    * `Authorization` header, so a cause chain is a credential in a log.
    */
   private async fail(operation: string, response: Response): Promise<never> {
-    throw this.refuse(operation, response.status, await response.text());
+    throw this.refuse(
+      operation,
+      response.status,
+      await this.read(operation, () => response.text()),
+    );
+  }
+
+  /**
+   * Read a response body, or refuse the way `send` refuses a fetch that never
+   * produced one.
+   *
+   * `send`'s `try` covers the PROMISE, not the stream: `fetch` resolves as soon
+   * as the status line is in, and every byte after that is read outside it. A
+   * connection dropped mid-body therefore arrived as a bare
+   * `TypeError: terminated`, whose `cause` is undici's `SocketError` carrying
+   * `code: "UND_ERR_SOCKET"` and a `socket` with the peer's `remoteAddress` and
+   * `remotePort` — the internal host a log has no business naming, and the one
+   * thing this adapter's whole error contract is built to keep out of a thrown
+   * error. Unwrapped, that rejection escapes every method here as a plain
+   * `TypeError`, so a caller cannot tell a transport failure from a refusal and
+   * the never-echo guarantee stops at the status line.
+   *
+   * Status 0 is the same sentinel `send` uses and means the same thing: the
+   * store was never reached, so there is nothing to answer with but the
+   * operation and the errno. Only the errno crosses out of the cause, as a
+   * field; no `cause` is attached, for the reason `send` gives.
+   */
+  private async read<T extends string | ArrayBuffer>(
+    operation: string,
+    read: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await read();
+    } catch (transport: unknown) {
+      throw new S3RequestError(operation, 0, transportCode(transport));
+    }
   }
 
   /**

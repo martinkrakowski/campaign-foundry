@@ -1,0 +1,210 @@
+{
+  "version": 1,
+  "lane": "PT-4b-asset-rows-and-c7-keys",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "    const key = inputKey(this.orgId, campaignId, assetId);",
+      "after": "    const key = `${inputKey(this.orgId, campaignId, assetId)}/${briefId}`;",
+      "because": "the slug goes back into the object key (DoD 3). `inputKey` itself takes no slug — that is the point of it, and it is why the mutation lives HERE rather than in `object-keys.ts`: with `briefId` appended in the adapter, the key is still legal (`winter-sale` is alphabet-legal), so nothing refuses it and no row is inconsistent. What it buys is a renameable, user-chosen string in the store's namespace: a rename becomes a move, a collision becomes two campaigns fighting over one prefix, and `deletePrefix(inputPrefix(...))` no longer describes everything under it. The DoD 3 test lists every key in the store after a write AND a copy and asserts none of them contains a slug or the asset's name — a key of ids passes, this one does not.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store.test.ts",
+        "-t",
+        "DoD 3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "      await this.discard(key);\n      if (pgErrorCode(error) === UNIQUE_VIOLATION) {",
+      "after": "      if (pgErrorCode(error) !== UNIQUE_VIOLATION) await this.discard(key);\n      if (pgErrorCode(error) === UNIQUE_VIOLATION) {",
+      "because": "the duplicate stops giving the object back. Both uploads of one name mint their own asset id, so the loser really did store its bytes under a key nothing else will ever name — and it is about to be told 409, which is the one answer that says \"nothing happened\". Leaving the object means every retry of the same upload adds another, each of them collectable only when the campaign itself is deleted, because `deleteAssets` empties the campaign's prefix by uuid and these ids sit in it. Only the duplicate branch is affected, so only the sequential test can see it: after the 409 there must be exactly ONE object under `inputPrefix` and exactly ONE `asset` row. (A swap of the two statements would not do: it leaves the non-duplicate path broken instead, which a different test already pins.)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store.test.ts",
+        "-t",
+        "leaves ONE object and ONE row"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "      `select id from campaign where org_id = $1 and slug = $2`,\n      [this.orgId, slug],",
+      "after": "      `select id from campaign where slug = $1`,\n      [slug],",
+      "because": "the slug lookup stops being org-scoped, and a slug is not globally unique: the constraint is `unique (org_id, slug)`, so two orgs may hold the same one and `campaignKnown`'s world is full of them. Without `org_id` the lookup returns SOME row, and which one is a planner's choice — so two orgs that both picked `spring-sale` silently share one campaign's asset rows, and `readAsset` reads whatever the winning row points at. The route test cannot see this: `PgBriefStore.resolveCampaign` 404s a cross-org ref long before the adapter is asked, which is why the adapter carries its own cross-tenant test (one slug, one asset, in each of two orgs).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store.test.ts",
+        "-t",
+        "cross-tenant"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/index.post.ts",
+      "before": "            await getAssetStore(scope).deleteAssets(targetSlug);",
+      "after": "            await getAssetStore(scope).deleteAssets(meta.campaignId);",
+      "because": "The free is handed the campaign UUID (meta.campaignId) instead of the slug. On STORE_BACKEND=postgres + OBJECT_STORE=fs (staging today) FsAssetStore keeps copied files under the SLUG directory, so freeing by uuid removes a directory that was never written and the copied files survive a failed create; the pg+fs rollback test sees the file still on disk. (pg+s3 is blind to this mutant: ObjectAssetStore accepts a uuid too.)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.postgres.test.ts",
+        "-t",
+        "the create rollback leaves no copied file under the target slug"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/S3ObjectStore.ts",
+      "before": "      try {\n        await response.arrayBuffer();\n      } catch {\n        // The exclusive create lost either way; see above.\n      }\n      throw new ObjectExistsError(key);",
+      "after": "      await response.arrayBuffer();\n      throw new ObjectExistsError(key);",
+      "because": "the 412 drain stops swallowing. The drain exists to put the connection back in the pool, and the store's answer — this key is taken, the exclusive create lost — is already in hand, so a drain that fails mid-stream means the connection is being torn down anyway, which is what the drain wanted. Unwrapped, a transport failure during it replaces \"this asset already exists\" with `S3RequestError`, and a caller that retries on a 500 re-uploads an asset that was never created. This is the ONE body read that must not be wrapped, and it is the exception that proves the four others are the rule rather than an oversight.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/S3ObjectStore-secrets.test.ts",
+        "-t",
+        "the 412 drain SWALLOWS a failure"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/S3ObjectStore.ts",
+      "before": "      bytes: new Uint8Array(await this.read(\"get\", () => response.arrayBuffer())),",
+      "after": "      bytes: new Uint8Array(await response.arrayBuffer()),",
+      "because": "`get`'s body read is back outside any wrapper, and `send`'s `try` covers only the fetch PROMISE — `fetch` resolved when the status line arrived, so every byte after that was never covered. undici reports a connection dropped mid-body as `TypeError: terminated` whose `cause` is a `SocketError` carrying `socket: { remoteAddress, remotePort }`, so the raw rejection escapes carrying the internal host: a caller cannot tell a transport failure from a refusal, and the never-echo guarantee stops at the status line. Nothing in that chain is a STRING, which is why the test's walker reads own enumerable properties and not only `message`/`cause` — a message-only walk calls this clean while `10.99.7.3` sits in the object two links down. The same wrap is on `copy`, `list` and `fail`, each with its own failing-stream test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/S3ObjectStore-secrets.test.ts",
+        "-t",
+        "get reads its body outside send"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "      if (existing.sha256 === source.sha256) return { name: candidate, reused: true };",
+      "after": "      if (existing.sha256 === source.sha256) return { name: candidate, reused: false };",
+      "because": "the copy runs again when the SUFFIXED name the search landed on already holds these exact bytes (fix round 1, HIGH). A plain re-copy cannot reach it — `logo.png` is taken by different bytes, so the search lands on `logo-<from>.png`, which an earlier copy already filled with the source's bytes. Copying anyway asks the target for a name it already answers: the insert raises a raw `23505`, which is not `code: EEXIST`, so the caller 500s instead of getting the no-op it asked for; and the object the copy just wrote is left under the target's prefix with no row that will ever name it and no `deleteAssets` that will find it, since `briefs.post.ts` runs a copy with no release step. `FsAssetStore` succeeds on identical bytes, so this is a divergence from fs as well. The test builds exactly that pair — target holding `logo.png` (JPEG) and `logo-<from>.png` (PNG), source holding `logo.png` (PNG) — and asserts the mapping, the unchanged row count and the unchanged keys, then runs the copy a second time.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store-copy.test.ts",
+        "-t",
+        "the SAME hash under the SUFFIXED name is a no-op"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "            await getAssetStore(scope).deleteAssets(targetSlug);",
+      "after": "            await getAssetStore(scope).deleteAssets(meta.campaignId);",
+      "because": "The free is handed the campaign UUID (meta.campaignId) instead of the slug. On STORE_BACKEND=postgres + OBJECT_STORE=fs (staging today) FsAssetStore keeps copied files under the SLUG directory, so freeing by uuid removes a directory that was never written and the copied files survive a failed create; the pg+fs rollback test sees the file still on disk. (pg+s3 is blind to this mutant: ObjectAssetStore accepts a uuid too.)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.postgres.test.ts",
+        "-t",
+        "the duplicate rollback leaves no copied file either"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "        await this.store.copy(inputKey(this.orgId, fromId, source.id), targetKey);\n        await this.db.query(",
+      "after": "        await this.db.query(",
+      "because": "`store.copy` moves back OUT of the compensation block (fix round 2, MEDIUM). S3 commits CopyObject's status line before it evaluates the copy, so `S3ObjectStore.copy` then reads a success body — and PT-4b's body-read wrap turns a read that dies mid-stream into a rejection with the DESTINATION OBJECT ALREADY STORED. With the copy outside the try, that rejection escapes before the insert, `discard(targetKey)` never runs, and the object sits under the target's prefix with nothing that will name it: `briefs.post.ts` runs a copy with no release step, so nothing else will either. The test is a store whose `copy` stores the object and then throws, which is exactly that shape; it leaves the target prefix empty.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store-copy.test.ts",
+        "-t",
+        "a copy that WROTE the object and then rejected discards it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/index.post.ts",
+      "before": "          const meta = await store.campaignMeta(targetSlug);\n          if (meta !== undefined && !meta.hasVersion) {",
+      "after": "          const meta = await store.campaignMeta(targetSlug);\n          if (meta !== undefined) {",
+      "because": "the free stops asking whether the campaign is real (fix round 3, MEDIUM). `withBriefLock` is IN-PROCESS, so a second API instance can write version 1 under the target slug between this request's `createCampaign` and its `createBrief`; the campaign is then a real, versioned one, and the free empties the WINNER's uploads — s3 through `deletePrefix` plus the row delete, fs through `rm -rf` — while the release below goes on to refuse, correctly, because a version exists. That is data loss rather than the leak this rollback exists to prevent, and it is why the order is free-then-release but the GUARD is still required: `campaignMeta`'s `hasVersion` is the same \"any version yet\" test `releaseCampaign` guards on, so asking it first asks the one question that can still change what happens. The test simulates the other instance by writing version 1 through a second `PgBriefStore` before raising an EEXIST-coded error, then asserts the campaign row, its asset row, its object and its `brief_version` all survive. The same line in `briefs/[id]/duplicate.post.ts` is the identical defect on the second of the two routes that make this sequence; the duplicate's own test drives it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.postgres.test.ts",
+        "-t",
+        "the create rollback leaves the winner's campaign and its assets alone"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/index.post.ts",
+      "before": "        try {\n          const meta = await store.campaignMeta(targetSlug);",
+      "after": "        await store.releaseCampaign(targetSlug);\n        try {\n          const meta = await store.campaignMeta(targetSlug);",
+      "because": "The campaign is released BEFORE its assets are freed. The release cascade removes the asset rows and the slug stops resolving, so campaignMeta answers undefined, the free is skipped, and the objects are left with no rows naming them; the pg+s3 rollback test sees objects still under the minted campaign prefix.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.postgres.test.ts",
+        "-t",
+        "a failure after the copy leaves no asset rows and no objects"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "        try {\n          const meta = await getBriefStore(scope).campaignMeta(targetSlug);",
+      "after": "        await getBriefStore(scope).releaseCampaign(targetSlug);\n        try {\n          const meta = await getBriefStore(scope).campaignMeta(targetSlug);",
+      "because": "The campaign is released BEFORE its assets are freed. The release cascade removes the asset rows and the slug stops resolving, so campaignMeta answers undefined, the free is skipped, and the objects are left with no rows naming them; the pg+s3 rollback test sees objects still under the minted campaign prefix.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.postgres.test.ts",
+        "-t",
+        "the duplicate route's rollback frees them too"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

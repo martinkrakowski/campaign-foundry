@@ -117,8 +117,10 @@ async function withDerivedSlug<T>(name: string, attempt: (slug: string) => Promi
  * on file existence alone — and, on Postgres, mints the versionless row this
  * write's own `createBrief` call then completes as its first Save (D177).
  * PT-5b2 fix-round items 2/3: once that reservation succeeds, a later
- * failure (asset copy, the first-version `createBrief`, the pool write)
- * releases it (`releaseCampaign`, `deleteAssets`) and propagates as-is —
+ * failure (asset copy, the first-version `createBrief`, the pool write) frees
+ * the copied assets and then releases it (`deleteAssets`, `releaseCampaign` —
+ * in THAT order, PT-4b, because the slug both frees by has to be resolved
+ * before the row goes) and propagates as-is —
  * never retried onto a different suffix, even when the failure is itself
  * EEXIST-shaped (a concurrent writer's own Save racing this exact slug).
  *
@@ -253,8 +255,13 @@ export default defineEventHandler(async (event) => {
    * into it and write it as version 1. An EEXIST from `createCampaign`
    * itself means the candidate is taken (`SlugTakenError`, retried by
    * `withDerivedSlug`); ANY later failure means the reservation held and
-   * this failure is real — released (`releaseCampaign`, `deleteAssets`) and
-   * propagated unmodified, never retried onto a different suffix.
+   * this failure is real — and is undone in this order: check
+   * `campaignMeta().hasVersion`, free the assets only while it is false, then
+   * `releaseCampaign` — and propagated unmodified, never retried onto a
+   * different suffix. The free must precede the release (PT-4b: on s3 the
+   * slug only resolves to a prefix while the row exists) and must be guarded
+   * (the lock is in-process, so a second instance can win this slug and its
+   * assets must survive).
    * `displayName` (PT-5b3, D168, D177) is the name the caller typed; `type`
    * is the SOURCE's own (`template.type`), the same rule
    * `routes/campaigns/index.post.ts` uses for a sourced create.
@@ -264,6 +271,10 @@ export default defineEventHandler(async (event) => {
       if (await isPoolDirSymlink(scope, targetSlug)) {
         throw new Error(SYMLINK_WRITE_ERROR);
       }
+      // PT-5b3 (D168, D177): `createCampaign` also stores the typed name and the
+      // source's own type; see this route's docstring. Nothing keeps its result
+      // (PT-4b): the rollback frees the assets by the target SLUG, before the
+      // release, because that is the only value every backend can act on.
       try {
         await getBriefStore(scope).createCampaign(targetSlug, {
           teamId: sourceTeamId,
@@ -302,10 +313,44 @@ export default defineEventHandler(async (event) => {
         // removes on fs (D177/D179): deleted first (a no-op if nothing was
         // ever written), or its own `rmdir` would refuse a non-empty directory.
         await withPoolLock(scope, targetSlug, () => deletePool(scope, targetSlug));
-        const released = await getBriefStore(scope).releaseCampaign(targetSlug);
-        // Only when the campaign itself is gone too, never after a real,
-        // versioned brief.
-        if (released) await getAssetStore(scope).deleteAssets(targetSlug);
+        // The assets go BEFORE the release, by SLUG, and only while this slug
+        // still has no version (PT-4b).
+        //
+        // Before, because the slug is the only value every backend can act on:
+        // `FsAssetStore` keeps a copied asset under `assets/inputs/<slug>/`, and
+        // `ObjectAssetStore` resolves the slug into the uuid its prefix is built
+        // from — which it can only do while the campaign row exists.
+        //
+        // The `hasVersion` guard is what keeps this from eating someone else's
+        // work, and this route's own docstring names the race: `withBriefLock`
+        // is IN-PROCESS, so a SECOND API instance can write version 1 under this
+        // slug between this request's `createCampaign` and its `createBrief`.
+        // That campaign is a real, versioned one now, and emptying its assets
+        // would delete the WINNER's uploads — while the release below goes on to
+        // refuse, correctly, because a version exists. `campaignMeta`'s
+        // `hasVersion` is exactly the "any version yet" test `releaseCampaign`
+        // guards on, so asking it first asks the one question that matters.
+        //
+        // Best-effort, and NOT freeing is the safe direction: the release is
+        // what makes the campaign go away, and on S3 its cascade takes any rows
+        // the failed prefix-delete left — objects without rows are unreachable,
+        // rows without objects are a re-upload. The original error propagates
+        // below either way, which is why a `campaignMeta` that throws is caught
+        // here too rather than allowed to replace it.
+        try {
+          const meta = await getBriefStore(scope).campaignMeta(targetSlug);
+          if (meta !== undefined && !meta.hasVersion) {
+            await getAssetStore(scope).deleteAssets(targetSlug);
+          }
+        } catch (cleanup) {
+          console.warn(
+            `[campaigns] could not free the assets of "${targetSlug}" after a failed duplicate: ${errorMessage(cleanup)}`,
+          );
+        }
+        // `releaseCampaign` carries the same guard, independently: it refuses
+        // once a real, versioned brief exists for the slug (a concurrent Save
+        // won it).
+        await getBriefStore(scope).releaseCampaign(targetSlug);
         throw error;
       }
     });

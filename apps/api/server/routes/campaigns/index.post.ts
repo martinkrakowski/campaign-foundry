@@ -106,8 +106,10 @@ async function withDerivedSlug<T>(name: string, attempt: (slug: string) => Promi
  * check run once, before any slug is ever reserved — a malformed pool or a
  * hidden reference answers 422/404 without minting anything. Once a
  * candidate IS reserved (`createCampaign`), a later failure (asset copy, the
- * first-version `createBrief`, the pool write) releases that reservation
- * (`releaseCampaign`, `deleteAssets`) and propagates as-is — never retried
+ * first-version `createBrief`, the pool write) frees the copied assets and then
+ * releases that reservation (`deleteAssets`, `releaseCampaign` — in THAT order,
+ * PT-4b, because the slug both frees by has to be resolved before the row goes)
+ * and propagates as-is — never retried
  * onto a different suffix, even when the failure is itself EEXIST-shaped
  * (a concurrent writer's own Save racing this exact slug).
  *
@@ -403,12 +405,54 @@ export default defineEventHandler(async (event) => {
         // ever written), or `releaseCampaign`'s own `rmdir` would refuse a
         // non-empty directory and answer false for no reason.
         await withPoolLock(scope, targetSlug, () => deletePool(scope, targetSlug));
-        const released = await store.releaseCampaign(targetSlug);
-        // Only when the campaign itself is gone too: `releaseCampaign`
-        // answers false once a real, versioned brief exists (a concurrent
-        // Save won the slug), and an asset directory that belongs to that
-        // real brief must never be deleted.
-        if (released) await getAssetStore(scope).deleteAssets(targetSlug);
+        // The assets go BEFORE the release, by SLUG, and only while this slug
+        // still has no version (PT-4b).
+        //
+        // Before, because the slug is what each backend can actually act on:
+        // `FsAssetStore` stores a copied asset under
+        // `assets/inputs/<slug>/` — a uuid is a directory it never wrote — and
+        // `ObjectAssetStore` resolves the slug into the uuid its prefix is built
+        // from, which it can only do while the campaign row exists. Released
+        // first, the row is gone and neither can free anything: on staging
+        // (`STORE_BACKEND=postgres`, `OBJECT_STORE=fs`) a failed create then
+        // deleted a non-existent uuid directory and left every copied file
+        // behind for good.
+        //
+        // The `hasVersion` guard is what keeps this from eating someone else's
+        // work, and the route's own docstring names the race it closes:
+        // `withBriefLock` is IN-PROCESS, so a SECOND API instance can write
+        // version 1 under this slug between this request's `createCampaign` and
+        // its `createBrief`. That campaign is a real, versioned one now, and
+        // emptying its assets would delete the WINNER's uploads — while the
+        // release below goes on to refuse, correctly, because a version exists.
+        // So the free asks first, and `campaignMeta`'s `hasVersion` is exactly
+        // the "any version yet" test `releaseCampaign` guards on: `exists(
+        // select 1 from brief_version …)` on pg, a brief FILE for the id on fs.
+        // One question, asked once, instead of inferred afterwards.
+        //
+        // Best-effort, and NOT freeing is the safe direction: the release is
+        // what makes the campaign go away, so a failure here must not stand in
+        // its way, and on S3 the release's cascade takes any rows the failed
+        // prefix-delete left — objects without rows are unreachable, rows
+        // without objects are a re-upload. The original error is what propagates
+        // below either way, which is also why a `campaignMeta` that THROWS (a
+        // malformed `campaign.json` on fs) is caught here rather than allowed to
+        // replace it: not knowing whether freeing is safe must never be the thing
+        // that destroys a real campaign's assets.
+        try {
+          const meta = await store.campaignMeta(targetSlug);
+          if (meta !== undefined && !meta.hasVersion) {
+            await getAssetStore(scope).deleteAssets(targetSlug);
+          }
+        } catch (cleanup) {
+          console.warn(
+            `[campaigns] could not free the assets of "${targetSlug}" after a failed create: ${errorMessage(cleanup)}`,
+          );
+        }
+        // `releaseCampaign` carries the same guard, independently: it refuses
+        // once a real, versioned brief exists for the slug (a concurrent Save
+        // won it), so the reservation it drops is always this request's own.
+        await store.releaseCampaign(targetSlug);
         throw error;
       }
     });
