@@ -284,6 +284,33 @@ jobs:
             exit 1
           fi
 
+      # The ObjectStorePort conformance suite's real half, alone, right after the
+      # store starts. It runs in its own step rather than inside `Test` because a
+      # 4-core runner saturated by the full suite starves SeaweedFS's internal
+      # heartbeats, and its master then answers every PUT with 500 InternalError
+      # (#656's first CI run). REQUIRED=1 turns a missing or unreachable store into
+      # a FAILURE rather than a skip. The steps below carry no TEST_S3_*, so their
+      # real half skips; coverage never depended on it (offline tests reach 100%).
+      - name: S3 conformance (real SeaweedFS)
+        run: "yarn vitest run --project api apps/api/server/lib/object-store"
+        env:
+          NODE_ENV: test
+          TEST_S3_ENDPOINT: http://127.0.0.1:8333
+          TEST_S3_PUBLIC_ENDPOINT: http://127.0.0.1:8333
+          TEST_S3_BUCKET: campaign-foundry-test
+          TEST_S3_REGION: us-east-1
+          TEST_S3_ACCESS_KEY_ID: ci-app-key
+          TEST_S3_SECRET_ACCESS_KEY: ci-app-secret
+          TEST_S3_REQUIRED: "1"
+
+      - name: SeaweedFS logs (on failure)
+        if: failure()
+        run: docker logs --tail 300 seaweedfs || true
+
+      - name: Stop SeaweedFS
+        if: always()
+        run: docker rm -f seaweedfs || true
+
       # run_tests = true; delete this step to skip tests in CI.
       # test:cov enforces the 100% coverage gate (vitest.config.ts thresholds).
       - name: Test
@@ -294,16 +321,6 @@ jobs:
           # else reads it: TEST_PG_URL is the harness's variable, and the step
           # below is the only one that sets it. This run is on PGlite.
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-          # The ObjectStorePort conformance suite's real half. REQUIRED=1 turns a
-          # missing or unreachable store into a FAILURE rather than a skip: this
-          # step just started one, so a skip here would be a claim nothing checked.
-          TEST_S3_ENDPOINT: http://127.0.0.1:8333
-          TEST_S3_PUBLIC_ENDPOINT: http://127.0.0.1:8333
-          TEST_S3_BUCKET: campaign-foundry-test
-          TEST_S3_REGION: us-east-1
-          TEST_S3_ACCESS_KEY_ID: ci-app-key
-          TEST_S3_SECRET_ACCESS_KEY: ci-app-secret
-          TEST_S3_REQUIRED: "1"
 
       # D186: the same API project, with TEST_PG_URL set, so every database test
       # runs against a real server instead of PGlite. PGlite is a real Postgres
@@ -312,23 +329,12 @@ jobs:
       # stays the coverage gate, unchanged and on PGlite; this step is the
       # evidence that the server path works, and has no --coverage because the
       # 100% thresholds are the full run's.
-      #
-      # The TEST_S3_* block is repeated rather than hoisted into `env:` at job
-      # level, because the manifest replay above must run WITHOUT it: every
-      # mutation this change claims is caught by an offline test, and a replay
-      # whose command needed a store would be unrunnable rather than unverified.
+
       - name: Test (real Postgres backend)
         run: "yarn vitest run --project api"
         env:
           NODE_ENV: test
           TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
-          TEST_S3_ENDPOINT: http://127.0.0.1:8333
-          TEST_S3_PUBLIC_ENDPOINT: http://127.0.0.1:8333
-          TEST_S3_BUCKET: campaign-foundry-test
-          TEST_S3_REGION: us-east-1
-          TEST_S3_ACCESS_KEY_ID: ci-app-key
-          TEST_S3_SECRET_ACCESS_KEY: ci-app-secret
-          TEST_S3_REQUIRED: "1"
 
       # Tests live in __tests__/ next to their modules, but Nitro scans apps/api/server/
       # recursively. A *.test.ts file landing there gets registered as a route and crashes
