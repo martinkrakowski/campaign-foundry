@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "lane": "PT-4k1-asset-ids-store-and-read",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "      `select campaign_id from asset where org_id = $1 and id = $2`,\n      [this.orgId, id],",
+      "after": "      `select campaign_id from asset where id = $1`,\n      [id],",
+      "because": "`org_id` is the whole of this method's tenancy and the route cannot supply it: `PgBriefStore.resolveCampaign` 404s before a store is reached, so nothing above this line ever sees two orgs that picked the same id. `asset.id` is a uuid PRIMARY KEY, so the predicate still finds the row and the query still succeeds — it simply finds it in ANOTHER TENANT, and the bytes under that row's key come back as this org's own. The cross-org test is the only thing that catches it, and it is written against a real second org that really holds the asset, so the leak has to come from this WHERE clause and nowhere else. The anchor is the whole query rather than its `org_id = $1` fragment because that fragment occurs a dozen times in this file (C6) and an anchor that matched more than one site would mutate a different statement.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store-ids.test.ts",
+        "-t",
+        "another org's id answers undefined and NEVER its bytes"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/asset-store.port.ts",
+      "before": "  return ASSET_ID_PATTERN.test(ref);",
+      "after": "  return true;",
+      "because": "`isAssetId` is D203's shape rule, and it is LOAD-BEARING rather than an optimisation: `asset.id` is a `uuid` column, so a path bound to `a.id = $2` raises `22P02` on pg and on PGlite alike, and both of this store's methods promise `undefined` for a ref they cannot answer. Accepting every string turns a `logo.png` brief ref into a 500 rather than a missing asset, and an UPPER-CASE uuid — the case a case-insensitive pattern wrongly admits, which is why this function must not reuse `CAMPAIGN_UUID_PATTERN` — stops being caught before the query too. The 'no query' half is what makes the assertion about the GUARD and not about luck: with the guard gone the adapter asks the database, and the test asserts the query count is zero for refs that are not ids at all.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store-ids.test.ts",
+        "-t",
+        "a NON-uuid answers undefined with NO query at all"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/object-input-assets.ts",
+      "before": "    if (isAssetId(ref)) {\n      // The store is looked up HERE, before the pending promise exists, for the\n      // same reason and with the same wording as the path branch below: a\n      // synchronous throw from `getAssetStore` must reject `read` with nothing\n      // memoised, not run `memo.delete` before the `memo.set` this line's callee\n      // is about to reach (f22778b5).\n      const assets = getAssetStore(this.env);\n      const pending = this.fetchById(ref, assets);\n      if (this.memo !== undefined) this.memo.set(ref, pending);\n      return Buffer.from(await pending);\n    }\n\n    const safePath = resolveAssetPath(ref, SYNTHETIC_ROOT);\n    if (safePath === undefined) return undefined;",
+      "after": "    const safePath = resolveAssetPath(ref, SYNTHETIC_ROOT);\n    if (safePath === undefined) return undefined;\n\n    if (isAssetId(ref)) {\n      // The store is looked up HERE, before the pending promise exists, for the\n      // same reason and with the same wording as the path branch below: a\n      // synchronous throw from `getAssetStore` must reject `read` with nothing\n      // memoised, not run `memo.delete` before the `memo.set` this line's callee\n      // is about to reach (f22778b5).\n      const assets = getAssetStore(this.env);\n      const pending = this.fetchById(ref, assets);\n      if (this.memo !== undefined) this.memo.set(ref, pending);\n      return Buffer.from(await pending);\n    }",
+      "because": "The ORDER is the lane, not the branch's presence. `resolveAssetPath` refuses a bare uuid — it is not under `<root>/assets` — so an id branch placed after the safety check is dead code for exactly the refs it exists to serve, and every scene and bed built from an id-named asset reports 'is not a valid asset path' for a brief that named nothing wrong. What makes that survivable in a review is that the branch is still THERE, still correct, and still covered by a test that calls it — the defect is only visible to a test that reads an id end to end, because every other assertion about the method still passes. Note the mutation keeps the 'store looked up before the promise exists' rule intact: it moves the branch, it does not also break the ordering, so one run attributes the failure to the position and not to two changes at once.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/object-input-assets-ids.test.ts",
+        "-t",
+        "an id reads its bytes"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "  pathMap[`assets/inputs/${fromBriefId}/${name}`] = targetId;",
+      "after": "  pathMap[`assets/inputs/${fromBriefId}/${name}`] = `assets/inputs/${fromBriefId}/${destName}`;",
+      "because": "The full-path entry is what a brief written BEFORE ids existed carries, and `rewriteAssetPath` checks `path in pathMap` FIRST and returns the value verbatim — so this one is the entry that decides what a path ref becomes. Answering a path here leaves the copied brief naming a ref in the SOURCE campaign: still readable, and owned by a campaign this copy did not create, so the target's own `deleteAssets` frees nothing while the source's frees bytes the copy depends on. It is also the entry D208d depends on: a stored path ref must become an id at save time, and a map that answers paths is what leaves staging holding path refs after PT-4k. The `name → destName` entry is untouched on purpose: that one feeds a path BUILDER, so an id there would produce `assets/inputs/<to>/<id>`, and separating the two is the point of the mutation.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store-copy.test.ts",
+        "-t",
+        "each asset lands on a NEW key and a NEW row"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "      const assetId = destination.reused ? destination.id : randomUUID();",
+      "after": "      const assetId = randomUUID();",
+      "because": "A reused asset has NO insert to read an id back from: nothing is copied and no row is written, because the target already holds these exact bytes under this name and copying them again would be the `23505` the unique index raises. So the id this map must name is the EXISTING row's, and minting a fresh one produces a ref that no row holds and no object backs — a duplicated campaign whose logo silently ENOENTs, or worse, is readable now and gone after the next copy. This is the branch that makes a duplicated campaign, and a replace-save over an already-copied asset, idempotent, so a fresh id here is not a cosmetic difference: it is the difference between 'the asset the target has' and 'an id that never existed'. The reused-branch test names the row it expects, read through the target's own rows, so a well-shaped uuid of an object nobody wrote cannot pass it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store-copy.test.ts",
+        "-t",
+        "the same hash reuses the name and writes NOTHING"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/object-input-assets.ts",
+      "before": "      const assets = getAssetStore(this.env);\n      const pending = this.fetchById(ref, assets);\n      if (this.memo !== undefined) this.memo.set(ref, pending);\n      return Buffer.from(await pending);\n    }\n\n    const safePath = resolveAssetPath(ref, SYNTHETIC_ROOT);\n    if (safePath === undefined) return undefined;\n\n    const target = parseInputRef(relative(SYNTHETIC_ROOT, safePath));\n    if (target === undefined) {\n      throw absent(ref, \"only assets/inputs/<slug>/<name> is a stored ref on this backend.\");\n    }\n\n    // The store is looked up HERE, before any promise exists: `getAssetStore` can\n    // throw synchronously (a malformed OBJECT_STORE), and a throw inside `fetch`\n    // would run its `memo.delete` BEFORE the `memo.set` below — leaving an\n    // already-rejected promise cached for the run. Thrown here, `read` simply\n    // rejects and nothing is stored.\n    const assets = getAssetStore(this.env);\n\n    // Stored BEFORE it is awaited, which is the whole of it: the next cell to ask\n    // while this one is still in flight finds the promise and waits on it.\n    const pending = this.fetch(ref, target, assets);\n    if (this.memo !== undefined) this.memo.set(ref, pending);\n    return Buffer.from(await pending);\n  }\n\n  /**\n   * One read of one ref, and the only place the memo is forgotten.\n   *\n   * Everything here is inside a `try` whose `catch` drops the entry, because a\n   * promise that is left in the map after rejecting is a permanent answer: the\n   * bucket that could not be read at the moment the run started, and the asset\n   * that had not been uploaded yet, are both things a LATER read has to be able to\n   * find. Only this caller owns the entry — a caller that joined an in-flight read\n   * never stored it, and so must not delete it.\n   */\n  private async fetch(ref: string, target: InputRef, assets: AssetStorePort): Promise<Uint8Array> {\n    try {\n      // The store's own org-scoped resolve → row → `get`, left to propagate: an\n      // `S3RequestError` or a pg error is a deployment that cannot answer, and the\n      // caller must hear it as one.\n      const bytes = await assets.readAsset(target.slug, target.name);\n      if (bytes === undefined) {\n        throw absent(ref, \"no campaign, asset row or object in this org answers it.\");\n      }\n      return bytes;\n    } catch (error) {\n      this.memo?.delete(ref);\n      throw error;\n    }\n  }\n\n  /**\n   * One read of one asset id, and the id branch's half of \"a failed read is not\n   * remembered\" (PT-4k1). It is its own method rather than a parameter of\n   * {@link ObjectInputAssets.fetch} because the two have nothing to share but the\n   * memo and the `catch`: an id names a row directly, so there is no slug/name\n   * pair to parse and no `InputRef` to carry — folding them together would mean\n   * a union threading a `undefined` ref through the path branch's SQL.\n   *\n   * **Both paths forget on failure, and that is not a detail.** An id ref is\n   * memoised exactly as a path ref is — same map, keyed by the ref string, so a\n   * brief that mixes both forms keeps one entry per ref — and a cached rejection\n   * would be a permanent answer for the rest of the run: the asset that had not\n   * been uploaded yet is exactly what a re-run has to be able to find.\n   */\n  private async fetchById(ref: string, assets: AssetStorePort): Promise<Uint8Array> {\n    try {\n      // Left to propagate, as on the path branch: a store that refuses is a\n      // deployment that cannot answer, and ENOENT means \"this ref names nothing\n      // here\" — a different, non-retryable-looking claim than \"the bucket is\n      // down\", which is what would mislead a consumer that branches on the code.\n      const bytes = await assets.readAssetById(ref);",
+      "after": "      const pending = this.fetchById(ref);\n      if (this.memo !== undefined) this.memo.set(ref, pending);\n      return Buffer.from(await pending);\n    }\n\n    const safePath = resolveAssetPath(ref, SYNTHETIC_ROOT);\n    if (safePath === undefined) return undefined;\n\n    const target = parseInputRef(relative(SYNTHETIC_ROOT, safePath));\n    if (target === undefined) {\n      throw absent(ref, \"only assets/inputs/<slug>/<name> is a stored ref on this backend.\");\n    }\n\n    // The store is looked up HERE, before any promise exists: `getAssetStore` can\n    // throw synchronously (a malformed OBJECT_STORE), and a throw inside `fetch`\n    // would run its `memo.delete` BEFORE the `memo.set` below — leaving an\n    // already-rejected promise cached for the run. Thrown here, `read` simply\n    // rejects and nothing is stored.\n    const assets = getAssetStore(this.env);\n\n    // Stored BEFORE it is awaited, which is the whole of it: the next cell to ask\n    // while this one is still in flight finds the promise and waits on it.\n    const pending = this.fetch(ref, target, assets);\n    if (this.memo !== undefined) this.memo.set(ref, pending);\n    return Buffer.from(await pending);\n  }\n\n  /**\n   * One read of one ref, and the only place the memo is forgotten.\n   *\n   * Everything here is inside a `try` whose `catch` drops the entry, because a\n   * promise that is left in the map after rejecting is a permanent answer: the\n   * bucket that could not be read at the moment the run started, and the asset\n   * that had not been uploaded yet, are both things a LATER read has to be able to\n   * find. Only this caller owns the entry — a caller that joined an in-flight read\n   * never stored it, and so must not delete it.\n   */\n  private async fetch(ref: string, target: InputRef, assets: AssetStorePort): Promise<Uint8Array> {\n    try {\n      // The store's own org-scoped resolve → row → `get`, left to propagate: an\n      // `S3RequestError` or a pg error is a deployment that cannot answer, and the\n      // caller must hear it as one.\n      const bytes = await assets.readAsset(target.slug, target.name);\n      if (bytes === undefined) {\n        throw absent(ref, \"no campaign, asset row or object in this org answers it.\");\n      }\n      return bytes;\n    } catch (error) {\n      this.memo?.delete(ref);\n      throw error;\n    }\n  }\n\n  /**\n   * One read of one asset id, and the id branch's half of \"a failed read is not\n   * remembered\" (PT-4k1). It is its own method rather than a parameter of\n   * {@link ObjectInputAssets.fetch} because the two have nothing to share but the\n   * memo and the `catch`: an id names a row directly, so there is no slug/name\n   * pair to parse and no `InputRef` to carry — folding them together would mean\n   * a union threading a `undefined` ref through the path branch's SQL.\n   *\n   * **Both paths forget on failure, and that is not a detail.** An id ref is\n   * memoised exactly as a path ref is — same map, keyed by the ref string, so a\n   * brief that mixes both forms keeps one entry per ref — and a cached rejection\n   * would be a permanent answer for the rest of the run: the asset that had not\n   * been uploaded yet is exactly what a re-run has to be able to find.\n   */\n  private async fetchById(ref: string): Promise<Uint8Array> {\n    try {\n      // Left to propagate, as on the path branch: a store that refuses is a\n      // deployment that cannot answer, and ENOENT means \"this ref names nothing\n      // here\" — a different, non-retryable-looking claim than \"the bucket is\n      // down\", which is what would mislead a consumer that branches on the code.\n      const assets = getAssetStore(this.env);\n      const bytes = await assets.readAssetById(ref);",
+      "because": "The f22778b5 rule, reproduced on the id branch: `getAssetStore` throws SYNCHRONOUSLY for a malformed OBJECT_STORE, and an async callee runs its body up to the first await before the caller stores anything. Looked up inside `fetchById`, that throw is caught by the very `catch` that exists to forget a failed read, so `memo.delete` runs on an entry that does not exist yet — and `read` then stores the rejected promise anyway. The memo answers that id with the same rejection for the rest of the run, which is what caching failures is forbidden from causing: a preview that ran before an upload, or a re-run after one, must be able to see the object appear. Every other assertion about this method still passes, because the failure is invisible until a SECOND read of the same id. The anchor spans BOTH sites on purpose — moving a statement out of `read` and into `fetchById` cannot be expressed as one line, and an anchor that mutated only the callee would leave the call-site lookup in place, so the throw would still happen outside any promise and the mutant would survive for the wrong reason rather than by being equivalent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/object-input-assets-ids.test.ts",
+        "-t",
+        "an id ref whose store cannot even be BUILT is not cached"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

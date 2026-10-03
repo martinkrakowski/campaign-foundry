@@ -22,6 +22,8 @@ import { requestTenant } from "../../lib/tenant.js";
  * decoded bytes alone — a valid PNG magic named `bed.mp3` must fail as audio, not
  * pass as an image the caller never asked for. 400 on bad input or magic, 413 over
  * 2 MiB (checked before decode and again after), 409 if the file already exists.
+ * The 201 body is `{ path }`, plus `id` on the backends that mint one (s3,
+ * PT-4k1) — the key is absent, not null, everywhere else.
  */
 export default defineEventHandler(async (event) => {
   const scope = requestTenant(event);
@@ -102,7 +104,13 @@ export default defineEventHandler(async (event) => {
   try {
     const result = await getAssetStore(scope).writeAsset(slug, name, bytes);
     setResponseStatus(event, 201);
-    return { path: result.path };
+    // CONDITIONALLY spread, and that is what keeps fs byte-identical: an fs store
+    // mints no id, and a response carrying `id: undefined` is not the same JSON as
+    // one without the key — `Object.keys` differs, and so does any `toEqual` on
+    // the parsed body. Under `s3` the id is what PT-4l's editor stores as the
+    // brief's ref, so it rides along with the path the web still writes until
+    // then (PT-4k1; the save-time normalisation of a path ref is PT-4k2).
+    return result.id === undefined ? { path: result.path } : { path: result.path, id: result.id };
   } catch (error) {
     if (isExistsError(error)) {
       setResponseStatus(event, 409);

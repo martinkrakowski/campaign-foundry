@@ -99,6 +99,11 @@ describe("ObjectAssetStore (PT-4b)", () => {
     test("stores the bytes under a key of ids, and records size, digest and type", async () => {
       expect(await assets.writeAsset(SLUG, "logo.png", PNG)).toEqual({
         path: `assets/inputs/${SLUG}/logo.png`,
+        // The id is the SAME one the row holds and the key is built from (PT-4k1),
+        // not merely a uuid of the right shape: it is read back through `rowsOf`
+        // below and compared, so an id minted for the answer and forgotten by the
+        // row would fail here rather than reach a brief.
+        id: (await rowsOf(db, slugId))[0]!.id,
       });
       const rows = await rowsOf(db, slugId);
       expect(rows).toHaveLength(1);
@@ -277,20 +282,29 @@ describe("ObjectAssetStore (PT-4b)", () => {
       await assets.writeAsset(SLUG, "logo.png", PNG);
       await assets.writeAsset(SLUG, "bed.mp3", JPEG);
       await assets.writeAsset(SLUG, "another.png", PNG);
+      // Each entry carries its own row's id (PT-4k1), read back rather than
+      // pattern-matched: `rowsOf` orders by name too, so this also pins that the
+      // id travels with its OWN entry — an id built from the listing's position
+      // would answer the same three uuids and still be wrong for any caller that
+      // stored one of them.
+      const [another, bed, logo] = await rowsOf(db, slugId);
       expect(await assets.listAssets(SLUG)).toEqual([
         {
+          id: another!.id,
           name: "another.png",
           type: "image/png",
           size: PNG.length,
           thumbnailUrl: `/api/pipeline/campaigns/assets?briefId=${encodeURIComponent(SLUG)}&name=another.png`,
         },
         {
+          id: bed!.id,
           name: "bed.mp3",
           type: "audio/mpeg",
           size: JPEG.length,
           thumbnailUrl: `/api/pipeline/campaigns/assets?briefId=${encodeURIComponent(SLUG)}&name=bed.mp3`,
         },
         {
+          id: logo!.id,
           name: "logo.png",
           type: "image/png",
           size: PNG.length,
