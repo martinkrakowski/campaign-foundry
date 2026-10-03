@@ -2,7 +2,7 @@ import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { objectStore } from "./config.js";
 import { parseStoredInputRef } from "./object-store/object-input-assets.js";
 import { CampaignNotFoundError } from "./ownership.js";
-import { isAssetId } from "./ports/asset-store.port.js";
+import { isAssetId, type AssetStorePort } from "./ports/asset-store.port.js";
 import type { BriefStorePort } from "./ports/brief-store.port.js";
 import { getAssetStore, getBriefStore } from "./ports/index.js";
 import type { StorageScope } from "./run-environment.js";
@@ -66,7 +66,10 @@ function collectRefs(brief: CampaignBrief): readonly string[] {
   for (const beat of brief.copy?.timeline?.beats ?? []) {
     if (beat.background !== undefined) refs.push(beat.background);
   }
-  return refs;
+  // Distinct refs only: every check below is a pure function of the ref, so a logo
+  // shared by ten products is one check, not ten (Qodo on #664 — preview runs this
+  // on every request, cached frame or not).
+  return [...new Set(refs)];
 }
 
 /** Refuse (404) a campaign the caller cannot SEE. `campaignVisibility` never throws to say "not found". */
@@ -120,6 +123,27 @@ export async function resolveBriefAssetRefs(
     return { brief, copyFrom: [], foreignIds: new Set() };
   }
   const underS3 = objectStore() === "s3";
+  // Per-call memos, keyed by slug: two distinct refs into one campaign (a logo and a
+  // scene) share its visibility answer and its asset listing. A rejected check is
+  // memoised too, and that is right: it is the same 404 (or the same 500) either way.
+  const visibility = new Map<string, Promise<void>>();
+  const visible = (slug: string): Promise<void> => {
+    let check = visibility.get(slug);
+    if (check === undefined) {
+      check = assertVisible(briefs, brief.id, slug);
+      visibility.set(slug, check);
+    }
+    return check;
+  };
+  const listings = new Map<string, ReturnType<AssetStorePort["listAssets"]>>();
+  const listing = (slug: string): ReturnType<AssetStorePort["listAssets"]> => {
+    let entries = listings.get(slug);
+    if (entries === undefined) {
+      entries = getAssetStore(scope).listAssets(slug);
+      listings.set(slug, entries);
+    }
+    return entries;
+  };
 
   const copyFrom: string[] = [];
   const seenOwners = new Set<string>();
@@ -141,7 +165,7 @@ export async function resolveBriefAssetRefs(
       // `undefined` covers an absent row AND another org's id — org-scoped by design,
       // so the two are the same answer and must be the same 404.
       if (owner === undefined) throw new BriefRefNotFoundError(brief.id);
-      await assertVisible(briefs, brief.id, owner.slug);
+      await visible(owner.slug);
       if (owner.slug !== opts.target) {
         noteOwner(owner.slug);
         foreignIds.add(ref);
@@ -160,12 +184,10 @@ export async function resolveBriefAssetRefs(
     // `assets/inputs/hydra-logo.png` refs, which is why D210(e) sequences the web's id
     // writing before staging moves to s3 rather than refusing the brief outright.
     if (stored === undefined) continue;
-    await assertVisible(briefs, brief.id, stored.slug);
+    await visible(stored.slug);
 
     if (underS3) {
-      const id = (await getAssetStore(scope).listAssets(stored.slug)).find(
-        (entry) => entry.name === stored.name,
-      )?.id;
+      const id = (await listing(stored.slug)).find((entry) => entry.name === stored.name)?.id;
       // No row for this name in a campaign the caller CAN see: a missing upload, not a
       // hidden campaign — and it still answers the route's one hidden-campaign 404, or
       // "the asset is not there" and "the campaign is not yours" become two probes.

@@ -21,8 +21,8 @@
     },
     {
       "file": "apps/api/server/lib/brief-asset-refs.ts",
-      "before": "      if (owner === undefined) throw new BriefRefNotFoundError(brief.id);\n      await assertVisible(briefs, brief.id, owner.slug);",
-      "after": "      await assertVisible(briefs, brief.id, owner?.slug ?? opts.target);",
+      "before": "      if (owner === undefined) throw new BriefRefNotFoundError(brief.id);\n      await visible(owner.slug);",
+      "after": "      await visible(owner?.slug ?? opts.target);",
       "because": "The ORG half. assetOwner is org-scoped, so undefined is the single answer for three different facts - no such row, a deleted row, and ANOTHER TENANT row - and this line is what collapses all three into one 404 the caller cannot tell apart. Answering it with the TARGET campaign keeps the brief running: under s3 the pipeline then resolves the id through the same org-scoped adapter, so the other tenant bytes come back as this caller own. Note the optional chain and the three arguments, which is what makes this the mutation it claims to be: assertVisible takes (store, briefId, slug), so an after-text that passed only two would look the slug up as NULL and be refused for a missing campaign instead - a mutant that survives for the wrong reason. Here the surviving case asks the TARGET visibility question, which is the one answer a caller always passes, so the cross-tenant refusal is the only thing gone and only a test that asserts the 404 sees it.",
       "command": [
         "yarn",

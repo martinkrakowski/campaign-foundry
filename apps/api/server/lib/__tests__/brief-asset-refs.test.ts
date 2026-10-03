@@ -345,6 +345,37 @@ describe("resolveBriefAssetRefs — render mode under s3 (PT-4k2a, D208 D, D210 
     expect(resolved.foreignIds).toEqual(new Set([ids[FRIEND]!]));
   });
 
+  test("a repeated ref, and refs sharing a campaign, cost ONE visibility check and ONE listing per campaign", async () => {
+    const visibility = vi.spyOn(PgBriefStore.prototype, "campaignVisibility");
+    const listAssets = vi.spyOn(ObjectAssetStore.prototype, "listAssets");
+    const brief = {
+      ...storedBrief(RUN),
+      products: [
+        // Three products share the friend campaign's logo by path; the last also names
+        // its asset by id, so one campaign is reached three ways.
+        { id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: pathRef(FRIEND) },
+        // A DIFFERENT string naming the same file: it survives the dedupe, and the
+        // listing memo is what answers it.
+        {
+          id: "p2",
+          name: "P2",
+          primaryColor: "#1473E6",
+          logoPath: `assets/inputs/${FRIEND}/./logo.png`,
+        },
+        {
+          id: "p3",
+          name: "P3",
+          primaryColor: "#1473E6",
+          logoPath: pathRef(FRIEND),
+          inputAsset: ids[FRIEND]!,
+        },
+      ],
+    };
+    await render(brief);
+    expect(visibility.mock.calls.filter(([slug]) => slug === FRIEND)).toHaveLength(1);
+    expect(listAssets.mock.calls.filter(([slug]) => slug === FRIEND)).toHaveLength(1);
+  });
+
   test("the 404 carries the CALLER'S brief id and never the owner slug or the ref", async () => {
     const error = await render(withRef("products[].logoPath", pathRef(THEIRS))).catch(
       (e: unknown) => e,
