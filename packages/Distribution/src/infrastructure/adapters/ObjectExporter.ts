@@ -92,8 +92,12 @@ export function renderObjectKey(
  * `application/octet-stream` would store happily and then be downloaded rather
  * than shown, and the failure would surface in a browser with nothing in the
  * run's log — which is the one place that could have named the file.
+ *
+ * **Exported so a packaged copy is stored with the SAME type** (PT-4h1): the
+ * bytes of a package are the bytes of a render, and a table keyed by extension
+ * that two modules each held a copy of would be free to disagree about `.mp4`.
  */
-function contentTypeFor(relativePath: string): string {
+export function contentTypeFor(relativePath: string): string {
   const dot = relativePath.lastIndexOf(".");
   const slash = relativePath.lastIndexOf("/");
   // A dot before the last slash is inside a directory name (`alpha/1.0/…`), not

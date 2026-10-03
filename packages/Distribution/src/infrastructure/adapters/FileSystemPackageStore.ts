@@ -12,8 +12,14 @@ import { resolveSafe } from "../safe-path.js";
  * staging dir (X23). Deliberately says nothing about staging directories,
  * sweeps, or paths — those are this adapter's internals, not something the
  * person waiting on an export needs to parse.
+ *
+ * **Exported so the object-store package store reports the SAME interruption**
+ * (PT-4h1). A caller must not be able to tell which backend it packaged on —
+ * the message is the whole of what the export screen shows, and two spellings
+ * would make the retry advice depend on a deployment detail. The fs adapter's
+ * behaviour is unchanged by the export.
  */
-const EXPORT_INTERRUPTED_MESSAGE =
+export const EXPORT_INTERRUPTED_MESSAGE =
   "Another export of this campaign started while this one was running, so this export was stopped to keep the package intact. Try again.";
 
 /**
