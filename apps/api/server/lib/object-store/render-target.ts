@@ -64,9 +64,15 @@ export interface RenderTarget {
  * `database()` would open a pool it has no settings for. The `undefined` means
  * "nothing to key by", which under fs is exactly right — the exporter there
  * writes to `env.outputRoot` and needs no uuid.
+ *
+ * **`env` is a `Pick<RunEnvironment, "tenant">` and nothing wider** (PT-4h1):
+ * this reads exactly one field of it, and the callers that have a full run
+ * environment are the pipeline, while `package.post.ts` has only a tenant. Taking
+ * the tenant alone says which of the two the resolver actually depends on, and
+ * every existing caller still compiles unchanged.
  */
 export async function renderTarget(
-  env: RunEnvironment,
+  env: Pick<RunEnvironment, "tenant">,
   slug: string,
 ): Promise<RenderTarget | undefined> {
   if (objectStore() === "fs") return undefined;

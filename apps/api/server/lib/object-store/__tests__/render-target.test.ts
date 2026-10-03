@@ -196,6 +196,24 @@ describe("renderTarget", () => {
     expect(statements).toEqual(["select id, slug from campaign where org_id = $1 and id = $2"]);
   });
 
+  test("a bare `{ tenant }` is enough — `package.post.ts` has no run environment (PT-4h1)", async () => {
+    // The parameter is `Pick<RunEnvironment, "tenant">`, so the route that resolves
+    // a packaging target can pass the one thing this function reads. The refusal
+    // is the compile-time claim: this call has no `outputRoot`, no `assetRoot`,
+    // no font and no provider settings, so if the resolver ever reached for one
+    // this file would not typecheck rather than the route failing at runtime.
+    await seedCampaign(db, ACME, SLUG, CAMPAIGN);
+    expect(await renderTarget({ tenant: { ...LOCAL_TENANT, orgId: ACME } }, SLUG)).toEqual({
+      campaignId: CAMPAIGN,
+      slug: SLUG,
+    });
+    // Absent is absent on the narrow parameter too — the org id is what scopes the
+    // query, and it is the one field the caller has.
+    expect(
+      await renderTarget({ tenant: { ...LOCAL_TENANT, orgId: GLOBEX } }, SLUG),
+    ).toBeUndefined();
+  });
+
   describe("under fs it answers undefined WITHOUT opening the database (fix 1)", () => {
     /** Every query path raises, so "not used" is a failure rather than a claim. */
     const refuse = async (): Promise<never> => {

@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "lane": "PT-4h1-package-writes-to-objects",
+  "mutations": [
+    {
+      "file": "packages/Distribution/src/infrastructure/adapters/ObjectPackageStore.ts",
+      "before": "    const key = renderObjectKey(\n      `${packageGenerationPrefix(this.options.packagePrefix, platformId, generation)}${FILES_SEGMENT}`,\n      this.options.campaignSegment,\n      relativePath,\n    );",
+      "after": "    const key = `${packageGenerationPrefix(this.options.packagePrefix, platformId, generation)}${FILES_SEGMENT}${relativePath}`;",
+      "because": "the packaged key is built from the path as handed over, so the slug that `campaignScoped` put at the front of `asset.outputPath` survives into the store's namespace: `…/packages/instagram-feed/<gen>/files/winter-sale/alpha/1x1.png`. It is DoD 3 in one line — a key carrying a user-chosen, renameable string is an address that stops being one the moment the campaign is renamed, and every key under it changes with it. Nothing else in the tree can see it: `readAsset` still finds the render (it uses the same builder, correctly), the manifest still records fs-shaped logical paths, the generation still commits, and the route still answers 200. The DoD assertion — after a full package, no key in the store carries the slug — is the only question asked anywhere that could observe it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/infrastructure/adapters/__tests__/ObjectPackageStore.test.ts",
+        "-t",
+        "DoD 3: after a FULL package, no key in the store carries the slug"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/infrastructure/adapters/ObjectPackageStore.ts",
+      "before": "    if (entry.key === `${platformPrefix}${generation}/${MANIFEST_FILENAME}`) {\n      committed.add(generation);\n    }",
+      "after": "    committed.add(generation);",
+      "because": "a generation counts as committed as soon as it has any key at all, so a crash between the first PUT and the manifest PUT leaves a half-written package readable. Every file in a package appears one at a time and a PUT is atomic per key, so the reader would see whichever prefix of the package happened to be written — and it would be a prefix, not a package: a manifest that does not exist, files the report never names, and for a re-export a package that silently lost an asset the previous one had. The manifest written last IS the whole commit protocol; without it there is nothing to wait for, and the reader has no way to tell a finished package from a run that died three files in. The crash-mid-write case is the only question asked anywhere that distinguishes the two.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/infrastructure/adapters/__tests__/ObjectPackageStore.test.ts",
+        "-t",
+        "nothing committed answers undefined, however many files are listed"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/infrastructure/adapters/ObjectPackageStore.ts",
+      "before": "      if (found !== undefined && found < generation) older.add(found);",
+      "after": "      if (found !== undefined && found <= generation) older.add(found);",
+      "because": "`<=` sweeps the generation that was JUST committed, so every successful export deletes its own package after writing it: the manifest is live for the microseconds between the PUT and the `deletePrefix`, and after that the platform has no committed generation at all. The reader answers `undefined` — or, if a previous generation survived, that one, which is a package that no longer matches the report. This is the one line that makes the commit atomic in the first place, and the mutation is invisible to every test that only checks what `writeManifest` returns, because the return value is computed from the logical path and never looks at the store. It is also the direction that matters for concurrency: sweeping a NEWER generation would fail an in-flight writer's own claim check, which is a crash rather than a wrong package.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/infrastructure/adapters/__tests__/ObjectPackageStore.test.ts",
+        "-t",
+        "the sweep empties every OLDER generation, committed or not"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/package.post.ts",
+      "before": "  if (objectStore() === \"fs\") return fsPackageStore(scope, slug);",
+      "after": "  if (objectStore() === \"fs\" || true) return fsPackageStore(scope, slug);",
+      "because": "the route never takes the s3 branch, so packaging under OBJECT_STORE=s3 resolves a target, then ignores it and writes the package to the output volume — while the RUN that produced the renders wrote them to objects, where the fs output store cannot see them. The request then fails with `Asset not found: …` on a render that exists, having also created an empty `output/packages/<slug>/` tree on a deployment that may have no such volume at all. Under `fs` nothing changes, which is why every fs route suite is blind to it, and the s3 route test is the only place the branch is observed: its assertion is that the keys the request ADDS all start with `org/<org>/campaign/<uuid>/packages/`, and a request that adds none while answering 422 cannot satisfy it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/package.s3.test.ts",
+        "-t",
+        "with a campaign row it writes ONLY under org/<org>/campaign/<uuid>/packages/"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/infrastructure/adapters/ObjectPackageStore.ts",
+      "before": "    const key = renderObjectKey(\n      this.options.renderPrefix,\n      this.options.campaignSegment,\n      relativePath,\n    );",
+      "after": "    const key = `${this.options.renderPrefix}${relativePath}`;",
+      "because": "the render is read at the prefix joined to the whole path, so the lookup becomes `…/renders/winter-sale/alpha/1x1.png` while `ObjectExporter` wrote it at `…/renders/alpha/1x1.png`. Every packaged asset is then missing, and the route answers 422 `Asset not found: …` for a creative that is sitting in the bucket — the same shape of failure as a genuinely absent render, for every asset, on a store that was populated by the run minutes earlier. It also drops the one check that stops a path belonging to another campaign from being read through this campaign's prefix. The round-trip test is the only question asked anywhere that reads a render back: `writePackaged` and `writeManifest` never call `readAsset`, and the X23 check reads the manifest's paths rather than the renders.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/infrastructure/adapters/__tests__/ObjectPackageStore.test.ts",
+        "-t",
+        "readAsset returns the render's bytes from the RENDERS prefix"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/infrastructure/adapters/ObjectPackageStore.ts",
+      "before": "    return this.logicalPath(platformId, relativePath);",
+      "after": "    return `${packageGenerationPrefix(this.options.packagePrefix, platformId, generation)}${FILES_SEGMENT}${relativePath}`;",
+      "because": "`writePackaged` returns the KEY instead of the logical path, so every `packagedPath` in the manifest is an object key: `org/<org>/campaign/<uuid>/packages/instagram-feed/<gen>/files/<slug>/alpha/1x1.png`. That string is what the customer's own file layout becomes, and what the route answers with — a generation id and a store prefix in a download. It also breaks the commit on the very next step, in a way that looks like a different bug: the claim check strips `packages/<slug>/<platformId>/` from a string that does not start with it, so every commit fails with the X23 interruption and no package is ever produced. The blob being returned makes the fs-parity invisible too: the fs adapter's return value is a path relative to the output root, and a key is not one. Only the equality against `FileSystemPackageStore`'s own return value can see this — every key assertion in the file asserts the key the test BUILT, which a key-shaped return still satisfies.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/infrastructure/adapters/__tests__/ObjectPackageStore.test.ts",
+        "-t",
+        "the returned paths are the fs adapter's, for the same inputs"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/infrastructure/adapters/ObjectPackageStore.ts",
+      "before": "    const stamp = Math.max(this.now(), (latest ?? -1) + 1);",
+      "after": "    const stamp = this.now();",
+      "because": "the minted stamp is the writer's own clock again, with no floor over the generations already in the prefix. On a single host with one clock that is indistinguishable — every writer agrees on what time it is — which is why nothing else in the suite can see it. The moment a second replica exists it is not: a pod whose clock reads a minute behind mints a generation that sorts BEFORE the one already committed, and because readers take the newest committed generation, that export is written, its manifest commits, its claim check passes, its sweep runs — and nothing ever reads it. The failure has no exception and no log line; the report simply keeps describing a package that a later export replaced, while the newer package is the one in the bucket and the older is the one every reader sees. The floor turns a clock disagreement into a strictly-increasing sequence, which is the only property `latestCommittedGeneration` actually relies on. Caught by the lagging-replica case, which is the only test with a writer whose `now()` reads BEHIND an existing committed generation.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/infrastructure/adapters/__tests__/ObjectPackageStore.test.ts",
+        "-t",
+        "a lagging replica's re-export still becomes the live one, and supersedes what it can see"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
