@@ -33,6 +33,17 @@ const INPUT_SEGMENT = "inputs";
 const RENDERS_SEGMENT = "renders";
 
 /**
+ * Where a campaign's PLATFORM PACKAGES live (PT-4h1, D203: packages are listed
+ * from object prefixes and there is no `package` table).
+ *
+ * It is the fourth campaign-scoped segment beside `inputs` and `renders`, and it
+ * is a SIBLING of them rather than a subtree: a package holds copies of renders,
+ * never the renders themselves, so `deletePrefix` here must not be able to reach
+ * one.
+ */
+const PACKAGES_SEGMENT = "packages";
+
+/**
  * The background cache sits outside C7's campaign shape, because a cache entry
  * belongs to no campaign: its key is a digest of a provider, a model, a prompt,
  * a ratio and a seed, so there is no campaign id to hang it off even when one
@@ -140,6 +151,36 @@ export function renderPrefix(orgId: string, campaignId: string): ObjectKey {
     "campaign",
     segment("the campaign id", campaignId, UUID_PATTERN),
     RENDERS_SEGMENT,
+    "",
+  ].join("/");
+  assertObjectKey(prefix);
+  return prefix;
+}
+
+/**
+ * Where one campaign's rendered creatives are PACKAGED per platform (PT-4h1,
+ * D203): `org/<orgId>/campaign/<campaignId>/packages/`.
+ *
+ * The shape is `renderPrefix` with `packages` in place of `renders`, and for the
+ * same reason: below it every key is built by REPLACING the leading campaign
+ * segment of the path the use case produced with a generation prefix, so the
+ * slug — the one thing a key must not carry (DoD 3) — is dropped at the join
+ * rather than by a rule that has to remember to drop it.
+ *
+ * Both ids are checked against their OWN patterns, exactly as in `renderPrefix`:
+ * a package prefix that carried a slug here would be self-consistent,
+ * renameable and ambiguous, which is the whole failure this key shape removes.
+ * The trailing `/` is load-bearing for the third time: a platform prefix below
+ * it is `<platformId>/<generation>/`, and without the separator `packages` would
+ * also prefix `packages-archive/`.
+ */
+export function packagePrefix(orgId: string, campaignId: string): ObjectKey {
+  const prefix = [
+    "org",
+    segment("the org id", orgId, ORG_ID_PATTERN),
+    "campaign",
+    segment("the campaign id", campaignId, UUID_PATTERN),
+    PACKAGES_SEGMENT,
     "",
   ].join("/");
   assertObjectKey(prefix);
