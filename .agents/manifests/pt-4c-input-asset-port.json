@@ -46,6 +46,23 @@
         "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/FileSystemAssetResolvers.cause.test.ts"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/preview-frame.post.ts",
+      "before": "  const key = `${env.messageFont}\\0${env.tenant.orgId}\\0${env.assetRoot}`;",
+      "after": "  const key = `${env.messageFont}\\0${env.assetRoot}`;",
+      "because": "two tenants resolving to the same asset root then share one preview bundle and one frame cache, so whichever renders first is served to both, the other org's logo included.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/preview-frame.test.ts",
+        "-t",
+        "the same asset root under two tenants gets different bundles"
+      ],
+      "verdict": "caught"
     }
   ]
 }

@@ -6,10 +6,10 @@
  * product's `inputAsset`), `NodeCanvasCompositor` (a brief's logo),
  * `FileSystemSceneAssetResolver` (a beat's `background`), `FileSystemAudioAssetResolver`
  * (the music bed) and, through `prepare`, `CanvasFfmpegVideoCompositor` — and each
- * reached into a directory itself. That put one confinement rule
- * ({@link resolveAssetPath}) behind five copies of the same filesystem call, and it
- * pinned "the brief's assets live in a directory under the project root" into the
- * domain: a storage backend could not be substituted without rewriting all five.
+ * reached into a directory itself. That put one confinement rule behind five
+ * copies of the same filesystem call, and it pinned "the brief's assets live in a
+ * directory under the project root" into the domain: a storage backend could not be
+ * substituted without rewriting all five.
  * This port is that seam, and nothing else changes about them (PT-4c): each keeps
  * its own decoding, its own cover-fit math and its own failure policy.
  *
@@ -17,10 +17,10 @@
  * business — an object store has no opinion about what a PNG is — so an adapter
  * returns what was stored and each consumer decodes it exactly as it did before.
  *
- * {@link resolveAssetPath} is the confinement rule this port's contract mirrors,
- * not a dependency of it: an implementation must return `undefined` for exactly
- * the refs that rule rejects, so that "this asset is unsafe" stays one decision
- * made once rather than one decision made five times.
+ * The confinement rule itself is an implementation's business, named nowhere
+ * here: what this port fixes is the OUTCOME — `undefined` for exactly the unsafe
+ * refs, bytes or a rejection for the rest — so that "this asset is unsafe" is one
+ * decision made once, in one place, rather than five times in five directories.
  */
 export interface InputAssetPort {
   /**

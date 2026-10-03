@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { readFile } from "node:fs/promises";
@@ -37,10 +37,24 @@ describe("FileSystemInputAssets (InputAssetPort adapter)", () => {
   });
 
   test("confines to the root it is given, not the process's project root (D167)", async () => {
-    const root = "/tmp/tenant-root";
-    const inputs = new FileSystemInputAssets(root);
-    await expect(inputs.read("../assets/x.png")).resolves.toBeUndefined();
-    await expect(inputs.read("assets/inputs/x.png")).rejects.toMatchObject({ code: "ENOENT" });
+    // A real scratch root, not a hard-coded name — and a ref that genuinely
+    // EXISTS under `projectRoot()`. This ref reading ENOENT here can then only
+    // mean the port looked in the root it was handed: a root whose contents
+    // nothing else in the repo can satisfy. (A hard-coded `/tmp/tenant-root`
+    // proved the same thing only by accident — nothing was there either way.)
+    const ref = "assets/inputs/hydra-logo.png";
+    expect(existsSync(join(projectRoot(), ...ref.split("/")))).toBe(true);
+    const root = mkdtempSync(join(tmpdir(), "cf-input-assets-root-"));
+    try {
+      const inputs = new FileSystemInputAssets(root);
+      // Safe under the given root, absent in it → the read's own failure.
+      await expect(inputs.read(ref)).rejects.toMatchObject({ code: "ENOENT" });
+      // A `..` that leaves the given root is unsafe, though the same ref is safe
+      // under projectRoot() — which is exactly the D167 distinction.
+      await expect(inputs.read(`../${ref}`)).resolves.toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("returns the raw bytes of a safe ref, untouched", async () => {
@@ -77,11 +91,12 @@ describe("FileSystemInputAssets (InputAssetPort adapter)", () => {
     }
   });
 
-  test("returns undefined — not a throw — for a safe ref under a root that does not exist", async () => {
-    // Nothing under an absent root can be safe, but an absent root is a
-    // misconfigured deployment rather than a hostile brief, so the port reports
-    // it the way it reports any other unreadable location: through the rejection
-    // the read would have raised, never by escaping as a different error.
+  test("an absent root rejects a safe ref with ENOENT, while an unsafe one is still just undefined", async () => {
+    // Two different outcomes under one absent root, and the distinction matters:
+    // the SAFE ref is rejected the way any unreadable location is (an absent root
+    // is a misconfigured deployment, reported through the read's own failure, not
+    // by escaping as some other error), while the UNSAFE ref never reaches the
+    // filesystem at all and so comes back undefined like any hostile path.
     const inputs = new FileSystemInputAssets(join(tmpdir(), "cf-no-such-root-pt4c"));
     await expect(inputs.read("assets/inputs/x.png")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(inputs.read("../outside.png")).resolves.toBeUndefined();

@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/routes/campaigns/preview-frame.post.ts",
-      "before": "  const key = `${env.messageFont}\\0${env.assetRoot}`;",
+      "before": "  const key = `${env.messageFont}\\0${env.tenant.orgId}\\0${env.assetRoot}`;",
       "after": "  const key = env.messageFont;",
-      "because": "bundles are keyed by font alone, so two asset roots share one frame cache and an org can be served another org's cached frame, its logo included.",
+      "because": "bundles are keyed by font alone, so two asset roots share one frame cache and an org can be served another org's cached frame, its logo included. Re-anchored 2026-10-03 by PT-4c: the key gained the tenant's orgId (PT-4c), so dropping it now drops the org with it — the same claim, and the same test still proves it.",
       "command": [
         "yarn",
         "vitest",

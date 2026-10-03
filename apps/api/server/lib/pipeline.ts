@@ -72,13 +72,19 @@ function resolvedModel(model: string | undefined, fallback: string): string {
 
 /**
  * The run's reader for brief-supplied input assets (PT-4c): one port over this
- * environment's asset root, shared by every consumer in the pipeline below — the
- * reused product images, the compositor's logo, a beat's scene and the music bed.
+ * environment's asset root, for the reused product images, the compositor's logo,
+ * a beat's scene and the music bed.
  *
  * Built from `env.assetRoot` per call and never from the process environment
  * (D167), so a tenant's runs read that tenant's assets. It is deliberately the
  * only place an `InputAssetPort` is constructed: substituting the storage backend
  * means changing this function, not the five consumers behind it.
+ *
+ * `buildPipeline` calls this ONCE and hands the result to every consumer, so a
+ * run reads one tree through one reader. A caller that wants a pipeline reader
+ * must pass that same instance on (see {@link imageGenerator}'s `inputs`); a
+ * standalone call gets its own, which is why this function promises one port per
+ * call and not one per run.
  */
 export function inputAssets(env: RunEnvironment): InputAssetPort {
   return new FileSystemInputAssets(env.assetRoot);
@@ -142,8 +148,18 @@ export function primaryImageProvider(
  * The `genai` variation axis decides *whether* GenAI is used for a cell;
  * `selected` (`?model=`) still decides *which* provider. `paletteShift` is
  * applied only by ProceduralBackgroundGenerator.
+ *
+ * `inputs` is the reader the reuse wrapper reads a product's `inputAsset`
+ * through. It defaults to this environment's own, so a standalone call still
+ * works, but {@link buildPipeline} passes the reader it already built: a run then
+ * reads one asset tree through ONE port instead of a second, identical one built
+ * here for the reuse wrapper alone.
  */
-export function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorPort {
+export function imageGenerator(
+  env: RunEnvironment,
+  selected?: string,
+  inputs: InputAssetPort = inputAssets(env),
+): ImageGeneratorPort {
   const procedural = new ProceduralBackgroundGenerator();
   const cache = new FileSystemBackgroundCache(join(env.outputRoot, "cache"));
   const usage = getUsageStore(env);
@@ -233,7 +249,7 @@ export function imageGenerator(env: RunEnvironment, selected?: string): ImageGen
       break;
   }
 
-  return new AssetReusingImageGenerator(generator, inputAssets(env));
+  return new AssetReusingImageGenerator(generator, inputs);
 }
 
 /**
@@ -252,7 +268,7 @@ export function buildPipeline(
   // One reader for this environment, shared by every consumer below (PT-4c).
   const inputs = inputAssets(env);
   return new GenerateCampaignUseCase({
-    imageGenerator: imageGenerator(env, imageModel),
+    imageGenerator: imageGenerator(env, imageModel, inputs),
     proceduralGenerator: new ProceduralBackgroundGenerator(),
     planner: pooledPlanner(planInput),
     compositor: new NodeCanvasCompositor(env.messageFont, inputs),
