@@ -253,8 +253,13 @@ export class ObjectAssetStore implements AssetStorePort {
       if (destination.reused) continue;
       const assetId = randomUUID();
       const targetKey = inputKey(this.orgId, toId, assetId);
-      await this.store.copy(inputKey(this.orgId, fromId, source.id), targetKey);
       try {
+        // INSIDE the try, because a copy can fail AFTER it wrote: S3 answers
+        // CopyObject's status line before it evaluates the copy, so the adapter
+        // reads a success body afterwards (PT-4b's body-read wrap) and a read
+        // that dies mid-stream rejects with the destination object already
+        // stored. Nothing after this point would have named it.
+        await this.store.copy(inputKey(this.orgId, fromId, source.id), targetKey);
         await this.db.query(
           `insert into asset (id, org_id, campaign_id, kind, name, size, sha256, content_type)
            values ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -272,9 +277,9 @@ export class ObjectAssetStore implements AssetStorePort {
       } catch (error) {
         // The same compensation `writeAsset` makes, and for the same reason: the
         // object is written before the row that will name it, and nobody rolls
-        // this call back — `briefs.post.ts` runs it with no release step. So an
-        // insert failure has to give the object back, or it sits under the
-        // target's prefix with nothing that will ever name it.
+        // this call back — `briefs.post.ts` runs it with no release step. So EITHER
+        // half failing has to give the object back, or it sits under the target's
+        // prefix with nothing that will ever name it.
         await this.discard(targetKey);
         // A concurrent copy of one name is the only `23505` left here (every
         // same-hash case above `continue`s before it gets this far), and it is
@@ -289,14 +294,15 @@ export class ObjectAssetStore implements AssetStorePort {
   }
 
   /**
-   * See `AssetStorePort.deleteAssets`. A uuid is used AS the campaign id, with
-   * no lookup at all, and that is the load-bearing half: by the time a create
-   * rollback calls this, `releaseCampaign` has already deleted the campaign row
-   * and the cascade took the asset rows with it, so a slug no longer resolves
-   * and a resolving lookup would no-op and orphan every object. The prefix is
-   * derived from the uuid, so the objects go whether or not the rows are still
-   * there — and the row delete afterwards is the harmless other half, needed
-   * for a campaign that still exists.
+   * See `AssetStorePort.deleteAssets`.
+   *
+   * A uuid is used AS the campaign id, with no lookup at all — the shape a
+   * caller holding a campaign's id and no row can free. The routes do not use
+   * it: they hold a SLUG and pass it, because this class has to resolve that
+   * slug into a uuid through the campaign row, and a create rollback frees the
+   * assets BEFORE the release that removes the row (PT-4b). The uuid branch is
+   * kept because it costs one regex test and answers a case that is otherwise
+   * silently wrong: given an id no row resolves, a slug lookup would no-op.
    *
    * A non-uuid is a slug and is resolved; one that does not resolve is a no-op,
    * exactly as on fs, where the directory simply is not there.

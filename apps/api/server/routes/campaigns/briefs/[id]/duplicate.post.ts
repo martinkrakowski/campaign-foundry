@@ -16,7 +16,7 @@ import {
   withPoolLock,
 } from "../../../../lib/pools.js";
 import { getAssetStore, getBriefStore } from "../../../../lib/ports/index.js";
-import type { ResolvedCampaign, StoredBrief } from "../../../../lib/ports/brief-store.port.js";
+import type { StoredBrief } from "../../../../lib/ports/brief-store.port.js";
 import {
   assertOwnedCampaign,
   assertSourceVisible,
@@ -117,8 +117,10 @@ async function withDerivedSlug<T>(name: string, attempt: (slug: string) => Promi
  * on file existence alone — and, on Postgres, mints the versionless row this
  * write's own `createBrief` call then completes as its first Save (D177).
  * PT-5b2 fix-round items 2/3: once that reservation succeeds, a later
- * failure (asset copy, the first-version `createBrief`, the pool write)
- * releases it (`releaseCampaign`, `deleteAssets`) and propagates as-is —
+ * failure (asset copy, the first-version `createBrief`, the pool write) frees
+ * the copied assets and then releases it (`deleteAssets`, `releaseCampaign` —
+ * in THAT order, PT-4b, because the slug both frees by has to be resolved
+ * before the row goes) and propagates as-is —
  * never retried onto a different suffix, even when the failure is itself
  * EEXIST-shaped (a concurrent writer's own Save racing this exact slug).
  *
@@ -264,17 +266,12 @@ export default defineEventHandler(async (event) => {
       if (await isPoolDirSymlink(scope, targetSlug)) {
         throw new Error(SYMLINK_WRITE_ERROR);
       }
-      // PT-4b: the minted campaign is KEPT, because the rollback below needs
-      // its uuid. On fs `createCampaign` answers `{ campaignId: slug }` (D179),
-      // so the `deleteAssets` call this feeds is byte-identical to the one
-      // that took the slug; on Postgres it answers the surrogate id, which is
-      // the only thing `deleteAssets` can use after `releaseCampaign` has
-      // removed the campaign row the slug resolved through. Declared out here
-      // because the `try` it is assigned in and the `catch` that reads it are
-      // siblings, and it is always assigned before that catch can run.
-      let minted: ResolvedCampaign;
+      // PT-5b3 (D168, D177): `createCampaign` also stores the typed name and the
+      // source's own type; see this route's docstring. Nothing keeps its result
+      // (PT-4b): the rollback frees the assets by the target SLUG, before the
+      // release, because that is the only value every backend can act on.
       try {
-        minted = await getBriefStore(scope).createCampaign(targetSlug, {
+        await getBriefStore(scope).createCampaign(targetSlug, {
           teamId: sourceTeamId,
           name: displayName,
           type: template.type,
@@ -311,18 +308,22 @@ export default defineEventHandler(async (event) => {
         // removes on fs (D177/D179): deleted first (a no-op if nothing was
         // ever written), or its own `rmdir` would refuse a non-empty directory.
         await withPoolLock(scope, targetSlug, () => deletePool(scope, targetSlug));
-        const released = await getBriefStore(scope).releaseCampaign(targetSlug);
-        // Only when the campaign itself is gone too, never after a real,
-        // versioned brief.
-        //
-        // The minted id, NOT `targetSlug` (PT-4b): on Postgres
-        // `releaseCampaign` above has already deleted the campaign row, and
-        // the cascade took this campaign's `asset` rows with it — so a
-        // `deleteAssets(slug)` would resolve to nothing, no-op, and leave
-        // every object the copy just made under the campaign's prefix with no
-        // row that will ever name them. On fs the minted id IS the slug, so
-        // this is the same call as before.
-        if (released) await getAssetStore(scope).deleteAssets(minted.campaignId);
+        // The assets go BEFORE the release, by SLUG, and best-effort (PT-4b).
+        // Before, because the slug is the only value every backend can act on:
+        // `FsAssetStore` keeps a copied asset under `assets/inputs/<slug>/`, and
+        // `ObjectAssetStore` resolves the slug into the uuid its prefix is built
+        // from — which it can only do while the campaign row exists. Best-effort
+        // because the release is what makes the campaign go away, and on S3 its
+        // cascade takes any rows a failed prefix-delete left: objects without
+        // rows are unreachable, rows without objects are a re-upload.
+        try {
+          await getAssetStore(scope).deleteAssets(targetSlug);
+        } catch {
+          // Reported by the release that follows, and by nothing else.
+        }
+        // `releaseCampaign` carries its own guard: it refuses once a real,
+        // versioned brief exists for the slug (a concurrent Save won it).
+        await getBriefStore(scope).releaseCampaign(targetSlug);
         throw error;
       }
     });

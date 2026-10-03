@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import { hashBytes } from "../../brief-files.js";
 import { resetDatabase, setDatabase } from "../../db/database.js";
@@ -235,6 +235,26 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
     expect((error as { code?: string }).code).toBe("EEXIST");
     expect((error as Error).message).toBe(`Asset "assets/inputs/target/logo.png" already exists.`);
     expect(await keysUnder(store, targetId)).toEqual([]);
+  });
+
+  test("a copy that WROTE the object and then rejected discards it", async () => {
+    // The failure the insert-compensation cannot see: S3 commits CopyObject's
+    // status line before it evaluates the copy, so `S3ObjectStore.copy` then
+    // reads a success body — and a read that dies mid-stream rejects with the
+    // destination object already stored. With `store.copy` outside the try, the
+    // rejection escapes before the insert and nothing will ever name the object.
+    const targetId = await seed(db, "target");
+    await assets.writeAsset(SOURCE, "logo.png", PNG);
+    const written = vi.spyOn(store, "copy").mockImplementation(async (src, dst) => {
+      await InMemoryObjectStore.prototype.copy.call(store, src, dst);
+      throw new Error("The object store could not be reached for copy.");
+    });
+    await expect(assets.copyAssets(SOURCE, "target")).rejects.toThrow(
+      "could not be reached for copy",
+    );
+    expect(written).toHaveBeenCalledTimes(1);
+    expect(await keysUnder(store, targetId)).toEqual([]);
+    expect(await rowsOf(db, targetId)).toEqual([]);
   });
 
   test("a nested name keeps its directory when it is suffixed", async () => {

@@ -55,9 +55,9 @@
     },
     {
       "file": "apps/api/server/routes/campaigns/index.post.ts",
-      "before": "        if (released) await getAssetStore(scope).deleteAssets(minted.campaignId);",
-      "after": "        if (released) await getAssetStore(scope).deleteAssets(targetSlug);",
-      "because": "the rollback frees the assets by a slug that no longer resolves. `releaseCampaign` above has ALREADY deleted the campaign row, and `asset.campaign_id` cascades, so `deleteAssets(slug)` resolves nothing, no-ops, and every object `copyAssets` just wrote stays under `org/<org>/campaign/<uuid>/inputs/` with no row left that will ever name it — the failure path that undoes a create leaves the largest thing the create made behind. The minted id is the fix and is what `ObjectAssetStore.deleteAssets` needs: a uuid-shaped ref is used as the campaign id with NO lookup, precisely because the row it would resolve through is gone. Caught offline by the Postgres-mode create rollback: after a `createBrief` failure, nothing is under the minted uuid's prefix.",
+      "before": "        try {\n          await getAssetStore(scope).deleteAssets(targetSlug);\n        } catch {\n          // Reported by the release that follows, and by nothing else.\n        }\n        // `releaseCampaign` carries its own guard: it refuses once a real,\n        // versioned brief exists for the slug (a concurrent Save won it), so the\n        // reservation it drops is always this request's own.\n        await store.releaseCampaign(targetSlug);",
+      "after": "        // `releaseCampaign` carries its own guard: it refuses once a real,\n        // versioned brief exists for the slug (a concurrent Save won it), so the\n        // reservation it drops is always this request's own.\n        await store.releaseCampaign(targetSlug);\n        try {\n          await getAssetStore(scope).deleteAssets(targetSlug);\n        } catch {\n          // Reported by the release that follows, and by nothing else.\n        }",
+      "because": "the free goes back AFTER the release (fix round 2, HIGH). `releaseCampaign` deletes the campaign row, and the slug is resolved THROUGH that row, so the free that follows resolves nothing, no-ops, and every object the copy just wrote stays under `org/<org>/campaign/<uuid>/inputs/` with no row left to name it — the one failure path whose whole job is to leave nothing behind. On staging (`STORE_BACKEND=postgres`, `OBJECT_STORE=fs`) this order is invisible, which is why the swap looks harmless: `FsAssetStore` addresses a directory by name and never asks the row. So the mutation is caught only by the postgres+s3 rollback, which asserts the minted campaign's prefix is empty. The OTHER half of the same HIGH — a uuid rather than a slug as the argument — is invisible to the same test (a uuid frees an s3 prefix correctly) and is pinned instead by the postgres+fs rollback tests, where a uuid is a directory that was never written; no mutation can express that half, because reverting it needs a uuid the route no longer holds.",
       "command": [
         "yarn",
         "vitest",
@@ -123,9 +123,9 @@
     },
     {
       "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
-      "before": "        if (released) await getAssetStore(scope).deleteAssets(minted.campaignId);",
-      "after": "        if (released) await getAssetStore(scope).deleteAssets(targetSlug);",
-      "because": "the DUPLICATE route's rollback frees the copied assets by a slug that no longer resolves (fix round 1, item 3). The identical defect the create route carried, in the second of the two routes that make the same sequence: `releaseCampaign` above has already deleted the campaign row, and `asset.campaign_id` cascades, so `deleteAssets(slug)` resolves nothing, no-ops, and every object `copyAssets` just wrote stays under `org/<org>/campaign/<uuid>/inputs/` with no row left to name it. Only the create route's copy of this line was tested before, which is exactly how a fix lands on one of two identical call sites. The duplicate rollback test mints a campaign, copies an asset, fails `createBrief`, and asserts no rows for the minted uuid and nothing under its prefix.",
+      "before": "        try {\n          await getAssetStore(scope).deleteAssets(targetSlug);\n        } catch {\n          // Reported by the release that follows, and by nothing else.\n        }\n        // `releaseCampaign` carries its own guard: it refuses once a real,\n        // versioned brief exists for the slug (a concurrent Save won it).\n        await getBriefStore(scope).releaseCampaign(targetSlug);",
+      "after": "        // `releaseCampaign` carries its own guard: it refuses once a real,\n        // versioned brief exists for the slug (a concurrent Save won it).\n        await getBriefStore(scope).releaseCampaign(targetSlug);\n        try {\n          await getAssetStore(scope).deleteAssets(targetSlug);\n        } catch {\n          // Reported by the release that follows, and by nothing else.\n        }",
+      "because": "the DUPLICATE route's free goes back AFTER the release (fix round 2, HIGH) — the identical defect on the second of the two routes that mint, copy, release and free in that order. `releaseCampaign` removes the campaign row, so the slug has nothing left to resolve through: the free no-ops and every copied object survives the failure path that exists to remove it. Only the create route's copy of this sequence is caught by the order, which is why this entry exists at all; a fix that lands on one of two identical call sites is the failure mode this manifest exists to make visible.",
       "command": [
         "yarn",
         "vitest",
@@ -135,6 +135,23 @@
         "apps/api/server/routes/campaigns/__tests__/assets.postgres.test.ts",
         "-t",
         "the duplicate route's rollback frees them too"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "        await this.store.copy(inputKey(this.orgId, fromId, source.id), targetKey);\n        await this.db.query(",
+      "after": "        await this.db.query(",
+      "because": "`store.copy` moves back OUT of the compensation block (fix round 2, MEDIUM). S3 commits CopyObject's status line before it evaluates the copy, so `S3ObjectStore.copy` then reads a success body — and PT-4b's body-read wrap turns a read that dies mid-stream into a rejection with the DESTINATION OBJECT ALREADY STORED. With the copy outside the try, that rejection escapes before the insert, `discard(targetKey)` never runs, and the object sits under the target's prefix with nothing that will name it: `briefs.post.ts` runs a copy with no release step, so nothing else will either. The test is a store whose `copy` stores the object and then throws, which is exactly that shape; it leaves the target prefix empty.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store-copy.test.ts",
+        "-t",
+        "a copy that WROTE the object and then rejected discards it"
       ],
       "verdict": "caught"
     }

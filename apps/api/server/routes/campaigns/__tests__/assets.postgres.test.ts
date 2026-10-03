@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   BRIEF_SCHEMA_VERSION,
   DEFAULT_CAMPAIGN_TYPE,
@@ -16,6 +18,7 @@ import {
 } from "../../../lib/object-store/index.js";
 import type { ResolvedCampaign } from "../../../lib/ports/brief-store.port.js";
 import { getAssetStore, resetAssetStore } from "../../../lib/ports/index.js";
+import { ObjectAssetStore } from "../../../lib/ports/object-asset-store.js";
 import { PgBriefStore } from "../../../lib/ports/pg-brief-store.js";
 import type { TenantContext } from "../../../lib/tenant.js";
 import assetsPostHandler from "../assets.post.js";
@@ -232,7 +235,7 @@ describe("the create rollback frees the copied assets (PT-4b)", () => {
     await getAssetStore(tenant).writeAsset("source-camp", "logo.png", PNG);
 
     // `createBrief` fails AFTER the copy, which is the whole point of the order:
-    // the reservation is released, and only then are the objects freed.
+    // the copied assets are freed, and only then is the reservation released.
     const failing = vi
       .spyOn(PgBriefStore.prototype, "createBrief")
       .mockRejectedValueOnce(new Error("boom"));
@@ -252,14 +255,16 @@ describe("the create rollback frees the copied assets (PT-4b)", () => {
     expect(res.status).toBe(500);
     expect(failing).toHaveBeenCalledTimes(1);
 
-    // The id `createCampaign` minted, which is what `deleteAssets` was given.
+    // The uuid `createCampaign` minted, which is the campaign whose prefix the
+    // copy wrote under — not, any more, what `deleteAssets` is given.
     const minted = (await mint.mock.results[0]!.value) as ResolvedCampaign;
     expect(minted.slug).toBe("copy");
 
-    // Nothing of the copy's survives: no rows of its own (the cascade took
-    // them with the released campaign) and no objects under its prefix. Scoped
-    // to the minted campaign, because the SOURCE's row is supposed to be here —
-    // the global count is asserted next, and it is 1 for exactly that reason.
+    // Nothing of the copy's survives: `deleteAssets(<slug>)` resolved the slug to
+    // that uuid while the row still existed, so it removed the rows AND the
+    // objects. Scoped to the minted campaign, because the SOURCE's row is
+    // supposed to be here — the global count is asserted next, and it is 1 for
+    // exactly that reason.
     const { rows } = await harness.db.query<{ n: number }>(
       `select count(*)::int as n from asset where campaign_id = $1`,
       [minted.campaignId],
@@ -274,10 +279,8 @@ describe("the create rollback frees the copied assets (PT-4b)", () => {
 
   test("the duplicate route's rollback frees them too", async () => {
     // The identical argument, against the second route that makes the same
-    // sequence. Both have a rollback that calls `deleteAssets`, and only one of
-    // them was tested: a `deleteAssets(slug)` here would resolve nothing either,
-    // because `releaseCampaign` above it has already deleted the campaign row
-    // and the cascade the asset rows with it.
+    // sequence: mint, copy, release, free. Both have a rollback, and only one of
+    // them was tested — which is how a fix lands on one of two identical sites.
     const tenant: TenantContext = { orgId: "local", userId: "u", roles: [], teamIds: [] };
     const briefs = new PgBriefStore(harness.db, "local", "u", [], []);
     await briefs.createCampaign("source-camp");
@@ -315,5 +318,121 @@ describe("the create rollback frees the copied assets (PT-4b)", () => {
     // And the source is still whole, as on the create path.
     expect(await assetCount(harness.db)).toBe(1);
     expect(await getAssetStore(tenant).readAsset("source-camp", "logo.png")).toEqual(PNG);
+  });
+
+  test("a cleanup failure still releases the campaign, and the ORIGINAL error is what surfaces", async () => {
+    // The free is best-effort because the RELEASE is what makes the campaign go
+    // away: skipping it instead would strand a versionless reservation, and its
+    // assets, for good. So a store that refuses to free must not stop the
+    // release — and must not become the error the caller hears either. EEXIST is
+    // the shape that tells them apart: this route maps it to 409 carrying ITS
+    // OWN message, so a 409 whose body names the cleanup would mean the wrong
+    // error won.
+    const tenant: TenantContext = { orgId: "local", userId: "u", roles: [], teamIds: [] };
+    const briefs = new PgBriefStore(harness.db, "local", "u", [], []);
+    await briefs.createCampaign("source-camp");
+    await briefs.createBrief(brief("source-camp"));
+    await getAssetStore(tenant).writeAsset("source-camp", "logo.png", PNG);
+
+    const real = Object.assign(new Error("the real failure"), { code: "EEXIST" });
+    vi.spyOn(PgBriefStore.prototype, "createBrief").mockRejectedValueOnce(real);
+    vi.spyOn(ObjectAssetStore.prototype, "deleteAssets").mockRejectedValue(
+      new Error("the cleanup exploded"),
+    );
+
+    const res = await mountTenantRoute(createHandler, {
+      method: "POST",
+      path: "/campaigns",
+      tenant,
+    })(
+      new Request("http://x/campaigns", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Copy", source: "source-camp" }),
+      }),
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "the real failure" });
+    // The release ran, so the reservation is gone — that is the thing the
+    // best-effort free exists to protect.
+    const { rows: left } = await harness.db.query<{ n: number }>(
+      `select count(*)::int as n from campaign where org_id = 'local' and slug = 'copy'`,
+    );
+    expect(left[0]!.n).toBe(0);
+  });
+
+  describe("with OBJECT_STORE=fs — staging's CURRENT configuration (PT-4b)", () => {
+    // `STORE_BACKEND=postgres` with `OBJECT_STORE` unset is what staging runs,
+    // and it is the combination the uuid argument broke: `FsAssetStore` keeps a
+    // copied asset under `assets/inputs/<slug>/`, so `deleteAssets(<uuid>)` names
+    // a directory it never wrote and the copied files survive the rollback with
+    // no campaign left to ever free them.
+    const tenant: TenantContext = { orgId: "local", userId: "u", roles: [], teamIds: [] };
+
+    beforeEach(() => {
+      delete process.env.OBJECT_STORE;
+      resetAssetStore();
+    });
+
+    const copied = () => join(harness.projectRoot, "assets", "inputs", "copy", "logo.png");
+    const original = () => join(harness.projectRoot, "assets", "inputs", "source-camp", "logo.png");
+
+    async function seedSource(): Promise<void> {
+      const briefs = new PgBriefStore(harness.db, "local", "u", [], []);
+      await briefs.createCampaign("source-camp");
+      await briefs.createBrief(brief("source-camp"));
+      await getAssetStore(tenant).writeAsset("source-camp", "logo.png", PNG);
+      expect(existsSync(original())).toBe(true);
+    }
+
+    test("the create rollback leaves no copied file under the target slug", async () => {
+      await seedSource();
+      vi.spyOn(PgBriefStore.prototype, "createBrief").mockRejectedValueOnce(new Error("boom"));
+
+      const res = await mountTenantRoute(createHandler, {
+        method: "POST",
+        path: "/campaigns",
+        tenant,
+      })(
+        new Request("http://x/campaigns", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Copy", source: "source-camp" }),
+        }),
+      );
+      expect(res.status).toBe(500);
+      // The whole copy is gone, directory and all…
+      expect(existsSync(copied())).toBe(false);
+      expect(existsSync(join(harness.projectRoot, "assets", "inputs", "copy"))).toBe(false);
+      // …and the source's own file is untouched.
+      expect(existsSync(original())).toBe(true);
+      // No `asset` row either: on this backend there never was one, and the
+      // rollback must not invent a table's worth of state by failing to free.
+      expect(await assetCount(harness.db)).toBe(0);
+    });
+
+    test("the duplicate rollback leaves no copied file either", async () => {
+      await seedSource();
+      vi.spyOn(PgBriefStore.prototype, "createBrief").mockRejectedValueOnce(new Error("boom"));
+
+      const res = await mountTenantRoute(duplicateHandler, {
+        method: "POST",
+        path: "/campaigns/briefs/:id/duplicate",
+        tenant,
+      })(
+        new Request("http://x/campaigns/briefs/source-camp/duplicate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Copy" }),
+        }),
+      );
+      expect(res.status).toBe(500);
+      expect(existsSync(copied())).toBe(false);
+      expect(existsSync(original())).toBe(true);
+      const { rows: left } = await harness.db.query<{ n: number }>(
+        `select count(*)::int as n from campaign where org_id = 'local' and slug = 'copy'`,
+      );
+      expect(left[0]!.n).toBe(0);
+    });
   });
 });
