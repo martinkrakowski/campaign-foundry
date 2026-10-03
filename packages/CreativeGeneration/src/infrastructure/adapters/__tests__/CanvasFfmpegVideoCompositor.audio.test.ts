@@ -18,6 +18,7 @@ import {
 } from "../CanvasFfmpegVideoCompositor.js";
 
 import { projectRoot } from "@campaignfoundry/shared";
+import { fsInputs } from "./fs-inputs.js";
 /**
  * VE3b1 — the music bed in the encoder.
  *
@@ -114,7 +115,7 @@ describe("CanvasFfmpegVideoCompositor — audio args (VE3b1)", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: argCapturingFfmpeg(captured),
       ffmpegPath: "/opt/ffmpeg",
-      assetRoot: projectRoot(),
+      inputs: fsInputs(projectRoot()),
     });
     await compositor.compositeVideo(videoRequest());
 
@@ -164,7 +165,7 @@ describe("CanvasFfmpegVideoCompositor — audio args (VE3b1)", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: argCapturingFfmpeg(captured),
       ffmpegPath: "/opt/ffmpeg",
-      assetRoot: projectRoot(),
+      inputs: fsInputs(projectRoot()),
     });
     const audio = new Uint8Array([1, 2, 3, 4]); // spawn is faked — never decoded here.
     await compositor.compositeVideo(videoRequest({ audio }));
@@ -223,7 +224,7 @@ describe("CanvasFfmpegVideoCompositor — audio args (VE3b1)", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: argCapturingFfmpeg(captured),
       ffmpegPath: "/opt/ffmpeg",
-      assetRoot: projectRoot(),
+      inputs: fsInputs(projectRoot()),
     });
     // fps 10 * durationSec 0.2 = 2 frames exactly, so frames / fps = 0.2 exactly
     // (no floating-point noise) and the fade is clamped to the full 0.2s.
@@ -239,7 +240,7 @@ describe("CanvasFfmpegVideoCompositor — audio args (VE3b1)", () => {
     const compositor = new CanvasFfmpegVideoCompositor({
       spawn: argCapturingFfmpeg(captured),
       ffmpegPath: "/opt/ffmpeg",
-      assetRoot: projectRoot(),
+      inputs: fsInputs(projectRoot()),
     });
     // durationSec 1.5 * fps 1 = 1.5, which rounds UP to 2 frames — so the
     // encoded video is 2s long, not 1.5s, and the audio must match the 2s it
@@ -397,7 +398,7 @@ describe("CanvasFfmpegVideoCompositor — audio, real ffmpeg (VE3b1)", () => {
     async () => {
       if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
       const audio = generateSineBedWav(ffmpegPath, 2);
-      const compositor = new CanvasFfmpegVideoCompositor({ assetRoot: projectRoot() });
+      const compositor = new CanvasFfmpegVideoCompositor({ inputs: fsInputs(projectRoot()) });
       const { video } = await compositor.compositeVideo(videoRequest({ audio }));
 
       const dir = mkdtempSync(join(tmpdir(), "cf-audio-out-"));
@@ -420,7 +421,7 @@ describe("CanvasFfmpegVideoCompositor — audio, real ffmpeg (VE3b1)", () => {
       if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
       const durationSec = 2;
       const audio = generateSineBedWav(ffmpegPath, 0.5); // shorter than the video
-      const compositor = new CanvasFfmpegVideoCompositor({ assetRoot: projectRoot() });
+      const compositor = new CanvasFfmpegVideoCompositor({ inputs: fsInputs(projectRoot()) });
       const { video } = await compositor.compositeVideo(videoRequest({ audio, durationSec }));
 
       const dir = mkdtempSync(join(tmpdir(), "cf-audio-out-"));
@@ -443,7 +444,7 @@ describe("CanvasFfmpegVideoCompositor — audio, real ffmpeg (VE3b1)", () => {
       if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
       const durationSec = 2;
       const audio = generateSineBedWav(ffmpegPath, 4); // longer than the video
-      const compositor = new CanvasFfmpegVideoCompositor({ assetRoot: projectRoot() });
+      const compositor = new CanvasFfmpegVideoCompositor({ inputs: fsInputs(projectRoot()) });
       const { video } = await compositor.compositeVideo(videoRequest({ audio, durationSec }));
 
       const dir = mkdtempSync(join(tmpdir(), "cf-audio-out-"));
@@ -464,7 +465,7 @@ describe("CanvasFfmpegVideoCompositor — audio, real ffmpeg (VE3b1)", () => {
     async () => {
       if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
       const audio = generateSineBedWav(ffmpegPath, 3);
-      const compositor = new CanvasFfmpegVideoCompositor({ assetRoot: projectRoot() });
+      const compositor = new CanvasFfmpegVideoCompositor({ inputs: fsInputs(projectRoot()) });
       const first = await compositor.compositeVideo(videoRequest({ audio }));
       const second = await compositor.compositeVideo(videoRequest({ audio }));
       expect(sha256(second.video)).toBe(sha256(first.video));
@@ -479,7 +480,7 @@ describe("CanvasFfmpegVideoCompositor — audio, real ffmpeg (VE3b1)", () => {
     async () => {
       if (!ffmpegPath) throw new Error("ffmpeg-static binary is not available");
       const audio = generateTwoStreamBed(ffmpegPath, 2);
-      const compositor = new CanvasFfmpegVideoCompositor({ assetRoot: projectRoot() });
+      const compositor = new CanvasFfmpegVideoCompositor({ inputs: fsInputs(projectRoot()) });
       const { video } = await compositor.compositeVideo(videoRequest({ audio }));
 
       const dir = mkdtempSync(join(tmpdir(), "cf-audio-out-"));
@@ -505,7 +506,7 @@ describe("CanvasFfmpegVideoCompositor — audio, real ffmpeg (VE3b1)", () => {
       const fps = 1;
       const encodedDurationSec = 2;
       const audio = generateSineBedWav(ffmpegPath, 1); // shorter than either duration — exercises padding too
-      const compositor = new CanvasFfmpegVideoCompositor({ assetRoot: projectRoot() });
+      const compositor = new CanvasFfmpegVideoCompositor({ inputs: fsInputs(projectRoot()) });
       const { video } = await compositor.compositeVideo(videoRequest({ audio, durationSec, fps }));
 
       const dir = mkdtempSync(join(tmpdir(), "cf-audio-out-"));

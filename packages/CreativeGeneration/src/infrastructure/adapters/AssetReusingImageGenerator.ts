@@ -1,13 +1,12 @@
-import { readFile } from "node:fs/promises";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type {
   AspectRatio,
   BackgroundContext,
   BackgroundResult,
   ImageGeneratorPort,
+  InputAssetPort,
   Product,
 } from "@campaignfoundry/CampaignOrchestration";
-import { resolveAssetPath } from "../safe-path.js";
 
 /**
  * AssetReusingImageGenerator — ImageGeneratorPort decorator.
@@ -19,10 +18,10 @@ import { resolveAssetPath } from "../safe-path.js";
  * keeps reuse policy in one place and out of every concrete generator.
  */
 export class AssetReusingImageGenerator implements ImageGeneratorPort {
-  /** @param assetRoot the project root whose `assets/` tree confines a reused asset (D167). */
+  /** @param inputs the confined reader a reused asset is read through (PT-4c). */
   constructor(
     private readonly generator: ImageGeneratorPort,
-    private readonly assetRoot: string,
+    private readonly inputs: InputAssetPort,
   ) {}
 
   async resolveBackground(
@@ -39,10 +38,12 @@ export class AssetReusingImageGenerator implements ImageGeneratorPort {
 
   /** Cover-fit a supplied asset to the target ratio; undefined if missing/unreadable. */
   private async tryReuseAsset(path: string, ratio: AspectRatio): Promise<Uint8Array | undefined> {
-    const safePath = resolveAssetPath(path, this.assetRoot);
-    if (!safePath) return undefined; // unsafe/absolute path → fall through to generation
     try {
-      const image = await loadImage(await readFile(safePath));
+      const bytes = await this.inputs.read(path);
+      // An unsafe ref is indistinguishable from one that was never named, so the
+      // read never throws for it — it comes back undefined and falls through here.
+      if (bytes === undefined) return undefined;
+      const image = await loadImage(Buffer.from(bytes));
       const canvas = createCanvas(ratio.width, ratio.height);
       const ctx = canvas.getContext("2d");
       const scale = Math.max(ratio.width / image.width, ratio.height / image.height);

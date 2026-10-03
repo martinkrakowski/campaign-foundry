@@ -26,6 +26,7 @@ import {
 } from "./compositor-golden-key.js";
 
 import { projectRoot } from "@campaignfoundry/shared";
+import { fsInputs } from "./fs-inputs.js";
 /**
  * Text-effect goldens (K3 gap, found by a reviewer and by K3's own mutation
  * manifest after K3 shipped): K3's own gate claimed "per-frame byte-identity
@@ -146,7 +147,11 @@ const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes)
  * (`effectT ?? t`, the legacy unification).
  */
 async function legacyFrame(effect: TextEffectKind, t: number): Promise<Buffer> {
-  const prepared = await NodeCanvasCompositor.prepare(baseRequest(effect), "Inter", projectRoot());
+  const prepared = await NodeCanvasCompositor.prepare(
+    baseRequest(effect),
+    "Inter",
+    fsInputs(projectRoot()),
+  );
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   NodeCanvasCompositor.draw(ctx, prepared, t, undefined);
@@ -164,7 +169,7 @@ async function timelineFrame(effect: TextEffectKind, windowFraction: number): Pr
   const prepared = await NodeCanvasCompositor.prepare(
     timelineRequest(effect),
     "Inter",
-    projectRoot(),
+    fsInputs(projectRoot()),
   );
   const timeline = prepared.timeline;
   if (timeline === undefined) {

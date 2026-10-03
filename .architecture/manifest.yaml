@@ -198,6 +198,7 @@ bounded_contexts:
             - CopyGeneratorPort
             - ExportPort
             - ImageGeneratorPort
+            - InputAssetPort
             - ObjectStorePort
             - PlatformProfilePort
             - SceneAssetPort
@@ -256,6 +257,7 @@ bounded_contexts:
           - CanvasFfmpegVideoCompositor
           - FileSystemAudioAssetResolver
           - FileSystemBackgroundCache
+          - FileSystemInputAssets
           - FileSystemSceneAssetResolver
           - FireflyImageGenerator
           - GeminiImageGenerator

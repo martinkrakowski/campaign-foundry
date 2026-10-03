@@ -1,15 +1,18 @@
-import { readFile } from "node:fs/promises";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import type { AspectRatio, SceneAssetPort } from "@campaignfoundry/CampaignOrchestration";
-import { resolveAssetPath } from "../safe-path.js";
+import type {
+  AspectRatio,
+  InputAssetPort,
+  SceneAssetPort,
+} from "@campaignfoundry/CampaignOrchestration";
 
 /**
  * FileSystemSceneAssetResolver — SceneAssetPort adapter.
  *
  * Cover-fits a beat's own background (VE5a `CopyBeat.background`) to a target
  * ratio exactly the way `AssetReusingImageGenerator.tryReuseAsset` fits a
- * product's `inputAsset` — same confinement (`resolveAssetPath`, confined to
- * the project's `assets/` tree), same center-crop cover-fit math. The two
+ * product's `inputAsset` — the same confinement (the `InputAssetPort` its
+ * constructor takes, which is `resolveAssetPath` confined to the project's
+ * `assets/` tree), same center-crop cover-fit math. The two
  * deliberately diverge on failure: `tryReuseAsset` returns `undefined` so its
  * caller can fall through to generation — the right call for a product's base
  * ground, which always has a generated fallback. A scene has no such
@@ -18,23 +21,30 @@ import { resolveAssetPath } from "../safe-path.js";
  * REJECTS instead, and the use case (`resolveTimelineBackgrounds`) turns
  * that rejection into a run failure naming the offending beat and path.
  *
- * The cover-fit math is not extracted into a shared helper: it already lives
- * inlined in three places in this package (`AssetReusingImageGenerator`,
- * `FireflyImageGenerator`, `OpenRouterImageGenerator`), each behind its own
- * golden-pinned adapter — refactoring those is out of this lane's scope.
+ * The port returns bytes and nothing else, so the decode stays here — the same
+ * place it has always been, and the same reason the cover-fit math is not
+ * extracted into a shared helper: it already lives inlined in three places in
+ * this package (`AssetReusingImageGenerator`, `FireflyImageGenerator`,
+ * `OpenRouterImageGenerator`), each behind its own golden-pinned adapter —
+ * refactoring those is out of this lane's scope.
  */
 export class FileSystemSceneAssetResolver implements SceneAssetPort {
-  /** @param assetRoot the project root whose `assets/` tree confines every read (D167). */
-  constructor(private readonly assetRoot: string) {}
+  /** @param inputs the confined reader every scene is read through (PT-4c). */
+  constructor(private readonly inputs: InputAssetPort) {}
 
   async resolveScene(path: string, ratio: AspectRatio): Promise<Uint8Array> {
-    const safePath = resolveAssetPath(path, this.assetRoot);
-    if (!safePath) {
+    let bytes: Uint8Array | undefined;
+    try {
+      bytes = await this.inputs.read(path);
+    } catch (cause) {
+      throw new Error(`Scene "${path}" could not be read.`, { cause });
+    }
+    if (bytes === undefined) {
       throw new Error(`Scene "${path}" is not a valid asset path.`);
     }
     let image: Awaited<ReturnType<typeof loadImage>>;
     try {
-      image = await loadImage(await readFile(safePath));
+      image = await loadImage(Buffer.from(bytes));
     } catch (cause) {
       throw new Error(`Scene "${path}" could not be read.`, { cause });
     }

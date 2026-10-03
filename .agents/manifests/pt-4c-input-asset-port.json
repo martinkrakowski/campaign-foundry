@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "lane": "PT-4c",
+  "mutations": [
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/FileSystemInputAssets.ts",
+      "before": "    if (safePath === undefined) return undefined;\n    return await readFile(safePath);",
+      "after": "    return await readFile(safePath ?? ref);",
+      "because": "reading the raw ref when the port's confinement rejects it returns the bytes of whatever an unsafe ref names, so a brief-supplied `/etc/passwd` or `../x` becomes a file-existence oracle over the whole repository — the exact failure resolveAssetPath exists to prevent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/FileSystemInputAssets.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
+      "before": "      if ((error as NodeJS.ErrnoException).code !== \"ENOENT\") {",
+      "after": "      if ((error as NodeJS.ErrnoException).code === \"ENOENT\") {",
+      "because": "inverting the ENOENT test warns about a logo that was simply never uploaded and stays silent about a corrupt one, so a present-but-unreadable brand asset renders with no logo and no diagnostic at all.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/NodeCanvasCompositor.logo-error.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/FileSystemSceneAssetResolver.ts",
+      "before": "      bytes = await this.inputs.read(path);\n    } catch (cause) {\n      throw new Error(`Scene \"${path}\" could not be read.`, { cause });",
+      "after": "      bytes = await this.inputs.read(path);\n    } catch {\n      throw new Error(`Scene \"${path}\" could not be read.`);",
+      "because": "dropping the cause leaves the run failure naming no reason, so a beat whose scene was never uploaded (ENOENT) and one whose scene arrived corrupt become the same report, and the operator is told only that the read failed.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/FileSystemAssetResolvers.cause.test.ts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/preview-frame.post.ts",
+      "before": "  const key = `${env.messageFont}\\0${env.tenant.orgId}\\0${env.assetRoot}`;",
+      "after": "  const key = `${env.messageFont}\\0${env.assetRoot}`;",
+      "because": "two tenants resolving to the same asset root then share one preview bundle and one frame cache, so whichever renders first is served to both, the other org's logo included.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/preview-frame.test.ts",
+        "-t",
+        "the same asset root under two tenants gets different bundles"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { createCanvas, loadImage, type Image, type SKRSContext2D } from "@napi-rs/canvas";
 import {
   CANONICAL_TEMPLATES,
@@ -20,6 +19,7 @@ import {
   type CompositeResult,
   type CompositorPort,
   type CopyTimeline,
+  type InputAssetPort,
   type MotionKind,
   type Pose,
   type ResolvedBeat,
@@ -46,7 +46,6 @@ import {
 } from "@campaignfoundry/CampaignOrchestration/creative-geometry";
 import { hexToRgb, wrapText } from "./canvas-util.js";
 import { registerBundledFonts } from "../fonts.js";
-import { resolveAssetPath } from "../safe-path.js";
 
 // Re-export so A2's compositor tests keep importing from this module; the
 // functions live in the domain (lint:arch — the editor must not reach here).
@@ -354,11 +353,11 @@ export class NodeCanvasCompositor implements CompositorPort {
 
   /**
    * @param fontFamily the headline family (`MESSAGE_FONT`, resolved by the caller).
-   * @param assetRoot the project root whose `assets/` tree confines the logo read (D167).
+   * @param inputs the confined reader the logo is read through (PT-4c).
    */
   constructor(
     private readonly fontFamily: string,
-    private readonly assetRoot: string,
+    private readonly inputs: InputAssetPort,
   ) {
     registerBundledFonts();
   }
@@ -488,7 +487,7 @@ export class NodeCanvasCompositor implements CompositorPort {
       readonly creativeType?: CreativeType;
     },
     fontFamily: string,
-    assetRoot: string,
+    inputs: InputAssetPort,
   ): Promise<PreparedCreative> {
     const canvas = request.canvas;
     const resolved = resolveCanvas(canvas);
@@ -563,14 +562,18 @@ export class NodeCanvasCompositor implements CompositorPort {
     );
 
     // Whether the logo applies is a brand-compliance signal the use case records
-    // on the asset. The path is brief-supplied (untrusted), so it's resolved
-    // through resolveAssetPath.
+    // on the asset. The path is brief-supplied (untrusted), so it is read through
+    // the confined InputAssetPort — the same `resolveAssetPath` confinement this
+    // block used to call itself, now behind the port. An absent `logoPath` is
+    // handed over as the empty ref, which the port refuses exactly as it refuses
+    // an unsafe one, so the no-logo case needs no branch of its own.
     let logo: PreparedCreative["logo"];
     let logoLoaded = false;
-    const logoPath = resolveAssetPath(request.logoPath, assetRoot);
-    if (logoPath) {
-      try {
-        const image = await loadImage(await readFile(logoPath));
+    const logoRef = request.logoPath ?? "";
+    try {
+      const logoBytes = await inputs.read(logoRef);
+      if (logoBytes !== undefined) {
+        const image = await loadImage(Buffer.from(logoBytes));
         // The block's own geometry merge (C4, R-D3): the enabled `logo` layer's
         // width/margin props over the `CREATIVE_GEOMETRY` default. Absent → the
         // constant → the pre-merge bytes (the goldens pin them).
@@ -593,17 +596,15 @@ export class NodeCanvasCompositor implements CompositorPort {
         const ly = clampInRange(rawY, insets.top, height - insets.bottom - logoH);
         logo = { image, x: lx, y: ly, width: target, height: logoH };
         logoLoaded = true;
-      } catch (error) {
-        // A missing logo is optional — skip cleanly. A present-but-unreadable or
-        // corrupt one is likely a mistake, so surface it (observable degradation)
-        // without aborting the run: logoApplied stays false and the compliance
-        // report flags it.
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-          const reason = error instanceof Error ? error.message : String(error);
-          console.warn(
-            `[NodeCanvasCompositor] logo at ${logoPath} could not be applied: ${reason}`,
-          );
-        }
+      }
+    } catch (error) {
+      // A missing logo is optional — skip cleanly. A present-but-unreadable or
+      // corrupt one is likely a mistake, so surface it (observable degradation)
+      // without aborting the run: logoApplied stays false and the compliance
+      // report flags it.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(`[NodeCanvasCompositor] logo at ${logoRef} could not be applied: ${reason}`);
       }
     }
 
@@ -673,7 +674,7 @@ export class NodeCanvasCompositor implements CompositorPort {
   }
 
   async compositeAsset(request: CompositeRequest): Promise<CompositeResult> {
-    const prepared = await NodeCanvasCompositor.prepare(request, this.fontFamily, this.assetRoot);
+    const prepared = await NodeCanvasCompositor.prepare(request, this.fontFamily, this.inputs);
     const canvas = createCanvas(prepared.width, prepared.height);
     const ctx = canvas.getContext("2d");
     // Still: pose at t = 1, effect clock settled (H4). The two clocks agree

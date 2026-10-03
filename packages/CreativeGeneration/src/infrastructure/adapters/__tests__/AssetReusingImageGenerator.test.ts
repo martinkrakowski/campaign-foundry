@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { projectRoot } from "@campaignfoundry/shared";
 import { AspectRatio, type ImageGeneratorPort } from "@campaignfoundry/CampaignOrchestration";
 import { AssetReusingImageGenerator } from "../AssetReusingImageGenerator.js";
+import { fsInputs } from "./fs-inputs.js";
 
 const ratio = (v = "1:1") => {
   const r = AspectRatio.create(v);
@@ -23,7 +24,10 @@ const delegate = (): ImageGeneratorPort => ({
 describe("AssetReusingImageGenerator (decorator)", () => {
   test("reuses a readable input asset without delegating", async () => {
     const inner = delegate();
-    const out = await new AssetReusingImageGenerator(inner, projectRoot()).resolveBackground(
+    const out = await new AssetReusingImageGenerator(
+      inner,
+      fsInputs(projectRoot()),
+    ).resolveBackground(
       { ...baseProduct, inputAsset: "assets/inputs/hydra-logo.png" },
       ratio("1:1"),
       ctx,
@@ -35,29 +39,30 @@ describe("AssetReusingImageGenerator (decorator)", () => {
 
   test("delegates when no input asset is supplied", async () => {
     const inner = delegate();
-    const out = await new AssetReusingImageGenerator(inner, projectRoot()).resolveBackground(
-      baseProduct,
-      ratio(),
-      ctx,
-    );
+    const out = await new AssetReusingImageGenerator(
+      inner,
+      fsInputs(projectRoot()),
+    ).resolveBackground(baseProduct, ratio(), ctx);
     expect(out.source).toBe("procedural");
     expect(inner.resolveBackground).toHaveBeenCalledTimes(1);
   });
 
   test("delegates when the input asset path is unsafe (absolute)", async () => {
     const inner = delegate();
-    const out = await new AssetReusingImageGenerator(inner, projectRoot()).resolveBackground(
-      { ...baseProduct, inputAsset: "/etc/passwd" },
-      ratio(),
-      ctx,
-    );
+    const out = await new AssetReusingImageGenerator(
+      inner,
+      fsInputs(projectRoot()),
+    ).resolveBackground({ ...baseProduct, inputAsset: "/etc/passwd" }, ratio(), ctx);
     expect(out.source).toBe("procedural");
     expect(inner.resolveBackground).toHaveBeenCalledTimes(1);
   });
 
   test("delegates when the input asset is missing or unreadable", async () => {
     const inner = delegate();
-    const out = await new AssetReusingImageGenerator(inner, projectRoot()).resolveBackground(
+    const out = await new AssetReusingImageGenerator(
+      inner,
+      fsInputs(projectRoot()),
+    ).resolveBackground(
       { ...baseProduct, inputAsset: "assets/inputs/does-not-exist.png" },
       ratio(),
       ctx,
@@ -96,7 +101,10 @@ describe("AssetReusingImageGenerator — image-only enforcement against real aud
     "a real, valid %s upload named as inputAsset falls through to generation, never 'reused'",
     async (name) => {
       const inner = delegate();
-      const out = await new AssetReusingImageGenerator(inner, projectRoot()).resolveBackground(
+      const out = await new AssetReusingImageGenerator(
+        inner,
+        fsInputs(projectRoot()),
+      ).resolveBackground(
         { ...baseProduct, inputAsset: `assets/inputs/ve3b2-image-only-proof/${name}` },
         ratio(),
         ctx,

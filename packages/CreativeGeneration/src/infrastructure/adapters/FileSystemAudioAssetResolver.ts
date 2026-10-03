@@ -1,12 +1,11 @@
-import { readFile } from "node:fs/promises";
-import type { AudioAssetPort } from "@campaignfoundry/CampaignOrchestration";
-import { resolveAssetPath } from "../safe-path.js";
+import type { AudioAssetPort, InputAssetPort } from "@campaignfoundry/CampaignOrchestration";
 
 /**
  * FileSystemAudioAssetResolver — AudioAssetPort adapter.
  *
  * Reuses the SAME confinement primitive `FileSystemSceneAssetResolver` uses
- * (`resolveAssetPath`, confined to the project's `assets/` tree) and the same
+ * (the `InputAssetPort` its constructor takes, which is `resolveAssetPath`
+ * confined to the project's `assets/` tree) and the same
  * reject-never-fall-back-silently contract — a music bed the user uploaded and
  * licenced has no generated fallback. It does NOT reuse `SceneAssetPort`'s
  * `resolveScene` method: that decodes the file as an image, cover-fits it to a
@@ -18,18 +17,19 @@ import { resolveAssetPath } from "../safe-path.js";
  * narrower port that actually fits: read the bytes, change nothing.
  */
 export class FileSystemAudioAssetResolver implements AudioAssetPort {
-  /** @param assetRoot the project root whose `assets/` tree confines every read (D167). */
-  constructor(private readonly assetRoot: string) {}
+  /** @param inputs the confined reader every bed is read through (PT-4c). */
+  constructor(private readonly inputs: InputAssetPort) {}
 
   async resolveAudio(path: string): Promise<Uint8Array> {
-    const safePath = resolveAssetPath(path, this.assetRoot);
-    if (!safePath) {
-      throw new Error(`Audio "${path}" is not a valid asset path.`);
-    }
+    let bytes: Uint8Array | undefined;
     try {
-      return await readFile(safePath);
+      bytes = await this.inputs.read(path);
     } catch (cause) {
       throw new Error(`Audio "${path}" could not be read.`, { cause });
     }
+    if (bytes === undefined) {
+      throw new Error(`Audio "${path}" is not a valid asset path.`);
+    }
+    return bytes;
   }
 }

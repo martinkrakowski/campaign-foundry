@@ -4,6 +4,7 @@ import {
   type CampaignBrief,
   type CopyGeneratorPort,
   type ImageGeneratorPort,
+  type InputAssetPort,
   type PipelineResult,
   type PlanInput,
   type RegenerationTarget,
@@ -13,6 +14,7 @@ import {
   CanvasFfmpegVideoCompositor,
   FileSystemAudioAssetResolver,
   FileSystemBackgroundCache,
+  FileSystemInputAssets,
   FileSystemSceneAssetResolver,
   FireflyImageGenerator,
   GeminiImageGenerator,
@@ -66,6 +68,26 @@ const FIREFLY_MODEL = "v3";
 /** `model` if set, else `fallback` — the same "unset or empty → default" rule each adapter applies internally. */
 function resolvedModel(model: string | undefined, fallback: string): string {
   return model && model.length > 0 ? model : fallback;
+}
+
+/**
+ * The run's reader for brief-supplied input assets (PT-4c): one port over this
+ * environment's asset root, for the reused product images, the compositor's logo,
+ * a beat's scene and the music bed.
+ *
+ * Built from `env.assetRoot` per call and never from the process environment
+ * (D167), so a tenant's runs read that tenant's assets. It is deliberately the
+ * only place an `InputAssetPort` is constructed: substituting the storage backend
+ * means changing this function, not the five consumers behind it.
+ *
+ * `buildPipeline` calls this ONCE and hands the result to every consumer, so a
+ * run reads one tree through one reader. A caller that wants a pipeline reader
+ * must pass that same instance on (see {@link imageGenerator}'s `inputs`); a
+ * standalone call gets its own, which is why this function promises one port per
+ * call and not one per run.
+ */
+export function inputAssets(env: RunEnvironment): InputAssetPort {
+  return new FileSystemInputAssets(env.assetRoot);
 }
 
 /**
@@ -126,8 +148,18 @@ export function primaryImageProvider(
  * The `genai` variation axis decides *whether* GenAI is used for a cell;
  * `selected` (`?model=`) still decides *which* provider. `paletteShift` is
  * applied only by ProceduralBackgroundGenerator.
+ *
+ * `inputs` is the reader the reuse wrapper reads a product's `inputAsset`
+ * through. It defaults to this environment's own, so a standalone call still
+ * works, but {@link buildPipeline} passes the reader it already built: a run then
+ * reads one asset tree through ONE port instead of a second, identical one built
+ * here for the reuse wrapper alone.
  */
-export function imageGenerator(env: RunEnvironment, selected?: string): ImageGeneratorPort {
+export function imageGenerator(
+  env: RunEnvironment,
+  selected?: string,
+  inputs: InputAssetPort = inputAssets(env),
+): ImageGeneratorPort {
   const procedural = new ProceduralBackgroundGenerator();
   const cache = new FileSystemBackgroundCache(join(env.outputRoot, "cache"));
   const usage = getUsageStore(env);
@@ -217,7 +249,7 @@ export function imageGenerator(env: RunEnvironment, selected?: string): ImageGen
       break;
   }
 
-  return new AssetReusingImageGenerator(generator, env.assetRoot);
+  return new AssetReusingImageGenerator(generator, inputs);
 }
 
 /**
@@ -233,20 +265,22 @@ export function buildPipeline(
   imageModel?: string,
   planInput: PlanInput = {},
 ): GenerateCampaignUseCase {
+  // One reader for this environment, shared by every consumer below (PT-4c).
+  const inputs = inputAssets(env);
   return new GenerateCampaignUseCase({
-    imageGenerator: imageGenerator(env, imageModel),
+    imageGenerator: imageGenerator(env, imageModel, inputs),
     proceduralGenerator: new ProceduralBackgroundGenerator(),
     planner: pooledPlanner(planInput),
-    compositor: new NodeCanvasCompositor(env.messageFont, env.assetRoot),
+    compositor: new NodeCanvasCompositor(env.messageFont, inputs),
     // Motion variants only; the parser has already gated them on the ffmpeg probe.
     videoCompositor: new CanvasFfmpegVideoCompositor({
       fontFamily: env.messageFont,
-      assetRoot: env.assetRoot,
+      inputs,
     }),
     // VE5b2: resolves a timeline beat's own background — motion variants only.
-    sceneAssets: new FileSystemSceneAssetResolver(env.assetRoot),
+    sceneAssets: new FileSystemSceneAssetResolver(inputs),
     // VE3b2: resolves the brief's music bed (audio.path) — motion variants only.
-    audioAssets: new FileSystemAudioAssetResolver(env.assetRoot),
+    audioAssets: new FileSystemAudioAssetResolver(inputs),
     compliance: new BrandComplianceChecker(),
     exporter: new FileSystemExporter(env.outputRoot),
     now: () => new Date(),

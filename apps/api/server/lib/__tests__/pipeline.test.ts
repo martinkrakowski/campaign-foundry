@@ -8,6 +8,8 @@ import {
   DEFAULT_CAMPAIGN_TYPE,
   templateFromCanonical,
   type CampaignBrief,
+  type ImageGeneratorPort,
+  type InputAssetPort,
 } from "@campaignfoundry/CampaignOrchestration";
 import {
   ALLOWED_IMAGE_MODELS,
@@ -34,9 +36,16 @@ const constructed = vi.hoisted(() => ({
   gemini: [] as Array<{ apiKey: string; model?: string }>,
   firefly: [] as Array<{ clientId: string; clientSecret: string }>,
   cacheDirs: [] as string[],
+  /** Every `InputAssetPort` instance built for a pipeline (PT-4c). */
+  ports: [] as unknown[],
+  /** The port each consumer was constructed with, by adapter name (PT-4c). */
+  consumers: [] as Array<{ name: string; inputs: unknown }>,
 }));
 vi.mock("@campaignfoundry/CreativeGeneration", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@campaignfoundry/CreativeGeneration")>();
+  const record = (name: string, inputs: unknown): void => {
+    constructed.consumers.push({ name, inputs });
+  };
   class OpenRouter extends actual.OpenRouterImageGenerator {
     constructor(options: ConstructorParameters<typeof actual.OpenRouterImageGenerator>[0]) {
       super(options);
@@ -61,12 +70,57 @@ vi.mock("@campaignfoundry/CreativeGeneration", async (importOriginal) => {
       constructed.cacheDirs.push(dir);
     }
   }
+  // PT-4c: the one InputAssetPort a build creates, and the five consumers' copies
+  // of it. Both are recorded so a test can prove they are the SAME object — the
+  // reader carries no state today, so identity is the whole contract.
+  class Inputs extends actual.FileSystemInputAssets {
+    constructor(root: string) {
+      super(root);
+      constructed.ports.push(this);
+    }
+  }
+  class Compositor extends actual.NodeCanvasCompositor {
+    constructor(fontFamily: string, inputs: InputAssetPort) {
+      super(fontFamily, inputs);
+      record("compositor", inputs);
+    }
+  }
+  class VideoCompositor extends actual.CanvasFfmpegVideoCompositor {
+    constructor(options: ConstructorParameters<typeof actual.CanvasFfmpegVideoCompositor>[0]) {
+      super(options);
+      record("videoCompositor", options.inputs);
+    }
+  }
+  class SceneAssets extends actual.FileSystemSceneAssetResolver {
+    constructor(inputs: InputAssetPort) {
+      super(inputs);
+      record("sceneAssets", inputs);
+    }
+  }
+  class AudioAssets extends actual.FileSystemAudioAssetResolver {
+    constructor(inputs: InputAssetPort) {
+      super(inputs);
+      record("audioAssets", inputs);
+    }
+  }
+  class ReusingGenerator extends actual.AssetReusingImageGenerator {
+    constructor(generator: ImageGeneratorPort, inputs: InputAssetPort) {
+      super(generator, inputs);
+      record("imageGenerator", inputs);
+    }
+  }
   return {
     ...actual,
     FileSystemBackgroundCache: Cache,
     OpenRouterImageGenerator: OpenRouter,
     GeminiImageGenerator: Gemini,
     FireflyImageGenerator: Firefly,
+    FileSystemInputAssets: Inputs,
+    NodeCanvasCompositor: Compositor,
+    CanvasFfmpegVideoCompositor: VideoCompositor,
+    FileSystemSceneAssetResolver: SceneAssets,
+    FileSystemAudioAssetResolver: AudioAssets,
+    AssetReusingImageGenerator: ReusingGenerator,
   };
 });
 /** The local operator's environment, resolved when called so each test's env setup applies. */
@@ -121,6 +175,32 @@ describe("pipeline composition root", () => {
     expect(ALLOWED_IMAGE_MODELS).toContain("imagen");
     expect(ALLOWED_IMAGE_MODELS).toContain("firefly");
     expect(ALLOWED_IMAGE_MODELS).toContain("x-ai/grok-imagine-image-quality");
+  });
+
+  test("buildPipeline builds ONE input port and hands that same instance to all five consumers (PT-4c)", () => {
+    // The recorder is file-wide, so start this test from a known count: the port
+    // is the only thing this asserts, and earlier tests build pipelines too.
+    constructed.ports.length = 0;
+    constructed.consumers.length = 0;
+
+    buildPipeline(localEnv(), "procedural");
+
+    // One build, one reader. `imageGenerator` used to call `inputAssets` itself,
+    // so a run carried two identical ports over one tree — one per consumer group.
+    expect(constructed.ports).toHaveLength(1);
+    const [port] = constructed.ports;
+
+    // ...and all five consumers got THAT one, not a look-alike each.
+    expect(constructed.consumers.map((c) => c.name).sort()).toEqual([
+      "audioAssets",
+      "compositor",
+      "imageGenerator",
+      "sceneAssets",
+      "videoCompositor",
+    ]);
+    for (const consumer of constructed.consumers) {
+      expect(consumer.inputs).toBe(port);
+    }
   });
 
   test("buildPipeline wires a use case for every generator-selection branch", () => {
