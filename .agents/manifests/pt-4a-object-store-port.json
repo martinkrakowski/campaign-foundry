@@ -55,9 +55,9 @@
     },
     {
       "file": "apps/api/server/lib/object-store/S3ObjectStore.ts",
-      "before": "    throw new S3RequestError(operation, response.status, code);",
-      "after": "    throw new S3RequestError(`${operation} ${this.endpoint}/${this.bucket}`, response.status, code);",
-      "because": "the thrown error now carries the endpoint, which names an internal network and — with a real request behind it — sits next to the signed URL. This is the shape the never-echo test exists for, and it is why that test builds the store FROM objectStoreSettings() with S3_ENDPOINT=http://marker-host-7f3a.invalid: a test-local endpoint would leave the mutation unobservable. `the object store never echoes a credential` asserts on the thrown message, on the recursive `cause` chain and on every console argument.",
+      "before": "    return new S3RequestError(operation, status, /<Code>([^<]*)<\\/Code>/.exec(body)?.[1]);",
+      "after": "    return new S3RequestError(`${operation} ${this.endpoint}`, status, /<Code>([^<]*)<\\/Code>/.exec(body)?.[1]);",
+      "because": "the thrown error now carries the endpoint, which names an internal network and — with a real request behind it — sits next to the signed URL. This is the shape the never-echo test exists for, and it is why that test builds the store FROM objectStoreSettings() with S3_ENDPOINT=http://marker-host-7f3a.invalid: a test-local endpoint would leave the mutation unobservable. `the object store never echoes a credential` asserts on the thrown message, on the recursive `cause` chain and on every console argument. Re-anchored in fix round 2 when `fail` grew a shared `refuse`: this line is where the endpoint is in scope, so the mutation is still a one-line change.",
       "command": [
         "yarn",
         "vitest",
@@ -101,6 +101,74 @@
         "apps/api/server/lib/object-store/__tests__/S3ObjectStore.test.ts",
         "-t",
         "shared pool"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/config.ts",
+      "before": "  if (parsed.search !== \"\" || parsed.hash !== \"\") return undefined;",
+      "after": "  if (parsed.search !== \"\") return undefined;",
+      "because": "an endpoint with a query or a fragment is accepted again, and `S3ObjectStore` appends `/<bucket>/<key>` to the endpoint STRING: with `S3_ENDPOINT=https://s3.example?t=1` every request resolves to pathname `/` with the object path carried as query parameters — silently, for every key, and nothing fails until a key is missing. Caught by the plain-origin test, which drives a query and a fragment.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/config.test.ts",
+        "-t",
+        "must be a plain http"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/infrastructure/adapters/InMemoryObjectStore.ts",
+      "before": "    if (!Number.isInteger(pageSize) || pageSize < 1) {",
+      "after": "    if (false) {",
+      "because": "a zero page size is accepted again, and `list` advances the page BY that number — so it never terminates. Being a synchronous loop it also starves the event loop, which takes the whole test worker down instead of failing one test; on this host a bare `for (; i < n; i += 0)` had to be killed by `timeout` rather than merely observed to spin. The S3 adapter carries the same guard, and the conformance suite passes a small page size on purpose, so both sides refuse the same values.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration",
+        "-t",
+        "positive integer is refused at construction"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/S3ObjectStore.ts",
+      "before": "    if (body.includes(\"<Error>\")) throw this.refuse(\"copy\", response.status, body);",
+      "after": "    if (false) throw this.refuse(\"copy\", response.status, body);",
+      "because": "a 200 copy carrying an `<Error>` document is reported as a copy that happened. S3 documents this case: CopyObject evaluates the copy after the status line is committed, so a failed copy can answer 200 — and believing the status alone hands a caller a `dstKey` that does not exist.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/S3ObjectStore.test.ts",
+        "-t",
+        "a 200 carrying an Error is not a successful copy"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/S3ObjectStore.ts",
+      "before": "    for (const key of keys) {\n      if (!OBJECT_KEY_PATTERN.test(key)) {",
+      "after": "    for (const key of keys) {\n      if (false && !OBJECT_KEY_PATTERN.test(key)) {",
+      "because": "deletePrefix goes back to deleting as it walks, with no up-front check. A key the store returns that the alphabet refuses — a proxy, a replication target or a second writer can put one under the prefix — then reaches `delete`, which refuses it mid-loop, leaving the prefix half-erased with no way to say which half. The guard has to be a separate pass BEFORE the first delete for the refusal to be all-or-nothing.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/S3ObjectStore-listing.test.ts",
+        "-t",
+        "validates the whole listing BEFORE deleting"
       ],
       "verdict": "caught"
     }

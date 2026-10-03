@@ -86,6 +86,14 @@ function tagText(xml: string, tag: string): string | undefined {
  * three are mandatory in the response schema, so a block missing one is a body
  * this parser has been asked to guess about, and a guessed listing that silently
  * drops an object is worse than an error.
+ *
+ * And a `Size` that is not a plain count, or a `LastModified` that is not a
+ * date, is refused the same way. `Number("seven")` is `NaN` and
+ * `new Date("whenever")` is an Invalid Date, both of which would travel on as
+ * ordinary-looking values: a caller summing sizes gets `NaN`, and a caller
+ * sorting by `lastModified` gets an order decided by `NaN` comparisons. Each
+ * message names the FIELD, never the value — the value came from the store and
+ * has not earned a place in a log.
  */
 export function parseListObjectsV2(xml: string): ListObjectsV2Page {
   if (/<!DOCTYPE/i.test(xml) || /<!ENTITY/i.test(xml)) {
@@ -100,11 +108,22 @@ export function parseListObjectsV2(xml: string): ListObjectsV2Page {
     if (key === undefined || size === undefined || lastModified === undefined) {
       throw new Error("Refusing a listing entry with no Key, Size or LastModified.");
     }
+    if (!/^\d+$/.test(size)) {
+      throw new Error("Refusing a listing entry whose Size is not a whole number of bytes.");
+    }
+    const bytes = Number(size);
+    if (!Number.isSafeInteger(bytes)) {
+      throw new Error("Refusing a listing entry whose Size is not a safe whole number of bytes.");
+    }
+    const modified = new Date(lastModified);
+    if (Number.isNaN(modified.getTime())) {
+      throw new Error("Refusing a listing entry whose LastModified is not a date.");
+    }
     contents.push({
       key,
-      size: Number(size),
+      size: bytes,
       etag: unquote(tagText(block, "ETag")),
-      lastModified: new Date(lastModified),
+      lastModified: modified,
     });
   }
 

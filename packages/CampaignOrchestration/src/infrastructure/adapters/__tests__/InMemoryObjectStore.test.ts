@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { ObjectExistsError } from "../../../application/ports/out/ObjectStorePort.js";
-import { InMemoryObjectStore } from "../InMemoryObjectStore.js";
+import { InMemoryObjectStore, LIST_PAGE_SIZE_PROBLEM } from "../InMemoryObjectStore.js";
 
 const BYTES = new Uint8Array([1, 2, 3, 4, 5]);
 
@@ -173,6 +173,19 @@ describe("InMemoryObjectStore", () => {
     );
     expect(url.host).toBe("memory.invalid");
     expect(url.pathname).toBe("/in-memory/campaigns/c1/renders/a.png");
+  });
+
+  test("a page size that is not a positive integer is refused at construction", () => {
+    // Zero is the one that matters: `list` advances the page BY this number, so a
+    // zero never terminates — and as a synchronous loop it starves the event loop,
+    // taking the test worker with it rather than failing one test. S3 clamps a
+    // `max-keys=0` to its own default, so both adapters refuse it instead.
+    for (const pageSize of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => new InMemoryObjectStore({ listPageSize: pageSize })).toThrow(
+        LIST_PAGE_SIZE_PROBLEM,
+      );
+    }
+    expect(() => new InMemoryObjectStore({ listPageSize: 1 })).not.toThrow();
   });
 
   test("an empty prefix is refused, so deletePrefix cannot empty the store", async () => {

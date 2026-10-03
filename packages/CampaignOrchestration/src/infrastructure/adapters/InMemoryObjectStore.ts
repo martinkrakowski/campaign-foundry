@@ -15,6 +15,14 @@ import {
 const DEFAULT_LIST_PAGE_SIZE = 1000;
 
 /**
+ * `listPageSize` has to be a positive integer, and this is the one message both
+ * adapters use for it: the page size is how the two are held to the same
+ * conformance, so a refusal that differs between them is a refusal one of them
+ * does not make.
+ */
+export const LIST_PAGE_SIZE_PROBLEM = "listPageSize must be a positive integer.";
+
+/**
  * A private copy of `bytes`, so a stored object is detached from the buffer it
  * was written from and a read never hands back a view of the store's own memory.
  *
@@ -70,7 +78,17 @@ export class InMemoryObjectStore implements ObjectStorePort {
   private readonly bucket: string;
 
   constructor(options: InMemoryObjectStoreOptions = {}) {
-    this.listPageSize = options.listPageSize ?? DEFAULT_LIST_PAGE_SIZE;
+    const pageSize = options.listPageSize ?? DEFAULT_LIST_PAGE_SIZE;
+    // Refused here rather than defended against in `list`, because the loop
+    // there advances BY the page size: a zero never terminates, and being a
+    // synchronous loop it starves the event loop too, so it takes the whole test
+    // worker down rather than failing one test. S3's own `max-keys` treats a zero
+    // as a clamp, so this is the adapter refusing what the store would paper
+    // over — and it refuses the same way in both adapters.
+    if (!Number.isInteger(pageSize) || pageSize < 1) {
+      throw new Error(LIST_PAGE_SIZE_PROBLEM);
+    }
+    this.listPageSize = pageSize;
     this.now = options.now ?? (() => Date.now());
     this.publicEndpoint = (options.publicEndpoint ?? "https://memory.invalid").replace(/\/+$/, "");
     this.bucket = options.bucket ?? "in-memory";

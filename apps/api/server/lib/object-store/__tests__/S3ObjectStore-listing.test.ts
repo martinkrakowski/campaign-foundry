@@ -184,6 +184,80 @@ describe("S3ObjectStore.list", () => {
     expect((await store(fetchImpl).list("campaigns/c1/"))[0]?.key).toBe("a\u{10FFFF}b");
   });
 
+  test("a Size that is not a whole number of bytes is refused", async () => {
+    // `Number("seven")` is NaN and would travel on as an ordinary-looking size:
+    // a caller summing sizes gets NaN and never notices where it started.
+    for (const size of ["seven", "-5", "1.5", "1e3", " 11", ""]) {
+      const { fetchImpl } = canned(
+        xmlResponse(
+          result(
+            `<Contents><Key>campaigns/c1/a.png</Key><Size>${size}</Size><LastModified>2026-10-03T09:00:00.000Z</LastModified></Contents>`,
+            "<IsTruncated>false</IsTruncated>",
+          ),
+        ),
+      );
+      await expect(store(fetchImpl).list("campaigns/c1/")).rejects.toThrow(
+        "Refusing a listing entry whose Size is not a whole number of bytes.",
+      );
+    }
+    // Past the safe-integer ceiling `^\d+$` still passes, so the bound needs its
+    // own check: `Number("999…9")` is a number, and an unsafe one.
+    const { fetchImpl } = canned(
+      xmlResponse(
+        result(
+          `<Contents><Key>campaigns/c1/a.png</Key><Size>${"9".repeat(20)}</Size><LastModified>2026-10-03T09:00:00.000Z</LastModified></Contents>`,
+          "<IsTruncated>false</IsTruncated>",
+        ),
+      ),
+    );
+    await expect(store(fetchImpl).list("campaigns/c1/")).rejects.toThrow(
+      "Refusing a listing entry whose Size is not a safe whole number of bytes.",
+    );
+  });
+
+  test("a LastModified that is not a date is refused", async () => {
+    // `new Date("whenever")` is an Invalid Date, and every comparison against one
+    // is false — so a listing sorted by lastModified would be ordered by nothing.
+    const { fetchImpl } = canned(
+      xmlResponse(
+        result(
+          "<Contents><Key>campaigns/c1/a.png</Key><Size>11</Size><LastModified>whenever</LastModified></Contents>",
+          "<IsTruncated>false</IsTruncated>",
+        ),
+      ),
+    );
+    await expect(store(fetchImpl).list("campaigns/c1/")).rejects.toThrow(
+      "Refusing a listing entry whose LastModified is not a date.",
+    );
+  });
+
+  test("deletePrefix validates the whole listing BEFORE deleting any of it", async () => {
+    // A key from the store is not a key this adapter wrote: a proxy, a replication
+    // target or a second writer can put one under the prefix that the alphabet
+    // refuses. A loop that validated and deleted as it went would leave the
+    // prefix half-erased; this one deletes nothing at all.
+    const { requests, fetchImpl } = canned(
+      xmlResponse(
+        result(
+          entry("campaigns/c1/renders/a.png", 1),
+          "<Contents><Key>campaigns/c1/renders/od d.png</Key><Size>1</Size><LastModified>2026-10-03T09:00:00.000Z</LastModified></Contents>",
+          "<IsTruncated>false</IsTruncated>",
+        ),
+      ),
+      new Response(null, { status: 204 }),
+    );
+    const error = await store(fetchImpl)
+      .deletePrefix("campaigns/c1/renders/")
+      .catch((thrown: unknown) => thrown);
+    expect((error as Error).message).toBe(
+      "The listing under this prefix contains a key outside the allowed alphabet; nothing was deleted.",
+    );
+    // Neither the odd key nor the prefix is named, and not one DELETE was sent.
+    expect((error as Error).message).not.toContain("od d.png");
+    expect((error as Error).message).not.toContain("campaigns/c1/renders/");
+    expect(requests.filter((request) => request.method === "DELETE")).toHaveLength(0);
+  });
+
   test("a Contents block with no Key, Size or LastModified is refused", async () => {
     const { fetchImpl } = canned(xmlResponse(result("<Contents><Size>5</Size></Contents>")));
     await expect(store(fetchImpl).list("campaigns/c1/")).rejects.toThrow(

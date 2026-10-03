@@ -771,7 +771,17 @@ describe("objectStore (PT-4a, D203)", () => {
     process.env.OBJECT_STORE = "s3";
     expect(objectStore()).toBe("s3");
     process.env.OBJECT_STORE = "b2";
-    expect(() => objectStore()).toThrow('OBJECT_STORE must be "fs" or "s3", not "b2".');
+    expect(() => objectStore()).toThrow('OBJECT_STORE must be "fs" or "s3".');
+    // The value is never echoed: a typo in an operator's .env.local should not
+    // become a log line, and the whole of the message is which variable to fix.
+    process.env.OBJECT_STORE = "MARKER-VALUE-7f3a";
+    expect(() => objectStore()).toThrow('OBJECT_STORE must be "fs" or "s3".');
+    try {
+      objectStore();
+      expect.unreachable("objectStore should have thrown");
+    } catch (error) {
+      expect((error as Error).message).not.toContain("MARKER-VALUE-7f3a");
+    }
   });
 });
 
@@ -858,56 +868,124 @@ describe("objectStoreSettings (PT-4a, D201)", () => {
     expect(() => objectStoreSettings()).toThrow("S3_BUCKET is required when OBJECT_STORE=s3.");
   });
 
-  test("both endpoints must be absolute http(s) URLs", () => {
+  /**
+   * What `fn` threw, or `undefined` if it returned.
+   *
+   * Written this way deliberately: an `expect.unreachable()` INSIDE the `try`
+   * that then inspects the error is caught by that same `catch`, so a function
+   * that stops throwing makes the assertion pass anyway. Capturing outside the
+   * `try` is the only shape where "did not throw" fails the test.
+   */
+  function capture(fn: () => unknown): unknown {
+    try {
+      fn();
+      return undefined;
+    } catch (error) {
+      return error;
+    }
+  }
+
+  test("both endpoints must be a plain http(s) origin", () => {
+    // The value is quoted nowhere in the message, so the assertion is on the
+    // variable. A query or a fragment is not untidy: `S3ObjectStore` appends
+    // `/<bucket>/<key>` to the endpoint string, so `?t=1` would route every key
+    // into the query and resolve to pathname `/`.
     for (const value of ["s3.midnight.lan", "s3://midnight.lan", "ftp://s3.midnight.lan"]) {
       setAll({ S3_ENDPOINT: value });
       expect(() => objectStoreSettings()).toThrow(
-        "S3_ENDPOINT must be an absolute http(s) URL when OBJECT_STORE=s3.",
+        "S3_ENDPOINT must be a plain http(s) origin with no query, fragment or credentials when OBJECT_STORE=s3.",
       );
     }
-    for (const value of ["objects.example", "ftp://objects.example"]) {
+    for (const value of [
+      "https://s3.midnight.lan?t=1",
+      "https://s3.midnight.lan#frag",
+      "https://user@s3.midnight.lan",
+      "https://user:secret@s3.midnight.lan",
+      // A password with no username is the only way to reach the second half of
+      // the credentials check, so it is here rather than relying on the first.
+      "https://:secret@s3.midnight.lan",
+    ]) {
+      setAll({ S3_ENDPOINT: value });
+      const error = capture(() => objectStoreSettings());
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).not.toContain("secret");
+      expect((error as Error).message).not.toContain("user");
+    }
+    for (const value of [
+      "objects.example",
+      "ftp://objects.example",
+      "https://objects.example?a=1",
+    ]) {
       setAll({ S3_PUBLIC_ENDPOINT: value });
       expect(() => objectStoreSettings()).toThrow(
-        "S3_PUBLIC_ENDPOINT must be an absolute http(s) URL when OBJECT_STORE=s3.",
+        "S3_PUBLIC_ENDPOINT must be a plain http(s) origin with no query, fragment or credentials when OBJECT_STORE=s3.",
       );
     }
-    setAll({ S3_ENDPOINT: "http://a:1", S3_PUBLIC_ENDPOINT: "https://b:2" });
-    expect(objectStoreSettings()?.endpoint).toBe("http://a:1");
+  });
+
+  test("a trailing slash is dropped, and an endpoint may carry a path prefix", () => {
+    setAll({
+      S3_ENDPOINT: "http://seaweedfs-s3:8333/",
+      S3_PUBLIC_ENDPOINT: "https://s3.midnight.lan///",
+    });
+    expect(objectStoreSettings()?.endpoint).toBe("http://seaweedfs-s3:8333");
+    expect(objectStoreSettings()?.publicEndpoint).toBe("https://s3.midnight.lan");
+    setAll({
+      S3_ENDPOINT: "https://s3.midnight.lan/gateway/",
+      S3_PUBLIC_ENDPOINT: "http://a:1/b/c",
+    });
+    expect(objectStoreSettings()?.endpoint).toBe("https://s3.midnight.lan/gateway");
+    expect(objectStoreSettings()?.publicEndpoint).toBe("http://a:1/b/c");
   });
 
   test("hazard: no error ever quotes a value, so a key pair cannot reach a log", () => {
     const secret = "MARKER-SECRET-7f3a";
     setAll({ S3_SECRET_ACCESS_KEY: secret, S3_ACCESS_KEY_ID: "MARKER-KEYID-7f3a" });
-    const paths: (() => unknown)[] = [
-      () => objectStoreSettings(),
-      () => {
-        delete process.env.S3_SECRET_ACCESS_KEY;
-        return objectStoreSettings();
-      },
-      () => {
-        setAll({ S3_ENDPOINT: `http://${"marker-host-7f3a"}.invalid` });
-        return objectStoreSettings();
-      },
-      () => {
-        setAll({ S3_PUBLIC_ENDPOINT: "not-a-url" });
-        return objectStoreSettings();
-      },
-      () => {
-        setAll({ STORE_BACKEND: "fs" });
-        return objectStoreSettings();
-      },
+    // Every one of these REFUSES. The one that returns is the all-valid settings
+    // read above, asserted separately — folding it in here is what made the
+    // first cut of this test vacuous.
+    const refusals: (readonly [string, () => unknown])[] = [
+      [
+        "fs as the store backend",
+        () => {
+          setAll({ STORE_BACKEND: "fs" });
+          return objectStoreSettings();
+        },
+      ],
+      [
+        "an endpoint that is not a URL",
+        () => {
+          setAll({ S3_ENDPOINT: "not-a-url" });
+          return objectStoreSettings();
+        },
+      ],
+      [
+        "an endpoint with a query",
+        () => {
+          setAll({ S3_ENDPOINT: `http://${"marker-host-7f3a"}.invalid?t=1` });
+          return objectStoreSettings();
+        },
+      ],
+      [
+        "a relative public endpoint",
+        () => {
+          setAll({ S3_PUBLIC_ENDPOINT: "objects.example" });
+          return objectStoreSettings();
+        },
+      ],
     ];
-    for (const path of paths) {
-      try {
-        path();
-        expect.unreachable("objectStoreSettings should have thrown");
-      } catch (error) {
-        const message = (error as Error).message;
-        expect(message).not.toContain(secret);
-        expect(message).not.toContain("MARKER-KEYID-7f3a");
-        expect(message).not.toContain("marker-host-7f3a");
-        expect((error as { cause?: unknown }).cause).toBeUndefined();
-      }
+    for (const [what, path] of refusals) {
+      const error = capture(path);
+      expect(error, `${what} must refuse`).toBeInstanceOf(Error);
+      const message = (error as Error).message;
+      expect(message).not.toContain(secret);
+      expect(message).not.toContain("MARKER-KEYID-7f3a");
+      expect(message).not.toContain("marker-host-7f3a");
+      expect((error as { cause?: unknown }).cause).toBeUndefined();
     }
+    // And the same settings with no hazard in them are READ, not refused — so the
+    // refusal above is the shape under test and not simply the only outcome.
+    setAll({ S3_SECRET_ACCESS_KEY: secret, S3_ACCESS_KEY_ID: "MARKER-KEYID-7f3a" });
+    expect(capture(() => objectStoreSettings())).toBeUndefined();
   });
 });

@@ -57,7 +57,9 @@ export function objectStore(): ObjectStoreMode {
   const value = process.env.OBJECT_STORE;
   if (value === undefined || value === "" || value === "fs") return "fs";
   if (value === "s3") return "s3";
-  throw new Error(`OBJECT_STORE must be "fs" or "s3", not "${value}".`);
+  // The variable, never the value: an operator's typo should not become a log
+  // line, and the whole value of the message is which variable to fix.
+  throw new Error(`OBJECT_STORE must be "fs" or "s3".`);
 }
 
 /** The S3-compatible store's coordinates, read only when `OBJECT_STORE=s3` (D201). */
@@ -86,15 +88,31 @@ const S3_VARIABLES = [
   "S3_SECRET_ACCESS_KEY",
 ] as const;
 
-/** Whether `value` is an absolute `http(s)` URL — the shape both endpoints must have. */
-function isAbsoluteHttpUrl(value: string): boolean {
+/**
+ * The endpoint as a plain origin plus an optional path, or undefined when the
+ * value is not one.
+ *
+ * "Plain" is the whole of it. `S3ObjectStore` appends `/<bucket>/<key>` to this
+ * string, so a query or a fragment is not untidy — it is a misroute: with
+ * `S3_ENDPOINT=https://s3.example?t=1` EVERY request resolves to pathname `/`
+ * with the object path carried as query parameters, silently, for every key. And
+ * `user:pass@host` is a credential in a config file and in every log that prints
+ * one, which is the same reason the rest of this function quotes no value.
+ *
+ * A trailing `/` is dropped rather than refused: it is what an operator types
+ * and it means the same thing.
+ */
+function plainEndpoint(value: string): string | undefined {
   let parsed: URL;
   try {
     parsed = new URL(value);
   } catch {
-    return false;
+    return undefined;
   }
-  return parsed.protocol === "http:" || parsed.protocol === "https:";
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+  if (parsed.search !== "" || parsed.hash !== "") return undefined;
+  if (parsed.username !== "" || parsed.password !== "") return undefined;
+  return parsed.origin + parsed.pathname.replace(/\/+$/, "");
 }
 
 /**
@@ -130,9 +148,13 @@ export function objectStoreSettings(): S3Settings | undefined {
     read[name] = value;
   }
   for (const name of ["S3_ENDPOINT", "S3_PUBLIC_ENDPOINT"] as const) {
-    if (!isAbsoluteHttpUrl(read[name])) {
-      throw new Error(`${name} must be an absolute http(s) URL when OBJECT_STORE=s3.`);
+    const plain = plainEndpoint(read[name]);
+    if (plain === undefined) {
+      throw new Error(
+        `${name} must be a plain http(s) origin with no query, fragment or credentials when OBJECT_STORE=s3.`,
+      );
     }
+    read[name] = plain;
   }
   return {
     endpoint: read.S3_ENDPOINT,

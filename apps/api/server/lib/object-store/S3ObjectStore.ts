@@ -2,6 +2,7 @@ import { AwsClient } from "aws4fetch";
 import {
   assertObjectKey,
   ObjectExistsError,
+  OBJECT_KEY_PATTERN,
   type ListedObject,
   type ObjectContent,
   type ObjectKey,
@@ -15,6 +16,15 @@ import type { S3Settings } from "../config.js";
 
 /** S3's own `max-keys` ceiling, sent as the page size of every listing. */
 const DEFAULT_LIST_PAGE_SIZE = 1000;
+
+/**
+ * `listPageSize` has to be a positive integer, and this is the one message both
+ * adapters use for it: the page size is how the two are held to the same
+ * conformance, so a refusal that differs between them is a refusal one of them
+ * does not make. A zero would be sent as `max-keys=0`, which S3 treats as a
+ * clamp to the default — a silent 1000-key page where the caller asked for none.
+ */
+const LIST_PAGE_SIZE_PROBLEM = "listPageSize must be a positive integer.";
 
 /** A non-2xx the store did not already map onto `undefined` or `ObjectExistsError`. */
 export class S3RequestError extends Error {
@@ -90,7 +100,11 @@ export class S3ObjectStore implements ObjectStorePort {
     // is a plain function, and naming it is what keeps the injected branch the
     // only one this file ever has.
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.listPageSize = options.listPageSize ?? DEFAULT_LIST_PAGE_SIZE;
+    const pageSize = options.listPageSize ?? DEFAULT_LIST_PAGE_SIZE;
+    if (!Number.isInteger(pageSize) || pageSize < 1) {
+      throw new Error(LIST_PAGE_SIZE_PROBLEM);
+    }
+    this.listPageSize = pageSize;
     this.now = options.now ?? (() => Date.now());
     this.endpoint = settings.endpoint.replace(/\/+$/, "");
     this.publicEndpoint = settings.publicEndpoint.replace(/\/+$/, "");
@@ -151,6 +165,16 @@ export class S3ObjectStore implements ObjectStorePort {
       "x-amz-copy-source": `/${this.bucket}/${srcKey}`,
     });
     if (!response.ok) await this.fail("copy", response);
+    // S3 documents the one case where this is NOT the end of it: CopyObject can
+    // answer 200 with an `<Error>` document in the body, because the copy is
+    // evaluated after the status line is already committed. Trusting the status
+    // alone reports a failed copy as done. The body is also read here for the
+    // ordinary reason: an unread response leaves the connection out of the pool.
+    const body = await response.text();
+    if (body.includes("<Error>")) throw this.refuse("copy", response.status, body);
+    if (!body.includes("<CopyObjectResult>")) {
+      throw new Error("Refusing a 200 copy whose body is neither a CopyObjectResult nor an Error.");
+    }
   }
 
   async list(prefix: ObjectKey): Promise<readonly ListedObject[]> {
@@ -178,9 +202,23 @@ export class S3ObjectStore implements ObjectStorePort {
     // One DELETE per key: the multi-object delete is a POST to `?delete` with an
     // XML body, and a second hand-written XML shape is a second parser to own
     // and to prove against a hostile body.
-    for (const object of await this.list(prefix)) {
-      await this.delete(object.key);
+    const keys = (await this.list(prefix)).map((object) => object.key);
+    // ALL OR NOTHING, and the check comes before the first delete rather than
+    // inside the loop. A key from the store is not a key this adapter wrote: a
+    // proxy, a replication target or a second writer can put one under this
+    // prefix that the alphabet would refuse, and a loop that validated and
+    // deleted as it went would leave the prefix half-erased with no way to say
+    // which half. So one odd key means nothing at all was deleted. The message
+    // names neither the key nor the prefix — the caller supplied the prefix, and
+    // the key came back from a store, so neither is ours to print.
+    for (const key of keys) {
+      if (!OBJECT_KEY_PATTERN.test(key)) {
+        throw new Error(
+          "The listing under this prefix contains a key outside the allowed alphabet; nothing was deleted.",
+        );
+      }
     }
+    for (const key of keys) await this.delete(key);
   }
 
   async presignGet(key: ObjectKey, options: PresignGetOptions): Promise<string> {
@@ -255,8 +293,19 @@ export class S3ObjectStore implements ObjectStorePort {
    * `Authorization` header, so a cause chain is a credential in a log.
    */
   private async fail(operation: string, response: Response): Promise<never> {
-    const code = /<Code>([^<]*)<\/Code>/.exec(await response.text())?.[1];
-    throw new S3RequestError(operation, response.status, code);
+    throw this.refuse(operation, response.status, await response.text());
+  }
+
+  /**
+   * The one place an error is built out of a store answer, so "never echo" has
+   * one line to hold rather than two. Deliberately an instance method rather than
+   * a free function: the settings are in scope here, which is what lets a
+   * mutation that appends `this.endpoint` to the message be a one-line change —
+   * and the never-echo test is what catches it. A HEAD error has no body at all,
+   * which is why the code is optional.
+   */
+  private refuse(operation: string, status: number, body: string): S3RequestError {
+    return new S3RequestError(operation, status, /<Code>([^<]*)<\/Code>/.exec(body)?.[1]);
   }
 }
 

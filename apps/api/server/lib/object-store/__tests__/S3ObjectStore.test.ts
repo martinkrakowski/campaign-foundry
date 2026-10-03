@@ -257,6 +257,51 @@ describe("S3ObjectStore failures", () => {
     expect((error as { cause?: unknown }).cause).toBeUndefined();
   });
 
+  test("a page size that is not a positive integer is refused at construction", () => {
+    // `max-keys=0` is a clamp in S3, not a refusal, so a zero would quietly give
+    // back 1000-key pages where the caller asked for none. The fake refuses the
+    // same values with the same message, because a divergence here is a
+    // conformance difference the suite cannot see.
+    for (const pageSize of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => new S3ObjectStore({ settings: SETTINGS, listPageSize: pageSize })).toThrow(
+        "listPageSize must be a positive integer.",
+      );
+    }
+    expect(
+      () =>
+        new S3ObjectStore({
+          settings: SETTINGS,
+          listPageSize: 1,
+          fetchImpl: async () => new Response(),
+        }),
+    ).not.toThrow();
+  });
+
+  test("copy reads the body, and a 200 carrying an Error is not a successful copy", async () => {
+    // S3 documents this: CopyObject can answer 200 with an <Error> document,
+    // because the copy is evaluated after the status line is committed. Believing
+    // the status alone reports a failed copy as done.
+    const { fetchImpl } = canned(
+      new Response("<Error><Code>InternalError</Code><Message>we tried</Message></Error>", {
+        status: 200,
+      }),
+    );
+    const error = await store({ fetchImpl })
+      .copy("campaigns/c1/a.png", "campaigns/c1/b.png")
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(S3RequestError);
+    expect((error as S3RequestError).status).toBe(200);
+    expect((error as S3RequestError).code).toBe("InternalError");
+    expect((error as Error).message).toBe("The object store answered 200 to copy (InternalError).");
+  });
+
+  test("copy refuses a 200 whose body is neither a CopyObjectResult nor an Error", async () => {
+    const { fetchImpl } = canned(new Response("<html>gateway</html>", { status: 200 }));
+    await expect(
+      store({ fetchImpl }).copy("campaigns/c1/a.png", "campaigns/c1/b.png"),
+    ).rejects.toThrow("Refusing a 200 copy whose body is neither a CopyObjectResult nor an Error.");
+  });
+
   test("with no injected fetch it falls back to the platform one, without calling it", async () => {
     // presignGet signs and returns; it never fetches. So this proves the default
     // was taken and is callable, with no socket opened — the alternative

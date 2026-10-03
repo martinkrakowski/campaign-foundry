@@ -135,6 +135,15 @@ describe("the object store never echoes a credential", () => {
       ["a missing S3_ACCESS_KEY_ID", () => withEnv("S3_ACCESS_KEY_ID", undefined)],
       ["a missing S3_SECRET_ACCESS_KEY", () => withEnv("S3_SECRET_ACCESS_KEY", undefined)],
       ["a relative S3_ENDPOINT", () => withEnv("S3_ENDPOINT", "not-a-url")],
+      [
+        "an S3_ENDPOINT with a query",
+        () => withEnv("S3_ENDPOINT", "https://marker-host-7f3a.invalid?t=1"),
+      ],
+      [
+        "an S3_ENDPOINT with credentials",
+        () =>
+          withEnv("S3_ENDPOINT", "https://MARKER-KEYID-7f3a:MARKER-SECRET-7f3a@objects.example"),
+      ],
       ["a non-http S3_ENDPOINT", () => withEnv("S3_ENDPOINT", "s3://bucket")],
       ["a relative S3_PUBLIC_ENDPOINT", () => withEnv("S3_PUBLIC_ENDPOINT", "objects.example")],
       [
@@ -145,25 +154,28 @@ describe("the object store never echoes a credential", () => {
     ];
 
     const thrown = await collect(paths);
+    const messages = thrown.map((error) => (error as Error).message);
     for (const error of thrown) {
       for (const marker of MARKERS) {
         expect(errorChain(error)).not.toContain(marker);
       }
     }
-    // They do say which variable, which is what makes them useful at all.
-    expect((thrown[0] as Error).message).toBe("S3_ENDPOINT is required when OBJECT_STORE=s3.");
-    expect((thrown[4] as Error).message).toBe("S3_ACCESS_KEY_ID is required when OBJECT_STORE=s3.");
-    expect((thrown[5] as Error).message).toBe(
-      "S3_SECRET_ACCESS_KEY is required when OBJECT_STORE=s3.",
-    );
-    expect((thrown[6] as Error).message).toBe(
-      "S3_ENDPOINT must be an absolute http(s) URL when OBJECT_STORE=s3.",
-    );
-    expect((thrown[8] as Error).message).toBe(
-      "S3_PUBLIC_ENDPOINT must be an absolute http(s) URL when OBJECT_STORE=s3.",
-    );
-    expect((thrown[10] as Error).message).toContain(
-      "OBJECT_STORE=s3 requires STORE_BACKEND=postgres",
+    // They do say which variable, which is what makes them useful at all — and
+    // asserted as a SET rather than by index, so adding a path above cannot
+    // silently move an assertion onto a different error (which is how the
+    // position-based version of this test hid a message change for a round).
+    expect(new Set(messages)).toEqual(
+      new Set([
+        "S3_ENDPOINT is required when OBJECT_STORE=s3.",
+        "S3_PUBLIC_ENDPOINT is required when OBJECT_STORE=s3.",
+        "S3_REGION is required when OBJECT_STORE=s3.",
+        "S3_BUCKET is required when OBJECT_STORE=s3.",
+        "S3_ACCESS_KEY_ID is required when OBJECT_STORE=s3.",
+        "S3_SECRET_ACCESS_KEY is required when OBJECT_STORE=s3.",
+        "S3_ENDPOINT must be a plain http(s) origin with no query, fragment or credentials when OBJECT_STORE=s3.",
+        "S3_PUBLIC_ENDPOINT must be a plain http(s) origin with no query, fragment or credentials when OBJECT_STORE=s3.",
+        "OBJECT_STORE=s3 requires STORE_BACKEND=postgres: only Postgres knows a campaign uuid, and a render key is derived from one.",
+      ]),
     );
   });
 
