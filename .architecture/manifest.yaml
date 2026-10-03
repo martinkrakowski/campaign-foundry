@@ -317,6 +317,7 @@ bounded_contexts:
           - FileSystemExporter
           - FileSystemPackageStore
           - ObjectExporter
+          - ObjectPackageStore
   - name: ui
     type: generic
     description: >
