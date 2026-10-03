@@ -158,6 +158,85 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
     expect(await assets.readAsset("target", `logo-${SOURCE}-2.png`)).toEqual(JPEG2);
   });
 
+  test("the SAME hash under the SUFFIXED name is a no-op, not a second copy (HIGH)", async () => {
+    // The case a plain re-copy cannot reach: `logo.png` is taken by different
+    // bytes, so the search lands on `logo-<from>.png` — which the target ALSO
+    // already holds, with the source's exact bytes, from an earlier copy. Asking
+    // for a name the target already answers is not a copy: copying it anyway
+    // raises a raw `23505` (a 500, not the no-op the caller asked for) and
+    // leaves the copied object behind with no row naming it.
+    const targetId = await seed(db, "target");
+    await assets.writeAsset("target", "logo.png", JPEG);
+    await assets.writeAsset("target", `logo-${SOURCE}.png`, PNG);
+    await assets.writeAsset(SOURCE, "logo.png", PNG);
+    const before = await keysUnder(store, targetId);
+
+    expect(await assets.copyAssets(SOURCE, "target")).toEqual({
+      "logo.png": `logo-${SOURCE}.png`,
+      [`assets/inputs/${SOURCE}/logo.png`]: `assets/inputs/target/logo-${SOURCE}.png`,
+    });
+    // The target is exactly as it was: two rows, and the same two objects.
+    expect(await rowsOf(db, targetId)).toHaveLength(2);
+    expect(await keysUnder(store, targetId)).toEqual(before);
+
+    // And running it again changes nothing either — the idempotency is not a
+    // one-shot courtesy to the first copy after the collision was created.
+    expect(await assets.copyAssets(SOURCE, "target")).toEqual({
+      "logo.png": `logo-${SOURCE}.png`,
+      [`assets/inputs/${SOURCE}/logo.png`]: `assets/inputs/target/logo-${SOURCE}.png`,
+    });
+    expect(await rowsOf(db, targetId)).toHaveLength(2);
+    expect(await keysUnder(store, targetId)).toEqual(before);
+  });
+
+  test("an insert failure after the copy gives the object back", async () => {
+    // `store.copy` runs before the insert and `briefs.post.ts` has no release
+    // step, so without compensation a failed insert orphans an object under the
+    // TARGET's prefix that no row will ever name and no delete will ever find.
+    const targetId = await seed(db, "target");
+    await assets.writeAsset(SOURCE, "logo.png", PNG);
+    const failing: SqlClient = {
+      ...db,
+      query: async (text, params) => {
+        if (text.includes("insert into asset")) throw new Error("insert exploded");
+        return db.query(text, params);
+      },
+    };
+    await expect(
+      new ObjectAssetStore(failing, store, ORG).copyAssets(SOURCE, "target"),
+    ).rejects.toThrow("insert exploded");
+    expect(await keysUnder(store, targetId)).toEqual([]);
+    expect(await rowsOf(db, targetId)).toEqual([]);
+    // The SOURCE is untouched: a failed copy never takes the campaign it was
+    // copying from with it.
+    expect(await assets.readAsset(SOURCE, "logo.png")).toEqual(PNG);
+  });
+
+  test("a concurrent copy that took the name answers EEXIST, and frees its object", async () => {
+    // The one `23505` the copy path can still see, now that every same-hash case
+    // leaves before the insert. EEXIST-coded, so a caller that maps a taken name
+    // to 409 maps this one too; and the object the loser copied is given back, or
+    // the winner's row would be the only thing under that name.
+    const targetId = await seed(db, "target");
+    await assets.writeAsset(SOURCE, "logo.png", PNG);
+    const racing: SqlClient = {
+      ...db,
+      query: async (text, params) => {
+        if (text.includes("insert into asset")) {
+          throw Object.assign(new Error("duplicate key"), { code: "23505" });
+        }
+        return db.query(text, params);
+      },
+    };
+    const error = await new ObjectAssetStore(racing, store, ORG).copyAssets(SOURCE, "target").then(
+      () => undefined,
+      (rejected: unknown) => rejected,
+    );
+    expect((error as { code?: string }).code).toBe("EEXIST");
+    expect((error as Error).message).toBe(`Asset "assets/inputs/target/logo.png" already exists.`);
+    expect(await keysUnder(store, targetId)).toEqual([]);
+  });
+
   test("a nested name keeps its directory when it is suffixed", async () => {
     // The route's `ASSET_NAME_PATTERN` admits a flat basename, so nothing it
     // writes has a directory — and a row is only ever written from a route. The

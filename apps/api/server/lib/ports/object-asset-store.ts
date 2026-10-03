@@ -223,9 +223,13 @@ export class ObjectAssetStore implements AssetStorePort {
    * **Collisions are decided on `sha256`, never by downloading anything.** A
    * target that already holds the same name with the same bytes reuses the name
    * and does nothing else: the asset the target has IS this asset, so copying
-   * it again would write a second object that no row could ever name. Same
-   * text as fs for the other case — `<stem>-<from><ext>`, then `-2`, `-3` — so
-   * a duplicated campaign's brief names the same files on both backends.
+   * it again would write a second object that no row could ever name. That holds
+   * on the SUFFIXED name too, not only the plain one: a target may already have
+   * `logo-<from>.png` carrying exactly these bytes from an earlier copy, and
+   * asking for a name the target already answers is not a copy — it is a no-op
+   * the unique index would refuse. Same text as fs for the other case —
+   * `<stem>-<from><ext>`, then `-2`, `-3` — so a duplicated campaign's brief
+   * names the same files on both backends.
    */
   async copyAssets(fromBriefId: string, toBriefId: string): Promise<Record<string, string>> {
     if (fromBriefId === toBriefId) return {};
@@ -239,37 +243,47 @@ export class ObjectAssetStore implements AssetStorePort {
 
     const pathMap: Record<string, string> = {};
     for (const source of sources) {
-      const taken = await this.assetRow(toId, source.name);
-      // fs's decision tree, in the same order: the same name already there with
-      // the same bytes is this very asset, so the name is reused and NOTHING
-      // else happens — no copy, no row, and therefore no second object that no
-      // row could name. This is what makes a duplicated campaign idempotent.
-      if (taken !== undefined && taken.sha256 === source.sha256) {
-        record(pathMap, fromBriefId, toBriefId, source.name, source.name);
-        continue;
-      }
-      const destName =
-        taken === undefined ? source.name : await this.suffixedName(toId, fromBriefId, source);
-      record(pathMap, fromBriefId, toBriefId, source.name, destName);
+      const destination = await this.destination(toId, fromBriefId, source);
+      record(pathMap, fromBriefId, toBriefId, source.name, destination.name);
+      // The target already holds these exact bytes under this name, so there is
+      // nothing to copy and nothing to insert — and copying anyway would be an
+      // insert the unique index refuses, which is a 500 rather than the no-op
+      // the caller asked for. This is what makes a duplicated campaign, or a
+      // replace-save over an already-copied asset, idempotent.
+      if (destination.reused) continue;
       const assetId = randomUUID();
-      await this.store.copy(
-        inputKey(this.orgId, fromId, source.id),
-        inputKey(this.orgId, toId, assetId),
-      );
-      await this.db.query(
-        `insert into asset (id, org_id, campaign_id, kind, name, size, sha256, content_type)
-         values ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [
-          assetId,
-          this.orgId,
-          toId,
-          INPUT_KIND,
-          destName,
-          Number(source.size),
-          source.sha256,
-          source.content_type,
-        ],
-      );
+      const targetKey = inputKey(this.orgId, toId, assetId);
+      await this.store.copy(inputKey(this.orgId, fromId, source.id), targetKey);
+      try {
+        await this.db.query(
+          `insert into asset (id, org_id, campaign_id, kind, name, size, sha256, content_type)
+           values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            assetId,
+            this.orgId,
+            toId,
+            INPUT_KIND,
+            destination.name,
+            Number(source.size),
+            source.sha256,
+            source.content_type,
+          ],
+        );
+      } catch (error) {
+        // The same compensation `writeAsset` makes, and for the same reason: the
+        // object is written before the row that will name it, and nobody rolls
+        // this call back — `briefs.post.ts` runs it with no release step. So an
+        // insert failure has to give the object back, or it sits under the
+        // target's prefix with nothing that will ever name it.
+        await this.discard(targetKey);
+        // A concurrent copy of one name is the only `23505` left here (every
+        // same-hash case above `continue`s before it gets this far), and it is
+        // the same refusal `writeAsset` answers: that name is taken.
+        if (pgErrorCode(error) === UNIQUE_VIOLATION) {
+          throw alreadyExists(this.assetRelPath(toBriefId, destination.name));
+        }
+        throw error;
+      }
     }
     return pathMap;
   }
@@ -342,14 +356,29 @@ export class ObjectAssetStore implements AssetStorePort {
   }
 
   /**
-   * The suffixed name a source asset takes when the target already has a
-   * DIFFERENT asset under its name. fs's text, word for word —
-   * `<stem>-<from><ext>`, then `-2`, `-3` — with "is this candidate taken"
-   * answered by a row rather than by `readFile`: the same question with the same
-   * answers and no bytes moved. A candidate holding the same bytes ends the
-   * search in fs too, so two runs of a copy that races itself agree.
+   * Where one source asset lands in the target, and whether it is ALREADY there.
+   *
+   * `reused` is the whole of the idempotency, and it is a claim about the BYTES
+   * rather than about the name: the target holds a row with this exact `sha256`
+   * under the chosen name, so the asset the target has IS this asset. The caller
+   * records the mapping and does nothing else — no `copy`, no `insert`, and
+   * therefore no second object that no row could name, and no `23505` from asking
+   * for a name the target already answers. It holds for a SUFFIXED name as much
+   * as for the plain one, which is the case a copy that runs twice reaches.
+   *
+   * fs's decision tree, in fs's order, with "is this candidate taken" answered by
+   * a row rather than by `readFile`: the same question with the same answers and
+   * no bytes moved. The suffix text is fs's word for word — `<stem>-<from><ext>`,
+   * then `-2`, `-3`.
    */
-  private async suffixedName(toId: string, fromBriefId: string, source: AssetRow): Promise<string> {
+  private async destination(
+    toId: string,
+    fromBriefId: string,
+    source: AssetRow,
+  ): Promise<{ readonly name: string; readonly reused: boolean }> {
+    const taken = await this.assetRow(toId, source.name);
+    if (taken === undefined) return { name: source.name, reused: false };
+    if (taken.sha256 === source.sha256) return { name: source.name, reused: true };
     const extension = extname(source.name);
     const stem = basename(source.name, extension);
     const directory = dirname(source.name);
@@ -358,7 +387,8 @@ export class ObjectAssetStore implements AssetStorePort {
       const named = `${base}${extension}`;
       const candidate = directory === "." ? named : `${directory}/${named}`;
       const existing = await this.assetRow(toId, candidate);
-      if (existing === undefined || existing.sha256 === source.sha256) return candidate;
+      if (existing === undefined) return { name: candidate, reused: false };
+      if (existing.sha256 === source.sha256) return { name: candidate, reused: true };
     }
   }
 

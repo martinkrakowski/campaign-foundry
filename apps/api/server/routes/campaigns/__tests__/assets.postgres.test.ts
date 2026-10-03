@@ -20,6 +20,7 @@ import { PgBriefStore } from "../../../lib/ports/pg-brief-store.js";
 import type { TenantContext } from "../../../lib/tenant.js";
 import assetsPostHandler from "../assets.post.js";
 import createHandler from "../index.post.js";
+import duplicateHandler from "../briefs/[id]/duplicate.post.js";
 import {
   mountTenantRoute,
   setupPgHarness,
@@ -267,6 +268,51 @@ describe("the create rollback frees the copied assets (PT-4b)", () => {
     expect(await store.list(inputPrefix("local", minted.campaignId))).toEqual([]);
     // One row left in the whole database: the SOURCE's, and its object with it.
     // A failed copy never takes the campaign it was copying from down too.
+    expect(await assetCount(harness.db)).toBe(1);
+    expect(await getAssetStore(tenant).readAsset("source-camp", "logo.png")).toEqual(PNG);
+  });
+
+  test("the duplicate route's rollback frees them too", async () => {
+    // The identical argument, against the second route that makes the same
+    // sequence. Both have a rollback that calls `deleteAssets`, and only one of
+    // them was tested: a `deleteAssets(slug)` here would resolve nothing either,
+    // because `releaseCampaign` above it has already deleted the campaign row
+    // and the cascade the asset rows with it.
+    const tenant: TenantContext = { orgId: "local", userId: "u", roles: [], teamIds: [] };
+    const briefs = new PgBriefStore(harness.db, "local", "u", [], []);
+    await briefs.createCampaign("source-camp");
+    await briefs.createBrief(brief("source-camp"));
+    await getAssetStore(tenant).writeAsset("source-camp", "logo.png", PNG);
+
+    const failing = vi
+      .spyOn(PgBriefStore.prototype, "createBrief")
+      .mockRejectedValueOnce(new Error("boom"));
+    const mint = vi.spyOn(PgBriefStore.prototype, "createCampaign");
+
+    const res = await mountTenantRoute(duplicateHandler, {
+      method: "POST",
+      path: "/campaigns/briefs/:id/duplicate",
+      tenant,
+    })(
+      new Request("http://x/campaigns/briefs/source-camp/duplicate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Copy" }),
+      }),
+    );
+    expect(res.status).toBe(500);
+    expect(failing).toHaveBeenCalledTimes(1);
+
+    const minted = (await mint.mock.results[0]!.value) as ResolvedCampaign;
+    expect(minted.slug).toBe("copy");
+
+    const { rows } = await harness.db.query<{ n: number }>(
+      `select count(*)::int as n from asset where campaign_id = $1`,
+      [minted.campaignId],
+    );
+    expect(rows[0]!.n).toBe(0);
+    expect(await store.list(inputPrefix("local", minted.campaignId))).toEqual([]);
+    // And the source is still whole, as on the create path.
     expect(await assetCount(harness.db)).toBe(1);
     expect(await getAssetStore(tenant).readAsset("source-camp", "logo.png")).toEqual(PNG);
   });

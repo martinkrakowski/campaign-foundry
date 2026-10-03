@@ -104,10 +104,18 @@ describe("ObjectAssetStore (PT-4b)", () => {
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({
         name: "logo.png",
-        size: String(PNG.length),
         sha256: hashBytes(PNG),
         content_type: "image/png",
       });
+      // `size` is `bigint`, and the two drivers disagree about what that means
+      // in JS: `pg` hands int8 back as a STRING (int8 is outside the safe-integer
+      // guarantee `pg` makes for any column) while PGlite hands back a number, so
+      // a `toMatchObject` expecting `String(size)` passes on one driver and fails
+      // on the other — which is CI's driver and the Mac's. The raw column is
+      // therefore compared as a NUMBER: the one form both agree on, and the shape
+      // `AssetEntry.size` has, so this pins what a caller reads rather than what
+      // one driver happened to serialize.
+      expect(Number(rows[0]!.size)).toBe(PNG.length);
       // The key is built from the row's own id and nothing else.
       expect((await store.list(inputPrefix(ORG, slugId))).map((o) => o.key)).toEqual([
         inputKey(ORG, slugId, rows[0]!.id),
@@ -313,6 +321,31 @@ describe("ObjectAssetStore (PT-4b)", () => {
       expect(await rowsOf(db, slugId)).toEqual([]);
       await assets.deleteAssets(slugId);
       expect(await store.list(inputPrefix(ORG, slugId))).toEqual([]);
+    });
+
+    test("another org's campaign UUID deletes nothing of theirs", async () => {
+      // The load-bearing half of item C4 — a uuid is used AS the campaign id with
+      // no lookup — must not become a way to name another tenant's prefix. Both
+      // halves of `deleteAssets` carry `org_id`, so passing a uuid this org does
+      // not hold empties this org's (empty) prefix and deletes this org's (no)
+      // rows, and the other org keeps every byte it had.
+      await db.query(`insert into org (id, name) values ('other', 'Other')`);
+      const theirId = await seed(db, "other", SLUG);
+      const theirs = new ObjectAssetStore(db, store, "other");
+      await theirs.writeAsset(SLUG, "logo.png", PNG);
+
+      await assets.deleteAssets(theirId);
+
+      // Read THEIR rows directly: `rowsOf` is org-scoped to this store's own org,
+      // so asking it about another org's row would answer `[]` whether or not the
+      // row survived — which is precisely the thing under test.
+      const { rows } = await db.query<{ n: number }>(
+        `select count(*)::int as n from asset where org_id = 'other' and campaign_id = $1`,
+        [theirId],
+      );
+      expect(rows[0]!.n).toBe(1);
+      expect(await store.list(inputPrefix("other", theirId))).toHaveLength(1);
+      expect(await theirs.readAsset(SLUG, "logo.png")).toEqual(PNG);
     });
 
     test("an unresolved slug is a no-op, exactly as on fs", async () => {
