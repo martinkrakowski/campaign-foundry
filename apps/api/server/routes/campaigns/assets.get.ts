@@ -1,8 +1,10 @@
 import { errorMessage } from "@campaignfoundry/shared";
 import { assertSafeId } from "../../lib/load-brief.js";
 import { ASSET_NAME_PATTERN, assetContentType } from "../../lib/asset-files.js";
+import { objectStore } from "../../lib/config.js";
 import { campaignKnown } from "../../lib/ownership.js";
 import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
+import { inputAssetRedirect } from "../../lib/signed-urls.js";
 
 import { requestTenant } from "../../lib/tenant.js";
 /**
@@ -15,8 +17,10 @@ import { requestTenant } from "../../lib/tenant.js";
  * - Missing or unowned campaign returns 404 (PT-2b).
  *
  * When `name` is supplied:
- * - Returns raw binary with matching `content-type` (image/png, image/jpeg, audio/mpeg,
- *   or audio/mp4 — VE3b2).
+ * - On `OBJECT_STORE=fs`: returns raw binary with matching `content-type` (image/png,
+ *   image/jpeg, audio/mpeg, or audio/mp4 — VE3b2).
+ * - On `OBJECT_STORE=s3`: answers 302 to a freshly presigned location (PT-4f, D209b);
+ *   no bytes are read here.
  * - Missing asset or unowned campaign returns 404.
  * - Invalid briefId or name returns 400.
  */
@@ -64,6 +68,36 @@ export default defineEventHandler(async (event) => {
     if (briefs.supportsTeams && (await briefs.campaignVisibility(slug)) === "hidden") {
       setResponseStatus(event, 404);
       return { error: `Asset "${name}" not found.` };
+    }
+    // D204/D209b: under `s3` a browser never gets bucket bytes through this
+    // route — it gets a 302 to a location this request just signed. The listing's
+    // `thumbnailUrl` IS this URL (both adapters spell it out, unchanged), which
+    // is what makes the listing cost no presign per asset and gives it no expiry.
+    //
+    // The branch is `objectStore() === "s3"` and NOTHING else. It cannot be
+    // "the store answered `undefined` for the key": fs answers that for every
+    // asset because it has no keys at all, so that test would ask fs a question
+    // whose "no" means "no bucket", and pg with `OBJECT_STORE=fs` would then
+    // redirect to a URL for a deployment that has none. The mode is the
+    // deployment's own switch, the same one the asset store's registry is built
+    // on, and it is read before any store is asked.
+    if (objectStore() === "s3") {
+      const redirect = await inputAssetRedirect(scope, slug, name);
+      if (redirect === undefined || redirect.kind === "missing") {
+        setResponseStatus(event, 404);
+        return { error: `Asset "${name}" not found.` };
+      }
+      // `no-store` because the `location` is signed with a window, and a cached
+      // 302 would outlive it: a browser replaying a cached redirect minutes later
+      // would land on a 403 with nothing to tell it why.
+      setResponseStatus(event, 302);
+      setHeader(event, "location", redirect.location);
+      setHeader(event, "cache-control", "no-store");
+      // No body and NO BYTES READ: the store answers whether the object is there,
+      // once the browser follows this. An object gone from under a row that exists
+      // is its 404 rather than this route's, which is a deliberate change from
+      // `readAsset`'s.
+      return "";
     }
     const bytes = await getAssetStore(scope).readAsset(slug, name);
     if (!bytes) {

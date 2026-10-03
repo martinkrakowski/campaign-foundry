@@ -258,6 +258,47 @@ function describeConformance({ real }: { real: boolean }): readonly string[] {
           );
         }
       });
+
+      // PT-4f, D209a. The report revision rides the signed URL as `v` (D204), so
+      // the one case both adapters must agree on is that it is INSIDE the
+      // signature: a store that accepted a tampered `v` would be serving a caller
+      // a URL it never signed, and a fake that hashed only the key and the window
+      // would be the one adapter on which "changing `v` changes the URL" is false.
+      it("a presigned GET with a version answers 200, and the same URL with `v` changed is refused", async () => {
+        await store.put(key("hero.png"), BYTES, { contentType: "image/png" });
+        const signed = await store.presignGet(key("hero.png"), {
+          expiresInSeconds: 1200,
+          // The window's own floor, so this case does not itself depend on the
+          // clock: the conformance suite is about the signature, not the window.
+          now: Math.floor(Date.now() / (15 * 60 * 1000)) * (15 * 60 * 1000),
+          version: "revision-a",
+        });
+        const parsed = new URL(signed);
+        if (real) {
+          const untampered = await fetch(signed);
+          expect(untampered.status).toBe(200);
+          expect(new Uint8Array(await untampered.arrayBuffer())).toEqual(BYTES);
+          parsed.searchParams.set("v", "revision-b");
+          expect((await fetch(parsed.toString())).status).toBe(403);
+        } else {
+          // The fake cannot verify a signature, so what it CAN say is that `v` is
+          // present, that it travels as a plain query parameter, and that changing
+          // it changes the digest — the same three claims the flipped-signature
+          // case above makes.
+          expect(parsed.searchParams.get("v")).toBe("revision-a");
+          const base = parsed.searchParams.get("X-Amz-Signature");
+          parsed.searchParams.set("v", "revision-b");
+          expect(parsed.searchParams.get("X-Amz-Signature")).toBe(base);
+          const other = new URL(
+            await store.presignGet(key("hero.png"), {
+              expiresInSeconds: 1200,
+              now: Math.floor(Date.now() / (15 * 60 * 1000)) * (15 * 60 * 1000),
+              version: "revision-b",
+            }),
+          );
+          expect(other.searchParams.get("X-Amz-Signature")).not.toBe(base);
+        }
+      });
     },
   );
   // The names come back as an array rather than a number because Vitest 4

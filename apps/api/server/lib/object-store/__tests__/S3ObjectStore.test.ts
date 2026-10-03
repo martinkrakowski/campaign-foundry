@@ -312,6 +312,40 @@ describe("S3ObjectStore failures", () => {
     ).toContain("X-Amz-Signature=");
   });
 
+  test("a `version` rides the query and is covered by the signature (PT-4f, D209a)", async () => {
+    const s3 = store({ fetchImpl: canned(new Response(null, { status: 200 })).fetchImpl });
+    const signed = new URL(
+      await s3.presignGet("campaigns/c1/renders/hero.png", {
+        expiresInSeconds: 1200,
+        now: 1_700_000_000_000,
+        version: "revision-a",
+      }),
+    );
+    expect(signed.searchParams.get("v")).toBe("revision-a");
+    // Set BEFORE `sign`, so it is inside the signature and not merely appended: a
+    // changed version gives a different signature, which is the only way a store
+    // can tell the two apart. An appended-after-signing parameter would leave both
+    // signatures identical and any client could edit it to anything.
+    const other = new URL(
+      await s3.presignGet("campaigns/c1/renders/hero.png", {
+        expiresInSeconds: 1200,
+        now: 1_700_000_000_000,
+        version: "revision-b",
+      }),
+    );
+    expect(other.searchParams.get("X-Amz-Signature")).not.toBe(
+      signed.searchParams.get("X-Amz-Signature"),
+    );
+    // Absent when not asked for — never a parameter this server invented.
+    const bare = new URL(
+      await s3.presignGet("campaigns/c1/renders/hero.png", {
+        expiresInSeconds: 1200,
+        now: 1_700_000_000_000,
+      }),
+    );
+    expect(bare.searchParams.has("v")).toBe(false);
+  });
+
   test("every method refuses a key outside the confined shape", async () => {
     const { requests, fetchImpl } = canned(new Response(null, { status: 200 }));
     const s3 = store({ fetchImpl });

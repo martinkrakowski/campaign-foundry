@@ -272,6 +272,57 @@ describe("ObjectAssetStore (PT-4b)", () => {
     });
   });
 
+  describe("assetObjectKey (PT-4f, D209b)", () => {
+    test("answers the key the upload really wrote, and undefined for every absence", async () => {
+      const written = await assets.writeAsset(SLUG, "logo.png", PNG);
+      const [row] = await rowsOf(db, slugId);
+      // The SAME key `writeAsset` built, read back through the row rather than
+      // re-derived: a `?name=` redirect that pointed anywhere else would hand a
+      // browser a presigned URL to an object this upload never wrote.
+      expect(await assets.assetObjectKey(SLUG, "logo.png")).toBe(inputKey(ORG, slugId, row!.id));
+      expect(await assets.assetObjectKey(SLUG, "photo.jpg")).toBeUndefined(); // no row
+      expect(await assets.assetObjectKey("no-such-campaign", "logo.png")).toBeUndefined(); // no campaign
+      // A row whose OBJECT is gone still answers its key: this method never checks
+      // that the bytes are there, and the store's own 404 after the redirect is
+      // what answers for it.
+      await store.delete(written.id ? inputKey(ORG, slugId, written.id) : "");
+      expect(await assets.assetObjectKey(SLUG, "logo.png")).toBe(inputKey(ORG, slugId, row!.id));
+    });
+
+    test("another org's SAME slug answers undefined, never that org's key", async () => {
+      await assets.writeAsset(SLUG, "logo.png", PNG);
+      // A real second org holding the same slug, because a slug is unique per org
+      // and not globally — this is the case a missing `org_id` would leak.
+      await db.query(`insert into org (id, name) values ('other', 'Other')`);
+      const otherCampaign = await seed(db, "other", SLUG);
+      const theirs = new ObjectAssetStore(db, store, "other");
+      const theirWritten = await theirs.writeAsset(SLUG, "logo.png", JPEG);
+      expect(await theirs.assetObjectKey(SLUG, "logo.png")).toBe(
+        inputKey("other", otherCampaign, theirWritten.id),
+      );
+      // And org `local`, asking about its own slug, never sees the other's key.
+      const [ourRow] = await rowsOf(db, slugId);
+      expect(await assets.assetObjectKey(SLUG, "logo.png")).toBe(inputKey(ORG, slugId, ourRow!.id));
+      expect(await assets.assetObjectKey(SLUG, "logo.png")).not.toBe(
+        inputKey("other", otherCampaign, theirWritten.id),
+      );
+    });
+
+    test("it never asks the store whether the object exists", async () => {
+      await assets.writeAsset(SLUG, "logo.png", PNG);
+      const get = vi.spyOn(store, "get");
+      const head = vi.spyOn(store, "head");
+      const list = vi.spyOn(store, "list");
+      await assets.assetObjectKey(SLUG, "logo.png");
+      // A `?name=` request under `s3` costs ONE query here; a HEAD round-trip would
+      // double the round trips of every thumbnail in a listing for an answer the
+      // browser is about to get from the store anyway.
+      expect(get).not.toHaveBeenCalled();
+      expect(head).not.toHaveBeenCalled();
+      expect(list).not.toHaveBeenCalled();
+    });
+  });
+
   describe("listAssets", () => {
     test("answers [] for an unresolved slug and never throws for not-found", async () => {
       // `campaignKnown` in assets.get.ts depends on the empty answer.

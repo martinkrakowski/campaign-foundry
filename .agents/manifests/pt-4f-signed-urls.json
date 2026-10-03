@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "lane": "PT-4f-signed-urls",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/signed-urls.ts",
+      "before": "export function signingInstant(now: number): number {\n  return Math.floor(now / SIGNING_WINDOW_MS) * SIGNING_WINDOW_MS;\n}",
+      "after": "export function signingInstant(now: number): number {\n  return now;\n}",
+      "because": "the window is the whole of D204's caching claim: `signingInstant` exists to FLOOR an instant to its window's start, so every call inside one 15-minute window produces the same signature and the browser reuses one cache entry. Returning `now` unfloored makes every signature unique to the millisecond, so a grid polling every tick re-downloads every creative on every tick — the exact cost D204 says window-aligned signing avoids. It is caught by `toBe`-IDENTICAL comparisons across two calls inside one window, which no weaker assertion could distinguish: two URLs differing is precisely what the mutation produces.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/result.get.test.ts",
+        "-t",
+        "one window signs one URL"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/signed-urls.ts",
+      "before": "        expiresInSeconds: SIGNED_URL_EXPIRES_SECONDS,\n        // D209a: the revision is a SIGNED parameter, so the browser re-fetches",
+      "after": "        expiresInSeconds: 900,\n        // D209a: the revision is a SIGNED parameter, so the browser re-fetches",
+      "because": "the expiry is 20 minutes on a 15-minute window, and the five minutes of overlap are load-bearing rather than slack: a URL minted in a window's last second must outlive that window's end, or a page that loaded just before a boundary finds every image, video and proof 403 with nothing to tell it why. A 900-second expiry makes the expiry exactly the window, which removes the overlap and reinstates that failure. The anchor is the whole option plus the comment line after it rather than the bare identifier, because `expiresInSeconds` appears twice in this file (the input-asset branch is 900 too, correctly) and a fragment would mutate the wrong call.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/result.get.test.ts",
+        "-t",
+        "one window signs one URL"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/signed-urls.ts",
+      "before": "      renderObjectKey(renderPrefix(scopeTenant(scope).orgId, target.campaignId), target.slug, path),",
+      "after": "      `${renderPrefix(scopeTenant(scope).orgId, target.campaignId)}${path.slice(path.indexOf('/') + 1)}`,",
+      "because": "`renderObjectKey` is the ONE implementation of path→key and the segment check inside it is the refusal: a path whose first segment is not this campaign's slug (`p1/1x1.png`, the fixture `routes-campaign-refs.test.ts` carries) or one `assertObjectKey` refuses (`..`, an empty segment) must cost that field and no other. A blind strip after the first `/` takes the path at face value, so `p1/1x1.png` and `winter-sale/p1/1x1.png` become the SAME key and the mismatch is invisible until one campaign's render is served to another — the failure `ObjectExporter.keyFor` exists to prevent. The refusal tests name all three cases, and the mutation is what makes them fail rather than pass by accident.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/signed-urls.test.ts",
+        "-t",
+        "a refused path costs ITS field only"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/result.get.ts",
+      "before": "  await campaignKnown(scope, slug, \"report\");\n  const report = await readReport(scope, slug);\n  // \"Never ran\" is answered before anything is signed: there are no rows to carry\n  // a URL, so the revision is not read either.\n  if (report === undefined) return EMPTY;",
+      "after": "  const report = await readReport(scope, slug);\n  // Never ran still answers EMPTY, but the URLs are minted BEFORE the gate below.\n  if (report !== undefined) await withAssetUrls(scope, report, { slug, campaignId: resolved?.campaignId });\n  await campaignKnown(scope, slug, \"report\");\n  if (report === undefined) return EMPTY;",
+      "because": "D170 and D204: a signed URL is issued ONLY after the ownership check, and that ordering is the whole tenancy of this route — the org and campaign in every key are the caller's own tenant's and its own resolve's. Minting above `campaignKnown` opens a report for a campaign the caller may not see. NOTE the spy that catches it is on `reportRevision`, NOT on `presignGet`: for a team-hidden campaign `PgBriefStore.resolveCampaign` is itself team-filtered, so the hidden caller's `target.campaignId` is undefined and `withAssetUrls` mints no presigned URL even when it runs — a `presignGet` count of zero does not distinguish the two orderings, and the mutation survives a presign-only assertion. `reportRevision` is read once per answered report and by nothing else on this path (`campaignKnown` goes to the port's own `getRevision`), so one call is the report having been opened at all.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/result.get.test.ts",
+        "-t",
+        "a team-hidden campaign answers 404 with ZERO presignGet calls"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/signed-urls.ts",
+      "before": "        ...(revision === undefined ? {} : { version: revision }),\n        ...(disposition === undefined ? {} : { responseContentDisposition: disposition }),",
+      "after": "        ...(disposition === undefined ? {} : { responseContentDisposition: disposition }),",
+      "because": "D209a: the report revision rides the URL as ONE named SIGNED parameter (`v`), which is what lets a browser re-fetch exactly when the bytes behind the object changed instead of on every poll tick, and stops a client appending an editable `?v=` of its own. Without it every URL for one key in one window is identical, so a re-run's fresh bytes sit behind a cached image — the two-revisions test is the only thing that sees it, because with the revision gone the two URLs are `toBe`-equal where the test demands they differ.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/signed-urls.test.ts",
+        "-t",
+        "the revision rides as the signed"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/assets.get.ts",
+      "before": "      setHeader(event, \"location\", redirect.location);\n      setHeader(event, \"cache-control\", \"no-store\");",
+      "after": "      setHeader(event, \"location\", redirect.location);",
+      "because": "the 302's `location` is signed with a 15-minute window, so a cached redirect outlives the signature it points at: a browser replaying it minutes later lands on a 403 with nothing to tell it why, and the asset is right there. `no-store` is the only thing that stops the replay, and the header assertion is the only place it is visible — the status and the location are unchanged by this mutation, so a test that only checked those would be green with the caching bug shipped. The anchor carries the `location` line because `cache-control` occurs twice in this file (the fs stream branch sets it too, correctly).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.postgres.test.ts",
+        "-t",
+        "\\?name= answers 302 to the row's own presigned key"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
