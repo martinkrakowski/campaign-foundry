@@ -223,6 +223,52 @@ describe("POST /campaigns/package under OBJECT_STORE=s3 (PT-4h1)", () => {
     );
   });
 
+  test("a failed sweep still answers 200, and says so without naming a key", async () => {
+    // The package is committed before the sweep runs, so a bucket that refuses
+    // deletes is garbage collection failing and NOT an export that did not finish.
+    // Reporting that is the composition root's job (item 1 of fix round 1), and the
+    // one thing it must never do is put a key in a log.
+    await seedCampaign(harness.db, "local", SLUG, CAMPAIGN);
+    await seedReport(harness.db, "local", SLUG);
+    await seedRender("local", CAMPAIGN);
+    // An older generation for the sweep to try (and be refused) to empty.
+    await store.put(
+      `org/local/campaign/${CAMPAIGN}/packages/${PLATFORM}/0000000000000-${"a".repeat(32)}/manifest.json`,
+      new Uint8Array([1]),
+    );
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(store, "deletePrefix").mockRejectedValue(
+      new Error("The object store answered 403 to delete."),
+    );
+
+    const res = await call(LOCAL, { campaignId: SLUG, platforms: [PLATFORM] });
+    expect(res.status).toBe(200);
+
+    const lines = warn.mock.calls.map((args) => String(args[0]));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("[package] could not sweep older generations");
+    // Names the platform, which is the one identifier an operator needs to find
+    // the campaign and the one that is not a tenant secret.
+    expect(lines[0]).toContain(PLATFORM);
+    // And names nothing of the store's namespace: no prefix, no org id, no
+    // campaign uuid (DoD 3). `org/` is the substring every key starts with, so it
+    // is the sharpest available probe for the whole shape.
+    expect(lines[0]).not.toContain("org/");
+    expect(lines[0]).not.toContain(CAMPAIGN);
+    expect(lines[0]).not.toContain("local");
+    // The package itself is committed and complete: the failure was garbage
+    // collection, so the manifest a customer gets is exactly the fs-shaped answer.
+    const body = (await res.json()) as { platforms: Array<{ manifestPath: string }> };
+    expect(body.platforms[0]!.manifestPath).toBe(`packages/${SLUG}/${PLATFORM}/manifest.json`);
+    // The refused generation is still there, for the next commit to sweep.
+    expect(
+      await store.get(
+        `org/local/campaign/${CAMPAIGN}/packages/${PLATFORM}/0000000000000-${"a".repeat(32)}/manifest.json`,
+      ),
+    ).toBeDefined();
+  });
+
   test("a missing render is a 422 whose body is the fs backend's, word for word", async () => {
     await seedCampaign(harness.db, "local", SLUG, CAMPAIGN);
     await seedReport(harness.db, "local", SLUG);

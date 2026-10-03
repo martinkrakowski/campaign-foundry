@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type {
@@ -285,7 +285,7 @@ describe("ObjectPackageStore", () => {
   /** One store, one clock reading, one nonce — so a generation is predictable. */
   const build = (
     target: ObjectStorePort = store,
-    over: { at?: number; hex?: string } = {},
+    over: { at?: number; hex?: string; onSweepError?: (e: unknown, p: string) => void } = {},
   ): ObjectPackageStore =>
     new ObjectPackageStore(target, {
       renderPrefix: RENDERS,
@@ -293,6 +293,7 @@ describe("ObjectPackageStore", () => {
       campaignSegment: SLUG,
       now: () => over.at ?? EARLY,
       nonce: nonce(over.hex ?? "a"),
+      onSweepError: over.onSweepError,
     });
 
   beforeEach(() => {
@@ -591,18 +592,31 @@ describe("ObjectPackageStore", () => {
     ]);
   });
 
-  test("the sweep NEVER empties a NEWER generation: an in-flight writer keeps its files", async () => {
-    // A request that started LATER but has not committed yet — the generation a
-    // `<=` comparison would delete out from under it.
+  test("the sweep NEVER empties a generation that sorts after this one: an in-flight writer keeps its files", async () => {
+    // **REFRAMED under the monotonic floor (fix round 1, item 2).** The old version
+    // put the in-flight generation in the store BEFORE the committing writer minted
+    // its own, which the floor now makes LATER — so this writer legitimately
+    // supersedes it, and the assertion that it survived was asserting a property
+    // item 2 gives up on purpose.
+    //
+    // "Newer" now means "minted later, floor-adjusted", and the floor is computed
+    // from what this writer could SEE at mint time. The generation a sweep must
+    // never touch is therefore the one that appears AFTER the mint: another
+    // request, writing right now, which no listing this writer has taken can
+    // contain. That is the case a `<=` comparison would delete, and the case the
+    // strict `<` exists for.
+    const committing = build(store, { at: LATE, hex: "b" });
+    await committing.writePackaged(PLATFORM, `${SLUG}/alpha/1x1.png`, PNG);
+    // Arrives after the mint above: a second request's generation, in flight.
     await store.put(`${PLATFORM_PREFIX}${LATER_GEN}/files/alpha/inflight.png`, PNG);
 
-    const older = build(store, { at: LATE, hex: "b" });
-    await older.writePackaged(PLATFORM, `${SLUG}/alpha/1x1.png`, PNG);
-    await older.writeManifest(PLATFORM, manifest());
+    await committing.writeManifest(PLATFORM, manifest());
 
     expect(
       await store.get(`${PLATFORM_PREFIX}${LATER_GEN}/files/alpha/inflight.png`),
     ).toBeDefined();
+    // …and this writer's own commit is still the live one, because the in-flight
+    // generation has no manifest to be live with.
     expect(
       await latestCommittedGeneration(await store.list(PLATFORM_PREFIX), PLATFORM_PREFIX),
     ).toBe(LATE_GEN);
@@ -640,22 +654,85 @@ describe("ObjectPackageStore", () => {
     expect(await store.get(`${PLATFORM_PREFIX}${EARLY_GEN}/files/alpha/1x1.png`)).toBeDefined();
   });
 
-  test("newest wins: generations written OUT OF ORDER leave the newer one live", async () => {
-    // The newer export commits FIRST — a slow request, or a replica whose clock
-    // reads later than a writer that already finished.
-    const newer = build(store, { at: LATER, hex: "c" });
-    await newer.writePackaged(PLATFORM, `${SLUG}/alpha/new.png`, PNG);
-    await newer.writeManifest(
-      PLATFORM,
-      manifest({
-        items: [
-          manifestItem({ packagedPath: `packages/${SLUG}/${PLATFORM}/${SLUG}/alpha/new.png` }),
-        ],
-      }),
+  test("a failed sweep is REPORTED: the callback receives the error and the platform", async () => {
+    // A silent catch is its own defect: the generations accumulate and the only
+    // symptom an operator ever sees is a bucket quietly out of space. So the
+    // failure crosses the port boundary as an argument, not as a throw.
+    const reported: Array<{ error: unknown; platformId: string }> = [];
+    const broken = storeWithBrokenCleanup(store);
+    await store.put(`${PLATFORM_PREFIX}${EARLY_GEN}/files/alpha/1x1.png`, PNG);
+
+    const packaged = build(broken, {
+      at: LATE,
+      hex: "b",
+      onSweepError: (error, platformId) => reported.push({ error, platformId }),
+    });
+    await packaged.writePackaged(PLATFORM, `${SLUG}/alpha/1x1.png`, PNG);
+    await packaged.writeManifest(PLATFORM, manifest());
+
+    expect(reported).toHaveLength(1);
+    expect(reported[0]!.platformId).toBe(PLATFORM);
+    // The very error the store raised, not a rewritten one: a caller that wants to
+    // branch on a status code or a code has to be able to.
+    expect((reported[0]!.error as Error).message).toMatch(/refused the sweep/);
+    // Still exactly one commit, and the older generation still standing.
+    expect(
+      await latestCommittedGeneration(await store.list(PLATFORM_PREFIX), PLATFORM_PREFIX),
+    ).toBe(LATE_GEN);
+    expect(await store.get(`${PLATFORM_PREFIX}${EARLY_GEN}/files/alpha/1x1.png`)).toBeDefined();
+  });
+
+  test("a sweep callback that ITSELF throws still leaves the committed package live", async () => {
+    // The reporting is wrapped, and this is why: a logger that cannot open its
+    // transport, a buffer that is full, a callback with a bug — none of those may
+    // turn garbage collection into a failed export, which is the exact thing the
+    // swallow around the sweep exists to prevent.
+    const broken = storeWithBrokenCleanup(store);
+    await store.put(`${PLATFORM_PREFIX}${EARLY_GEN}/files/alpha/1x1.png`, PNG);
+
+    const packaged = build(broken, {
+      at: LATE,
+      hex: "b",
+      onSweepError: () => {
+        throw new Error("the logger could not open its transport");
+      },
+    });
+    await packaged.writePackaged(PLATFORM, `${SLUG}/alpha/1x1.png`, PNG);
+    await expect(packaged.writeManifest(PLATFORM, manifest())).resolves.toBe(
+      `packages/${SLUG}/${PLATFORM}/manifest.json`,
     );
-    const older = build(store, { at: LATE, hex: "b" });
-    await older.writePackaged(PLATFORM, `${SLUG}/alpha/old.png`, PNG);
-    await older.writeManifest(
+    expect(
+      await latestCommittedGeneration(await store.list(PLATFORM_PREFIX), PLATFORM_PREFIX),
+    ).toBe(LATE_GEN);
+  });
+
+  test("a sweep that works reports NOTHING: no callback, no phantom error", async () => {
+    // The other direction, and the one a bare `catch {}` cannot get right: with
+    // nothing to report, the callback must not fire. A store that is merely being
+    // asked to delete nothing is not a failure.
+    let calls = 0;
+    const packaged = build(store, {
+      at: LATE,
+      hex: "b",
+      onSweepError: () => {
+        calls += 1;
+      },
+    });
+    await packaged.writePackaged(PLATFORM, `${SLUG}/alpha/1x1.png`, PNG);
+    await packaged.writeManifest(PLATFORM, manifest());
+    expect(calls).toBe(0);
+  });
+
+  test("newest wins: a generation minted LAST is the one readers get, clock or no clock", async () => {
+    // The second export commits FIRST, and its writer's clock reads EARLIER than
+    // the first's — a replica behind, or two pods with unsynced clocks. The
+    // guarantee is "the most recently MINTED generation wins", not "the latest
+    // wall-clock stamp wins", because readers order by the stamp and a clock
+    // disagreement would otherwise leave the newer export permanently in the
+    // shadow of the older one: written, committed, and never read by anything.
+    const first = build(store, { at: EARLY, hex: "a" });
+    await first.writePackaged(PLATFORM, `${SLUG}/alpha/old.png`, PNG);
+    await first.writeManifest(
       PLATFORM,
       manifest({
         items: [
@@ -664,9 +741,134 @@ describe("ObjectPackageStore", () => {
       }),
     );
 
+    const second = build(store, { at: EARLY - 60_000, hex: "b" });
+    await second.writePackaged(PLATFORM, `${SLUG}/alpha/new.png`, PNG);
+    await second.writeManifest(
+      PLATFORM,
+      manifest({
+        items: [
+          manifestItem({ packagedPath: `packages/${SLUG}/${PLATFORM}/${SLUG}/alpha/new.png` }),
+        ],
+      }),
+    );
+
+    // It is live, and the generation it replaced is gone.
     expect(
       await latestCommittedGeneration(await store.list(PLATFORM_PREFIX), PLATFORM_PREFIX),
-    ).toBe(LATER_GEN);
+    ).toBe(gen(EARLY + 1, "b"));
+    expect(await store.get(`${PLATFORM_PREFIX}${EARLY_GEN}/files/alpha/old.png`)).toBeUndefined();
+  });
+
+  test("a lagging replica's re-export still becomes the live one, and supersedes what it can see", async () => {
+    // The case item 2 exists for, stated as one question: an existing COMMITTED
+    // generation at stamp T, and a writer whose `now()` reads a full minute
+    // BEFORE T. Before the floor, that writer minted `T - 60_000`, its manifest
+    // committed, and `latestCommittedGeneration` kept answering with the older
+    // package — a re-export that nobody could ever read.
+    await store.put(`${PLATFORM_PREFIX}${EARLY_GEN}/files/alpha/1x1.png`, PNG);
+    await store.put(`${PLATFORM_PREFIX}${EARLY_GEN}/manifest.json`, new Uint8Array([1]));
+    expect(
+      await latestCommittedGeneration(await store.list(PLATFORM_PREFIX), PLATFORM_PREFIX),
+    ).toBe(EARLY_GEN);
+
+    const lagging = build(store, { at: EARLY - 60_000, hex: "d" });
+    await lagging.writePackaged(PLATFORM, `${SLUG}/alpha/1x1.png`, PNG);
+    await lagging.writeManifest(PLATFORM, manifest());
+
+    // Sorted AFTER T, not before it — which is the whole of the floor's purpose.
+    expect(gen(EARLY + 1, "d") > EARLY_GEN).toBe(true);
+    expect(
+      await latestCommittedGeneration(await store.list(PLATFORM_PREFIX), PLATFORM_PREFIX),
+    ).toBe(gen(EARLY + 1, "d"));
+    // And its commit swept the generation it superseded, so the platform holds one.
+    expect(await keysUnder(PLATFORM_PREFIX)).toEqual([
+      `${PLATFORM_PREFIX}${gen(EARLY + 1, "d")}/files/alpha/1x1.png`,
+      `${PLATFORM_PREFIX}${gen(EARLY + 1, "d")}/manifest.json`,
+    ]);
+  });
+
+  test("with nothing to compare against the stamp is the clock, unchanged", async () => {
+    // The floor must not invent a future. A fresh platform's first generation is
+    // exactly what the clock said, or every key in the namespace would be stamped
+    // ahead of wall time and a later reader comparing the two would be misled.
+    const packaged = build(store, { at: EARLY, hex: "a" });
+    await packaged.writePackaged(PLATFORM, `${SLUG}/alpha/1x1.png`, PNG);
+    expect(await keysUnder(PLATFORM_PREFIX)).toEqual([
+      `${PLATFORM_PREFIX}${EARLY_GEN}/files/alpha/1x1.png`,
+    ]);
+  });
+
+  test("an uncommitted generation raises the floor too, and a malformed one does not", async () => {
+    // Committed or not: a crashed writer's generation is still a generation, and
+    // re-minting its stamp under a later clock would put two writers' bytes under
+    // one segment.
+    await store.put(`${PLATFORM_PREFIX}${LATER_GEN}/files/alpha/1x1.png`, PNG);
+    const afterCrash = build(store, { at: EARLY, hex: "b" });
+    await afterCrash.writePackaged(PLATFORM, `${SLUG}/alpha/1x1.png`, PNG);
+    expect(await keysUnder(PLATFORM_PREFIX)).toContain(
+      `${PLATFORM_PREFIX}${gen(LATER + 1, "b")}/files/alpha/1x1.png`,
+    );
+
+    // A malformed segment is ignored for the floor exactly as readers ignore it —
+    // and this is not academic. Its leading digits are a huge NUMBER, so a floor
+    // computed from it would be past 13 digits, `padStart` would not shorten it,
+    // and every generation minted afterwards would fail `PACKAGE_GENERATION_PATTERN`
+    // and be invisible forever.
+    await store.put(`${PLATFORM_PREFIX}${"9".repeat(20)}-${"e".repeat(32)}/manifest.json`, PNG);
+    await store.put(`${PLATFORM_PREFIX}${"9".repeat(13)}.staging-x/manifest.json`, PNG);
+    const afterNoise = build(store, { at: EARLY, hex: "c" });
+    await afterNoise.writePackaged(PLATFORM, `${SLUG}/alpha/1x1.png`, PNG);
+    // Still a 13-digit stamp read from the clock, not a 20-digit one.
+    expect(await keysUnder(PLATFORM_PREFIX)).toContain(
+      `${PLATFORM_PREFIX}${gen(LATER + 2, "c")}/files/alpha/1x1.png`,
+    );
+  });
+
+  test("a manifest committed after a newer writer swept its generation is never read, and the next commit removes it", async () => {
+    // The window the claim check cannot close, pinned rather than argued about.
+    // A passes its claim check; B (newer) commits and sweeps A's generation; A
+    // then writes its manifest. A's package is committed and complete-looking,
+    // and it is NOT what any reader gets, because B's generation sorts after it.
+    // Nothing is corrupted: readers take the newest committed generation, and the
+    // next commit for this platform sweeps A's.
+    const a = build(store, { at: EARLY, hex: "a" });
+    await a.writePackaged(PLATFORM, `${SLUG}/alpha/a.png`, PNG);
+    await a.writeManifest(
+      PLATFORM,
+      manifest({
+        items: [manifestItem({ packagedPath: `packages/${SLUG}/${PLATFORM}/${SLUG}/alpha/a.png` })],
+      }),
+    );
+
+    // B commits later, and sweeps A wholesale.
+    const b = build(store, { at: LATE, hex: "b" });
+    await b.writePackaged(PLATFORM, `${SLUG}/alpha/b.png`, PNG);
+    await b.writeManifest(
+      PLATFORM,
+      manifest({
+        items: [manifestItem({ packagedPath: `packages/${SLUG}/${PLATFORM}/${SLUG}/alpha/b.png` })],
+      }),
+    );
+    expect(await store.get(`${PLATFORM_PREFIX}${EARLY_GEN}/manifest.json`)).toBeUndefined();
+
+    // A re-runs and writes its manifest. A's own generation is the fresh one it
+    // just minted, so this is a complete, readable package — the case the brief
+    // refutes is A holding a generation B swept. Reproduced by writing that
+    // generation's manifest directly, which is what a commit between A's check and
+    // A's PUT would leave behind.
+    await store.put(`${PLATFORM_PREFIX}${LATE_GEN}/manifest.json`, new Uint8Array([1]));
+    expect(
+      await latestCommittedGeneration(await store.list(PLATFORM_PREFIX), PLATFORM_PREFIX),
+    ).toBe(LATE_GEN);
+
+    // A later commit for the platform removes it.
+    const c = build(store, { at: LATER, hex: "c" });
+    await c.writePackaged(PLATFORM, `${SLUG}/alpha/c.png`, PNG);
+    await c.writeManifest(PLATFORM, manifest({ items: [] }));
+    expect(await store.get(`${PLATFORM_PREFIX}${LATE_GEN}/manifest.json`)).toBeUndefined();
+    expect(
+      await latestCommittedGeneration(await store.list(PLATFORM_PREFIX), PLATFORM_PREFIX),
+    ).toBe(gen(LATER, "c"));
   });
 
   test("pagination: the claim check and the sweep see every page", async () => {
@@ -714,7 +916,12 @@ describe("ObjectPackageStore", () => {
     ]);
   });
 
-  test("pagination: a file that is only on the last page is still caught by the claim check", async () => {
+  test("pagination: a claimed file that exists ONLY on the last page is still found", async () => {
+    // The previous version of this test claimed a file that was never written,
+    // which the claim check rejects from the FIRST page — so it passed against an
+    // implementation that read one page and proved nothing about pagination. This
+    // one claims a file that EXISTS, and puts it where a one-page read cannot see
+    // it: three files at two keys per page, and the claimed one is last.
     const paged = new InMemoryObjectStore({ listPageSize: 2 });
     const packaged = new ObjectPackageStore(paged, {
       renderPrefix: RENDERS,
@@ -725,7 +932,18 @@ describe("ObjectPackageStore", () => {
     });
     const one = await packaged.writePackaged(PLATFORM, `${SLUG}/alpha/1x1.png`, PNG);
     const two = await packaged.writePackaged(PLATFORM, `${SLUG}/beta/1x1.png`, PNG);
-    // The third file is never written, and the claim names it.
+    const three = await packaged.writePackaged(PLATFORM, `${SLUG}/gamma/1x1.png`, PNG);
+    // Sanity: the file really is there, really is last, and a two-key read misses
+    // it. Without this the test would be asserting nothing about the page it names.
+    const all = await paged.list(`${PLATFORM_PREFIX}${EARLY_GEN}/files/`);
+    expect(all).toHaveLength(3);
+    expect(all.map((e) => e.key)).toContain(`${PLATFORM_PREFIX}${EARLY_GEN}/files/gamma/1x1.png`);
+    expect(
+      (await paged.list(`${PLATFORM_PREFIX}${EARLY_GEN}/files/`)).slice(0, 2).map((e) => e.key),
+    ).not.toContain(`${PLATFORM_PREFIX}${EARLY_GEN}/files/gamma/1x1.png`);
+
+    // The commit SUCCEEDS, and only because the claim check read past the first
+    // page: the manifest's third item names a key the first page does not hold.
     await expect(
       packaged.writeManifest(
         PLATFORM,
@@ -733,11 +951,14 @@ describe("ObjectPackageStore", () => {
           items: [
             manifestItem({ packagedPath: one }),
             manifestItem({ packagedPath: two }),
-            manifestItem({ packagedPath: `packages/${SLUG}/${PLATFORM}/${SLUG}/gamma/1x1.png` }),
+            manifestItem({ packagedPath: three }),
           ],
         }),
       ),
-    ).rejects.toThrow(/^Another export of this campaign/);
+    ).resolves.toBe(`packages/${SLUG}/${PLATFORM}/manifest.json`);
+    expect(
+      await latestCommittedGeneration(await paged.list(PLATFORM_PREFIX), PLATFORM_PREFIX),
+    ).toBe(EARLY_GEN);
   });
 
   test("cross-tenant: a store built for one org writes only under that org", async () => {

@@ -103,6 +103,23 @@
         "the returned paths are the fs adapter's, for the same inputs"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/infrastructure/adapters/ObjectPackageStore.ts",
+      "before": "    const stamp = Math.max(this.now(), (latest ?? -1) + 1);",
+      "after": "    const stamp = this.now();",
+      "because": "the minted stamp is the writer's own clock again, with no floor over the generations already in the prefix. On a single host with one clock that is indistinguishable — every writer agrees on what time it is — which is why nothing else in the suite can see it. The moment a second replica exists it is not: a pod whose clock reads a minute behind mints a generation that sorts BEFORE the one already committed, and because readers take the newest committed generation, that export is written, its manifest commits, its claim check passes, its sweep runs — and nothing ever reads it. The failure has no exception and no log line; the report simply keeps describing a package that a later export replaced, while the newer package is the one in the bucket and the older is the one every reader sees. The floor turns a clock disagreement into a strictly-increasing sequence, which is the only property `latestCommittedGeneration` actually relies on. Caught by the lagging-replica case, which is the only test with a writer whose `now()` reads BEHIND an existing committed generation.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/infrastructure/adapters/__tests__/ObjectPackageStore.test.ts",
+        "-t",
+        "a lagging replica's re-export still becomes the live one, and supersedes what it can see"
+      ],
+      "verdict": "caught"
     }
   ]
 }

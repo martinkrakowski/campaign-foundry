@@ -4,6 +4,7 @@ import {
   PackageForPlatformUseCase,
   type PackageStorePort,
 } from "@campaignfoundry/Distribution";
+import { errorMessage } from "@campaignfoundry/shared";
 import { getCapabilities } from "../../lib/capabilities.js";
 import { objectStore } from "../../lib/config.js";
 import { objectStoreClient } from "../../lib/object-store/index.js";
@@ -183,6 +184,25 @@ async function buildPackageStore(
     renderPrefix: renderPrefix(scope.orgId, target.campaignId),
     packagePrefix: packagePrefix(scope.orgId, target.campaignId),
     campaignSegment: target.slug,
+    onSweepError: (error, platformId) => {
+      // The package is committed by the time this can run, so it is reported and
+      // not thrown — see `ObjectPackageStoreOptions.onSweepError`. The composition
+      // root reports it rather than the adapter, because the adapter is in
+      // Distribution and the logger is this app's.
+      //
+      // **The platform id and the message, and nothing this adapter knows.** A key
+      // is `org/<orgId>/campaign/<uuid>/…` (DoD 3), so interpolating one here would
+      // put a tenant's org id and campaign uuid into a log line — readable by
+      // whoever reads logs, which is the one place they must not be. The message is
+      // safe to interpolate because `S3RequestError` names only the operation, the
+      // status and the body's `<Code>` (PT-4a's never-echo rule): a real bucket
+      // refusal arrives here already stripped of the key it refused. So the line
+      // below cannot carry one, and that holds because of a contract in
+      // `S3ObjectStore`, not because this call site is careful.
+      console.warn(
+        `[package] could not sweep older generations for platform ${platformId}: ${errorMessage(error)}`,
+      );
+    },
   });
 }
 

@@ -42,6 +42,14 @@ const PLATFORM_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
  */
 export const PACKAGE_GENERATION_PATTERN = /^\d{13}-[0-9a-f]{32}$/;
 
+/**
+ * The width of the millisecond stamp inside a generation segment, and the width
+ * `padStart` pads it back to. Named rather than repeated so the reader that reads
+ * a stamp and the writer that writes one cannot disagree about where the stamp
+ * ends — which is the one thing in this file that has to be true on both sides.
+ */
+const STAMP_DIGITS = 13;
+
 /** The one file whose presence IS the commit. Never a real packaged creative. */
 const MANIFEST_FILENAME = "manifest.json";
 
@@ -169,6 +177,36 @@ function generationSegmentOf(key: string, platformPrefix: string): string | unde
   return PACKAGE_GENERATION_PATTERN.test(parts[0]!) ? parts[0] : undefined;
 }
 
+/**
+ * The largest millisecond stamp among the WELL-FORMED generations under
+ * `platformPrefix`, or `undefined` when it holds none.
+ *
+ * **Committed or not, both count.** An uncommitted generation is invisible to
+ * readers, but it is a generation: sweeping one on the strength of a stamp is what
+ * makes the sequence monotonic whether or not the writer that minted it ever
+ * finished, and a floor computed only over committed generations would let a
+ * crashed writer's segment be re-minted under a later clock.
+ *
+ * A malformed key is ignored for the same reason readers ignore it — and the
+ * reason this is not `Number(prefixDigits)` on every numeric-looking segment is
+ * that a 20-digit directory a hand-written PUT left behind would push the floor
+ * past 13 digits, `padStart` would not shorten it, and every generation minted
+ * afterwards would fail `PACKAGE_GENERATION_PATTERN` and be invisible forever.
+ */
+function latestStampOf(
+  listed: readonly ListedObject[],
+  platformPrefix: string,
+): number | undefined {
+  let latest: number | undefined;
+  for (const entry of listed) {
+    const segment = generationSegmentOf(entry.key, platformPrefix);
+    if (segment === undefined) continue;
+    const stamp = Number(segment.slice(0, STAMP_DIGITS));
+    if (latest === undefined || stamp > latest) latest = stamp;
+  }
+  return latest;
+}
+
 export interface ObjectPackageStoreOptions {
   /** `org/<orgId>/campaign/<campaignId>/renders/`, from `renderPrefix`. */
   readonly renderPrefix: string;
@@ -180,6 +218,23 @@ export interface ObjectPackageStoreOptions {
   readonly now?: () => number;
   /** 32 lowercase hex characters. Defaults to a `randomUUID()` without hyphens. */
   readonly nonce?: () => string;
+  /**
+   * Told that the post-commit sweep failed, without failing the request.
+   *
+   * **A callback rather than a throw, because the commit already happened.** The
+   * package is whole and live by the time the sweep runs, so failing the export
+   * would tell the export screen that an export which succeeded did not. But a
+   * silent `catch` is its own defect: the failure is invisible, the generations
+   * accumulate, and the one thing an operator needs — that a bucket is refusing
+   * deletes — arrives as nothing at all.
+   *
+   * It is injected rather than logged here because **Distribution does not import
+   * a logger**: the shared logger lives in `apps/api`'s infrastructure layer, and a
+   * package adapter reaching for it would invert the dependency the hexagonal split
+   * exists to hold. The composition root supplies the reporting, exactly as it
+   * supplies the store.
+   */
+  readonly onSweepError?: (error: unknown, platformId: string) => void;
 }
 
 /**
@@ -298,12 +353,16 @@ export class ObjectPackageStore implements PackageStorePort {
    * (4) The fs-shaped logical path, because that is what the manifest and the
    * route's answer both carry.
    *
-   * **A sweep that FAILS does not fail the request.** The commit has already
-   * happened by then, so the package is whole and live; reporting a failure would
-   * tell the export screen that an export which succeeded did not, and the next
-   * commit for that platform sweeps the same generations anyway. This is the one
-   * place a step is allowed not to be atomic with the one before it, and it is
-   * the step whose work is pure garbage collection.
+   * **A sweep that FAILS does not fail the request — but it is REPORTED.** The
+   * commit has already happened by then, so the package is whole and live;
+   * failing the export would tell the export screen that an export which
+   * succeeded did not. It is not swallowed silently either: `onSweepError` is
+   * handed the failure and the platform, so a bucket that has started refusing
+   * deletes shows up in a log instead of as generations quietly accumulating
+   * until something else trips over them. The next commit for that platform
+   * sweeps the same generations anyway. This is the one place a step is allowed
+   * not to be atomic with the one before it, and it is the step whose work is
+   * pure garbage collection.
    */
   async writeManifest(platformId: string, manifest: PackageManifest): Promise<string> {
     const generation = await this.generationFor(platformId);
@@ -318,8 +377,16 @@ export class ObjectPackageStore implements PackageStorePort {
     // still propagate, because those are the ones that decide whether a package exists.
     try {
       await this.sweepOlderGenerations(platformId, generation);
-    } catch {
-      // The next commit for this platform sweeps the same generations.
+    } catch (error) {
+      // Reported, never thrown — see `onSweepError`. The reporting itself is
+      // wrapped: a callback that throws (a full buffer, a logger that fails to
+      // open its transport) must not turn garbage collection into a failed export,
+      // which is the exact thing the swallow above exists to prevent.
+      try {
+        this.options.onSweepError?.(error, platformId);
+      } catch {
+        // Nothing left to do but keep the committed package.
+      }
     }
     return this.logicalPath(platformId, MANIFEST_FILENAME);
   }
@@ -328,6 +395,16 @@ export class ObjectPackageStore implements PackageStorePort {
    * The generation this instance writes into for `platformId`, minted on the
    * first call for it. Kept per platform and not per store, so one store serves
    * every platform in a multi-platform request without their files interleaving.
+   *
+   * **The stamp is `max(now(), latest + 1)`, not `now()`** — see
+   * {@link latestStampOf}. `now()` is the WRITER's clock, and it is not the only
+   * one: a replica whose clock reads a minute behind will mint a generation that
+   * sorts BEFORE the one already committed, and because readers take the newest
+   * committed generation, a perfectly good re-export would never become the one
+   * anything reads. It would still be written, and its manifest would still commit
+   * — silently, and permanently in the shadow of a package the report no longer
+   * describes. One listing at mint time turns a clock disagreement into a
+   * strictly-increasing sequence, which is the property readers actually depend on.
    */
   private async generationFor(platformId: string): Promise<string> {
     const existing = this.generations.get(platformId);
@@ -335,8 +412,13 @@ export class ObjectPackageStore implements PackageStorePort {
     // Checked before a generation is minted rather than on the first PUT, so a
     // platform id that cannot be a key segment fails before anything is written
     // and before a manifest could name a key that was never created.
-    platformSegment(platformId);
-    const generation = `${String(this.now()).padStart(13, "0")}-${this.nonce()}`;
+    const prefix = `${this.options.packagePrefix}${platformSegment(platformId)}`;
+    // Listed ONCE, over the whole platform, so the floor accounts for every
+    // generation this writer can see — committed or not, because an uncommitted one
+    // is still a generation a later writer must sort after.
+    const latest = latestStampOf(await this.store.list(prefix), prefix);
+    const stamp = Math.max(this.now(), (latest ?? -1) + 1);
+    const generation = `${String(stamp).padStart(STAMP_DIGITS, "0")}-${this.nonce()}`;
     this.generations.set(platformId, generation);
     return generation;
   }
