@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "lane": "PT-4e-renders-and-cache",
+  "mutations": [
+    {
+      "file": "packages/Distribution/src/infrastructure/adapters/ObjectExporter.ts",
+      "before": "  if (segments[0] !== campaignSegment) {",
+      "after": "  if (segments[0] !== campaignSegment && false) {",
+      "because": "the campaign-segment check is skipped, so the first segment is stripped whatever it said and `rest` is joined onto the prefix regardless. Every path the use case produces today still works, so nothing about the report changes — which is why this is invisible until it is not. An exporter built for campaign `camp` is then handed `other-camp/alpha/1x1.png` and writes those bytes under `…/campaign/<camp-uuid>/renders/alpha/1x1.png`: the report names one campaign's row and the bytes are another's, and the web serves whichever the key resolves to. The refusal is not defensive: `campaignSegment` exists to be CHECKED, since the one value tying a path to the campaign whose prefix receives it is the value being dropped. Caught by the refusal test, which is the only one that passes a path whose leading segment is not the exporter's own — every round-trip test would pass against this.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/infrastructure/adapters/__tests__/ObjectExporter.test.ts",
+        "-t",
+        "REFUSES a path whose leading segment is another campaign's"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/infrastructure/adapters/ObjectExporter.ts",
+      "before": "  const key = `${prefix}${rest}`;",
+      "after": "  const key = `${prefix}${relativePath}`;",
+      "because": "the whole relative path is joined instead of the part below the campaign segment, so the slug survives into the store's namespace: `org/o/campaign/<uuid>/renders/camp/p1/sq/v1.png`. It is DoD 3 in one line — a key that carries a user-chosen, renameable string is a path that stops being an address, and the moment the campaign is renamed every key under it changes. The rest of the suite is blind to it by construction: the round-trip tests assert the keys THEY asked for, which this still returns for any path the exporter itself validated, and the report JSON is unchanged either way (D203), so nothing above the adapter would ever notice. Only the DoD assertion — no key of a full export contains the slug — can see it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/infrastructure/adapters/__tests__/ObjectExporter.test.ts",
+        "-t",
+        "DoD 3: after a full export, no key carries the campaign's slug"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/Distribution/src/infrastructure/adapters/ObjectExporter.ts",
+      "before": "  \".mp4\": \"video/mp4\",",
+      "after": "  \".mp4\": \"image/png\",",
+      "because": "the mp4 is stored with a PNG's content type. Nothing in the object store objects: the bytes go up, the key is right, the size is right, and the report is unchanged. The damage is entirely on the READ side and lands in a browser — a signed GET answers `Content-Type: image/png` on a video, so the grid renders a broken image where the clip should play, and on the packaging path the clip is not playable at all. On fs this is unobservable by construction, because `writeFile` records no type — which is exactly why the fs suite says nothing about content types and the object suite must.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/Distribution/src/infrastructure/adapters/__tests__/ObjectExporter.test.ts",
+        "-t",
+        "an mp4 is stored as video/mp4"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/pipeline.ts",
+      "before": "  if (objectStore() === \"fs\") return new FileSystemExporter(env.outputRoot);",
+      "after": "  if (objectStore() === \"fs\" || renders === undefined) return new FileSystemExporter(env.outputRoot);",
+      "because": "a run under OBJECT_STORE=s3 with no resolved campaign falls back to disk instead of refusing. This is the quietest failure the lane could ship and the reason the refusal exists: nothing throws, the run completes, the report is written with every asset path it has always reported, and the bytes are on a volume nothing under s3 can serve — so the run looks successful in every log and every metric, and the first symptom is an operator watching a grid of 404s. It also writes to `outputRoot` in a process that may have no such volume at all. The refusal is asserted directly: `buildPipeline` under s3 with no target MUST throw, and the fs half of the switch is unchanged, so nothing else in the tree notices.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/pipeline.test.ts",
+        "-t",
+        "under OBJECT_STORE=s3 buildPipeline REFUSES to build without a render target"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/render-target.ts",
+      "before": "    `select id, slug from campaign where org_id = $1 and slug = $2`,\n    [env.tenant.orgId, slug],",
+      "after": "    `select id, slug from campaign where slug = $1`,\n    [slug],",
+      "because": "`org_id` leaves the SLUG branch, so a slug resolves against every campaign with that slug in the deployment. The unique constraint is `(org_id, slug)`, not `slug`, so two orgs can both call a campaign `summer-launch` — the shape is ordinary, not a corner case — and the query answers whichever row the planner reaches first. The caller cannot tell: it gets a uuid and a slug, and both look right. Every render and proof of that run then lands under the OTHER tenant's campaign prefix, and the two tenants read each other's campaigns' creatives, permanently, with nothing in either log. The tenant scope here is the whole claim of the function; nothing above it re-checks. Re-anchored in fix round 1: the uuid branch added in front of it selects `id, slug`, so the statement this mutation removes is the SLUG branch and the uuid branch keeps its own `org_id` — which is why the uuid-branch version of this claim is a separate mutation.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/render-target.test.ts",
+        "-t",
+        "under s3 a slug resolves to its campaign in this org, and to nothing outside it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CreativeGeneration/src/infrastructure/adapters/ObjectBackgroundCache.ts",
+      "before": "      await this.deleteCorrupt(objectKey);\n      return undefined;",
+      "after": "      return undefined;",
+      "because": "a corrupt entry is reported as a miss but left in place. The caller regenerates and `set`s over it, so for a cache that is merely rewritten this costs one wasted write and nothing else — which is why it is a poor mutation to spot by reading. It bites where the entry cannot be rewritten: `set` is unconditional here, but a `put` that fails (a full bucket, a quota, a transient 5xx) leaves the rubbish in place, and every later `get` re-reads it, re-decides it is corrupt, and regenerates again — so a poison entry costs a full GenAI call per cell, per run, forever, and never once reports why. The fs adapter deletes it, and it is the one thing the two caches must agree about: a cache that keeps its poison is a cache whose misses are not misses.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/ObjectBackgroundCache.test.ts",
+        "-t",
+        "treats a non-PNG or trivial entry as a miss and deletes it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/render-target.ts",
+      "before": "      `select id, slug from campaign where org_id = $1 and id = $2`,\n      [env.tenant.orgId, slug.toLowerCase()],",
+      "after": "      `select id, slug from campaign where id = $1`,\n      [slug.toLowerCase()],",
+      "because": "`org_id` leaves the uuid branch, so a uuid-addressed run resolves against every campaign with that id in the deployment. The slug branch keeps its `org_id`, which is why nothing above notices: the slug tests — the ones this lane was written around — still pass, and a uuid ref is a minority of runs. The damage is a tenant's renders written under another tenant's prefix, from a caller that holds a legitimate uuid. A uuid is only as private as the org that issued it, and nothing downstream re-checks: the report names the campaign, and the bytes are somebody else's. Only the cross-org uuid case can see this, because the only other uuid test has no second org holding anything.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/render-target.test.ts",
+        "-t",
+        "a uuid ref from ANOTHER org resolves to nothing"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

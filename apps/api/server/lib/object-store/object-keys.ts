@@ -15,11 +15,31 @@ const ORG_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
  * `0016_asset.sql`). Deliberately the same shape `PgBriefStore.resolveCampaign`
  * tries first, so a uuid that reaches here has already been a campaign id
  * somewhere rather than arriving as an arbitrary string from a route.
+ *
+ * **Exported so the ref RESOLVER asks the same question this does** (fix 1:
+ * `render-target.ts`). `campaign.id` is a `uuid` column, so whether a ref is
+ * tried as an id before it is tried as a slug decides whether a uuid-addressed
+ * run resolves or fails — and two copies of this expression would be free to
+ * disagree about which refs those are. The pattern is the codebase's, unchanged:
+ * four other modules spell it identically, and a looser one here would accept a
+ * ref those four refuse.
  */
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The segment every uploaded input lives under — `kind = 'input'` in the row. */
 const INPUT_SEGMENT = "inputs";
+
+/** Where a campaign's renders and proofs live (D203: proofs under `renders/`). */
+const RENDERS_SEGMENT = "renders";
+
+/**
+ * The background cache sits outside C7's campaign shape, because a cache entry
+ * belongs to no campaign: its key is a digest of a provider, a model, a prompt,
+ * a ratio and a seed, so there is no campaign id to hang it off even when one
+ * generated it. It is still tenant-scoped BY PREFIX (D203, D167) — see
+ * {@link cachePrefix}.
+ */
+const CACHE_SEGMENT = "cache";
 
 /**
  * Refuse an id that is not the shape its own column declares, before it is
@@ -93,6 +113,55 @@ export function inputPrefix(orgId: string, campaignId: string): ObjectKey {
     INPUT_SEGMENT,
     "",
   ].join("/");
+  assertObjectKey(prefix);
+  return prefix;
+}
+
+/**
+ * Where one campaign's RENDERS live (PT-4e, D203): `org/<orgId>/campaign/<campaignId>/renders/`.
+ *
+ * The shape is `inputPrefix` with `renders` in place of `inputs`, and for the
+ * same reason: a render key is built by REPLACING the leading campaign segment
+ * of the path the use case already produced with this prefix, so the leading
+ * slug — the one thing the use case's paths carry that a key must not (DoD 3) —
+ * is dropped at the join rather than somewhere a rule has to remember to drop
+ * it. What survives the join is the product, the ratio and the variant index,
+ * which is what the report JSON names and what the caller reads back.
+ *
+ * Both the org and the campaign id are checked against their OWN patterns, as
+ * above: a render key that carried a slug here would be self-consistent,
+ * renameable and ambiguous, which is the whole failure this key shape exists to
+ * remove.
+ */
+export function renderPrefix(orgId: string, campaignId: string): ObjectKey {
+  const prefix = [
+    "org",
+    segment("the org id", orgId, ORG_ID_PATTERN),
+    "campaign",
+    segment("the campaign id", campaignId, UUID_PATTERN),
+    RENDERS_SEGMENT,
+    "",
+  ].join("/");
+  assertObjectKey(prefix);
+  return prefix;
+}
+
+/**
+ * Where one org's background cache lives (PT-4e, D203): `org/<orgId>/cache/`.
+ *
+ * It is deliberately OUTSIDE C7's campaign shape and deliberately still
+ * tenant-scoped. A cache entry is keyed by a digest of the prompt that produced
+ * it, not by a campaign, so there is no campaign id to hang it off — and
+ * inventing one would mean a re-run under a different campaign wrote a second
+ * copy of the same image. The org prefix is what keeps two tenants out of each
+ * other's cache: the prompt is user-authored, so without it one org could
+ * fingerprint another's briefs by timing cache hits.
+ *
+ * Like every prefix here, the trailing `/` is load-bearing — it is why this is
+ * not a slice of some longer key.
+ */
+export function cachePrefix(orgId: string): ObjectKey {
+  const prefix = ["org", segment("the org id", orgId, ORG_ID_PATTERN), CACHE_SEGMENT, ""].join("/");
   assertObjectKey(prefix);
   return prefix;
 }
