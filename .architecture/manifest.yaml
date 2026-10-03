@@ -198,11 +198,13 @@ bounded_contexts:
             - CopyGeneratorPort
             - ExportPort
             - ImageGeneratorPort
+            - ObjectStorePort
             - PlatformProfilePort
             - SceneAssetPort
             - VideoCompositorPort
       infrastructure:
         adapters:
+          - InMemoryObjectStore
           - NodeCryptoPolicyHasher
     generator:
       eslint:
