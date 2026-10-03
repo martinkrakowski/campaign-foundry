@@ -145,9 +145,15 @@ self-signed one, so the browser needs that CA once. Export it to a file:
 ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n cert-manager get secret midnight-ca -o jsonpath="{.data.ca\.crt}"' | base64 -d > midnight-ca.crt
 ```
 
-Then import `midnight-ca.crt` into the browser's trust store (Firefox: Settings →
-Privacy & Security → Certificates → Import, or "Authorities"), or into the
-system trust store with `sudo cp midnight-ca.crt /usr/local/share/ca-certificates/midnight-ca.crt && sudo update-ca-certificates`.
+Then trust it. On macOS (Safari and Chrome use the Keychain):
+
+```sh
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain midnight-ca.crt
+```
+
+Firefox keeps its own store: Settings → Privacy & Security → Certificates → View
+Certificates → Authorities → Import. On Debian/Ubuntu: `sudo cp midnight-ca.crt
+/usr/local/share/ca-certificates/midnight-ca.crt && sudo update-ca-certificates`.
 
 It is read from the cluster's own Kubernetes Secret over the authenticated
 cluster API, not fetched over the network, so an intercepted TLS connection
