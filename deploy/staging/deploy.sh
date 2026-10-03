@@ -64,18 +64,72 @@ if [ "${SECRET_LEN:-0}" -lt 32 ]; then
   exit 1
 fi
 
+# The object store's identities: an admin key that may create and delete buckets,
+# and an app key scoped to the one bucket (D201). Created by the owner (README
+# "Object store (once, owner)", step 3). Checked here too, for the same reason and
+# the same way: weed boots with an unreadable identities file, the bucket never
+# appears and the app has nothing to talk to, so this must fail before the build
+# and not after it. Length is not enough on its own: the initContainer printf's
+# these values into JSON string literals, so a quote, a backslash or a newline
+# would pass a length check and then leave a corrupt s3.json behind.
+echo "==> object-store secret"
+for key in admin-access-key admin-secret-key app-access-key app-secret-key; do
+  SECRET_LEN=$(remote "kubectl -n $NS get secret seaweedfs-s3 -o jsonpath={.data.$key} 2>/dev/null | base64 -d 2>/dev/null | wc -c" | tr -d ' ')
+  if [ "${SECRET_LEN:-0}" -lt 32 ]; then
+    echo "deploy.sh: secret seaweedfs-s3 is missing, has no \"$key\" key, or that value is shorter than 32 bytes; create it (deploy/staging/README.md, \"Object store (once, owner)\", step 3) and deploy again." >&2
+    exit 1
+  fi
+  if ! remote "kubectl -n $NS get secret seaweedfs-s3 -o jsonpath={.data.$key} 2>/dev/null | base64 -d 2>/dev/null | grep -Eqxz '[0-9a-f]+'"; then
+    echo "deploy.sh: secret seaweedfs-s3 key $key must be lowercase hex (README \"Object store (once, owner)\" step 3)" >&2
+    exit 1
+  fi
+done
+
+# The hostPath the object data lives on. seaweedfs.yaml mounts it with type
+# Directory, so nothing creates it, and the Pod runs as uid 1000: if the
+# directory is absent or owned by anyone else, weed's TestFolderWritable Fatalf's
+# and the Pod crash-loops — but only after the image was built and pushed.
+# Checked here, on the node, before the build.
+echo "==> object-store data directory"
+DATA_DIR_UID=$(remote "stat -c %u /mnt/pool/campaign-foundry-staging/seaweedfs 2>/dev/null" | tr -d ' ')
+if [ "$DATA_DIR_UID" != 1000 ]; then
+  echo "deploy.sh: /mnt/pool/campaign-foundry-staging/seaweedfs is missing or not owned by uid 1000 on $NODE; run README \"Object store (once, owner)\", step 1 and deploy again." >&2
+  exit 1
+fi
+
+# Both certificates now come from midnight-ca, which must exist before the
+# Ingresses that name it or cert-manager logs a failed issuer and leaves them on
+# the old, self-signed one.
+echo "==> TLS issuer"
+if ! remote "kubectl get clusterissuer midnight-ca -o name" >/dev/null 2>&1; then
+  echo "deploy.sh: ClusterIssuer midnight-ca is missing; create it (cert-manager) or the Ingresses stay on their previous certificate." >&2
+  exit 1
+fi
+
 echo "==> build $IMAGE on $CONTEXT"
 git archive --format=tar HEAD | docker --context "$CONTEXT" build -t "$IMAGE" -
 echo "==> push"
 docker --context "$CONTEXT" push "$IMAGE"
 
-# The new app must not start before its migrations have run: everything but the
-# Deployment is applied first, then the migration, and only then the Deployment.
+# The app must not start before its migrations have run: everything but the app's
+# own Deployment is applied first, then the migration, and only then the app. The
+# app is therefore selected by NAME as well as by kind — matching `kind: Deployment`
+# alone would put SeaweedFS's Deployment in the app phase and leave staging without
+# an object store until the app was already up.
 RENDERED=$(kubectl kustomize deploy/staging | sed "s#registry.midnight.lan/library/campaign-foundry:latest#$IMAGE#")
-only_app() { node -e 'const d=require("fs").readFileSync(0,"utf8").split(/\n---\n/);process.stdout.write(d.filter(x=>/^kind: Deployment$/m.test(x)===(process.argv[1]==="app")).join("\n---\n"))' "$1"; }
+only_app() { node -e 'const d=require("fs").readFileSync(0,"utf8").split(/\n---\n/);const isApp=x=>/^kind: Deployment$/m.test(x)&&/^  name: campaign-foundry$/m.test(x);process.stdout.write(d.filter(x=>isApp(x)===(process.argv[1]==="app")).join("\n---\n"))' "$1"; }
 
 echo "==> apply services"
 printf '%s\n' "$RENDERED" | only_app services | remote kubectl apply -f -
+
+# The bucket exists before anything that could ask for it, and it exists before
+# the migrations run: the object store is part of the platform the app boots on.
+echo "==> wait for SeaweedFS"
+remote kubectl -n "$NS" rollout status deployment/seaweedfs --timeout=5m
+echo "==> create the bucket"
+remote kubectl -n "$NS" delete job s3-bootstrap --ignore-not-found
+cat deploy/staging/jobs/s3-bootstrap.yaml | remote kubectl apply -f -
+remote kubectl -n "$NS" wait job/s3-bootstrap --for=condition=complete --timeout=5m
 
 # The API consumes cf.run-requests at boot (KAFKA_CONSUME=true), so the topic and
 # the user's ACLs must be ready before the new app starts.
