@@ -171,12 +171,12 @@ unauthenticated HTTP. Hiding them from the Service and the Ingress is not enough
 because any pod in the cluster can still dial the Pod IP directly and skip S3 auth.
 So `seaweedfs.yaml` carries a NetworkPolicy `seaweedfs` with **one** ingress rule:
 TCP 8333 only, from pods in this namespace (the app's `api` container and the
-`s3-bootstrap` Job) and from Traefik in `kube-system`. Egress is not restricted, so
-the app still resolves and still reaches Postgres and Kafka. The Pod's own
-components talk over loopback, which no policy touches, and the kubelet's readiness
+`s3-bootstrap` Job) and from Traefik in `kube-system`. Egress is not restricted (the policy selects only the SeaweedFS pod). The Pod's own
+components dial each other at the Pod's own IP, which stays inside the Pod's network
+namespace and never meets the policy, and the kubelet's readiness
 probe comes from the node, which k3s's kube-router always allows.
 
-After a deploy the orchestrator verifies it from a throwaway pod, because a policy
+After a deploy the orchestrator verifies it from a throwaway pod **in `campaign-foundry-staging`** (from any other namespace both curls time out, which proves nothing), because a policy
 that is wrong in the permissive direction is silent: the `curl` on 8888 **must time
 out**, and the `curl` on 8333 must answer **200**. The first is the check that
 matters — if it answers anything at all, something is reaching past the signature.

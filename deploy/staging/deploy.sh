@@ -79,7 +79,7 @@ for key in admin-access-key admin-secret-key app-access-key app-secret-key; do
     echo "deploy.sh: secret seaweedfs-s3 is missing, has no \"$key\" key, or that value is shorter than 32 bytes; create it (deploy/staging/README.md, \"Object store (once, owner)\", step 3) and deploy again." >&2
     exit 1
   fi
-  if ! remote "kubectl -n $NS get secret seaweedfs-s3 -o jsonpath={.data.$key} 2>/dev/null | base64 -d 2>/dev/null | grep -Eqx '[0-9a-f]+'"; then
+  if ! remote "kubectl -n $NS get secret seaweedfs-s3 -o jsonpath={.data.$key} 2>/dev/null | base64 -d 2>/dev/null | grep -Eqxz '[0-9a-f]+'"; then
     echo "deploy.sh: secret seaweedfs-s3 key $key must be lowercase hex (README \"Object store (once, owner)\" step 3)" >&2
     exit 1
   fi
