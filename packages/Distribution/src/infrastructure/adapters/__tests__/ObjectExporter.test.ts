@@ -1,7 +1,78 @@
 import { describe, test, expect, beforeEach } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
+import { PDFArray, PDFDocument, PDFRawStream, decodePDFRawStream } from "pdf-lib";
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
+import { buildPrintProof } from "../../print-proof.js";
 import { ObjectExporter, renderObjectKey } from "../ObjectExporter.js";
+
+/** Everything about a proof that "the same proof" actually means. */
+interface ProofFacts {
+  readonly pages: number;
+  readonly width: number;
+  readonly height: number;
+  readonly images: number;
+  readonly strokes: number;
+  readonly text: string;
+}
+
+/**
+ * Read a proof back through pdf-lib rather than assuming its shape from a magic
+ * number — `%PDF-` and a size check would both pass against an exporter that
+ * built its OWN pdf, which is the drift `buildPrintProof` exists to remove: two
+ * page geometries and two crop-mark placements, free to differ by a pixel, on a
+ * document a customer signs off on.
+ *
+ * `pdf-lib` has no text extractor, so the text is read out of the content
+ * stream's own operators: `drawText` emits a HEX literal inside `Tj` and
+ * `drawImage` a `Do`, `drawLine` an `S`. Counting operators is reading what was
+ * drawn, not re-deriving it.
+ */
+async function proofFacts(bytes: Uint8Array): Promise<ProofFacts> {
+  const doc = await PDFDocument.load(bytes);
+  const operators = doc
+    .getPages()
+    .map((page) => {
+      const contents = page.node.Contents();
+      const raw =
+        contents instanceof PDFArray
+          ? contents.lookupMaybe(0, PDFRawStream)
+          : contents instanceof PDFRawStream
+            ? contents
+            : undefined;
+      return raw === undefined
+        ? ""
+        : Buffer.from(decodePDFRawStream(raw).decode()).toString("latin1");
+    })
+    .join("\n");
+  const page = doc.getPage(0);
+  return {
+    pages: doc.getPageCount(),
+    width: page.getSize().width,
+    height: page.getSize().height,
+    images: (operators.match(/\bDo\b/g) ?? []).length,
+    strokes: (operators.match(/\bS\b/g) ?? []).length,
+    text: [...operators.matchAll(/<([0-9a-fA-F]+)>\s*Tj/g)]
+      .map(([, hex]) => Buffer.from(hex!, "hex").toString("latin1"))
+      .join(" "),
+  };
+}
+
+/**
+ * Re-save a proof with its timestamps pinned.
+ *
+ * pdf-lib stamps a creation date on every document it creates, so two proofs
+ * built a second apart differ in BYTES while being the same document — which is
+ * why "the same bytes" is asked after pinning both, and why it is still a
+ * question worth asking: with the one field that cannot match removed, every
+ * other byte is compared.
+ */
+async function withPinnedDates(bytes: Uint8Array): Promise<Uint8Array> {
+  const pinned = new Date("2026-01-01T00:00:00.000Z");
+  const doc = await PDFDocument.load(bytes);
+  doc.setCreationDate(pinned);
+  doc.setModificationDate(pinned);
+  return doc.save();
+}
 
 const ORG = "acme";
 const CAMPAIGN = "3f1b7a52-0c4d-4a6e-9b21-5d8e7c6a5b4c";
@@ -124,12 +195,40 @@ describe("ObjectExporter", () => {
     expect((await store.get(`${PREFIX}alpha/1x1/fallback.png`))!.contentType).toBe("image/png");
   });
 
-  test("generatePrintProof writes the same PDF the fs exporter writes", async () => {
-    await exporter.generatePrintProof(png(), `${SLUG}/proofs/alpha.pdf`);
+  test("generatePrintProof writes the bytes buildPrintProof produces, not a PDF of its own", async () => {
+    const image = png();
+    await exporter.generatePrintProof(image, `${SLUG}/proofs/alpha.pdf`);
     const read = await store.get(`${PREFIX}proofs/alpha.pdf`);
-    expect(Buffer.from(read!.bytes).subarray(0, 5).toString()).toBe("%PDF-");
-    expect(read!.bytes.length).toBeGreaterThan(100);
+    const stored = read!.bytes;
     expect(read!.contentType).toBe("application/pdf");
+
+    // Structural, field by field: page count, page size, the embedded image, the
+    // eight crop marks and the footer text — all compared against the SHARED
+    // helper's own output. An exporter that built a second copy of the proof
+    // cannot satisfy this by matching a header.
+    const [fromExporter, fromHelper] = await Promise.all([
+      proofFacts(stored),
+      proofFacts(await buildPrintProof(image)),
+    ]);
+    expect(fromExporter).toEqual(fromHelper);
+    // …and the absolute shape, so `buildPrintProof`'s own geometry is pinned here
+    // rather than only ever compared with itself: 8×8 image + 24pt margins, and
+    // the 28pt footer band, from `print-proof.ts`.
+    expect(fromExporter.pages).toBe(1);
+    expect(fromExporter.width).toBe(56);
+    expect(fromExporter.height).toBe(84);
+    expect(fromExporter.images).toBe(1);
+    expect(fromExporter.strokes).toBe(8);
+    expect(fromExporter.text).toContain("Campaign Foundry proof");
+    expect(fromExporter.text).toContain("RGB asset");
+    expect(Buffer.from(stored).length).toBeGreaterThan(100);
+
+    // And byte for byte, with the one field that cannot match pinned on both.
+    const [pinnedExporter, pinnedHelper] = await Promise.all([
+      withPinnedDates(stored),
+      withPinnedDates(await buildPrintProof(image)),
+    ]);
+    expect(Buffer.from(pinnedExporter).equals(Buffer.from(pinnedHelper))).toBe(true);
   });
 
   test("remove deletes the object and is idempotent", async () => {

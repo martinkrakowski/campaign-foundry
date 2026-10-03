@@ -463,19 +463,20 @@ export async function runCampaign(
   // row it would never have run is a tenancy decision taken on a run that turned
   // out not to be a run at all (C5).
   const renders = await renderTarget(env, brief.id);
-  // The composition-site refusal, and the only message an operator gets. Under
-  // `s3` there is no campaign row to key renders by, and the reachable case is
-  // the CLI: campaign rows are created through the API, so a hand-written YAML
-  // brief run under `OBJECT_STORE=s3` has never had one. `buildPipeline` throws
-  // on the same absence as a backstop for a caller that skipped this, and this
-  // is here so the CLI — which reports `error.message` and exits 1 — says what
-  // to do instead of showing a stack.
+  // The composition-site refusal, and the only message the operator gets. Under
+  // `s3` there is no campaign row to key renders by, and the reachable case is a
+  // brief this org does not have.
+  //
+  // **It says what the operator can act on and nothing about the deployment.**
+  // This string reaches the web through the failed job (the CLI prints it too),
+  // and a message naming `OBJECT_STORE=s3` or "save it through the API first"
+  // hands a user of the app the shape of the host's storage and the route they
+  // were not supposed to be using. Which absence it was — no campaign row, no
+  // slug, a run with no campaign at all — is for the log, not for the report.
+  // `buildPipeline` throws the same absence as a backstop for a caller that
+  // skipped this, and its message IS operator-facing, so it may say more.
   if (objectStore() === "s3" && renders === undefined) {
-    return err(
-      new Error(
-        `Campaign "${brief.id}" has no row in this org; under OBJECT_STORE=s3 a run needs its campaign — save the brief through the API first.`,
-      ),
-    );
+    return err(new Error(`Campaign "${brief.id}" was not found in this organisation.`));
   }
   return buildPipeline(env, imageModel, planInput.value, renders).execute(brief, options);
 }

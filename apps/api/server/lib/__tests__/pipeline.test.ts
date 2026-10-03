@@ -46,8 +46,8 @@ const constructed = vi.hoisted(() => ({
   /** The port each consumer was constructed with, by adapter name (PT-4c). */
   consumers: [] as Array<{ name: string; inputs: unknown }>,
   /** PT-4e: the exporters and the background caches the composition root built. */
-  exporters: [] as Array<{ kind: string; store: unknown }>,
-  caches: [] as Array<{ kind: string; store: unknown }>,
+  exporters: [] as Array<{ kind: string; store: unknown; prefix?: string; segment?: string }>,
+  caches: [] as Array<{ kind: string; store: unknown; prefix?: string }>,
 }));
 vi.mock("@campaignfoundry/CreativeGeneration", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@campaignfoundry/CreativeGeneration")>();
@@ -88,7 +88,7 @@ vi.mock("@campaignfoundry/CreativeGeneration", async (importOriginal) => {
       prefix: string,
     ) {
       super(store, prefix);
-      constructed.caches.push({ kind: "object", store });
+      constructed.caches.push({ kind: "object", store, prefix });
     }
   }
   // PT-4c: the one InputAssetPort a build creates, and the five consumers' copies
@@ -164,7 +164,12 @@ vi.mock("@campaignfoundry/Distribution", async (importOriginal) => {
       options: ConstructorParameters<typeof actual.ObjectExporter>[1],
     ) {
       super(store, options);
-      constructed.exporters.push({ kind: "object", store });
+      constructed.exporters.push({
+        kind: "object",
+        store,
+        prefix: options.prefix,
+        segment: options.campaignSegment,
+      });
     }
   }
   return { ...actual, FileSystemExporter: FsExporter, ObjectExporter: ObjectExp };
@@ -199,6 +204,7 @@ describe("pipeline composition root", () => {
   const origOut = process.env.OUTPUT_DIR;
   /** Any uuid, and the slug the use case's own paths start with. */
   const RENDERS = { campaignId: "3f1b7a52-0c4d-4a6e-9b21-5d8e7c6a5b4c", slug: "camp" };
+  const OTHER_RENDERS = { campaignId: "00000000-0000-4000-8000-000000000001", slug: "camp" };
 
   beforeEach(() => {
     for (const k of KEYS) {
@@ -314,6 +320,56 @@ describe("pipeline composition root", () => {
     // Both were handed the ONE store the process shares with its input assets,
     // so a run writes its inputs and its renders through the same client.
     expect(constructed.exporters[0]!.store).toBe(constructed.caches[0]!.store);
+
+    // The PREFIXES, not just the class: a switch that built the right adapter
+    // over the wrong prefix would satisfy everything above and put every render
+    // in another org's bucket or another campaign's namespace — which is the
+    // whole tenancy claim of the lane, and the part a class cannot show.
+    expect(constructed.caches[0]!.prefix).toBe(`org/${LOCAL_TENANT.orgId}/cache/`);
+    expect(constructed.exporters[0]!.prefix).toBe(
+      `org/${LOCAL_TENANT.orgId}/campaign/${RENDERS.campaignId}/renders/`,
+    );
+    // And the segment is the ref the use case builds its paths from, so every
+    // path it writes still maps through `renderObjectKey`.
+    expect(constructed.exporters[0]!.segment).toBe(RENDERS.slug);
+  });
+
+  test("the s3 prefixes carry THIS org: another tenant's build differs in both (PT-4e)", () => {
+    // The negative that makes the assertion above mean something. `LOCAL_TENANT`
+    // is one org; a second run under another one must not reuse its namespace,
+    // and a build for another campaign must not reuse its renders prefix either.
+    const acme = runEnvironment({ ...LOCAL_TENANT, orgId: "acme", userId: "u1" });
+    const globex = runEnvironment({ ...LOCAL_TENANT, orgId: "globex", userId: "u2" });
+    const saved = process.env.OBJECT_STORE;
+    process.env.OBJECT_STORE = "s3";
+    constructed.exporters.length = 0;
+    constructed.caches.length = 0;
+    try {
+      buildPipeline(acme, "procedural", {}, RENDERS);
+      buildPipeline(globex, "procedural", {}, RENDERS);
+      buildPipeline(
+        acme,
+        "procedural",
+        {},
+        { campaignId: OTHER_RENDERS.campaignId, slug: RENDERS.slug },
+      );
+    } finally {
+      if (saved === undefined) delete process.env.OBJECT_STORE;
+      else process.env.OBJECT_STORE = saved;
+    }
+    expect(constructed.caches.map((c) => c.prefix)).toEqual([
+      "org/acme/cache/",
+      "org/globex/cache/",
+      "org/acme/cache/",
+    ]);
+    expect(constructed.exporters.map((e) => e.prefix)).toEqual([
+      `org/acme/campaign/${RENDERS.campaignId}/renders/`,
+      `org/globex/campaign/${RENDERS.campaignId}/renders/`,
+      `org/acme/campaign/${OTHER_RENDERS.campaignId}/renders/`,
+    ]);
+    // No two of them collide, which is the point of asserting them separately:
+    // the org and the campaign are independent axes of the same key.
+    expect(new Set(constructed.exporters.map((e) => e.prefix)).size).toBe(3);
   });
 
   test("under fs the exporter and the cache are today's adapters, unchanged (PT-4e)", () => {
@@ -412,16 +468,20 @@ describe("pipeline composition root", () => {
 
     const savedStore = process.env.OBJECT_STORE;
 
-    test("a run with no campaign row answers the CLI's message, before any pipeline is built", async () => {
+    test("a run with no campaign row answers a message that leaks no config (fix 2)", async () => {
       process.env.OBJECT_STORE = "s3";
       withCampaigns([]);
       constructed.exporters.length = 0;
       const result = await runCampaign(localEnv(), brief, "procedural");
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.error.message).toBe(
-          'Campaign "camp" has no row in this org; under OBJECT_STORE=s3 a run needs its campaign — save the brief through the API first.',
-        );
+        // This string reaches the web through the failed job, so it names the
+        // campaign and the org and NOTHING else: not `OBJECT_STORE`, not "the
+        // API", not the shape of the host's storage. An app user reading their
+        // job list should learn that the campaign is not theirs, not how the
+        // server is deployed or which route was supposed to have created it.
+        expect(result.error.message).toBe('Campaign "camp" was not found in this organisation.');
+        expect(result.error.message).not.toMatch(/OBJECT_STORE|s3|API|bucket|save the brief/i);
       }
       // Refused BEFORE `buildPipeline`, so no exporter was chosen and nothing
       // was written anywhere — a run that cannot be keyed must not half-run.
@@ -439,6 +499,47 @@ describe("pipeline composition root", () => {
       if (result.success) expect(result.value.assets).toHaveLength(6);
       expect(constructed.exporters.map((e) => e.kind)).toEqual(["object"]);
       expect(existsSync(join(dir, "camp"))).toBe(false);
+    });
+
+    test("a UUID-ADDRESSED run resolves its target and writes under the campaign's prefix (fix 1)", async () => {
+      // `generate.post.ts` gates on `campaignMeta(brief.id)`, which tries a
+      // canonical uuid FIRST — so a body brief whose `id` is the uuid is queued
+      // and this run happens. It is the end-to-end half of the finding: without
+      // the uuid branch `renderTarget` answers `undefined`, and the run is failed
+      // with "campaign not found" for a campaign the gate itself named.
+      process.env.OBJECT_STORE = "s3";
+      withCampaigns([{ id: RENDERS.campaignId }]);
+      const memory = new InMemoryObjectStore();
+      setObjectStoreClient(memory);
+      constructed.exporters.length = 0;
+      // The brief's own `id` IS the uuid, so `campaignScoped` builds `<uuid>/…`
+      // paths — and those are exactly what the exporter's segment must expect.
+      const uuidBrief: CampaignBrief = { ...brief, id: RENDERS.campaignId };
+      const result = await runCampaign(localEnv(), uuidBrief, "procedural");
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.value.assets[0]!.outputPath).toBe(`${RENDERS.campaignId}/alpha/1x1.png`);
+      }
+      // The bytes went to the store, under the uuid prefix, and the exporter was
+      // told the uuid is the segment its paths carry.
+      expect(constructed.exporters[0]!.prefix).toBe(
+        `org/${LOCAL_TENANT.orgId}/campaign/${RENDERS.campaignId}/renders/`,
+      );
+      expect(constructed.exporters[0]!.segment).toBe(RENDERS.campaignId);
+      const keys = (await memory.list("org/")).map((entry) => entry.key);
+      expect(keys.length).toBeGreaterThan(0);
+      for (const key of keys) {
+        expect(key).not.toContain("/camp/");
+        expect(
+          key.startsWith(`org/${LOCAL_TENANT.orgId}/campaign/${RENDERS.campaignId}/renders/`),
+        ).toBe(true);
+      }
+      expect(keys).toContain(
+        `org/${LOCAL_TENANT.orgId}/campaign/${RENDERS.campaignId}/renders/alpha/1x1.png`,
+      );
+      // And nothing landed on disk, under EITHER name.
+      expect(existsSync(join(dir, "camp"))).toBe(false);
+      expect(existsSync(join(dir, RENDERS.campaignId))).toBe(false);
     });
 
     test("a refused re-roll never touches the database (C5)", async () => {

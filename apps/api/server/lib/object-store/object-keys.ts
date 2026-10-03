@@ -15,8 +15,16 @@ const ORG_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
  * `0016_asset.sql`). Deliberately the same shape `PgBriefStore.resolveCampaign`
  * tries first, so a uuid that reaches here has already been a campaign id
  * somewhere rather than arriving as an arbitrary string from a route.
+ *
+ * **Exported so the ref RESOLVER asks the same question this does** (fix 1:
+ * `render-target.ts`). `campaign.id` is a `uuid` column, so whether a ref is
+ * tried as an id before it is tried as a slug decides whether a uuid-addressed
+ * run resolves or fails — and two copies of this expression would be free to
+ * disagree about which refs those are. The pattern is the codebase's, unchanged:
+ * four other modules spell it identically, and a looser one here would accept a
+ * ref those four refuse.
  */
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The segment every uploaded input lives under — `kind = 'input'` in the row. */
 const INPUT_SEGMENT = "inputs";

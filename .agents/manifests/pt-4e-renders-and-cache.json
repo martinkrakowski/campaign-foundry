@@ -72,9 +72,9 @@
     },
     {
       "file": "apps/api/server/lib/object-store/render-target.ts",
-      "before": "    `select id from campaign where org_id = $1 and slug = $2`,\n    [env.tenant.orgId, slug],",
-      "after": "    `select id from campaign where slug = $1`,\n    [slug],",
-      "because": "`org_id` leaves the WHERE clause, so a slug resolves against EVERY campaign with that slug in the deployment. The unique constraint is `(org_id, slug)`, not `slug`, so two orgs can both call a campaign `summer-launch` — the shape is ordinary, not a corner case — and the query answers whichever row the planner reaches first. The caller cannot tell: it gets a uuid and a slug, and both look right. Every render and proof of that run then lands under the OTHER tenant's campaign prefix, and the two tenants read each other's campaigns' creatives, permanently, with nothing in either log. The tenant scope here is the whole claim of the function; nothing above it re-checks.",
+      "before": "    `select id, slug from campaign where org_id = $1 and slug = $2`,\n    [env.tenant.orgId, slug],",
+      "after": "    `select id, slug from campaign where slug = $1`,\n    [slug],",
+      "because": "`org_id` leaves the SLUG branch, so a slug resolves against every campaign with that slug in the deployment. The unique constraint is `(org_id, slug)`, not `slug`, so two orgs can both call a campaign `summer-launch` — the shape is ordinary, not a corner case — and the query answers whichever row the planner reaches first. The caller cannot tell: it gets a uuid and a slug, and both look right. Every render and proof of that run then lands under the OTHER tenant's campaign prefix, and the two tenants read each other's campaigns' creatives, permanently, with nothing in either log. The tenant scope here is the whole claim of the function; nothing above it re-checks. Re-anchored in fix round 1: the uuid branch added in front of it selects `id, slug`, so the statement this mutation removes is the SLUG branch and the uuid branch keeps its own `org_id` — which is why the uuid-branch version of this claim is a separate mutation.",
       "command": [
         "yarn",
         "vitest",
@@ -83,7 +83,7 @@
         "api",
         "apps/api/server/lib/object-store/__tests__/render-target.test.ts",
         "-t",
-        "the same slug in another org resolves to that org's campaign, or to nothing"
+        "under s3 a slug resolves to its campaign in this org, and to nothing outside it"
       ],
       "verdict": "caught"
     },
@@ -101,6 +101,23 @@
         "packages/CreativeGeneration/src/infrastructure/adapters/__tests__/ObjectBackgroundCache.test.ts",
         "-t",
         "treats a non-PNG or trivial entry as a miss and deletes it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/render-target.ts",
+      "before": "      `select id, slug from campaign where org_id = $1 and id = $2`,\n      [env.tenant.orgId, slug.toLowerCase()],",
+      "after": "      `select id, slug from campaign where id = $1`,\n      [slug.toLowerCase()],",
+      "because": "`org_id` leaves the uuid branch, so a uuid-addressed run resolves against every campaign with that id in the deployment. The slug branch keeps its `org_id`, which is why nothing above notices: the slug tests — the ones this lane was written around — still pass, and a uuid ref is a minority of runs. The damage is a tenant's renders written under another tenant's prefix, from a caller that holds a legitimate uuid. A uuid is only as private as the org that issued it, and nothing downstream re-checks: the report names the campaign, and the bytes are somebody else's. Only the cross-org uuid case can see this, because the only other uuid test has no second org holding anything.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/render-target.test.ts",
+        "-t",
+        "a uuid ref from ANOTHER org resolves to nothing"
       ],
       "verdict": "caught"
     }
