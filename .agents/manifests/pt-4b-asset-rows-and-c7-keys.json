@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "lane": "PT-4b-asset-rows-and-c7-keys",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "    const key = inputKey(this.orgId, campaignId, assetId);",
+      "after": "    const key = `${inputKey(this.orgId, campaignId, assetId)}/${briefId}`;",
+      "because": "the slug goes back into the object key (DoD 3). `inputKey` itself takes no slug — that is the point of it, and it is why the mutation lives HERE rather than in `object-keys.ts`: with `briefId` appended in the adapter, the key is still legal (`winter-sale` is alphabet-legal), so nothing refuses it and no row is inconsistent. What it buys is a renameable, user-chosen string in the store's namespace: a rename becomes a move, a collision becomes two campaigns fighting over one prefix, and `deletePrefix(inputPrefix(...))` no longer describes everything under it. The DoD 3 test lists every key in the store after a write AND a copy and asserts none of them contains a slug or the asset's name — a key of ids passes, this one does not.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store.test.ts",
+        "-t",
+        "DoD 3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "      await this.discard(key);\n      if (pgErrorCode(error) === UNIQUE_VIOLATION) {",
+      "after": "      if (pgErrorCode(error) !== UNIQUE_VIOLATION) await this.discard(key);\n      if (pgErrorCode(error) === UNIQUE_VIOLATION) {",
+      "because": "the duplicate stops giving the object back. Both uploads of one name mint their own asset id, so the loser really did store its bytes under a key nothing else will ever name — and it is about to be told 409, which is the one answer that says \"nothing happened\". Leaving the object means every retry of the same upload adds another, each of them collectable only when the campaign itself is deleted, because `deleteAssets` empties the campaign's prefix by uuid and these ids sit in it. Only the duplicate branch is affected, so only the sequential test can see it: after the 409 there must be exactly ONE object under `inputPrefix` and exactly ONE `asset` row. (A swap of the two statements would not do: it leaves the non-duplicate path broken instead, which a different test already pins.)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store.test.ts",
+        "-t",
+        "leaves ONE object and ONE row"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "      `select id from campaign where org_id = $1 and slug = $2`,\n      [this.orgId, slug],",
+      "after": "      `select id from campaign where slug = $1`,\n      [slug],",
+      "because": "the slug lookup stops being org-scoped, and a slug is not globally unique: the constraint is `unique (org_id, slug)`, so two orgs may hold the same one and `campaignKnown`'s world is full of them. Without `org_id` the lookup returns SOME row, and which one is a planner's choice — so two orgs that both picked `spring-sale` silently share one campaign's asset rows, and `readAsset` reads whatever the winning row points at. The route test cannot see this: `PgBriefStore.resolveCampaign` 404s a cross-org ref long before the adapter is asked, which is why the adapter carries its own cross-tenant test (one slug, one asset, in each of two orgs).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store.test.ts",
+        "-t",
+        "cross-tenant"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/index.post.ts",
+      "before": "        if (released) await getAssetStore(scope).deleteAssets(minted.campaignId);",
+      "after": "        if (released) await getAssetStore(scope).deleteAssets(targetSlug);",
+      "because": "the rollback frees the assets by a slug that no longer resolves. `releaseCampaign` above has ALREADY deleted the campaign row, and `asset.campaign_id` cascades, so `deleteAssets(slug)` resolves nothing, no-ops, and every object `copyAssets` just wrote stays under `org/<org>/campaign/<uuid>/inputs/` with no row left that will ever name it — the failure path that undoes a create leaves the largest thing the create made behind. The minted id is the fix and is what `ObjectAssetStore.deleteAssets` needs: a uuid-shaped ref is used as the campaign id with NO lookup, precisely because the row it would resolve through is gone. Caught offline by the Postgres-mode create rollback: after a `createBrief` failure, nothing is under the minted uuid's prefix.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.postgres.test.ts",
+        "-t",
+        "a failure after the copy leaves no asset rows and no objects"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/S3ObjectStore.ts",
+      "before": "      try {\n        await response.arrayBuffer();\n      } catch {\n        // The exclusive create lost either way; see above.\n      }\n      throw new ObjectExistsError(key);",
+      "after": "      await response.arrayBuffer();\n      throw new ObjectExistsError(key);",
+      "because": "the 412 drain stops swallowing. The drain exists to put the connection back in the pool, and the store's answer — this key is taken, the exclusive create lost — is already in hand, so a drain that fails mid-stream means the connection is being torn down anyway, which is what the drain wanted. Unwrapped, a transport failure during it replaces \"this asset already exists\" with `S3RequestError`, and a caller that retries on a 500 re-uploads an asset that was never created. This is the ONE body read that must not be wrapped, and it is the exception that proves the four others are the rule rather than an oversight.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/S3ObjectStore-secrets.test.ts",
+        "-t",
+        "the 412 drain SWALLOWS a failure"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/S3ObjectStore.ts",
+      "before": "      bytes: new Uint8Array(await this.read(\"get\", () => response.arrayBuffer())),",
+      "after": "      bytes: new Uint8Array(await response.arrayBuffer()),",
+      "because": "`get`'s body read is back outside any wrapper, and `send`'s `try` covers only the fetch PROMISE — `fetch` resolved when the status line arrived, so every byte after that was never covered. undici reports a connection dropped mid-body as `TypeError: terminated` whose `cause` is a `SocketError` carrying `socket: { remoteAddress, remotePort }`, so the raw rejection escapes carrying the internal host: a caller cannot tell a transport failure from a refusal, and the never-echo guarantee stops at the status line. Nothing in that chain is a STRING, which is why the test's walker reads own enumerable properties and not only `message`/`cause` — a message-only walk calls this clean while `10.99.7.3` sits in the object two links down. The same wrap is on `copy`, `list` and `fail`, each with its own failing-stream test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/S3ObjectStore-secrets.test.ts",
+        "-t",
+        "get reads its body outside send"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

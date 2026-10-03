@@ -1,10 +1,12 @@
 import { join } from "node:path";
-import { storeBackend } from "../config.js";
+import { objectStore, storeBackend } from "../config.js";
 import { database } from "../db/database.js";
+import { objectStoreClient } from "../object-store/index.js";
 import { scopeRoots, scopeTenant, type StorageScope } from "../run-environment.js";
 import { FsBriefStore } from "./fs-brief-store.js";
 import { PgBriefStore } from "./pg-brief-store.js";
 import { FsAssetStore } from "./fs-asset-store.js";
+import { ObjectAssetStore } from "./object-asset-store.js";
 import { FsPoolStore } from "./fs-pool-store.js";
 import { PgPoolStore } from "./pg-pool-store.js";
 import { FsTemplateStore } from "./fs-template-store.js";
@@ -52,6 +54,7 @@ export * from "./run-delivery.port.js";
 export * from "./fs-brief-store.js";
 export * from "./pg-brief-store.js";
 export * from "./fs-asset-store.js";
+export * from "./object-asset-store.js";
 export * from "./fs-pool-store.js";
 export * from "./pg-pool-store.js";
 export * from "./fs-template-store.js";
@@ -152,9 +155,21 @@ const briefs = new Registry<BriefStorePort>(
     return new PgBriefStore(database(), orgId, userId, roles, teamIds);
   },
 );
+// With OBJECT_STORE=s3 (PT-4b, D201), uploaded inputs become `asset` rows
+// behind an `ObjectStorePort`, so the store is per ORG and not per project root:
+// the adapter's own queries are org-scoped and its keys are
+// `org/<orgId>/campaign/<uuid>/…`, so a root that named a directory instead
+// would hand one org a store that writes another org's ids. Everything else is
+// fs, unchanged, down to the directory it builds.
 const assets = new Registry<AssetStorePort>(
-  (t) => join(scopeRoots(t).projectRoot, "assets", "inputs"),
-  (dir) => new FsAssetStore(dir),
+  (t) =>
+    objectStore() === "s3"
+      ? PG + scopeTenant(t).orgId
+      : join(scopeRoots(t).projectRoot, "assets", "inputs"),
+  (key) =>
+    key.startsWith(PG)
+      ? new ObjectAssetStore(database(), objectStoreClient(), key.slice(PG.length))
+      : new FsAssetStore(key),
 );
 // With STORE_BACKEND=postgres (PT-3e), one store per org over the process's
 // database; otherwise one per project root's briefs directory, on files.

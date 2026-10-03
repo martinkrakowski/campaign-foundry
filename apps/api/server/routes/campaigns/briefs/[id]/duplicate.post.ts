@@ -16,7 +16,7 @@ import {
   withPoolLock,
 } from "../../../../lib/pools.js";
 import { getAssetStore, getBriefStore } from "../../../../lib/ports/index.js";
-import type { StoredBrief } from "../../../../lib/ports/brief-store.port.js";
+import type { ResolvedCampaign, StoredBrief } from "../../../../lib/ports/brief-store.port.js";
 import {
   assertOwnedCampaign,
   assertSourceVisible,
@@ -264,8 +264,17 @@ export default defineEventHandler(async (event) => {
       if (await isPoolDirSymlink(scope, targetSlug)) {
         throw new Error(SYMLINK_WRITE_ERROR);
       }
+      // PT-4b: the minted campaign is KEPT, because the rollback below needs
+      // its uuid. On fs `createCampaign` answers `{ campaignId: slug }` (D179),
+      // so the `deleteAssets` call this feeds is byte-identical to the one
+      // that took the slug; on Postgres it answers the surrogate id, which is
+      // the only thing `deleteAssets` can use after `releaseCampaign` has
+      // removed the campaign row the slug resolved through. Declared out here
+      // because the `try` it is assigned in and the `catch` that reads it are
+      // siblings, and it is always assigned before that catch can run.
+      let minted: ResolvedCampaign;
       try {
-        await getBriefStore(scope).createCampaign(targetSlug, {
+        minted = await getBriefStore(scope).createCampaign(targetSlug, {
           teamId: sourceTeamId,
           name: displayName,
           type: template.type,
@@ -305,7 +314,15 @@ export default defineEventHandler(async (event) => {
         const released = await getBriefStore(scope).releaseCampaign(targetSlug);
         // Only when the campaign itself is gone too, never after a real,
         // versioned brief.
-        if (released) await getAssetStore(scope).deleteAssets(targetSlug);
+        //
+        // The minted id, NOT `targetSlug` (PT-4b): on Postgres
+        // `releaseCampaign` above has already deleted the campaign row, and
+        // the cascade took this campaign's `asset` rows with it — so a
+        // `deleteAssets(slug)` would resolve to nothing, no-op, and leave
+        // every object the copy just made under the campaign's prefix with no
+        // row that will ever name them. On fs the minted id IS the slug, so
+        // this is the same call as before.
+        if (released) await getAssetStore(scope).deleteAssets(minted.campaignId);
         throw error;
       }
     });

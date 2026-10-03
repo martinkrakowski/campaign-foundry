@@ -44,10 +44,13 @@ export default defineEventHandler(async (event) => {
   }
 
   // See result.get.ts: resolve a uuid to its slug on a backend that has one
-  // (D178), pass a slug through unchanged otherwise — an unsaved draft has no
-  // campaign row yet (assets are routinely uploaded before a brief is saved),
-  // and on fs the id IS the slug (D179), so no lookup runs there. The reads
-  // below already answer their own "not found" for a genuinely unknown ref.
+  // (D178), pass a ref through unchanged otherwise. On fs the id IS the slug
+  // (D179) and an unsaved draft has no row at all, so no lookup runs there and
+  // the reads below answer their own "not found" for a ref that names no
+  // directory. On Postgres every campaign is a minted row (PT-5c2), so the
+  // lookup always has something to resolve and a ref that does not resolve is
+  // a ref that does not exist — which is what `campaignKnown` and the `readAsset`
+  // below already say, with no extra check here.
   const briefs = getBriefStore(scope);
   const resolved = briefs.supportsTeams ? await briefs.resolveCampaign(briefId) : undefined;
   const slug = resolved?.slug ?? briefId;

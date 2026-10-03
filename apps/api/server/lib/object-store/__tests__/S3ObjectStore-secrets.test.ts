@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import { ObjectExistsError } from "@campaignfoundry/CampaignOrchestration";
 import { objectStoreSettings, type S3Settings } from "../../config.js";
 import { S3ObjectStore, S3RequestError } from "../S3ObjectStore.js";
 
@@ -29,13 +30,40 @@ const OBJECT_STORE_VARS = [
 
 const SAVED = Object.fromEntries(OBJECT_STORE_VARS.map((name) => [name, process.env[name]]));
 
-/** Every message in an error's `cause` chain: a credential reaches a log through any link. */
-function errorChain(error: unknown, seen = new Set<unknown>()): string {
+/** How deep the walk below goes, matching `rendered`'s own cap. */
+const ERROR_CHAIN_DEPTH = 4;
+
+/**
+ * Everything an error carries, as text: a credential — or an internal host —
+ * reaches a log through any of it, not only through `message`.
+ *
+ * It walks own ENUMERABLE PROPERTIES as well as `message` and `cause`, and
+ * that is the whole of the reason it is not the version PT-4a shipped:
+ * undici reports a body read that fails mid-stream as `TypeError: terminated`
+ * whose `cause` is a `SocketError` carrying `socket: { remoteAddress,
+ * remotePort }`. The peer address is a PROPERTY of a plain object three links
+ * down — nothing anywhere in that chain is a string, so a message-only walk
+ * reads it as absent and the never-echo guarantee looks intact while the host
+ * is right there in the object. `cause` is read by name because V8 makes it own
+ * but NON-enumerable, so `Object.entries` never sees it.
+ */
+function errorChain(error: unknown, seen = new Set<unknown>(), depth = 0): string {
   if (typeof error === "string") return error;
-  if (!(error instanceof Error) || seen.has(error)) return "";
+  if (typeof error !== "object" || error === null || seen.has(error)) return "";
   seen.add(error);
-  const cause: unknown = (error as { cause?: unknown }).cause;
-  return [error.message, errorChain(cause, seen)].filter((part) => part !== "").join(" | ");
+  if (depth > ERROR_CHAIN_DEPTH) return "";
+  const parts: string[] = [];
+  if (error instanceof Error) parts.push(error.message);
+  const entries: [string, unknown][] = Object.entries(error as Record<string, unknown>);
+  if (error instanceof Error && "cause" in error) {
+    entries.push(["cause", (error as { cause?: unknown }).cause]);
+  }
+  for (const [name, value] of entries) {
+    if (name === "message") continue;
+    const rendered = errorChain(value, seen, depth + 1);
+    if (rendered !== "") parts.push(`${name}=${rendered}`);
+  }
+  return parts.join(" | ");
 }
 
 /**
@@ -83,6 +111,45 @@ async function collect(
 /** Answer every request with this status and body. A fresh fetch per store, so no test shares one. */
 function answering(status: number, body: string): typeof fetch {
   return async () => new Response(body, { status, headers: { "content-type": "application/xml" } });
+}
+
+/**
+ * The peer address a mid-stream failure carries, and the one thing in the whole
+ * chain that is a property rather than a message — which is why `errorChain`
+ * above walks properties.
+ */
+const REMOTE_ADDRESS = "10.99.7.3";
+
+/** undici's own shape for a connection dropped after the status line. */
+function socketFailure(): TypeError {
+  return new TypeError("terminated", {
+    cause: Object.assign(new Error("other side closed"), {
+      code: "UND_ERR_SOCKET",
+      socket: { remoteAddress: REMOTE_ADDRESS, remotePort: 8333 },
+    }),
+  });
+}
+
+/**
+ * A fetch that answers `status` with a body which FAILS mid-stream — the one
+ * failure `send`'s `try` cannot see, because `fetch` resolved long before any
+ * byte was read.
+ *
+ * Deliberately not `answering()`: that builds a `Response` from a string, and
+ * the helper this file's sibling suites use `clone()`s its response, which
+ * reads the body here rather than at the call site and would hide exactly the
+ * read under test.
+ */
+function failingStream(status: number): typeof fetch {
+  return async () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.error(socketFailure());
+        },
+      }),
+      { status },
+    );
 }
 
 /** Run `objectStoreSettings()` with `name` set to `value`, and put `name` back whatever happens. */
@@ -320,6 +387,93 @@ describe("the object store never echoes a credential", () => {
       expect(after.join("\n")).toContain("X-Amz-Signature=");
     } finally {
       for (const spy of spies) spy.mockRestore();
+    }
+  });
+});
+
+describe("a body read that fails mid-stream never leaks the peer (PT-4b follow-up)", () => {
+  /**
+   * Every FIVE body-read site, each on its own. One shared `describe` with a
+   * table would be shorter, and would then be able to lose a site silently: the
+   * whole defect is that a read outside `send`'s `try` answers with undici's
+   * rejection instead of this adapter's own error, and a site with no test is
+   * exactly the site that keeps doing it. Named individually for that reason.
+   */
+  const KEY = "campaigns/c1/inputs/hero.png";
+
+  /** Assert the one shape all four wrapped reads must produce. */
+  function assertRefusal(error: unknown, operation: string): void {
+    expect(error).toBeInstanceOf(S3RequestError);
+    const refused = error as S3RequestError;
+    // Status 0: the body never arrived, so there is nothing to answer with but
+    // the operation — the same sentinel `send` uses for a rejected fetch.
+    expect(refused.status).toBe(0);
+    expect(refused.code).toBe("UND_ERR_SOCKET");
+    expect(refused.message).toBe(
+      `The object store could not be reached for ${operation} (UND_ERR_SOCKET).`,
+    );
+    // No `cause`: a chain is still a log, and this one holds the socket.
+    expect((refused as { cause?: unknown }).cause).toBeUndefined();
+    for (const marker of [...MARKERS, REMOTE_ADDRESS]) {
+      expect(errorChain(refused)).not.toContain(marker);
+    }
+  }
+
+  test("get reads its body outside send, and a failure there is S3RequestError", async () => {
+    const s3 = new S3ObjectStore({ settings: settings(), fetchImpl: failingStream(200) });
+    const error = await s3.get(KEY).then(
+      () => undefined,
+      (rejected: unknown) => rejected,
+    );
+    assertRefusal(error, "get");
+  });
+
+  test("copy reads its body outside send, and a failure there is S3RequestError", async () => {
+    const s3 = new S3ObjectStore({ settings: settings(), fetchImpl: failingStream(200) });
+    const error = await s3.copy(KEY, "campaigns/c1/inputs/hero-copy.png").then(
+      () => undefined,
+      (rejected: unknown) => rejected,
+    );
+    assertRefusal(error, "copy");
+  });
+
+  test("list reads its body outside send, and a failure there is S3RequestError", async () => {
+    const s3 = new S3ObjectStore({ settings: settings(), fetchImpl: failingStream(200) });
+    const error = await s3.list("campaigns/c1/inputs/").then(
+      () => undefined,
+      (rejected: unknown) => rejected,
+    );
+    assertRefusal(error, "list");
+  });
+
+  test("fail reads the error body outside send, and a failure there is S3RequestError", async () => {
+    // A 403 whose `<Code>` never arrives: the status is known but the body is
+    // not, and reporting "answered 403" with no code would read like a clean
+    // refusal rather than a transport failure — so it refuses with status 0,
+    // exactly as the three above do.
+    const s3 = new S3ObjectStore({ settings: settings(), fetchImpl: failingStream(403) });
+    const error = await s3.head(KEY).then(
+      () => undefined,
+      (rejected: unknown) => rejected,
+    );
+    assertRefusal(error, "head");
+  });
+
+  test("the 412 drain SWALLOWS a failure: the store's answer is already in hand", async () => {
+    // The one body read that must NOT become an S3RequestError. The exclusive
+    // create lost whatever the drain did, so the caller is told that and not
+    // about a connection the adapter was only trying to tidy up.
+    const s3 = new S3ObjectStore({ settings: settings(), fetchImpl: failingStream(412) });
+    const error = await s3.put(KEY, new Uint8Array([1]), { ifNoneMatch: "*" }).then(
+      () => undefined,
+      (rejected: unknown) => rejected,
+    );
+    expect(error).toBeInstanceOf(ObjectExistsError);
+    expect((error as ObjectExistsError).key).toBe(KEY);
+    // The control on the whole describe: the same drain at 412 must not hide a
+    // credential either, and the swallowed error is not attached anywhere.
+    for (const marker of [...MARKERS, REMOTE_ADDRESS]) {
+      expect(errorChain(error)).not.toContain(marker);
     }
   });
 });
