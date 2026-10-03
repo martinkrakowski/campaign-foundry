@@ -11,7 +11,16 @@ import type {
 /** PNG magic: 89 50 4E 47 0D 0A 1A 0A. */
 const PNG_SIGNATURE = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
 
-function isPngBuffer(bytes: Uint8Array): boolean {
+/**
+ * Whether `bytes` starts with the PNG magic AND is longer than it — a file
+ * holding nothing but the signature is not an image either, so the length is
+ * part of the test rather than a separate one.
+ *
+ * Exported because `ObjectBackgroundCache` (PT-4e) reads through a store rather
+ * than a filesystem and must reach the same verdict about the same bytes: two
+ * copies of this check would be free to disagree about what a cache hit is.
+ */
+export function isPngBuffer(bytes: Uint8Array): boolean {
   if (bytes.byteLength <= PNG_SIGNATURE.byteLength) return false;
   for (let i = 0; i < PNG_SIGNATURE.byteLength; i++) {
     if (bytes[i] !== PNG_SIGNATURE[i]) return false;
