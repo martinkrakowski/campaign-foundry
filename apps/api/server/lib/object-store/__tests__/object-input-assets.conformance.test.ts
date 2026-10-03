@@ -134,12 +134,19 @@ describe.skipIf(ENDPOINT === undefined && !REQUIRED)(
     });
 
     test("an org the slug is not in gets ENOENT — never another org's bytes", async () => {
-      await assets.writeAsset(SLUG, NAME, PNG);
+      // Its own name: the database is shared across this file's tests (one
+      // beforeAll), so re-writing NAME would be a legitimate duplicate (EEXIST)
+      // and the cross-org read below would never run.
+      const crossOrgName = "cross-org.png";
+      const crossOrgRef = `assets/inputs/${SLUG}/${crossOrgName}`;
+      await assets.writeAsset(SLUG, crossOrgName, PNG);
+      // The owning org reads it, so an ENOENT below is the org boundary, not a missing object.
+      expect(await new ObjectInputAssets(env).read(crossOrgRef)).toBeDefined();
       const theirs: RunEnvironment = {
         ...env,
         tenant: { ...env.tenant, orgId: `${ORG}-other-${randomUUID().slice(0, 8)}` },
       };
-      await expect(new ObjectInputAssets(theirs).read(REF)).rejects.toMatchObject({
+      await expect(new ObjectInputAssets(theirs).read(crossOrgRef)).rejects.toMatchObject({
         code: "ENOENT",
       });
     });
