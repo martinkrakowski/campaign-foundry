@@ -1,5 +1,6 @@
 import { setResponseHeader } from "h3";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { BriefRefNotFoundError, resolveBriefAssetRefs } from "../../lib/brief-asset-refs.js";
 import { deleteJob, enqueueJob } from "../../lib/jobs.js";
 import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
 import { getBriefStore, getUsageStore } from "../../lib/ports/index.js";
@@ -115,6 +116,32 @@ export default defineEventHandler(async (event) => {
   if ((await briefs.campaignMeta(brief.id)) === undefined) {
     setResponseStatus(event, 404);
     return { error: `Campaign "${brief.id}" not found.` };
+  }
+
+  // PT-4k2a (D208 B, D210 a/d): the gate above answers for the brief's OWN campaign,
+  // and a body brief's refs are a different matter — an id or an
+  // `assets/inputs/<slug>/<name>` path names some OTHER campaign, which can be another
+  // team's (D210 d) or another org's. Checked HERE, before the revision read below, the
+  // quota read and `enqueueJob`, so a refusal leaves nothing behind: no job, no usage
+  // read, no delivery.
+  //
+  // **The brief that goes on is the body's own, byte for byte** (`RunRequest.brief` is
+  // the request contract and the report keys off it), because this is a check and not a
+  // rewrite: D210(a) scopes it to `render`, and the ref→id remap belongs to the save
+  // side, PT-4k2b.
+  //
+  // The refusal re-uses THIS route's hidden-campaign body verbatim, so a ref to a
+  // hidden campaign, a ref to another org's, a ref with no row and a brief whose own
+  // campaign is hidden are one answer (D210 c) — and a `campaignVisibility`/store
+  // failure is not folded into it: that rethrows and stays a 500.
+  try {
+    await resolveBriefAssetRefs(env, brief, { target: brief.id, mode: "render" });
+  } catch (error) {
+    if (error instanceof BriefRefNotFoundError) {
+      setResponseStatus(event, 404);
+      return { error: `Campaign "${brief.id}" not found.` };
+    }
+    throw error;
   }
 
   const reroll = regenerateOnly !== undefined;

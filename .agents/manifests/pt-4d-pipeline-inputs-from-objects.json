@@ -21,8 +21,8 @@
     },
     {
       "file": "apps/api/server/lib/object-store/object-input-assets.ts",
-      "before": "    const safePath = resolveAssetPath(ref, SYNTHETIC_ROOT);\n    if (safePath === undefined) return undefined;",
-      "after": "    const safePath = resolveAssetPath(ref, SYNTHETIC_ROOT) ?? ref;",
+      "before": "    if (resolveAssetPath(ref, SYNTHETIC_ROOT) === undefined) return undefined;",
+      "after": "    if (false && resolveAssetPath(ref, SYNTHETIC_ROOT) === undefined) return undefined;",
       "because": "the confinement check is skipped: a ref `resolveAssetPath` refuses is handed to the parser as though it had passed. `/etc/passwd` then parses to no campaign and answers ENOENT rather than undefined, and `../outside.png` parses the same way — so a run over a brief naming a path outside the assets tree fails loudly where fs skipped the asset cleanly, and a brief naming `/etc/passwd` gets an error naming an asset rather than being ignored. The confinement decision is the ONE thing this port must not make twice: it is made once, in `resolveAssetPath`, so the object port's refusals and `FileSystemInputAssets`' cannot drift apart.",
       "command": [
         "yarn",

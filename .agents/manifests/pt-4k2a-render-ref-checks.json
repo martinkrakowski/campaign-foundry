@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "PT-4k2a-render-ref-checks",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "  if ((await briefs.campaignVisibility(slug)) !== \"visible\") {\n    throw new BriefRefNotFoundError(briefId);\n  }",
+      "after": "  if (false && (await briefs.campaignVisibility(slug)) !== \"visible\") {\n    throw new BriefRefNotFoundError(briefId);\n  }",
+      "because": "The TEAM half of the check, and the whole of D210(d) r2 on staging. `assetOwner` and `listAssets` are org-scoped only by design (object-asset-store.ts:76-80), so nothing else in this file can tell a campaign in the caller's org from one in a team they are outside of — this is the one explicit `campaignVisibility` call, and making it never refuse leaves a cross-team read open on every backend with teams, including the pg+fs staging one. `false &&` keeps the call itself in place, so the mutant still PAYS for the query and every assertion about how many queries a render makes keeps passing: what changes is only the decision, which is the defect. It is the kind of change a reviewer reads past, because the line is still there, still correct-looking, and still covered by a test that reaches it — only a test that asserts the 404 sees the difference.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.test.ts",
+        "-t",
+        "an id ref in a team-HIDDEN campaign answers 404"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "      if (owner === undefined) throw new BriefRefNotFoundError(brief.id);\n      await assertVisible(briefs, brief.id, owner.slug);",
+      "after": "      await assertVisible(briefs, brief.id, owner?.slug ?? opts.target);",
+      "because": "The ORG half. assetOwner is org-scoped, so undefined is the single answer for three different facts - no such row, a deleted row, and ANOTHER TENANT row - and this line is what collapses all three into one 404 the caller cannot tell apart. Answering it with the TARGET campaign keeps the brief running: under s3 the pipeline then resolves the id through the same org-scoped adapter, so the other tenant bytes come back as this caller own. Note the optional chain and the three arguments, which is what makes this the mutation it claims to be: assertVisible takes (store, briefId, slug), so an after-text that passed only two would look the slug up as NULL and be refused for a missing campaign instead - a mutant that survives for the wrong reason. Here the surviving case asks the TARGET visibility question, which is the one answer a caller always passes, so the cross-tenant refusal is the only thing gone and only a test that asserts the 404 sees it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.test.ts",
+        "-t",
+        "another org's id answers 404 — org-scoped, so it is absent and never forbidden"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/generate.post.ts",
+      "before": "  try {\n    await resolveBriefAssetRefs(env, brief, { target: brief.id, mode: \"render\" });\n  } catch (error) {\n    if (error instanceof BriefRefNotFoundError) {\n      setResponseStatus(event, 404);\n      return { error: `Campaign \"${brief.id}\" not found.` };\n    }\n    throw error;\n  }\n\n  const reroll = regenerateOnly !== undefined;",
+      "after": "  const reroll = regenerateOnly !== undefined;",
+      "because": "The ORDER is the lane, not the call's presence: a check that runs after `enqueueJob` still refuses the request, still answers the right 404 body, and still never renders — but by then the job row exists, the quota has been read and `getRunDelivery().deliver` has been handed the request, so a caller who cannot see the assets has already been admitted, charged and started, and the refusal lands on a run in flight. Moving the block is the only way to express it as one edit, and it leaves every other assertion about this route intact: the 404 body is still `Campaign \"<id>\" not found.`, the brief handed to `deliver` is still the body's own, and nothing about the report contract moves. The test that catches it is the one that counts the side effects rather than the status, because the status is the one thing the mutant gets right.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/render-ref-checks.test.ts",
+        "-t",
+        "a team-HIDDEN ref 404s with the hidden-campaign body and ZERO side effects"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/preview-frame.post.ts",
+      "before": "  try {\n    await resolveBriefAssetRefs(env, brief, { target: brief.id, mode: \"render\" });\n  } catch (error) {\n    if (error instanceof BriefRefNotFoundError) {\n      setResponseStatus(event, 404);\n      return { error: `Campaign \"${brief.id}\" not found.` };\n    }\n    throw error;\n  }\n  const result = await previewAdapters(env).useCase.execute(brief, selection);",
+      "after": "  const result = await previewAdapters(env).useCase.execute(brief, selection);\n  if (!result.success) {\n    // A cell the brief cannot render (unknown product, bad ratio) is the caller's error.\n    setResponseStatus(event, 400);\n    return { error: errorMessage(result.error) };\n  }\n  try {\n    await resolveBriefAssetRefs(env, brief, { target: brief.id, mode: \"render\" });\n  } catch (error) {\n    if (error instanceof BriefRefNotFoundError) {\n      setResponseStatus(event, 404);\n      return { error: `Campaign \"${brief.id}\" not found.` };\n    }\n    throw error;\n  }",
+      "because": "The preview's ORDER is a cache property, not a tidiness one. `previewAdapters`' bundle — and the frame cache inside it — is keyed per ORG, never per team, so the lookup a check placed after `execute` performs has already returned the frame cache under the caller's key: a team-B body naming team-A refs is answered with team A's PNG, A's logo composited into it, and the refusal then discards bytes it has already read out of the shared cache. The mutation puts the same call after the render AND after the 400 branch, so the mutant still refuses, still answers the identical body and still refuses a brief the compositor cannot render — the only difference is what the cache was asked first, which is exactly the defect. A test that only asserted the status would pass this.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/render-ref-checks.test.ts",
+        "-t",
+        "CACHE LEAK: team B posting team A's IDENTICAL body gets 404, not A's cached frame"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
