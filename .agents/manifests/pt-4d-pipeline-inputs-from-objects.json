@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "lane": "PT-4d-pipeline-inputs-from-objects",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/object-store/object-input-assets.ts",
+      "before": "    if (bytes === undefined) {\n      throw absent(ref, \"no campaign, asset row or object in this org answers it.\");\n    }",
+      "after": "    if (bytes === undefined) {\n      return undefined;\n    }",
+      "because": "a safe ref that nothing answers reports 'there is no such asset' by answering `undefined` — the answer that means 'this ref is unsafe, skip it'. The two are indistinguishable to every consumer, and each of them then does the wrong thing for the operator: a scene and a music bed stop rejecting with 'could not be read' and start refusing a brief that named nothing wrong with it (PT-4c pins that message and its `cause`), while the logo — which only silences itself on ENOENT — starts skipping a campaign's logo for a deployment it cannot see. The test that catches it runs the REAL scene resolver against the object port with a campaign no row belongs to and asserts both the message and that the `cause` is ENOENT; the unsafe ref still answers `undefined` correctly, so the switch is what fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/object-input-assets.consumers.test.ts",
+        "-t",
+        "the two safe outcomes are told apart by message and by cause"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/object-input-assets.ts",
+      "before": "    const safePath = resolveAssetPath(ref, SYNTHETIC_ROOT);\n    if (safePath === undefined) return undefined;",
+      "after": "    const safePath = resolveAssetPath(ref, SYNTHETIC_ROOT) ?? ref;",
+      "because": "the confinement check is skipped: a ref `resolveAssetPath` refuses is handed to the parser as though it had passed. `/etc/passwd` then parses to no campaign and answers ENOENT rather than undefined, and `../outside.png` parses the same way — so a run over a brief naming a path outside the assets tree fails loudly where fs skipped the asset cleanly, and a brief naming `/etc/passwd` gets an error naming an asset rather than being ignored. The confinement decision is the ONE thing this port must not make twice: it is made once, in `resolveAssetPath`, so the object port's refusals and `FileSystemInputAssets`' cannot drift apart.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/object-input-assets.test.ts",
+        "-t",
+        "an unsafe ref answers undefined"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/object-input-assets.ts",
+      "before": "    if (bytes === undefined) {\n      throw absent(ref, \"no campaign, asset row or object in this org answers it.\");\n    }",
+      "after": "    if (bytes === undefined) {\n      if (this.memo !== undefined) this.memo.set(ref, Buffer.alloc(0));\n      throw absent(ref, \"no campaign, asset row or object in this org answers it.\");\n    }",
+      "because": "the memo starts remembering failures, as an empty read rather than as an absence. The run that is waiting on an upload is the case that dies: the preview that ran before the upload, the re-run after it, and every retry in between all get the cached zero-length answer and report a missing logo for the rest of the reader's life — while the store has held the right bytes the whole time. Caching only SUCCESSFUL reads is the whole of the memo's contract; a cache that remembers a refusal is a cache that lies, and the retry test (a MISSING ref, then the upload, then the read) is the only case that can see it, because every other test reads once.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/object-input-assets.memo.test.ts",
+        "-t",
+        "the next read retries the store and finds the new object"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/pipeline.ts",
+      "before": "  if (objectStore() === \"s3\") return new ObjectInputAssets(env, options);",
+      "after": "  if (objectStore() === \"s3\" && false) return new ObjectInputAssets(env, options);",
+      "because": "the switch is short-circuited and every run reads from disk again under OBJECT_STORE=s3 — the exact state this lane exists to close, and the one that is invisible until a staging bucket stops being mirrored to a PVC. Nothing else in the tree changes: the port is still one per build and still handed to all five consumers, so every other assertion in the file keeps passing and only the class of the port betrays it. That is why the s3 case asserts `instanceof ObjectInputAssets` and not merely identity.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/pipeline.test.ts",
+        "-t",
+        "under OBJECT_STORE=s3 the one port is an ObjectInputAssets"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/plugins/object-store-boot-guard.ts",
+      "before": "  if (objectStore() !== \"s3\") return;",
+      "after": "  if (objectStore() !== \"fs\") return;",
+      "because": "the guard's condition is inverted, so under OBJECT_STORE=s3 it returns before validating anything and every boot check it was added for is skipped. The deployment it was added for is the quiet one: a host missing S3_BUCKET boots, passes every route's existence check, takes a run off Kafka, and fails it on the logo — a per-run 500 an operator reads as a brief problem. The fs half still returns early, so nothing else in the suite notices; only the s3 cases, which expect a throw, can see it. (The worker's copy of this guard has its own tests for the same reason.)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/plugins/__tests__/object-store-boot-guard.test.ts",
+        "-t",
+        "S3_ENDPOINT unset"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

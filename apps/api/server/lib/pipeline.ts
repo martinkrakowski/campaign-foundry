@@ -26,6 +26,12 @@ import {
 import { BrandComplianceChecker } from "@campaignfoundry/GovernanceAndCompliance";
 import { FileSystemExporter } from "@campaignfoundry/Distribution";
 import { err, type Result } from "@campaignfoundry/shared";
+import { objectStore } from "./config.js";
+// `./object-store/object-input-assets.js` DIRECTLY, never the `object-store`
+// barrel: this class imports the ports barrel for `getAssetStore`, and the barrel
+// imports `object-store/index.js`, so a re-export there would close a cycle. See
+// that file's "Must not".
+import { ObjectInputAssets } from "./object-store/object-input-assets.js";
 import type { Provider } from "./ports/provider-key.port.js";
 import type { ProviderSettings, RunEnvironment } from "./run-environment.js";
 import { MeteredCopyGenerator, MeteredImageGenerator } from "./metering.js";
@@ -70,15 +76,39 @@ function resolvedModel(model: string | undefined, fallback: string): string {
   return model && model.length > 0 ? model : fallback;
 }
 
+export interface InputAssetsOptions {
+  /**
+   * Cache successful reads inside the returned port, so a run reads one asset
+   * once. Opt-in, and only {@link buildPipeline} opts in.
+   *
+   * It is opt-in rather than always-on because the reader's lifetime is the
+   * caller's choice: a run's reader dies with the run, while `imageGenerator`'s
+   * default and the preview bundle are kept by their callers — the preview's
+   * bundles live for the process (one per font, org and asset root), and a
+   * process-lifetime memo there would serve stale bytes for the whole preview
+   * session. Ignored under `fs`, where `FileSystemInputAssets` is exactly as
+   * memo-free as it has always been.
+   */
+  readonly memo?: boolean;
+}
+
 /**
  * The run's reader for brief-supplied input assets (PT-4c): one port over this
  * environment's asset root, for the reused product images, the compositor's logo,
  * a beat's scene and the music bed.
  *
- * Built from `env.assetRoot` per call and never from the process environment
- * (D167), so a tenant's runs read that tenant's assets. It is deliberately the
- * only place an `InputAssetPort` is constructed: substituting the storage backend
- * means changing this function, not the five consumers behind it.
+ * Built from `env` per call and never from the process environment (D167), so a
+ * tenant's runs read that tenant's assets. It is deliberately the only place an
+ * `InputAssetPort` is constructed: substituting the storage backend means
+ * changing this function, not the five consumers behind it.
+ *
+ * **The switch is `objectStore()`, and it is here and nowhere else** (PT-4d):
+ * under `s3` an `ObjectInputAssets` reads a brief's ref through PT-4b's org-scoped
+ * `ObjectAssetStore`, and under `fs` it is today's `FileSystemInputAssets` over
+ * `env.assetRoot`, unchanged. Every path that renders a creative — the generate
+ * route, the in-API Kafka consumer, `bin/worker.ts`, `bin/generate.ts`, the
+ * preview route — reaches this function, so there is no second place to change
+ * and no path that can silently stay on disk.
  *
  * `buildPipeline` calls this ONCE and hands the result to every consumer, so a
  * run reads one tree through one reader. A caller that wants a pipeline reader
@@ -86,7 +116,8 @@ function resolvedModel(model: string | undefined, fallback: string): string {
  * standalone call gets its own, which is why this function promises one port per
  * call and not one per run.
  */
-export function inputAssets(env: RunEnvironment): InputAssetPort {
+export function inputAssets(env: RunEnvironment, options: InputAssetsOptions = {}): InputAssetPort {
+  if (objectStore() === "s3") return new ObjectInputAssets(env, options);
   return new FileSystemInputAssets(env.assetRoot);
 }
 
@@ -265,8 +296,12 @@ export function buildPipeline(
   imageModel?: string,
   planInput: PlanInput = {},
 ): GenerateCampaignUseCase {
-  // One reader for this environment, shared by every consumer below (PT-4c).
-  const inputs = inputAssets(env);
+  // One reader for this environment, shared by every consumer below (PT-4c), and
+  // the ONLY caller that asks for the per-run memo (PT-4d): the logo is read once
+  // per cell, so a 50-cell run asks a bucket for the same object ~150 times
+  // without it. Under fs the flag is ignored and this is still one
+  // `FileSystemInputAssets` over `env.assetRoot`.
+  const inputs = inputAssets(env, { memo: true });
   return new GenerateCampaignUseCase({
     imageGenerator: imageGenerator(env, imageModel, inputs),
     proceduralGenerator: new ProceduralBackgroundGenerator(),

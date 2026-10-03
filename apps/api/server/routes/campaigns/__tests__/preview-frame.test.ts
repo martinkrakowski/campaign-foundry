@@ -3,6 +3,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
+import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
+import { resetDatabase, setDatabase } from "../../../lib/db/database.js";
+import { migratedDatabase } from "../../../lib/db/__tests__/pglite-client.js";
+import type { SqlClient } from "../../../lib/db/sql-client.js";
+import { resetObjectStoreClient, setObjectStoreClient } from "../../../lib/object-store/index.js";
+import { ObjectAssetStore } from "../../../lib/ports/object-asset-store.js";
+import { resetAssetStore } from "../../../lib/ports/index.js";
 import {
   AssetReusingImageGenerator,
   CanvasFfmpegVideoCompositor,
@@ -19,7 +26,7 @@ import route, {
   resetPreviewAdapters,
 } from "../preview-frame.post.js";
 import { getBriefStore } from "../../../lib/ports/index.js";
-import { runEnvironment } from "../../../lib/run-environment.js";
+import { runEnvironment, type RunEnvironment } from "../../../lib/run-environment.js";
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
 
 const mount = () => {
@@ -389,5 +396,119 @@ describe("POST /campaigns/preview-frame", () => {
     } finally {
       g.readBody = original;
     }
+  });
+});
+
+/**
+ * The preview route under `OBJECT_STORE=s3` (PT-4d).
+ *
+ * The preview's reader is `inputAssets(env)` like everyone else's, so it switches
+ * too — but two things are specific to THIS route and are what these cases pin:
+ *
+ * - the bundle is kept for the life of the PROCESS, so its teardown must reset
+ *   more than the stores. `tenant-harness.ts` does not touch
+ *   `resetPreviewAdapters()`, `resetObjectStoreClient()` or `OBJECT_STORE`, and a
+ *   bundle left holding one org's reader would answer the next test from it.
+ * - the bundle KEY still carries `assetRoot`. Under `s3` that root is a pure
+ *   function of the org, so it is redundant — and it stays, because fs still has
+ *   two roots per tenant.
+ */
+describe("POST /campaigns/preview-frame under OBJECT_STORE=s3 (PT-4d)", () => {
+  let dir: string;
+  let db: SqlClient;
+  let store: InMemoryObjectStore;
+  const origRoot = process.env.PROJECT_ROOT;
+  const SAVED_OBJECT_STORE = process.env.OBJECT_STORE;
+
+  /** The stored ref, which is the shape `ObjectAssetStore.assetRelPath` returns. */
+  const STORED_LOGO = "assets/inputs/camp/logo.png";
+  const s3Brief = () => ({
+    ...brief(),
+    products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: STORED_LOGO }],
+  });
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), "cf-preview-s3-"));
+    process.env.PROJECT_ROOT = dir;
+    resetProjectRoot();
+    // The campaign gate (PT-5c2) stays on fs here: `OBJECT_STORE` switches the
+    // ASSET store alone, and this is about the asset read.
+    await getBriefStore(LOCAL_TENANT).createCampaign("camp");
+    process.env.OBJECT_STORE = "s3";
+    db = await migratedDatabase();
+    setDatabase(db);
+    store = new InMemoryObjectStore();
+    setObjectStoreClient(store);
+    resetAssetStore();
+    // TWO campaign rows for one id, and they are not the same table: the route's
+    // gate asks the brief store (fs here, PT-5c2) while the asset read resolves
+    // through Postgres. Seeding only one leaves the other saying "no such
+    // campaign", which is a 404 from one end and an ENOENT from the other.
+    await db.query(`insert into org (id, name) values ($1, $1) on conflict do nothing`, [
+      LOCAL_TENANT.orgId,
+    ]);
+    await db.query(`insert into campaign (org_id, slug) values ($1, $2)`, [
+      LOCAL_TENANT.orgId,
+      "camp",
+    ]);
+    await new ObjectAssetStore(db, store, LOCAL_TENANT.orgId).writeAsset(
+      "camp",
+      "logo.png",
+      ONE_PX_PNG,
+    );
+    resetPreviewAdapters();
+  });
+
+  afterEach(async () => {
+    // Every one of these, and in this order: the bundle holds a reader, the reader
+    // holds a store client, and both are process-wide.
+    resetPreviewAdapters();
+    resetAssetStore();
+    resetObjectStoreClient();
+    resetDatabase();
+    vi.restoreAllMocks();
+    rmSync(dir, { recursive: true, force: true });
+    if (SAVED_OBJECT_STORE === undefined) delete process.env.OBJECT_STORE;
+    else process.env.OBJECT_STORE = SAVED_OBJECT_STORE;
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+    resetProjectRoot();
+    await db.end();
+  });
+
+  test("renders the frame with the logo read out of the object store, not from disk", async () => {
+    const get = vi.spyOn(store, "get");
+    const res = await mount()(jsonReq({ brief: s3Brief(), cell: cell() }));
+    expect(res.status).toBe(200);
+    expect(get).toHaveBeenCalledTimes(1);
+    // The demo ref this file's fs brief uses is NOT in the store, and a preview
+    // that silently fell back to it would have answered this too.
+    expect(get.mock.calls[0]![0]).toContain("org/local/campaign/");
+  });
+
+  test("a missing logo is silent: the frame still renders, as it does on fs", async () => {
+    // ENOENT from the object port is what `readFile` would have raised, so the
+    // compositor skips the logo and the preview is answered rather than refused.
+    await db.query(`delete from asset`);
+    resetPreviewAdapters();
+    const res = await mount()(jsonReq({ brief: s3Brief(), cell: cell() }));
+    expect(res.status).toBe(200);
+    expect(
+      Buffer.from(await res.arrayBuffer())
+        .subarray(0, 8)
+        .toString("hex"),
+    ).toBe("89504e470d0a1a0a");
+  });
+
+  test("two orgs never share a bundle, so one org's logo is never another's frame", () => {
+    const local = runEnvironment(LOCAL_TENANT);
+    const globex: RunEnvironment = {
+      ...local,
+      tenant: { orgId: "globex", userId: "u", roles: [], teamIds: [] },
+    };
+    expect(previewAdapters(local)).not.toBe(previewAdapters(globex));
+    // ...and the same org twice is the same bundle, which is what makes the frame
+    // cache worth having.
+    expect(previewAdapters(local)).toBe(previewAdapters(runEnvironment(LOCAL_TENANT)));
   });
 });
