@@ -9,8 +9,8 @@
 # master's own HTTP ports are unauthenticated and appear in no Service and no
 # Ingress, so nothing but the signed S3 port is reachable from outside the Pod.
 #
-# The image is the tag: the owner mirrors it into Harbor (README "Object store"),
-# and the orchestrator adds the digest at deploy time.
+# The image is the tag: the owner mirrors it into Harbor (README "Object store
+# (once, owner)", step 2), and the orchestrator adds the digest at deploy time.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -80,16 +80,19 @@ spec:
       containers:
         - name: seaweedfs
           image: registry.midnight.lan/library/seaweedfs:4.48
-          # `weed` does not create its directories, so the metadata paths are made
-          # first; without them the Pod dies on "Check Meta Folder … no such file
-          # or directory". The data directory itself is created by the owner
-          # (README "Object store", step 1) and must exist: it is a hostPath of
-          # type Directory, never DirectoryOrCreate, because a kubelet-created one
-          # is root-owned and fsGroup does not apply to a hostPath.
+          # `weed` creates no directory it is told to use: SeaweedFS's
+          # TestFolderWritable only stats the directory and Fatalf's when it is
+          # missing, so all three are made here. `/mnt/pool/seaweedfs/data` is
+          # under the hostPath root, which the owner creates (README "Object store
+          # (once, owner)", step 1) as 1000:1000 mode 750, so this works as uid
+          # 1000. The hostPath is mounted with type Directory, never
+          # DirectoryOrCreate: a kubelet-created directory is root-owned, and
+          # fsGroup does not apply to a hostPath.
           command: ["/bin/sh", "-c"]
           args:
             - >-
-              mkdir -p /metadata/master /metadata/idx && exec /usr/bin/weed server
+              mkdir -p /metadata/master /metadata/idx /mnt/pool/seaweedfs/data
+              && exec /usr/bin/weed server
               -dir=/mnt/pool/seaweedfs/data -master.dir=/metadata/master
               -volume.dir.idx=/metadata/idx -volume.max=16
               -master.volumeSizeLimitMB=1024 -filer -s3
@@ -120,9 +123,14 @@ spec:
               mountPath: /mnt/pool/seaweedfs
             # The master's metadata and the volume .idx files, on local disk
             # (local-path): small, and rewritten on every scan, so they want a
-            # real filesystem rather than the union. The filer's LevelDB is NOT
-            # here: `weed server` puts it at $dir/../filerldb2 unless -filer.dir
-            # says otherwise, so it lands beside the data on the mergerfs.
+            # real filesystem rather than the union. The filer's LevelDB lands
+            # here too: `weed server` defaults the filer's dir to -master.dir,
+            # so it is /metadata/master/filerldb2. There is no -filer.dir flag.
+            # That also depends on the emptyDir hiding the image's own
+            # /etc/seaweedfs/filer.toml, whose leveldb2.dir=/data/filerldb2 uid
+            # 1000 cannot write: NEVER give the s3-config mount a subPath, or the
+            # file's own filer.toml comes back into view and the filer fails at
+            # boot.
             - name: metadata
               mountPath: /metadata
             - name: s3-config

@@ -88,16 +88,21 @@ ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging create 
 
 ### Object store (once, owner)
 
-Four steps, in this order. `deploy.sh` refuses to deploy until steps 1 and 3 are
-done, and the first deploy after step 2 is the first that can pull the image.
+Four steps, in this order. `deploy.sh` refuses to deploy until **steps 1 and 3**
+are done and until the `midnight-ca` ClusterIssuer exists — it checks all three
+before it builds anything, because each one only fails visibly after a build and
+a rollout. The first deploy after step 2 is the first that can pull the image.
 
 **1. The data directory.** The object data (the `.dat` volumes) lives on the
-`/mnt/pool` mergerfs, 18 TB free; the master's metadata and the `.idx` files stay
-on local disk, on the `seaweedfs-metadata` PVC. The Pod runs as uid 1000, so the
-directory is created here, owned by 1000:1000. `seaweedfs.yaml` mounts it as a
-hostPath of type `Directory` and never `DirectoryOrCreate`, because a
+`/mnt/pool` mergerfs, 18 TB free; the master's metadata, the `.idx` files and the
+filer's LevelDB stay on local disk, on the `seaweedfs-metadata` PVC. The Pod runs
+as uid 1000, so the directory is created here, owned by 1000:1000. `seaweedfs.yaml`
+mounts it as a hostPath of type `Directory` and never `DirectoryOrCreate`, because a
 kubelet-created directory is root-owned and `fsGroup` does not apply to a
-hostPath.
+hostPath. Nothing creates the directory below it either — the Pod makes its own
+`data` on start — but the root itself must exist, or `type: Directory` leaves the
+Pod with nothing to mount and it crash-loops. `deploy.sh` checks this before it
+builds.
 
 ```sh
 ssh m 'sudo install -d -o 1000 -g 1000 -m 750 /mnt/pool/campaign-foundry-staging/seaweedfs'
@@ -116,11 +121,12 @@ docker --context midnight pull chrislusf/seaweedfs:4.48 && docker --context midn
 **3. The identities secret.** Two identities: an `admin` key that may create
 and delete buckets, and an app key scoped to the one bucket `campaign-foundry`.
 There is no anonymous identity, so an unsigned or wrongly-keyed request is denied.
-Run this on the node, so the keys are generated there and never touch a laptop or
-the repo:
+The single quotes keep `$(openssl …)` inside the ssh command, so the keys are
+generated **on the node** and never touch a laptop or the repo, and
+`KUBECONFIG=$HOME/.kube/config` resolves there too:
 
 ```sh
-kubectl -n campaign-foundry-staging create secret generic seaweedfs-s3 --from-literal=admin-access-key=$(openssl rand -hex 16) --from-literal=admin-secret-key=$(openssl rand -hex 32) --from-literal=app-access-key=$(openssl rand -hex 16) --from-literal=app-secret-key=$(openssl rand -hex 32)
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging create secret generic seaweedfs-s3 --from-literal=admin-access-key="$(openssl rand -hex 16)" --from-literal=admin-secret-key="$(openssl rand -hex 32)" --from-literal=app-access-key="$(openssl rand -hex 16)" --from-literal=app-secret-key="$(openssl rand -hex 32)"'
 ```
 
 The access keys are 32 hex characters, so they clear the 32-byte minimum
@@ -133,17 +139,21 @@ startup.
 
 **4. Trust `midnight-ca` in the browser.** Both Ingresses now get their
 certificate from the cluster's own issuer, `midnight-ca`, instead of a
-self-signed one, so the browser needs that CA once. Export it with:
+self-signed one, so the browser needs that CA once. Export it to a file:
 
 ```sh
-kubectl -n cert-manager get secret midnight-ca -o jsonpath='{.data.ca\.crt}' | base64 -d
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n cert-manager get secret midnight-ca -o jsonpath="{.data.ca\.crt}"' | base64 -d > midnight-ca.crt
 ```
+
+Then import `midnight-ca.crt` into the browser's trust store (Firefox: Settings →
+Privacy & Security → Certificates → Import, or "Authorities"), or into the
+system trust store with `sudo cp midnight-ca.crt /usr/local/share/ca-certificates/midnight-ca.crt && sudo update-ca-certificates`.
 
 It is read from the cluster's own Kubernetes Secret over the authenticated
 cluster API, not fetched over the network, so an intercepted TLS connection
-cannot plant a trust root — the same reasoning as the Harbor CA above. Import it
-into the browser or the system trust store; do **not** reach for `curl -k`,
-which proves nothing about who signed the response.
+cannot plant a trust root — the same reasoning as the Harbor CA above. Never
+reach for `curl -k`, which proves nothing about who signed the response; delete
+the file once it is imported.
 
 ### Resend key (once, owner)
 

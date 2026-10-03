@@ -66,17 +66,30 @@ fi
 
 # The object store's identities: an admin key that may create and delete buckets,
 # and an app key scoped to the one bucket (D201). Created by the owner (README
-# "Object store secret"). Checked here too, for the same reason and the same way:
-# weed boots with an unreadable identities file, the bucket never appears and the
-# app has nothing to talk to, so this must fail before the build and not after it.
+# "Object store (once, owner)", step 3). Checked here too, for the same reason and
+# the same way: weed boots with an unreadable identities file, the bucket never
+# appears and the app has nothing to talk to, so this must fail before the build
+# and not after it.
 echo "==> object-store secret"
 for key in admin-access-key admin-secret-key app-access-key app-secret-key; do
   SECRET_LEN=$(remote "kubectl -n $NS get secret seaweedfs-s3 -o jsonpath={.data.$key} 2>/dev/null | base64 -d 2>/dev/null | wc -c" | tr -d ' ')
   if [ "${SECRET_LEN:-0}" -lt 32 ]; then
-    echo "deploy.sh: secret seaweedfs-s3 is missing, has no \"$key\" key, or that value is shorter than 32 bytes; create it (deploy/staging/README.md, \"Object store secret\") and deploy again." >&2
+    echo "deploy.sh: secret seaweedfs-s3 is missing, has no \"$key\" key, or that value is shorter than 32 bytes; create it (deploy/staging/README.md, \"Object store (once, owner)\", step 3) and deploy again." >&2
     exit 1
   fi
 done
+
+# The hostPath the object data lives on. seaweedfs.yaml mounts it with type
+# Directory, so nothing creates it, and the Pod runs as uid 1000: if the
+# directory is absent or owned by anyone else, weed's TestFolderWritable Fatalf's
+# and the Pod crash-loops — but only after the image was built and pushed.
+# Checked here, on the node, before the build.
+echo "==> object-store data directory"
+DATA_DIR_UID=$(remote "stat -c %u /mnt/pool/campaign-foundry-staging/seaweedfs 2>/dev/null" | tr -d ' ')
+if [ "$DATA_DIR_UID" != 1000 ]; then
+  echo "deploy.sh: /mnt/pool/campaign-foundry-staging/seaweedfs is missing or not owned by uid 1000 on $NODE; run README \"Object store (once, owner)\", step 1 and deploy again." >&2
+  exit 1
+fi
 
 # Both certificates now come from midnight-ca, which must exist before the
 # Ingresses that name it or cert-manager logs a failed issuer and leaves them on
