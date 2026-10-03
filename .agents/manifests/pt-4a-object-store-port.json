@@ -157,8 +157,8 @@
     },
     {
       "file": "apps/api/server/lib/object-store/S3ObjectStore.ts",
-      "before": "    for (const key of keys) {\n      if (!OBJECT_KEY_PATTERN.test(key)) {",
-      "after": "    for (const key of keys) {\n      if (false && !OBJECT_KEY_PATTERN.test(key)) {",
+      "before": "    for (const key of keys) {\n      if (objectKeyProblem(key) !== undefined) {",
+      "after": "    for (const key of keys) {\n      if (false && objectKeyProblem(key) !== undefined) {",
       "because": "deletePrefix goes back to deleting as it walks, with no up-front check. A key the store returns that the alphabet refuses — a proxy, a replication target or a second writer can put one under the prefix — then reaches `delete`, which refuses it mid-loop, leaving the prefix half-erased with no way to say which half. The guard has to be a separate pass BEFORE the first delete for the refusal to be all-or-nothing.",
       "command": [
         "yarn",
@@ -169,6 +169,23 @@
         "apps/api/server/lib/object-store/__tests__/S3ObjectStore-listing.test.ts",
         "-t",
         "validates the whole listing BEFORE deleting"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/S3ObjectStore.ts",
+      "before": "    for (const key of keys) {\n      if (objectKeyProblem(key) !== undefined) {",
+      "after": "    for (const key of keys) {\n      if (!/^[A-Za-z0-9._/-]+$/.test(key)) {",
+      "because": "deletePrefix's pre-check goes back to the alphabet only. `a//b.png` passes the character class, so the loop starts, deletes `a.png`, then `delete` refuses the empty segment mid-loop: the test that lists `a//b.png` sees a DELETE sent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/S3ObjectStore-listing.test.ts",
+        "-t",
+        "deletePrefix refuses a key inside the alphabet that delete would still refuse"
       ],
       "verdict": "caught"
     }

@@ -258,6 +258,29 @@ describe("S3ObjectStore.list", () => {
     expect(requests.filter((request) => request.method === "DELETE")).toHaveLength(0);
   });
 
+  test("deletePrefix refuses a key inside the alphabet that delete would still refuse", async () => {
+    // `a//b.png` passes the character class but has an empty segment, which
+    // `delete` refuses: an alphabet-only pre-check would let the loop start and
+    // then die on it after deleting `a.png`.
+    const { requests, fetchImpl } = canned(
+      xmlResponse(
+        result(
+          entry("campaigns/c1/renders/a.png", 1),
+          entry("campaigns/c1/renders/a//b.png", 1),
+          "<IsTruncated>false</IsTruncated>",
+        ),
+      ),
+      new Response(null, { status: 204 }),
+    );
+    const error = await store(fetchImpl)
+      .deletePrefix("campaigns/c1/renders/")
+      .catch((thrown: unknown) => thrown);
+    expect((error as Error).message).toBe(
+      "The listing under this prefix contains a key outside the allowed alphabet; nothing was deleted.",
+    );
+    expect(requests.filter((request) => request.method === "DELETE")).toHaveLength(0);
+  });
+
   test("a Contents block with no Key, Size or LastModified is refused", async () => {
     const { fetchImpl } = canned(xmlResponse(result("<Contents><Size>5</Size></Contents>")));
     await expect(store(fetchImpl).list("campaigns/c1/")).rejects.toThrow(

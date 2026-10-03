@@ -2,7 +2,7 @@ import { AwsClient } from "aws4fetch";
 import {
   assertObjectKey,
   ObjectExistsError,
-  OBJECT_KEY_PATTERN,
+  objectKeyProblem,
   type ListedObject,
   type ObjectContent,
   type ObjectKey,
@@ -208,11 +208,13 @@ export class S3ObjectStore implements ObjectStorePort {
     // proxy, a replication target or a second writer can put one under this
     // prefix that the alphabet would refuse, and a loop that validated and
     // deleted as it went would leave the prefix half-erased with no way to say
-    // which half. So one odd key means nothing at all was deleted. The message
+    // which half. So one odd key means nothing at all was deleted. The check is
+    // `objectKeyProblem`, the very rule `delete` applies, not just the alphabet:
+    // `a//b` and `a/./b` are legal S3 keys inside the alphabet that `delete` refuses. The message
     // names neither the key nor the prefix — the caller supplied the prefix, and
     // the key came back from a store, so neither is ours to print.
     for (const key of keys) {
-      if (!OBJECT_KEY_PATTERN.test(key)) {
+      if (objectKeyProblem(key) !== undefined) {
         throw new Error(
           "The listing under this prefix contains a key outside the allowed alphabet; nothing was deleted.",
         );
