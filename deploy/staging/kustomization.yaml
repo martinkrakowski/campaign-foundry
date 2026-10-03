@@ -9,6 +9,7 @@ resources:
   - postgres.yaml
   - kafka.yaml
   - data-pvc.yaml
+  - seaweedfs.yaml
   - app.yaml
 images:
   - name: campaign-foundry

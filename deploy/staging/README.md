@@ -2,8 +2,8 @@
 
 Campaign Foundry's staging environment runs on the owner's k3s node `midnight`
 (`ssh m`), reachable only on the local network or the VPN, at
-**https://campaign-foundry.midnight.lan** (TLS from the cluster's self-signed
-issuer). Production hosting is still open
+**https://campaign-foundry.midnight.lan** (TLS from the cluster's own issuer,
+`midnight-ca`). Production hosting is still open
 (`docs/planning/2026-09-24_platform-and-tenancy.md`, §7 "What the owner is deciding"); this is not it.
 
 ## What runs (namespace `campaign-foundry-staging`)
@@ -14,12 +14,15 @@ issuer). Production hosting is still open
 | Files | PVC `campaign-foundry-data` (local-path, 20Gi) at `/data` | Briefs, input assets, fonts and output. Seeded from the image's samples on first start. |
 | PostgreSQL | CloudNativePG `Cluster` `cf-pg` | TLS; the app verifies against the operator's CA (`cf-pg-ca`). Migrated on every deploy. The app runs `STORE_BACKEND=postgres` and `AUTH_MODE=better-auth` (since 2026-09-26: staging is where the platform is proven), so it starts with empty tables until PT-8 imports the seeded file data. Separate from the Aiven database. |
 | Kafka | Strimzi `Kafka` `cf-kafka`, KRaft, one node | TLS listener with client-certificate auth, as on Aiven. `KafkaUser` `campaign-foundry`, with ACLs on topic `cf.run-requests` and group `cf-workers`. The API publishes queued runs there and consumes them itself (`KAFKA_CONSUME=true`, PT-6b2/PT-6b3); its client certificate and the cluster CA are mounted under `/data/certs`. |
+| Object store | `seaweedfs.yaml`: one SeaweedFS Pod (master, volume server, filer and S3 gateway), Service `seaweedfs-s3` on 8333 | In-cluster on `http://seaweedfs-s3:8333`, and from a browser on **https://s3.midnight.lan** (path-style, `midnight-ca`) so a presigned URL is the same URL on both sides. Bucket `campaign-foundry`, created by `jobs/s3-bootstrap.yaml` on every deploy. Nothing reaches it over the app yet — `S3_*` arrives with PT-4j. |
 
 No image-provider keys are configured, so renders are procedural and spend no
 credits. To use real imagery, create a Secret with `GEMINI_API_KEY` or
 `OPENROUTER_API_KEY` and reference it from the `api` container deliberately.
 
-Object storage (D174c, Backblaze B2) is not set up: nothing uses it until PT-4.
+Object storage is SeaweedFS on this node (D201, replacing D174c's Backblaze B2,
+which waits for production). Versioning and object lock stay **off**
+(seaweedfs#8073): staging must behave like the cloud bucket it will become.
 
 ## One-time setup (cluster-wide; done 2026-09-25)
 
@@ -82,6 +85,65 @@ ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging create 
 
 `deploy.sh` checks it before building anything, and refuses while it is missing, has no
 `secret` key, or is shorter than 32 characters.
+
+### Object store (once, owner)
+
+Four steps, in this order. `deploy.sh` refuses to deploy until steps 1 and 3 are
+done, and the first deploy after step 2 is the first that can pull the image.
+
+**1. The data directory.** The object data (the `.dat` volumes) lives on the
+`/mnt/pool` mergerfs, 18 TB free; the master's metadata and the `.idx` files stay
+on local disk, on the `seaweedfs-metadata` PVC. The Pod runs as uid 1000, so the
+directory is created here, owned by 1000:1000. `seaweedfs.yaml` mounts it as a
+hostPath of type `Directory` and never `DirectoryOrCreate`, because a
+kubelet-created directory is root-owned and `fsGroup` does not apply to a
+hostPath.
+
+```sh
+ssh m 'sudo install -d -o 1000 -g 1000 -m 750 /mnt/pool/campaign-foundry-staging/seaweedfs'
+```
+
+**2. Mirror the image into Harbor.** The cluster pulls only from
+`registry.midnight.lan`, so `chrislusf/seaweedfs:4.48` is pulled once, re-tagged
+and pushed:
+
+```sh
+docker --context midnight pull chrislusf/seaweedfs:4.48 && docker --context midnight tag chrislusf/seaweedfs:4.48 registry.midnight.lan/library/seaweedfs:4.48 && docker --context midnight push registry.midnight.lan/library/seaweedfs:4.48
+```
+
+`seaweedfs.yaml` pins the tag; the orchestrator adds the digest at deploy time.
+
+**3. The identities secret.** Two identities: an `admin` key that may create
+and delete buckets, and an app key scoped to the one bucket `campaign-foundry`.
+There is no anonymous identity, so an unsigned or wrongly-keyed request is denied.
+Run this on the node, so the keys are generated there and never touch a laptop or
+the repo:
+
+```sh
+kubectl -n campaign-foundry-staging create secret generic seaweedfs-s3 --from-literal=admin-access-key=$(openssl rand -hex 16) --from-literal=admin-secret-key=$(openssl rand -hex 32) --from-literal=app-access-key=$(openssl rand -hex 16) --from-literal=app-secret-key=$(openssl rand -hex 32)
+```
+
+The access keys are 32 hex characters, so they clear the 32-byte minimum
+`deploy.sh` checks — as do the 64-character secret keys. `deploy.sh` measures all
+four with `base64 -d | wc -c` and never prints a value; the Pod reads them into
+`/etc/seaweedfs/s3.json` and the bootstrap Job writes its curl config to an
+emptyDir, so a key never appears in `ps` either. Changing a key means recreating
+the Secret and then restarting the Pod: `weed` reads the identities file once, at
+startup.
+
+**4. Trust `midnight-ca` in the browser.** Both Ingresses now get their
+certificate from the cluster's own issuer, `midnight-ca`, instead of a
+self-signed one, so the browser needs that CA once. Export it with:
+
+```sh
+kubectl -n cert-manager get secret midnight-ca -o jsonpath='{.data.ca\.crt}' | base64 -d
+```
+
+It is read from the cluster's own Kubernetes Secret over the authenticated
+cluster API, not fetched over the network, so an intercepted TLS connection
+cannot plant a trust root — the same reasoning as the Harbor CA above. Import it
+into the browser or the system trust store; do **not** reach for `curl -k`,
+which proves nothing about who signed the response.
 
 ### Resend key (once, owner)
 
@@ -147,7 +209,8 @@ It shows the commit and asks before building. Without a terminal (a script, CI o
 agent) it refuses unless given `--yes`, and any other argument is refused, so a stray
 `--help` never deploys.
 
-It builds on the node, pushes, applies `deploy/staging`, waits for Postgres, runs
+It builds on the node, pushes, applies `deploy/staging`, waits for SeaweedFS and
+creates the bucket (`jobs/s3-bootstrap.yaml`), waits for Kafka and Postgres, runs
 the migrations (`jobs/migrate.yaml`), and restarts the app.
 
 ## Known limits
