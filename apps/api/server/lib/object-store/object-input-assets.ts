@@ -1,5 +1,6 @@
 import { relative } from "node:path";
 import type { InputAssetPort } from "@campaignfoundry/CampaignOrchestration";
+import type { AssetStorePort } from "../ports/asset-store.port.js";
 import { resolveAssetPath } from "@campaignfoundry/CreativeGeneration";
 import { getAssetStore } from "../ports/index.js";
 import type { RunEnvironment } from "../run-environment.js";
@@ -156,9 +157,16 @@ export class ObjectInputAssets implements InputAssetPort {
       throw absent(ref, "only assets/inputs/<slug>/<name> is a stored ref on this backend.");
     }
 
+    // The store is looked up HERE, before any promise exists: `getAssetStore` can
+    // throw synchronously (a malformed OBJECT_STORE), and a throw inside `fetch`
+    // would run its `memo.delete` BEFORE the `memo.set` below — leaving an
+    // already-rejected promise cached for the run. Thrown here, `read` simply
+    // rejects and nothing is stored.
+    const assets = getAssetStore(this.env);
+
     // Stored BEFORE it is awaited, which is the whole of it: the next cell to ask
     // while this one is still in flight finds the promise and waits on it.
-    const pending = this.fetch(ref, target);
+    const pending = this.fetch(ref, target, assets);
     if (this.memo !== undefined) this.memo.set(ref, pending);
     return Buffer.from(await pending);
   }
@@ -173,12 +181,12 @@ export class ObjectInputAssets implements InputAssetPort {
    * find. Only this caller owns the entry — a caller that joined an in-flight read
    * never stored it, and so must not delete it.
    */
-  private async fetch(ref: string, target: InputRef): Promise<Uint8Array> {
+  private async fetch(ref: string, target: InputRef, assets: AssetStorePort): Promise<Uint8Array> {
     try {
       // The store's own org-scoped resolve → row → `get`, left to propagate: an
       // `S3RequestError` or a pg error is a deployment that cannot answer, and the
       // caller must hear it as one.
-      const bytes = await getAssetStore(this.env).readAsset(target.slug, target.name);
+      const bytes = await assets.readAsset(target.slug, target.name);
       if (bytes === undefined) {
         throw absent(ref, "no campaign, asset row or object in this org answers it.");
       }

@@ -219,6 +219,22 @@ describe("ObjectInputAssets — the per-run memo (PT-4d)", () => {
     expect(get).toHaveBeenCalledTimes(2);
   });
 
+  test("a store that cannot even be built is not cached: the next read, once configured, retries", async () => {
+    await new ObjectAssetStore(db, store, ORG).writeAsset(SLUG, NAME, BYTES);
+    const inputs = new ObjectInputAssets(env, { memo: true });
+    // A malformed switch makes the registry throw SYNCHRONOUSLY while it builds.
+    process.env.OBJECT_STORE = "not-a-backend";
+    resetAssetStore();
+    await expect(inputs.read(REF)).rejects.toThrow();
+    // Configured again: the same memoised reader must reach the store, not replay
+    // a rejection it cached before the promise was ever stored.
+    process.env.OBJECT_STORE = "s3";
+    resetAssetStore();
+    const get = vi.spyOn(store, "get");
+    expect(Buffer.from((await inputs.read(REF))!)).toEqual(BYTES);
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
   test("an unsafe ref is not cached either — it costs no store call at all", async () => {
     const inputs = new ObjectInputAssets(env, { memo: true });
     expect(await inputs.read("../escape.png")).toBeUndefined();
