@@ -69,12 +69,18 @@ fi
 # "Object store (once, owner)", step 3). Checked here too, for the same reason and
 # the same way: weed boots with an unreadable identities file, the bucket never
 # appears and the app has nothing to talk to, so this must fail before the build
-# and not after it.
+# and not after it. Length is not enough on its own: the initContainer printf's
+# these values into JSON string literals, so a quote, a backslash or a newline
+# would pass a length check and then leave a corrupt s3.json behind.
 echo "==> object-store secret"
 for key in admin-access-key admin-secret-key app-access-key app-secret-key; do
   SECRET_LEN=$(remote "kubectl -n $NS get secret seaweedfs-s3 -o jsonpath={.data.$key} 2>/dev/null | base64 -d 2>/dev/null | wc -c" | tr -d ' ')
   if [ "${SECRET_LEN:-0}" -lt 32 ]; then
     echo "deploy.sh: secret seaweedfs-s3 is missing, has no \"$key\" key, or that value is shorter than 32 bytes; create it (deploy/staging/README.md, \"Object store (once, owner)\", step 3) and deploy again." >&2
+    exit 1
+  fi
+  if ! remote "kubectl -n $NS get secret seaweedfs-s3 -o jsonpath={.data.$key} 2>/dev/null | base64 -d 2>/dev/null | grep -Eqx '[0-9a-f]+'"; then
+    echo "deploy.sh: secret seaweedfs-s3 key $key must be lowercase hex (README \"Object store (once, owner)\" step 3)" >&2
     exit 1
   fi
 done

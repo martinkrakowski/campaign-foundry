@@ -91,7 +91,9 @@ ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging create 
 Four steps, in this order. `deploy.sh` refuses to deploy until **steps 1 and 3**
 are done and until the `midnight-ca` ClusterIssuer exists — it checks all three
 before it builds anything, because each one only fails visibly after a build and
-a rollout. The first deploy after step 2 is the first that can pull the image.
+a rollout. It also refuses a key that is not lowercase hex: the Pod writes these
+values straight into JSON, so a quote or a newline in one would leave a corrupt
+`s3.json`. The first deploy after step 2 is the first that can pull the image.
 
 **1. The data directory.** The object data (the `.dat` volumes) lives on the
 `/mnt/pool` mergerfs, 18 TB free; the master's metadata, the `.idx` files and the
@@ -160,6 +162,24 @@ cluster API, not fetched over the network, so an intercepted TLS connection
 cannot plant a trust root — the same reasoning as the Harbor CA above. Never
 reach for `curl -k`, which proves nothing about who signed the response; delete
 the file once it is imported.
+
+### What may reach the store (every deploy)
+
+`weed server` binds every listener to `0.0.0.0`: the S3 gateway on 8333, and
+beside it the master, the filer, the gRPC ports and the volume port, all
+unauthenticated HTTP. Hiding them from the Service and the Ingress is not enough,
+because any pod in the cluster can still dial the Pod IP directly and skip S3 auth.
+So `seaweedfs.yaml` carries a NetworkPolicy `seaweedfs` with **one** ingress rule:
+TCP 8333 only, from pods in this namespace (the app's `api` container and the
+`s3-bootstrap` Job) and from Traefik in `kube-system`. Egress is not restricted, so
+the app still resolves and still reaches Postgres and Kafka. The Pod's own
+components talk over loopback, which no policy touches, and the kubelet's readiness
+probe comes from the node, which k3s's kube-router always allows.
+
+After a deploy the orchestrator verifies it from a throwaway pod, because a policy
+that is wrong in the permissive direction is silent: the `curl` on 8888 **must time
+out**, and the `curl` on 8333 must answer **200**. The first is the check that
+matters — if it answers anything at all, something is reaching past the signature.
 
 ### Resend key (once, owner)
 
