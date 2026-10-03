@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { cachePrefix, inputKey, inputPrefix, renderPrefix } from "../object-keys.js";
+import { cachePrefix, inputKey, inputPrefix, packagePrefix, renderPrefix } from "../object-keys.js";
 
 const ORG = "local";
 const CAMPAIGN = "3f1b7a52-0c4d-4a6e-9b21-5d8e7c6a5b4c";
@@ -121,6 +121,90 @@ describe("the render and cache prefixes (PT-4e)", () => {
         expect(message).toMatch(/^Refusing an object key: the (org|campaign) id/);
         expect(message).not.toContain(MARKER);
       });
+    }
+  });
+});
+
+// PT-4h1. The package prefix is the fourth member of the same family, and the
+// only thing that makes it a PREFIX rather than a string is the trailing `/`:
+// everything below it is a `<platformId>/<generation>/…` key, and `deletePrefix`
+// at commit time is what empties an older generation.
+describe("the package prefix (PT-4h1)", () => {
+  test("packagePrefix is the render prefix with `packages` in place of `renders`", () => {
+    expect(packagePrefix(ORG, CAMPAIGN)).toBe(`org/${ORG}/campaign/${CAMPAIGN}/packages/`);
+  });
+
+  test("the trailing slash is load-bearing: a package key starts with it, and nothing else does", () => {
+    const prefix = packagePrefix(ORG, CAMPAIGN);
+    // The shape below it, from `ObjectPackageStore`'s own layout: a platform, a
+    // generation and a file.
+    const key = `${prefix}instagram-feed/0000175304210000-aaaaaaaaaaaa.../manifest.json`;
+    expect(key.startsWith(prefix)).toBe(true);
+    expect(key.startsWith(prefix.slice(0, -1))).toBe(true);
+    // The failure the separator prevents: without it this prefix also matches a
+    // sibling namespace, and the sweep at commit time would empty it too.
+    const withoutSlash = prefix.slice(0, -1);
+    expect(
+      `org/${ORG}/campaign/${CAMPAIGN}/packages-archive/facebook/x/manifest.json`.startsWith(
+        withoutSlash,
+      ),
+    ).toBe(true);
+    expect(
+      `org/${ORG}/campaign/${CAMPAIGN}/packages-archive/facebook/x/manifest.json`.startsWith(
+        prefix,
+      ),
+    ).toBe(false);
+  });
+
+  test("it is a SIBLING of the renders prefix, so neither can empty the other", () => {
+    // A package holds COPIES. If `packages` were a subtree of `renders/`, a
+    // campaign's renders and its packages would share one namespace and every
+    // sweep at commit time would be a candidate for deleting renders.
+    expect(packagePrefix(ORG, CAMPAIGN).startsWith(renderPrefix(ORG, CAMPAIGN))).toBe(false);
+    expect(renderPrefix(ORG, CAMPAIGN).startsWith(packagePrefix(ORG, CAMPAIGN))).toBe(false);
+    expect(packagePrefix(ORG, CAMPAIGN).startsWith(inputPrefix(ORG, CAMPAIGN))).toBe(false);
+  });
+
+  test("two campaigns never share a package prefix, and two orgs never share one either", () => {
+    const other = "00000000-0000-4000-8000-000000000001";
+    expect(packagePrefix(ORG, CAMPAIGN)).not.toBe(packagePrefix(ORG, other));
+    expect(packagePrefix(ORG, CAMPAIGN)).not.toBe(packagePrefix("other", CAMPAIGN));
+  });
+
+  describe("every id is checked against its OWN pattern here too", () => {
+    const MARKER = "MARKER-7f3a";
+    const refused: readonly (readonly [string, () => unknown])[] = [
+      ["a package prefix with a missing org id", () => packagePrefix("", CAMPAIGN)],
+      ["a package prefix with a slug for a campaign id", () => packagePrefix(ORG, MARKER)],
+      [
+        "a package prefix with an org id holding a slash",
+        () => packagePrefix(`acme/../${MARKER}`, CAMPAIGN),
+      ],
+      [
+        "a package prefix with a campaign id over the column's shape",
+        () => packagePrefix(ORG, `${MARKER}-0000-0000-0000`),
+      ],
+    ];
+
+    for (const [what, call] of refused) {
+      test(`${what} is refused, naming the parameter and not the value`, () => {
+        let thrown: unknown;
+        try {
+          call();
+        } catch (error) {
+          thrown = error;
+        }
+        expect(thrown).toBeInstanceOf(Error);
+        const message = (thrown as Error).message;
+        expect(message).toMatch(/^Refusing an object key: the (org|campaign) id/);
+        expect(message).not.toContain(MARKER);
+      });
+    }
+  });
+
+  test("an org id of the shapes Better Auth mints is accepted here too", () => {
+    for (const orgId of ["local", "Acme", "acme_1", "a-b-C_9"]) {
+      expect(packagePrefix(orgId, CAMPAIGN)).toBe(`org/${orgId}/campaign/${CAMPAIGN}/packages/`);
     }
   });
 });

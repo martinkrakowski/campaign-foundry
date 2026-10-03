@@ -3,3 +3,4 @@
 export * from "./FileSystemExporter.js";
 export * from "./FileSystemPackageStore.js";
 export * from "./ObjectExporter.js";
+export * from "./ObjectPackageStore.js";
