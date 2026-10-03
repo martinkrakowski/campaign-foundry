@@ -34,8 +34,8 @@ function decodeXmlText(value: string): string {
   return value.replace(
     /&(?:#(\d+)|#x([\dA-Fa-f]+)|([A-Za-z]+));/g,
     (match, decimal: string, hex: string, name: string) => {
-      if (decimal !== undefined) return String.fromCodePoint(Number(decimal));
-      if (hex !== undefined) return String.fromCodePoint(Number.parseInt(hex, 16));
+      if (decimal !== undefined) return codePoint(Number(decimal));
+      if (hex !== undefined) return codePoint(Number.parseInt(hex, 16));
       // `Object.hasOwn`, not `in` and not `??`: an entity name is only
       // `[A-Za-z]+`, so `&toString;` is a well-formed entity whose name is an
       // INHERITED property — `PREDEFINED_ENTITIES.toString` would hand back a
@@ -44,6 +44,27 @@ function decodeXmlText(value: string): string {
       return match;
     },
   );
+}
+
+/**
+ * A character reference as the character it names, or a refusal.
+ *
+ * `String.fromCodePoint` throws a bare `RangeError` past U+10FFFF, and that
+ * RangeError would surface out of `list()` with no hint that a listing was the
+ * thing at fault. So the range is checked here and refused in this parser's own
+ * words.
+ *
+ * `Number.isInteger` comes first and is not redundant: `\d+` cannot express a
+ * fraction, but it CAN overflow — `&#` plus four hundred nines parses to
+ * `Infinity`, which is not an integer and which `fromCodePoint` would also
+ * refuse. There is no lower bound to check, because `\d+` and `[\dA-Fa-f]+`
+ * cannot spell a negative number.
+ */
+function codePoint(value: number): string {
+  if (!Number.isInteger(value) || value > 0x10ffff) {
+    throw new Error("Refusing a listing with an out-of-range character reference.");
+  }
+  return String.fromCodePoint(value);
 }
 
 /** The decoded text of the first `<tag>` in `xml`, or undefined when it has none. */

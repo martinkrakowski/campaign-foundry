@@ -154,6 +154,36 @@ describe("S3ObjectStore.list", () => {
     }
   });
 
+  test("a character reference past U+10FFFF is refused, not a bare RangeError", async () => {
+    // `String.fromCodePoint` throws a RangeError for all three of these, and that
+    // RangeError would otherwise surface out of `list()` naming nothing about a
+    // listing. The 400-digit one parses to `Infinity`, which is how the
+    // `Number.isInteger` half of the guard earns its place.
+    for (const reference of ["&#x110000;", "&#1114112;", `&#${"9".repeat(400)};`]) {
+      const { fetchImpl } = canned(
+        xmlResponse(
+          result(
+            `<Contents><Key>a${reference}b</Key><Size>1</Size><LastModified>2026-10-03T09:00:00.000Z</LastModified></Contents>`,
+            "<IsTruncated>false</IsTruncated>",
+          ),
+        ),
+      );
+      await expect(store(fetchImpl).list("campaigns/c1/")).rejects.toThrow(
+        "Refusing a listing with an out-of-range character reference.",
+      );
+    }
+    // The last code point itself is still fine, so the guard is a bound and not a ban.
+    const { fetchImpl } = canned(
+      xmlResponse(
+        result(
+          "<Contents><Key>a&#x10FFFF;b</Key><Size>1</Size><LastModified>2026-10-03T09:00:00.000Z</LastModified></Contents>",
+          "<IsTruncated>false</IsTruncated>",
+        ),
+      ),
+    );
+    expect((await store(fetchImpl).list("campaigns/c1/"))[0]?.key).toBe("a\u{10FFFF}b");
+  });
+
   test("a Contents block with no Key, Size or LastModified is refused", async () => {
     const { fetchImpl } = canned(xmlResponse(result("<Contents><Size>5</Size></Contents>")));
     await expect(store(fetchImpl).list("campaigns/c1/")).rejects.toThrow(

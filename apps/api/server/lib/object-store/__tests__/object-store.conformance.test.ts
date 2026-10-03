@@ -128,6 +128,21 @@ function describeConformance({ real }: { real: boolean }): readonly string[] {
         );
       });
 
+      it("a Node Buffer body is stored as exactly its bytes", async () => {
+        // `Buffer` extends `Uint8Array`, but `Buffer.prototype.slice` is
+        // `subarray` — so an adapter that copies with `slice()` copies NOTHING
+        // here, and `head().size` answers 8192 with the rest of Node's shared
+        // pool in the bucket. `Buffer` is what `fs.readFile`, `Buffer.concat`,
+        // sharp and ffmpeg hand back, so this is the shape the next lane puts.
+        const buffer = Buffer.from([1, 2, 3]);
+        await store.put(key("buffer.bin"), buffer, { contentType: "application/octet-stream" });
+        expect((await store.head(key("buffer.bin")))?.size).toBe(3);
+        expect((await store.get(key("buffer.bin")))?.bytes).toEqual(new Uint8Array([1, 2, 3]));
+        // And the caller's own buffer stays the caller's to keep writing to.
+        buffer[0] = 250;
+        expect((await store.get(key("buffer.bin")))?.bytes).toEqual(new Uint8Array([1, 2, 3]));
+      });
+
       it("copy duplicates an object under a new key and leaves the source", async () => {
         await store.put(key("src.png"), BYTES, { contentType: "image/png" });
         await store.copy(key("src.png"), key("dst.png"));

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { objectStoreSettings, type S3Settings } from "../../config.js";
-import { S3ObjectStore } from "../S3ObjectStore.js";
+import { S3ObjectStore, S3RequestError } from "../S3ObjectStore.js";
 
 /**
  * The three values that must never reach a log, a thrown message or a `cause`
@@ -209,6 +209,54 @@ describe("the object store never echoes a credential", () => {
       }
       expect((error as { cause?: unknown }).cause).toBeUndefined();
     }
+  });
+
+  test("a transport failure never leaks the endpoint through a cause", async () => {
+    // Two rejections, because the two halves of `transportCode` are different
+    // shapes: undici's real one carries `code`, and a caller-supplied fetch can
+    // reject with a bare TypeError that carries nothing at all.
+    const rejections: readonly unknown[] = [
+      new TypeError("fetch failed", {
+        cause: Object.assign(new Error("getaddrinfo ENOTFOUND marker-host-7f3a.invalid"), {
+          code: "ENOTFOUND",
+        }),
+      }),
+      new TypeError("fetch failed"),
+    ];
+    const thrown: unknown[] = [];
+    for (const rejection of rejections) {
+      const rejecting: typeof fetch = async () => {
+        throw rejection;
+      };
+      const s3 = new S3ObjectStore({ settings: settings(), fetchImpl: rejecting });
+      for (const call of [
+        (s: S3ObjectStore) => s.get("campaigns/c1/a.png"),
+        (s: S3ObjectStore) => s.put("campaigns/c1/a.png", new Uint8Array([1])),
+        (s: S3ObjectStore) => s.head("campaigns/c1/a.png"),
+        (s: S3ObjectStore) => s.delete("campaigns/c1/a.png"),
+        (s: S3ObjectStore) => s.copy("campaigns/c1/a.png", "campaigns/c1/b.png"),
+        (s: S3ObjectStore) => s.list("campaigns/c1/"),
+      ]) {
+        const error = await call(s3).then(
+          () => undefined,
+          (rejected: unknown) => rejected,
+        );
+        expect(error, "a rejected fetch must refuse").toBeInstanceOf(Error);
+        thrown.push(error);
+      }
+    }
+    expect(thrown).toHaveLength(rejections.length * 6);
+    for (const error of thrown) {
+      for (const marker of MARKERS) {
+        expect(errorChain(error)).not.toContain(marker);
+      }
+      // The whole chain, not just the top: an unwrapped `cause` is where a host
+      // survives, and `fetch failed` on its own says nothing worth hiding.
+      expect((error as { cause?: unknown }).cause).toBeUndefined();
+    }
+    // The one thing that does survive is the errno, and it is a field.
+    expect((thrown[0] as S3RequestError).code).toBe("ENOTFOUND");
+    expect((thrown[6] as S3RequestError).code).toBeUndefined();
   });
 
   test("no console argument carries a marker, and the detector is proved on a control", async () => {

@@ -86,6 +86,23 @@
         "second page is fetched"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/S3ObjectStore.ts",
+      "before": "      body: body === undefined ? undefined : new Uint8Array(body).buffer,",
+      "after": "      body: body === undefined ? undefined : body.slice().buffer,",
+      "because": "the shared-Buffer-pool upload comes back (fix round 1, HIGH). `Buffer` extends `Uint8Array` but `Buffer.prototype.slice` is `subarray`, so on a Buffer the copy is a VIEW and `.buffer` on it is the whole 8 KiB pool: `Buffer.from([1,2,3]).slice().buffer.byteLength` is 8192, other memory included. Nothing downstream notices, because an S3 header-auth request is signed `X-Amz-Content-Sha256: UNSIGNED-PAYLOAD` and the store never hashes what arrived — `head().size` reads 8192 and `get()` hands back another process's bytes. `fs.readFile`, `Buffer.concat`, sharp and ffmpeg all produce Buffers, so the next lane hits this on its first PUT. The offline test reads the captured request's own byte length, which is 8192 under the mutation and 3 without it; the conformance suite's Buffer case checks the same thing end to end on a real store.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/S3ObjectStore.test.ts",
+        "-t",
+        "shared pool"
+      ],
+      "verdict": "caught"
     }
   ]
 }

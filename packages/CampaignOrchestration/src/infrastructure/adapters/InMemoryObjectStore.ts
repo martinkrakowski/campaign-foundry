@@ -14,6 +14,21 @@ import {
 /** S3's own `max-keys` ceiling, which the fake pages at by default. */
 const DEFAULT_LIST_PAGE_SIZE = 1000;
 
+/**
+ * A private copy of `bytes`, so a stored object is detached from the buffer it
+ * was written from and a read never hands back a view of the store's own memory.
+ *
+ * `new Uint8Array(bytes)` and NOT `bytes.slice()`: `Buffer` extends `Uint8Array`
+ * but `Buffer.prototype.slice` is `subarray`, so on a Buffer — which is what
+ * `fs.readFile`, `Buffer.concat`, sharp and ffmpeg all return — `slice()`
+ * aliases the caller's buffer instead of copying it. A fake that aliases would
+ * make a stored object change under the test that just wrote it, and would hide
+ * the same defect in a real adapter that did the same thing.
+ */
+function detached(bytes: Uint8Array): Uint8Array {
+  return new Uint8Array(bytes);
+}
+
 interface StoredObject {
   readonly bytes: Uint8Array;
   readonly contentType?: string;
@@ -67,8 +82,7 @@ export class InMemoryObjectStore implements ObjectStorePort {
       throw new ObjectExistsError(key);
     }
     this.objects.set(key, {
-      // Copied, so a caller reusing its buffer cannot change a stored object.
-      bytes: bytes.slice(),
+      bytes: detached(bytes),
       contentType: options.contentType,
       etag: createHash("md5").update(bytes).digest("hex"),
       lastModified: new Date(this.now()),
@@ -79,7 +93,7 @@ export class InMemoryObjectStore implements ObjectStorePort {
     assertObjectKey(key);
     const stored = this.objects.get(key);
     if (stored === undefined) return undefined;
-    return { bytes: stored.bytes.slice(), contentType: stored.contentType };
+    return { bytes: detached(stored.bytes), contentType: stored.contentType };
   }
 
   async head(key: ObjectKey): Promise<ObjectMetadata | undefined> {
@@ -129,7 +143,7 @@ export class InMemoryObjectStore implements ObjectStorePort {
     if (stored === undefined) {
       throw new Error("Cannot copy an object that does not exist.");
     }
-    this.objects.set(dstKey, { ...stored, bytes: stored.bytes.slice() });
+    this.objects.set(dstKey, { ...stored, bytes: detached(stored.bytes) });
   }
 
   async presignGet(key: ObjectKey, options: PresignGetOptions): Promise<string> {

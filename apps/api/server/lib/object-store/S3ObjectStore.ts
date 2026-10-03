@@ -19,12 +19,16 @@ const DEFAULT_LIST_PAGE_SIZE = 1000;
 /** A non-2xx the store did not already map onto `undefined` or `ObjectExistsError`. */
 export class S3RequestError extends Error {
   readonly status: number;
-  /** The body's `<Code>`, when it had one — a HEAD response never does. */
+  /** The body's `<Code>`, or the errno code when the store was never reached. */
   readonly code?: string;
 
   constructor(operation: string, status: number, code?: string) {
     super(
-      `The object store answered ${status} to ${operation}${code === undefined ? "" : ` (${code})`}.`,
+      // Status 0 is the one status that never came from the store: the transport
+      // failed first, so there is nothing to answer with but the operation.
+      status === 0
+        ? `The object store could not be reached for ${operation}${code === undefined ? "" : ` (${code})`}.`
+        : `The object store answered ${status} to ${operation}${code === undefined ? "" : ` (${code})`}.`,
     );
     this.name = "S3RequestError";
     this.status = status;
@@ -98,9 +102,8 @@ export class S3ObjectStore implements ObjectStorePort {
     const headers: Record<string, string> = {};
     if (options.contentType !== undefined) headers["Content-Type"] = options.contentType;
     if (options.ifNoneMatch !== undefined) headers["If-None-Match"] = options.ifNoneMatch;
-    // The Uint8Array itself, not a Blob or a stream: aws4fetch hashes only a
-    // string, an ArrayBuffer or an ArrayBufferView.
-    const response = await this.send(this.objectUrl(key), "PUT", headers, bytes);
+    // `send` makes the exact-size copy; see the note on the body there.
+    const response = await this.send("put", this.objectUrl(key), "PUT", headers, bytes);
     if (response.status === 412) {
       // Drained before the throw so the connection goes back to the pool; a
       // `cancel()` on an unread body is not the same promise everywhere.
@@ -112,7 +115,7 @@ export class S3ObjectStore implements ObjectStorePort {
 
   async get(key: ObjectKey): Promise<ObjectContent | undefined> {
     assertObjectKey(key);
-    const response = await this.send(this.objectUrl(key), "GET", {});
+    const response = await this.send("get", this.objectUrl(key), "GET", {});
     if (response.status === 404) return undefined;
     if (!response.ok) await this.fail("get", response);
     return {
@@ -123,7 +126,7 @@ export class S3ObjectStore implements ObjectStorePort {
 
   async head(key: ObjectKey): Promise<ObjectMetadata | undefined> {
     assertObjectKey(key);
-    const response = await this.send(this.objectUrl(key), "HEAD", {});
+    const response = await this.send("head", this.objectUrl(key), "HEAD", {});
     if (response.status === 404) return undefined;
     if (!response.ok) await this.fail("head", response);
     const contentLength = response.headers.get("content-length");
@@ -136,7 +139,7 @@ export class S3ObjectStore implements ObjectStorePort {
 
   async delete(key: ObjectKey): Promise<void> {
     assertObjectKey(key);
-    const response = await this.send(this.objectUrl(key), "DELETE", {});
+    const response = await this.send("delete", this.objectUrl(key), "DELETE", {});
     if (response.status === 404) return;
     if (!response.ok) await this.fail("delete", response);
   }
@@ -144,7 +147,7 @@ export class S3ObjectStore implements ObjectStorePort {
   async copy(srcKey: ObjectKey, dstKey: ObjectKey): Promise<void> {
     assertObjectKey(srcKey);
     assertObjectKey(dstKey);
-    const response = await this.send(this.objectUrl(dstKey), "PUT", {
+    const response = await this.send("copy", this.objectUrl(dstKey), "PUT", {
       "x-amz-copy-source": `/${this.bucket}/${srcKey}`,
     });
     if (!response.ok) await this.fail("copy", response);
@@ -161,7 +164,7 @@ export class S3ObjectStore implements ObjectStorePort {
       url.searchParams.set("max-keys", String(this.listPageSize));
       if (continuationToken !== undefined)
         url.searchParams.set("continuation-token", continuationToken);
-      const response = await this.send(url, "GET", {});
+      const response = await this.send("list", url, "GET", {});
       if (!response.ok) await this.fail("list", response);
       const page = parseListObjectsV2(await response.text());
       listed.push(...page.contents);
@@ -207,6 +210,7 @@ export class S3ObjectStore implements ObjectStorePort {
   }
 
   private async send(
+    operation: string,
     url: URL,
     method: string,
     headers: Record<string, string>,
@@ -215,15 +219,33 @@ export class S3ObjectStore implements ObjectStorePort {
     const request = await this.client.sign(url, {
       method,
       headers,
-      // The bytes' own `ArrayBuffer`, not the view and never a Blob or a stream:
-      // aws4fetch hashes only a string, an ArrayBuffer or an ArrayBufferView,
-      // and the `BodyInit` this repo's lib declares does not accept a
-      // `Uint8Array`. `slice()` is what makes the buffer EXACTLY the bytes — the
-      // same bytes `head().size` and the same bytes a caller still holds — and
-      // it is a copy of a buffer the caller has already handed over.
-      body: body === undefined ? undefined : body.slice().buffer,
+      // A COPY of exactly these bytes, into an ArrayBuffer of exactly their
+      // length — never the caller's view and never a Blob or a stream (aws4fetch
+      // hashes only a string, an ArrayBuffer or an ArrayBufferView).
+      //
+      // `new Uint8Array(body)`, and emphatically NOT `body.slice()`: `Buffer`
+      // extends `Uint8Array` but `Buffer.prototype.slice` is `subarray`, so on a
+      // Buffer it returns a VIEW, and `.buffer` on that view is the whole shared
+      // 8 KiB pool — `Buffer.from([1,2,3]).slice().buffer.byteLength` is 8192,
+      // pool contents included. Nothing would notice: an S3 header-auth request
+      // is signed `X-Amz-Content-Sha256: UNSIGNED-PAYLOAD`, so the store never
+      // hashes what arrived and accepts the pool silently. `head().size` would
+      // then read 8192 and `get()` would hand back other processes' memory, and
+      // `fs.readFile`, `Buffer.concat`, sharp and ffmpeg all produce Buffers.
+      // The TypedArray constructor copies whatever the input's `slice` does.
+      body: body === undefined ? undefined : new Uint8Array(body).buffer,
     });
-    return this.fetchImpl(request);
+    try {
+      return await this.fetchImpl(request);
+    } catch (transport: unknown) {
+      // undici reports a transport failure as `TypeError: fetch failed` with a
+      // `cause` naming the syscall and the host — and the host here is an
+      // in-cluster address, which a log has no business describing. Nothing from
+      // the cause survives: not its message, not the host, and not the error
+      // itself as a `cause`, because a chain is still a log. Only the errno code
+      // is kept, as a field, where it is a diagnosis and not a disclosure.
+      throw new S3RequestError(operation, 0, transportCode(transport));
+    }
   }
 
   /**
@@ -246,4 +268,15 @@ function amzDate(milliseconds: number): string {
 /** S3 quotes an ETag; the port's `etag` is unquoted, so a fake and a store agree. */
 function stripQuotes(value: string | null): string | undefined {
   return value === null ? undefined : value.replace(/^"(.*)"$/, "$1");
+}
+
+/**
+ * The errno code out of a rejected fetch's cause — `ENOTFOUND`, `ECONNREFUSED`,
+ * `CERT_HAS_EXPIRED` — and nothing else. A code names a failure; the cause's
+ * message names the host and the syscall, which is a disclosure.
+ */
+function transportCode(error: unknown): string | undefined {
+  const cause: unknown = (error as { cause?: unknown } | null)?.cause;
+  const code: unknown = (cause as { code?: unknown } | null | undefined)?.code;
+  return typeof code === "string" ? code : undefined;
 }

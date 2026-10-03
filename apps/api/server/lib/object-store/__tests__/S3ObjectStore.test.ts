@@ -222,6 +222,41 @@ describe("S3ObjectStore failures", () => {
     expect(requests).toHaveLength(1);
   });
 
+  test("a Buffer body is uploaded as exactly its bytes, never Node's shared pool", async () => {
+    const { requests, fetchImpl } = canned(new Response(null, { status: 200 }));
+    // `Buffer.prototype.slice` is `subarray`, so the copy that used to be made
+    // here was a VIEW and `.buffer` on it was the whole 8 KiB pool. Nothing
+    // downstream would have noticed: an S3 header-auth request is signed
+    // UNSIGNED-PAYLOAD, so the store never hashes what arrived.
+    await store({ fetchImpl }).put("campaigns/c1/renders/a.bin", Buffer.from([1, 2, 3]));
+    const sent = await requests[0]?.arrayBuffer();
+    expect(sent?.byteLength).toBe(3);
+  });
+
+  test("a transport failure is refused, naming the operation and no host", async () => {
+    // undici's shape, verbatim: the real cause names the syscall AND the host,
+    // and `S3_ENDPOINT` is an in-cluster address.
+    const rejecting: typeof fetch = async () => {
+      throw new TypeError("fetch failed", {
+        cause: Object.assign(new Error("getaddrinfo ENOTFOUND marker-host-7f3a.invalid"), {
+          code: "ENOTFOUND",
+        }),
+      });
+    };
+    const error = await store({ fetchImpl: rejecting })
+      .get("campaigns/c1/renders/hero.png")
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(S3RequestError);
+    expect((error as S3RequestError).status).toBe(0);
+    // The errno is a diagnosis and stays; the host is a disclosure and does not.
+    expect((error as S3RequestError).code).toBe("ENOTFOUND");
+    expect((error as Error).message).toBe(
+      "The object store could not be reached for get (ENOTFOUND).",
+    );
+    expect((error as Error).message).not.toContain("marker-host-7f3a");
+    expect((error as { cause?: unknown }).cause).toBeUndefined();
+  });
+
   test("with no injected fetch it falls back to the platform one, without calling it", async () => {
     // presignGet signs and returns; it never fetches. So this proves the default
     // was taken and is callable, with no socket opened — the alternative
