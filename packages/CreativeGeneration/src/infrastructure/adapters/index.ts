@@ -10,6 +10,7 @@ export * from "./FileSystemSceneAssetResolver.js";
 export * from "./FireflyImageGenerator.js";
 export * from "./GeminiImageGenerator.js";
 export * from "./NodeCanvasCompositor.js";
+export * from "./ObjectBackgroundCache.js";
 export * from "./OpenRouterCopyGenerator.js";
 export * from "./OpenRouterImageGenerator.js";
 export * from "./ProceduralBackgroundGenerator.js";

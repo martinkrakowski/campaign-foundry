@@ -262,6 +262,7 @@ bounded_contexts:
           - FireflyImageGenerator
           - GeminiImageGenerator
           - NodeCanvasCompositor
+          - ObjectBackgroundCache
           - OpenRouterCopyGenerator
           - OpenRouterImageGenerator
           - ProceduralBackgroundGenerator
@@ -315,6 +316,7 @@ bounded_contexts:
         adapters:
           - FileSystemExporter
           - FileSystemPackageStore
+          - ObjectExporter
   - name: ui
     type: generic
     description: >

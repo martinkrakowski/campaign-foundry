@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/pipeline.ts",
-      "before": "    exporter: new FileSystemExporter(env.outputRoot),",
-      "after": "    exporter: new FileSystemExporter(process.env.OUTPUT_DIR ?? \"output\"),",
-      "because": "the exporter resolves OUTPUT_DIR at build time instead of using the environment captured at enqueue, so a run built after OUTPUT_DIR moved writes into the new directory (the #567 mechanism).",
+      "before": "  if (objectStore() === \"fs\") return new FileSystemExporter(env.outputRoot);",
+      "after": "  if (objectStore() === \"fs\") return new FileSystemExporter(process.env.OUTPUT_DIR ?? \"output\");",
+      "because": "the exporter resolves OUTPUT_DIR at build time instead of using the environment captured at enqueue, so a run built after OUTPUT_DIR moved writes into the new directory (the #567 mechanism). Re-anchored in PT-4e: the fs exporter is now chosen by the `exporter` helper beside `inputAssets` rather than inline in the use case's dependency literal, so the same claim is made at the line that makes it. The claim, the mutation and the test are unchanged.",
       "command": [
         "yarn",
         "vitest",

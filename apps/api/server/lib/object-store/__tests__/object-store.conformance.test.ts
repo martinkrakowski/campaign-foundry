@@ -143,6 +143,32 @@ function describeConformance({ real }: { real: boolean }): readonly string[] {
         expect((await store.get(key("buffer.bin")))?.bytes).toEqual(new Uint8Array([1, 2, 3]));
       });
 
+      // PT-4e. A motion variant's clip is 3–8 MiB and it is already IN MEMORY
+      // before the exporter sees it — there is no multipart in this store and
+      // none is needed, which is exactly why the size is the thing under test:
+      // a single PUT of a body this size is the only large transfer the app
+      // makes, and nothing else in this suite crosses a megabyte.
+      it("an ~8 MiB body round-trips byte-identical", async () => {
+        // PATTERNED, not zeros: a body of zeros is the one buffer that can be
+        // short, doubled or replaced by a same-length run of zeroes and still
+        // compare equal. `i % 251` makes every byte position carry its own
+        // index-dependent value, so any offset, truncation or zero-fill shows up
+        // as a difference rather than as nothing.
+        const body = Buffer.allocUnsafe(8 * 1024 * 1024);
+        for (let i = 0; i < body.length; i++) body[i] = i % 251;
+        await store.put(key("clip.mp4"), body, { contentType: "video/mp4" });
+
+        const read = await store.get(key("clip.mp4"));
+        expect(read).toBeDefined();
+        // `Buffer.equals`, never `toEqual`: an 8M-element structural comparison
+        // is slow and, on failure, prints a diff no human reads.
+        expect(Buffer.from(read!.bytes).equals(body)).toBe(true);
+        // The size, so a body that arrived whole but short is caught even if a
+        // future read happened to return a same-length buffer of zeroes.
+        expect((await store.head(key("clip.mp4")))?.size).toBe(body.length);
+        expect(read!.contentType).toBe("video/mp4");
+      });
+
       it("copy duplicates an object under a new key and leaves the source", async () => {
         await store.put(key("src.png"), BYTES, { contentType: "image/png" });
         await store.copy(key("src.png"), key("dst.png"));
