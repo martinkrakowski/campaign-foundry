@@ -207,7 +207,7 @@ kind: Ingress
 metadata:
   name: campaign-foundry
   annotations:
-    cert-manager.io/cluster-issuer: selfsigned-issuer
+    cert-manager.io/cluster-issuer: midnight-ca
     traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
 spec:
   ingressClassName: traefik

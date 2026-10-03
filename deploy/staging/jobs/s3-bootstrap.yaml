@@ -1,0 +1,75 @@
+# Create the one bucket the app uses (D201: `campaign-foundry`, private, the same
+# C7 key layout the file store had). Runs before the app rolls out, on every
+# deploy: the bucket PUT answers 200 when it creates it and 409 when it is already
+# there, so the Job is idempotent and the same manifest can be applied twice.
+#
+# The credentials go in a curl config file on an emptyDir, never in argv: argv is
+# world-readable through `ps` for the life of the request, and the admin secret
+# can write and delete every bucket.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: s3-bootstrap
+  namespace: campaign-foundry-staging
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+      containers:
+        - name: bootstrap
+          image: registry.midnight.lan/library/seaweedfs:4.48
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              umask 077
+              mkdir -p /tmp/aws
+              printf 'user = "%s:%s"\n' "$ADMIN_ACCESS_KEY" "$ADMIN_SECRET_KEY" > /tmp/aws/curl.conf
+              # us-east-1 is meaningless to SeaweedFS and everything else to S3,
+              # but the signature is computed over it, so it must be the same
+              # region the app signs with (S3_REGION). --max-time bounds one try,
+              # so a store that accepts the connection and then stalls costs one
+              # retry rather than the whole Job's deadline.
+              try=1
+              while [ "$try" -le 60 ]; do
+                code=$(curl -K /tmp/aws/curl.conf --aws-sigv4 aws:amz:us-east-1:s3 \
+                  --max-time 10 -s -o /dev/null -w '%{http_code}' \
+                  -X PUT http://seaweedfs-s3:8333/campaign-foundry) || code=000
+                case "$code" in
+                  200 | 409)
+                    echo "bucket campaign-foundry is present ($code), attempt $try"
+                    exit 0
+                    ;;
+                esac
+                try=$((try + 1))
+                sleep 1
+              done
+              echo "s3-bootstrap: the bucket PUT answered neither 200 nor 409 in 60 tries (last $code); is seaweedfs-s3 up and is the admin key right?" >&2
+              exit 1
+          env:
+            - name: ADMIN_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3
+                  key: admin-access-key
+            - name: ADMIN_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3
+                  key: admin-secret-key
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: aws-config
+              mountPath: /tmp/aws
+      volumes:
+        - name: aws-config
+          emptyDir: {}

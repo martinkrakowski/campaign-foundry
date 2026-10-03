@@ -1,0 +1,268 @@
+# The staging object store (D201, D205): SeaweedFS, one `weed server` pod that is
+# its own master, volume server, filer and S3 gateway. Versioning and object lock
+# stay off (seaweedfs#8073): staging must behave like B2 or a cloud bucket, not
+# like a store with extra features.
+#
+# Reachable two ways, and only two: in-cluster on the Service `seaweedfs-s3` (the
+# API signs against this) and from the owner's browser on https://s3.midnight.lan,
+# path-style, so a presigned URL is the same URL either side. The filer's and the
+# master's own HTTP ports are unauthenticated and appear in no Service and no
+# Ingress, so nothing but the signed S3 port is reachable from outside the Pod.
+#
+# The image is the tag: the owner mirrors it into Harbor (README "Object store
+# (once, owner)", step 2), and the orchestrator adds the digest at deploy time.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seaweedfs
+  labels:
+    app: seaweedfs
+spec:
+  replicas: 1
+  # One replica, and Recreate for the same reason as the app: the hostPath data
+  # directory is in use by the old Pod until it is gone.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: seaweedfs
+  template:
+    metadata:
+      labels:
+        app: seaweedfs
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+      initContainers:
+        # Render the identities file from the owner's Secret. `weed` reads it
+        # once at startup, and there is no anonymous identity, so an unsigned or
+        # wrongly-keyed request is denied rather than served. The values are hex,
+        # so printf needs no escaping; nothing here writes one to stdout or to
+        # the log. That is a promise about the values, so it is checked rather
+        # than assumed: a value holding a quote, a backslash or a newline would
+        # pass deploy.sh's length check and then produce a corrupt s3.json. The
+        # check is a `case` glob, not grep, so it needs no binary this image may
+        # not have, and it names the key, never the value.
+        - name: render-s3-config
+          image: registry.midnight.lan/library/seaweedfs:4.48
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              umask 077
+              # The key name in the message is the Secret's, because that is
+              # what the operator edits; the value never appears.
+              want_hex() {
+                case "$2" in
+                  '' | *[!0-9a-f]*)
+                    echo "render-s3-config: secret seaweedfs-s3 key $1 is not lowercase hex; recreate it with openssl rand -hex (README \"Object store (once, owner)\" step 3)" >&2
+                    exit 1
+                    ;;
+                esac
+              }
+              want_hex admin-access-key "$ADMIN_ACCESS_KEY"
+              want_hex admin-secret-key "$ADMIN_SECRET_KEY"
+              want_hex app-access-key "$APP_ACCESS_KEY"
+              want_hex app-secret-key "$APP_SECRET_KEY"
+              printf '{"identities":[{"name":"admin","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]},{"name":"campaign-foundry","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Read:campaign-foundry","Write:campaign-foundry","List:campaign-foundry","Tagging:campaign-foundry"]}]}\n' "$ADMIN_ACCESS_KEY" "$ADMIN_SECRET_KEY" "$APP_ACCESS_KEY" "$APP_SECRET_KEY" > /etc/seaweedfs/s3.json
+          env:
+            - name: ADMIN_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3
+                  key: admin-access-key
+            - name: ADMIN_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3
+                  key: admin-secret-key
+            - name: APP_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3
+                  key: app-access-key
+            - name: APP_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3
+                  key: app-secret-key
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: s3-config
+              mountPath: /etc/seaweedfs
+      containers:
+        - name: seaweedfs
+          image: registry.midnight.lan/library/seaweedfs:4.48
+          # `weed` creates no directory it is told to use: SeaweedFS's
+          # TestFolderWritable only stats the directory and Fatalf's when it is
+          # missing, so all three are made here. `/mnt/pool/seaweedfs/data` is
+          # under the hostPath root, which the owner creates (README "Object store
+          # (once, owner)", step 1) as 1000:1000 mode 750, so this works as uid
+          # 1000. The hostPath is mounted with type Directory, never
+          # DirectoryOrCreate: a kubelet-created directory is root-owned, and
+          # fsGroup does not apply to a hostPath.
+          command: ["/bin/sh", "-c"]
+          args:
+            - >-
+              mkdir -p /metadata/master /metadata/idx /mnt/pool/seaweedfs/data
+              && exec /usr/bin/weed server
+              -dir=/mnt/pool/seaweedfs/data -master.dir=/metadata/master
+              -volume.dir.idx=/metadata/idx -volume.max=16
+              -master.volumeSizeLimitMB=1024 -filer -s3
+              -s3.config=/etc/seaweedfs/s3.json -s3.port=8333 -ip.bind=0.0.0.0
+          ports:
+            - name: s3
+              containerPort: 8333
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: s3
+            periodSeconds: 10
+            timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          volumeMounts:
+            # The .dat volumes, on mergerfs: 18 TB free, and the only bulk data.
+            - name: data
+              mountPath: /mnt/pool/seaweedfs
+            # The master's metadata and the volume .idx files, on local disk
+            # (local-path): small, and rewritten on every scan, so they want a
+            # real filesystem rather than the union. local-path creates the volume
+            # directory as root mode 0777, so the uid 1000 `mkdir -p` above
+            # succeeds here; the waves deployment relies on the same thing.
+            #
+            # The filer's LevelDB lands here too: `weed server` defaults the
+            # filer's dir to -master.dir, so it is /metadata/master/filerldb2.
+            # There is no -filer.dir flag.
+            # That also depends on the emptyDir hiding the image's own
+            # /etc/seaweedfs/filer.toml, whose leveldb2.dir=/data/filerldb2 uid
+            # 1000 cannot write: NEVER give the s3-config mount a subPath, or the
+            # file's own filer.toml comes back into view and the filer fails at
+            # boot.
+            - name: metadata
+              mountPath: /metadata
+            - name: s3-config
+              mountPath: /etc/seaweedfs
+              readOnly: true
+      volumes:
+        - name: data
+          hostPath:
+            path: /mnt/pool/campaign-foundry-staging/seaweedfs
+            type: Directory
+        - name: metadata
+          persistentVolumeClaim:
+            claimName: seaweedfs-metadata
+        - name: s3-config
+          emptyDir: {}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: seaweedfs-metadata
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+# The signed S3 port and nothing else. That is not enough on its own: `weed
+# server` binds every listener to 0.0.0.0, so the master (9333), the filer (8888),
+# the gRPC ports (18888, 19333) and the volume port (8080) are all unauthenticated
+# HTTP that any pod in the cluster can still dial on the Pod IP, skipping S3 auth
+# entirely. They are in no Service and no Ingress, and the NetworkPolicy below is
+# what actually keeps them unreachable.
+apiVersion: v1
+kind: Service
+metadata:
+  name: seaweedfs-s3
+  labels:
+    app: seaweedfs
+spec:
+  selector:
+    app: seaweedfs
+  ports:
+    - name: s3
+      port: 8333
+      targetPort: s3
+---
+# One rule, one port. Egress is not restricted: this policy selects only the
+# SeaweedFS pod, which needs DNS and nothing else, so an egress rule would add
+# nothing worth its upkeep (the app's own traffic is out of this policy's scope).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: seaweedfs
+spec:
+  podSelector:
+    matchLabels:
+      app: seaweedfs
+  policyTypes: [Ingress]
+  ingress:
+    # (a) any pod in this namespace — the app's api container and the
+    # s3-bootstrap Job — and (b) Traefik, which is in kube-system: a
+    # namespaceSelector and a podSelector in ONE from entry are ANDed, so the
+    # second entry is Traefik in kube-system and nothing else.
+    #
+    # The master (9333), filer (8888), gRPC (18888, 19333) and volume (8080)
+    # ports get no rule at all, so nothing outside the Pod can reach them. Inside
+    # the Pod they keep working: `weed server`'s components dial each other at
+    # the Pod's own IP, which is delivered on `lo` inside the Pod's network
+    # namespace and never reaches the host's policy chains.
+    #
+    # The kubelet's readiness probe is not in here either, and does not need to
+    # be: k3s's kube-router allows node-to-local-pod traffic, so the probe from
+    # the node still reaches 8333. The orchestrator verifies that at deploy time.
+    - from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 8333
+---
+# Where presigned URLs are minted for: the browser and any client outside the
+# cluster. Path-style (path `/`), because S3 virtual-host style would need a
+# wildcard certificate for s3.midnight.lan.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: seaweedfs-s3
+  annotations:
+    cert-manager.io/cluster-issuer: midnight-ca
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: s3.midnight.lan
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: seaweedfs-s3
+                port:
+                  name: s3
+  tls:
+    - hosts:
+        - s3.midnight.lan
+      secretName: seaweedfs-s3-tls

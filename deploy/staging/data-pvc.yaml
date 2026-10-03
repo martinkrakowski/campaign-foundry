@@ -1,6 +1,7 @@
 # The app's files: briefs, input assets and fonts (seeded from the image on first
-# start), and rendered output. The file stores still hold everything but review
-# decisions (PT-3), so this must survive a redeploy.
+# start), and rendered output. Briefs, pools, reports, templates and decisions
+# moved to Postgres in PT-3, so this volume is not the system of record any more
+# and it must survive a redeploy.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
