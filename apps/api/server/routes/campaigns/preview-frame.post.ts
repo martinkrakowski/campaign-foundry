@@ -90,9 +90,15 @@ const bundles = new Map<string, PreviewAdapters>();
  * dropping it would re-open the #576 class this cache key was widened to close.
  */
 export function previewAdapters(env: RunEnvironment): PreviewAdapters {
+  // Under s3 `assetRoot` is a pure function of the org (scopeRoots), so it stays
+  // in the key rather than being dropped: fs still has two roots per tenant.
   const key = `${env.messageFont}\0${env.tenant.orgId}\0${env.assetRoot}`;
   let bundle = bundles.get(key);
   if (!bundle) {
+    // No `{ memo: true }` here, unlike `buildPipeline` (PT-4d): this bundle is
+    // kept for the process, so a memo inside it would outlive the upload a
+    // preview is waiting on. The frame cache is already keyed on the logoPath
+    // string, so an unchanged ref costs nothing anyway.
     const inputs = inputAssets(env);
     const compositor = new NodeCanvasCompositor(env.messageFont, inputs);
     const videoCompositor = new CanvasFfmpegVideoCompositor({

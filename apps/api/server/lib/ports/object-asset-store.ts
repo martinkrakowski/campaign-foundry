@@ -67,8 +67,9 @@ interface AssetRow {
  * of the team rules. Team visibility belongs to `PgBriefStore`, and the routes
  * that call it already refuse a hidden campaign before it ever reaches a store.
  *
- * Under `OBJECT_STORE=s3` the pipeline still reads its inputs from disk
- * (PT-4d); this is the storage half, not the read path.
+ * Under `OBJECT_STORE=s3` the pipeline reads its inputs through
+ * `ObjectInputAssets`, which reaches THIS adapter for the bytes (PT-4d); this is
+ * the storage half, and the read path above it is a port.
  */
 export class ObjectAssetStore implements AssetStorePort {
   constructor(

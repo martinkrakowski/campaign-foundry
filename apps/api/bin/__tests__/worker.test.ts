@@ -3,6 +3,27 @@ import { fileURLToPath } from "node:url";
 import { main, type WorkerConsumer } from "../worker.js";
 import type { KafkaSettings } from "../../server/lib/config.js";
 
+/**
+ * The object-store guard `main()` runs at start (PT-4d), and the environment
+ * handling this file did not have until it needed one.
+ *
+ * `main()` now reads `OBJECT_STORE` and, under `s3`, `objectStoreSettings()`.
+ * Both read `process.env`, so without a save-and-restore here every test in the
+ * file would inherit whatever the previous one set — and a `STORE_BACKEND` left
+ * at `postgres` would turn an unrelated Kafka test into a configuration failure.
+ */
+const ENV_KEYS = [
+  "OBJECT_STORE",
+  "STORE_BACKEND",
+  "S3_ENDPOINT",
+  "S3_PUBLIC_ENDPOINT",
+  "S3_REGION",
+  "S3_BUCKET",
+  "S3_ACCESS_KEY_ID",
+  "S3_SECRET_ACCESS_KEY",
+  "KAFKA_BROKERS",
+] as const;
+
 describe("worker bin main() (PT-6b2, D174d)", () => {
   const validSettings: KafkaSettings = {
     brokers: ["broker1:9092"],
@@ -10,6 +31,24 @@ describe("worker bin main() (PT-6b2, D174d)", () => {
     groupId: "cf-workers",
     consume: true,
   };
+
+  const savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
+
+  beforeEach(() => {
+    // The guard must be inert for every test that is not about it: an `s3` left
+    // over from a previous test would make `main()` throw before Kafka is even
+    // consulted.
+    delete process.env.OBJECT_STORE;
+    delete process.env.STORE_BACKEND;
+  });
+
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      if (savedEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = savedEnv[key];
+    }
+    vi.restoreAllMocks();
+  });
 
   test("starts consumer and registers shutdown signal listeners", async () => {
     const mockConsumer: WorkerConsumer = {
@@ -276,6 +315,109 @@ describe("worker bin main() (PT-6b2, D174d)", () => {
     await expect(main(() => undefined)).rejects.toThrow(
       "Cannot start worker: KAFKA_BROKERS is not set.",
     );
+  });
+});
+
+describe("worker main() — the object-store guard (PT-4d)", () => {
+  const savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
+  const kafkaSettings: KafkaSettings = {
+    brokers: ["broker1:9092"],
+    topic: "cf.run-requests",
+    groupId: "cf-workers",
+    consume: true,
+  };
+  const quietConsumer = (): WorkerConsumer => ({
+    start: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue(undefined),
+  });
+  const mockProcess = {
+    on: vi.fn(),
+    removeListener: vi.fn(),
+    exitCode: undefined as number | undefined,
+  };
+
+  beforeEach(() => {
+    for (const key of ENV_KEYS) delete process.env[key];
+  });
+
+  /** Every `S3_*` variable set, so a test can unset exactly the one it is about. */
+  const validS3Env = (): void => {
+    process.env.OBJECT_STORE = "s3";
+    process.env.STORE_BACKEND = "postgres";
+    process.env.S3_ENDPOINT = "http://s3.example:8333";
+    process.env.S3_PUBLIC_ENDPOINT = "https://s3.example:8333";
+    process.env.S3_REGION = "us-east-1";
+    process.env.S3_BUCKET = "campaigns";
+    process.env.S3_ACCESS_KEY_ID = "key-id";
+    process.env.S3_SECRET_ACCESS_KEY = "secret-value";
+  };
+
+  afterEach(() => {
+    for (const key of ENV_KEYS) {
+      if (savedEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = savedEnv[key];
+    }
+    vi.restoreAllMocks();
+  });
+
+  test("under OBJECT_STORE=s3 with a missing variable, main() refuses to start", async () => {
+    // `STORE_BACKEND` FIRST: `objectStoreSettings()` checks it before any `S3_*`,
+    // so leaving it unset would throw its own message and prove nothing about the
+    // variable this lane added. And only ONE `S3_*` is unset: the guard reports
+    // the first missing one in declaration order, so a half-empty environment
+    // would always name `S3_ENDPOINT`.
+    validS3Env();
+    delete process.env.S3_BUCKET;
+    const consumer = quietConsumer();
+    await expect(
+      main(
+        () => kafkaSettings,
+        () => consumer,
+        mockProcess as never,
+        console,
+        async () => {},
+      ),
+    ).rejects.toThrow("S3_BUCKET is required when OBJECT_STORE=s3.");
+    // Refused BEFORE the consumer is built: a worker that started would take runs
+    // off the queue and fail every one of them with a message about a logo.
+    expect(consumer.start).not.toHaveBeenCalled();
+  });
+
+  test("the guard runs after loadEnv() and before the Kafka check", async () => {
+    validS3Env();
+    delete process.env.S3_ENDPOINT;
+    // Both refused: the store is reported first, because a run on this host would
+    // fail on every asset long before it failed on a missing broker.
+    await expect(main(() => undefined)).rejects.toThrow("S3_ENDPOINT is required");
+  });
+
+  test("under OBJECT_STORE=s3 with every variable set, main() starts as usual", async () => {
+    validS3Env();
+    const consumer = quietConsumer();
+    const { consumer: started } = await main(
+      () => kafkaSettings,
+      () => consumer,
+      mockProcess as never,
+      console,
+      async () => {},
+    );
+    expect(started).toBe(consumer);
+    expect(consumer.start).toHaveBeenCalledTimes(1);
+  });
+
+  test("under OBJECT_STORE=fs nothing is validated, whatever the S3_* variables say", async () => {
+    process.env.OBJECT_STORE = "fs";
+    process.env.STORE_BACKEND = "fs";
+    const consumer = quietConsumer();
+    await expect(
+      main(
+        () => kafkaSettings,
+        () => consumer,
+        mockProcess as never,
+        console,
+        async () => {},
+      ),
+    ).resolves.toBeDefined();
   });
 });
 

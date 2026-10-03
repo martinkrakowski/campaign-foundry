@@ -24,6 +24,7 @@ import {
 } from "../pipeline.js";
 
 import { runEnvironment, type RunEnvironment } from "../run-environment.js";
+import { ObjectInputAssets } from "../object-store/object-input-assets.js";
 import { LOCAL_TENANT } from "../tenant.js";
 
 /**
@@ -200,6 +201,42 @@ describe("pipeline composition root", () => {
     ]);
     for (const consumer of constructed.consumers) {
       expect(consumer.inputs).toBe(port);
+    }
+  });
+
+  // PT-4d. The switch is `objectStore()` inside `inputAssets`, so the only thing
+  // that can move is WHICH port that one function builds — the identity contract
+  // above is the same contract on both backends, and it is asserted through the
+  // consumers rather than through `constructed.ports`: that recorder is a
+  // subclass of the PACKAGE's `FileSystemInputAssets`, so under s3, where nothing
+  // fs is built, it has nothing to record.
+  test("under OBJECT_STORE=s3 the one port is an ObjectInputAssets, and all five consumers share it (PT-4d)", () => {
+    const saved = process.env.OBJECT_STORE;
+    process.env.OBJECT_STORE = "s3";
+    constructed.ports.length = 0;
+    constructed.consumers.length = 0;
+    try {
+      buildPipeline(localEnv(), "procedural");
+    } finally {
+      if (saved === undefined) delete process.env.OBJECT_STORE;
+      else process.env.OBJECT_STORE = saved;
+    }
+
+    // No `FileSystemInputAssets` at all: under s3 a run must not reach for a
+    // project root, because there are no files behind these refs any more.
+    expect(constructed.ports).toHaveLength(0);
+    expect(constructed.consumers.map((c) => c.name).sort()).toEqual([
+      "audioAssets",
+      "compositor",
+      "imageGenerator",
+      "sceneAssets",
+      "videoCompositor",
+    ]);
+    // One instance, five consumers — the memo lives in THAT object, so a second
+    // reader anywhere would mean a second cache and a second copy of every logo.
+    for (const consumer of constructed.consumers) {
+      expect(consumer.inputs).toBeInstanceOf(ObjectInputAssets);
+      expect(consumer.inputs).toBe(constructed.consumers[0]!.inputs);
     }
   });
 

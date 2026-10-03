@@ -1,5 +1,10 @@
 import { pathToFileURL } from "node:url";
-import { kafkaSettings, type KafkaSettings } from "../server/lib/config.js";
+import {
+  kafkaSettings,
+  objectStore,
+  objectStoreSettings,
+  type KafkaSettings,
+} from "../server/lib/config.js";
 import { database } from "../server/lib/db/database.js";
 import { loadEnv } from "../server/lib/env.js";
 import { RunConsumer } from "../server/lib/run-consumer.js";
@@ -25,6 +30,12 @@ export async function main(
   },
 ): Promise<{ consumer: WorkerConsumer; shutdown: (signal: string) => Promise<void> }> {
   loadEnv();
+  // PT-4d: validate the object store's configuration before anything is
+  // consumed, so a missing `S3_*` variable stops the worker here rather than
+  // failing every run it renders. No network call — and a WRONG bucket name
+  // passes it, because `S3ObjectStore.get` maps every 404 (NoSuchBucket
+  // included) to `undefined`. Same guard as `plugins/object-store-boot-guard.ts`.
+  if (objectStore() === "s3") objectStoreSettings();
   const settings = resolveSettings();
   if (!settings) {
     throw new Error("Cannot start worker: KAFKA_BROKERS is not set.");
