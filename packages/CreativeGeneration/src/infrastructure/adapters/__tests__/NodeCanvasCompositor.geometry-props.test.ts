@@ -9,6 +9,7 @@ import {
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
 import { projectRoot } from "@campaignfoundry/shared";
+import { fsInputs } from "./fs-inputs.js";
 /**
  * C4 / R-D3: the per-layer geometry props (D134) become live. Each of the four
  * in-scope props — `accent.solidHeight`/`accent.fadeHeight`, `logo.width`/
@@ -71,7 +72,7 @@ interface Frame {
 
 /** Render a still to raw RGBA — the whole draw, not the dispatch spy. */
 async function frame(req: TemplateRequest): Promise<Frame> {
-  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   NodeCanvasCompositor.draw(ctx, prepared, 1);
@@ -81,7 +82,7 @@ async function frame(req: TemplateRequest): Promise<Frame> {
 
 /** How many text blits a still frame makes (drawStaticText paints one per line). */
 async function fillTextCalls(req: TemplateRequest): Promise<number> {
-  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
   const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
   const spy = vi.spyOn(ctx, "fillText");
   NodeCanvasCompositor.draw(ctx, prepared, 1);
@@ -213,8 +214,8 @@ describe("logo.width is live (C4, R-D3)", () => {
     const emptyProps = request({
       template: templateWith([IMAGE, COPY, { id: "logo", kind: "logo", props: {} }]),
     });
-    const a = await NodeCanvasCompositor.prepare(noKey, "Inter", projectRoot());
-    const b = await NodeCanvasCompositor.prepare(emptyProps, "Inter", projectRoot());
+    const a = await NodeCanvasCompositor.prepare(noKey, "Inter", fsInputs(projectRoot()));
+    const b = await NodeCanvasCompositor.prepare(emptyProps, "Inter", fsInputs(projectRoot()));
     const ca = createCanvas(a.width, a.height).getContext("2d");
     const cb = createCanvas(b.width, b.height).getContext("2d");
     NodeCanvasCompositor.draw(ca, a, 1);
@@ -385,7 +386,7 @@ describe("text anchor prop is honoured only without the anchor axis (C4b, R-D4)"
         { id: "copy", kind: "static-text", props: { anchor: "top" } },
       ]),
     });
-    const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
+    const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
     expect(prepared.anchor).toBe("top");
 
     // Pixel proof, not just the field: the prop-driven render is byte-identical
@@ -407,7 +408,7 @@ describe("text anchor prop is honoured only without the anchor axis (C4b, R-D4)"
         { id: "copy", kind: "static-text", props: { anchor: "top" } },
       ]),
     });
-    const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
+    const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
     expect(prepared.anchor).toBe("bottom");
 
     const withAxis = await frame(req);

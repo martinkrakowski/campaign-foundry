@@ -4,6 +4,7 @@ import {
   type CampaignBrief,
   type CopyGeneratorPort,
   type ImageGeneratorPort,
+  type InputAssetPort,
   type PipelineResult,
   type PlanInput,
   type RegenerationTarget,
@@ -13,6 +14,7 @@ import {
   CanvasFfmpegVideoCompositor,
   FileSystemAudioAssetResolver,
   FileSystemBackgroundCache,
+  FileSystemInputAssets,
   FileSystemSceneAssetResolver,
   FireflyImageGenerator,
   GeminiImageGenerator,
@@ -66,6 +68,20 @@ const FIREFLY_MODEL = "v3";
 /** `model` if set, else `fallback` — the same "unset or empty → default" rule each adapter applies internally. */
 function resolvedModel(model: string | undefined, fallback: string): string {
   return model && model.length > 0 ? model : fallback;
+}
+
+/**
+ * The run's reader for brief-supplied input assets (PT-4c): one port over this
+ * environment's asset root, shared by every consumer in the pipeline below — the
+ * reused product images, the compositor's logo, a beat's scene and the music bed.
+ *
+ * Built from `env.assetRoot` per call and never from the process environment
+ * (D167), so a tenant's runs read that tenant's assets. It is deliberately the
+ * only place an `InputAssetPort` is constructed: substituting the storage backend
+ * means changing this function, not the five consumers behind it.
+ */
+export function inputAssets(env: RunEnvironment): InputAssetPort {
+  return new FileSystemInputAssets(env.assetRoot);
 }
 
 /**
@@ -217,7 +233,7 @@ export function imageGenerator(env: RunEnvironment, selected?: string): ImageGen
       break;
   }
 
-  return new AssetReusingImageGenerator(generator, env.assetRoot);
+  return new AssetReusingImageGenerator(generator, inputAssets(env));
 }
 
 /**
@@ -233,20 +249,22 @@ export function buildPipeline(
   imageModel?: string,
   planInput: PlanInput = {},
 ): GenerateCampaignUseCase {
+  // One reader for this environment, shared by every consumer below (PT-4c).
+  const inputs = inputAssets(env);
   return new GenerateCampaignUseCase({
     imageGenerator: imageGenerator(env, imageModel),
     proceduralGenerator: new ProceduralBackgroundGenerator(),
     planner: pooledPlanner(planInput),
-    compositor: new NodeCanvasCompositor(env.messageFont, env.assetRoot),
+    compositor: new NodeCanvasCompositor(env.messageFont, inputs),
     // Motion variants only; the parser has already gated them on the ffmpeg probe.
     videoCompositor: new CanvasFfmpegVideoCompositor({
       fontFamily: env.messageFont,
-      assetRoot: env.assetRoot,
+      inputs,
     }),
     // VE5b2: resolves a timeline beat's own background — motion variants only.
-    sceneAssets: new FileSystemSceneAssetResolver(env.assetRoot),
+    sceneAssets: new FileSystemSceneAssetResolver(inputs),
     // VE3b2: resolves the brief's music bed (audio.path) — motion variants only.
-    audioAssets: new FileSystemAudioAssetResolver(env.assetRoot),
+    audioAssets: new FileSystemAudioAssetResolver(inputs),
     compliance: new BrandComplianceChecker(),
     exporter: new FileSystemExporter(env.outputRoot),
     now: () => new Date(),

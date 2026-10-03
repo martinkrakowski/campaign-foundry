@@ -11,6 +11,7 @@ import { CREATIVE_GEOMETRY } from "@campaignfoundry/CampaignOrchestration/creati
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
 import { projectRoot } from "@campaignfoundry/shared";
+import { fsInputs } from "./fs-inputs.js";
 const ratio = (v = "1:1") => {
   const r = AspectRatio.create(v);
   if (!r.success) throw r.error;
@@ -67,7 +68,7 @@ interface TextOp {
 
 /** Draw one frame and record what copy was painted (text, alpha, rise offset, type style). */
 async function timelineSpy(req: TimelineRequest, t: number, motion?: MotionKind, copyT?: number) {
-  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   const texts: TextOp[] = [];
@@ -109,7 +110,7 @@ interface LogoFrame {
 
 /** Draw one frame and capture the final drawImage (the brand logo) plus its prepared geometry. */
 async function logoFrame(req: TimelineRequest, copyT: number): Promise<LogoFrame> {
-  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   let position: LogoFrame["position"] | undefined;
@@ -144,7 +145,7 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
         timeline: copyTimeline([{ text: SHORT }]),
       },
       "Inter",
-      projectRoot(),
+      fsInputs(projectRoot()),
     );
     const singleLong = await NodeCanvasCompositor.prepare(
       {
@@ -153,9 +154,9 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
         timeline: copyTimeline([{ text: LONG }]),
       },
       "Inter",
-      projectRoot(),
+      fsInputs(projectRoot()),
     );
-    const pair = await NodeCanvasCompositor.prepare(pReq, "Inter", projectRoot());
+    const pair = await NodeCanvasCompositor.prepare(pReq, "Inter", fsInputs(projectRoot()));
 
     const shortAlone = must(singleShort.beatLayouts, "single-short beatLayouts").get(SHORT);
     const longAlone = must(singleLong.beatLayouts, "single-long beatLayouts").get(LONG);
@@ -195,7 +196,7 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
       keyBeat: 2,
     });
     const pReq = { ...request({ safeInsets: insets, message: LONG }), durationSec: 8, timeline };
-    const prepared = await NodeCanvasCompositor.prepare(pReq, "Inter", projectRoot());
+    const prepared = await NodeCanvasCompositor.prepare(pReq, "Inter", fsInputs(projectRoot()));
     const layouts = must(prepared.beatLayouts, "beatLayouts");
     expect(layouts.size).toBe(2);
 
@@ -223,7 +224,7 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
         timeline: copyTimeline([{ text: SHORT }, { text: LONG }]),
       },
       "Inter",
-      projectRoot(),
+      fsInputs(projectRoot()),
     );
     expect(prepared.timeline).toBeUndefined();
     expect(prepared.beatLayouts).toBeUndefined();
@@ -245,7 +246,7 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
           timeline: copyTimeline([]),
         },
         "Inter",
-        projectRoot(),
+        fsInputs(projectRoot()),
       ),
     ).rejects.toThrow(/empty copy\.timeline/);
   });
@@ -348,7 +349,7 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
     ]);
     const durationSec = 6;
     const req = { ...request(), durationSec, timeline };
-    const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
+    const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
     const resolved = must(prepared.timeline, "timeline");
 
     // At exactly Beta's start (t = 1/3), its local progress is 0: the beat must be
@@ -415,7 +416,7 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
     });
     const durationSec = 8;
     const req = { ...request(), durationSec, timeline };
-    const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
+    const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
     const layouts = must(prepared.beatLayouts, "beatLayouts");
     (layouts as Map<string, unknown>).delete("Beta");
 
@@ -473,7 +474,7 @@ describe("NodeCanvasCompositor sequenced copy (copy.timeline)", () => {
 
 /** Rebuild the request, spy on fillRect, and return how many rectangles the frame painted. */
 async function countRects(req: TimelineRequest, t: number): Promise<number> {
-  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
   const canvas = createCanvas(prepared.width, prepared.height);
   const ctx = canvas.getContext("2d");
   let rects = 0;
@@ -495,8 +496,8 @@ describe("a key beat outside the timeline fails by name", () => {
       timeline: copyTimeline([{ text: "one" }, { text: "two" }], { keyBeat: 5 }),
       durationSec: 6,
     };
-    await expect(NodeCanvasCompositor.prepare(bad, "Inter", projectRoot())).rejects.toThrow(
-      /keyBeat is 5, outside \[1, 2\]/,
-    );
+    await expect(
+      NodeCanvasCompositor.prepare(bad, "Inter", fsInputs(projectRoot())),
+    ).rejects.toThrow(/keyBeat is 5, outside \[1, 2\]/);
   });
 });

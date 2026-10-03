@@ -5,6 +5,7 @@ export * from "./canvas-util.js";
 export * from "./CanvasFfmpegVideoCompositor.js";
 export * from "./FileSystemAudioAssetResolver.js";
 export * from "./FileSystemBackgroundCache.js";
+export * from "./FileSystemInputAssets.js";
 export * from "./FileSystemSceneAssetResolver.js";
 export * from "./FireflyImageGenerator.js";
 export * from "./GeminiImageGenerator.js";

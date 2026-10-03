@@ -24,6 +24,7 @@ import {
   ProceduralBackgroundGenerator,
 } from "@campaignfoundry/CreativeGeneration";
 import { parseBrief } from "../../lib/load-brief.js";
+import { inputAssets } from "../../lib/pipeline.js";
 import { LruCache } from "../../lib/preview-cache.js";
 import { platformZones } from "../../lib/platform-zones.js";
 import { getBriefStore } from "../../lib/ports/index.js";
@@ -79,24 +80,28 @@ const bundles = new Map<string, PreviewAdapters>();
 
 /**
  * The preview's adapters for a run environment, built from the composition root
- * (D167), never from the process environment at import. One bundle per font and
- * asset root, and each bundle has its own frame cache: a preview reads the logo
- * from its asset root, so two orgs sending identical inputs would otherwise be
- * served each other's cached frame, the other org's logo included. The font is
- * the validated `messageFont` (D59), the same one the pipeline renders with.
+ * (D167), never from the process environment at import. One bundle per font,
+ * tenant and asset root, and each bundle has its own frame cache: a preview reads
+ * the logo from its asset root, so two orgs sending identical inputs would
+ * otherwise be served each other's cached frame, the other org's logo included.
+ * The font is the validated `messageFont` (D59), the same one the pipeline renders
+ * with; the tenant is the environment's own, and the asset root stays in the key
+ * beside it (PT-4c) — two roots under ONE tenant are still two asset trees, so
+ * dropping it would re-open the #576 class this cache key was widened to close.
  */
 export function previewAdapters(env: RunEnvironment): PreviewAdapters {
-  const key = `${env.messageFont}\0${env.assetRoot}`;
+  const key = `${env.messageFont}\0${env.tenant.orgId}\0${env.assetRoot}`;
   let bundle = bundles.get(key);
   if (!bundle) {
-    const compositor = new NodeCanvasCompositor(env.messageFont, env.assetRoot);
+    const inputs = inputAssets(env);
+    const compositor = new NodeCanvasCompositor(env.messageFont, inputs);
     const videoCompositor = new CanvasFfmpegVideoCompositor({
       fontFamily: env.messageFont,
-      assetRoot: env.assetRoot,
+      inputs,
     });
     // VE5b2: a beat's own scene is a reused uploaded asset, never a GenAI call, so
     // wiring the real resolver here carries none of D52's credit-safety concern.
-    const sceneAssets = new FileSystemSceneAssetResolver(env.assetRoot);
+    const sceneAssets = new FileSystemSceneAssetResolver(inputs);
     const frameCache = new LruCache<PreviewFrameCacheEntry>(PREVIEW_FRAME_CACHE_ENTRIES);
     const useCase = new PreviewCreativeFrameUseCase({
       imageGenerator: previewBackgroundGenerator,

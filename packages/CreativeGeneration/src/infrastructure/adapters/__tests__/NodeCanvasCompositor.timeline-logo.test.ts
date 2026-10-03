@@ -8,6 +8,7 @@ import type {
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
 import { projectRoot } from "@campaignfoundry/shared";
+import { fsInputs } from "./fs-inputs.js";
 /**
  * The motion path (`drawTimeline`, used for `copy.timeline` briefs) must draw
  * the brand logo if and only if `logoApplied` reports it — the same fact the
@@ -89,7 +90,7 @@ describe("the motion path draws the logo iff logoApplied reports it (D7/F2)", ()
     const prepared = await NodeCanvasCompositor.prepare(
       request(templateWithoutLogo),
       "Inter",
-      projectRoot(),
+      fsInputs(projectRoot()),
     );
     // The file loaded fine; the resolved layer list simply omits `logo`.
     expect(prepared.logo).toBeDefined();
@@ -106,7 +107,7 @@ describe("the motion path draws the logo iff logoApplied reports it (D7/F2)", ()
     const prepared = await NodeCanvasCompositor.prepare(
       request(templateWithLogo),
       "Inter",
-      projectRoot(),
+      fsInputs(projectRoot()),
     );
     expect(prepared.logo).toBeDefined();
     expect(prepared.logoApplied).toBe(true);

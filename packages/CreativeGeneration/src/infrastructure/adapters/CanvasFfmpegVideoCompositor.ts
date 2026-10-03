@@ -8,6 +8,7 @@ import { createCanvas, type Canvas, type SKRSContext2D } from "@napi-rs/canvas";
 import type {
   CompositeResult,
   CopyTimeline,
+  InputAssetPort,
   MotionKind,
   ResolvedBeat,
   VideoCompositeRequest,
@@ -58,8 +59,8 @@ export type FfmpegSpawn = (
 
 export interface CanvasFfmpegVideoCompositorOptions {
   readonly fontFamily?: string;
-  /** The project root whose `assets/` tree confines logo reads (D167, PT-0b1). */
-  readonly assetRoot: string;
+  /** The confined reader the logo is read through (PT-4c, replacing `assetRoot`). */
+  readonly inputs: InputAssetPort;
   readonly spawn?: FfmpegSpawn;
   readonly ffmpegPath?: string | null;
   /** Kill the encode and reject after this many ms (default {@link DEFAULT_ENCODE_TIMEOUT_MS}). */
@@ -105,7 +106,7 @@ const STDERR_TAIL = 4_000;
  */
 export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
   private readonly fontFamily: string;
-  private readonly assetRoot: string;
+  private readonly inputs: InputAssetPort;
   private readonly spawn: FfmpegSpawn;
   private readonly ffmpegPath: string | null;
   private readonly encodeTimeoutMs: number;
@@ -113,7 +114,7 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
 
   constructor(options: CanvasFfmpegVideoCompositorOptions) {
     this.fontFamily = options.fontFamily ?? "Inter";
-    this.assetRoot = options.assetRoot;
+    this.inputs = options.inputs;
     this.spawn =
       options.spawn ??
       ((command, args, spawnOptions) => defaultSpawn(command, [...args], spawnOptions));
@@ -132,7 +133,7 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
       throw new Error("ffmpeg-static binary is not available");
     }
 
-    const prepared = await NodeCanvasCompositor.prepare(request, this.fontFamily, this.assetRoot);
+    const prepared = await NodeCanvasCompositor.prepare(request, this.fontFamily, this.inputs);
     const canvas = createCanvas(prepared.width, prepared.height);
     const ctx = canvas.getContext("2d");
 
@@ -180,7 +181,7 @@ export class CanvasFfmpegVideoCompositor implements VideoCompositorPort {
       );
     }
 
-    const prepared = await NodeCanvasCompositor.prepare(request, this.fontFamily, this.assetRoot);
+    const prepared = await NodeCanvasCompositor.prepare(request, this.fontFamily, this.inputs);
     const canvas = createCanvas(prepared.width, prepared.height);
     const ctx = canvas.getContext("2d");
 

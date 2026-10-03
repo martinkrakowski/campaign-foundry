@@ -12,6 +12,7 @@ import {
 import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 
 import { projectRoot } from "@campaignfoundry/shared";
+import { fsInputs } from "./fs-inputs.js";
 /**
  * K4: the missing read this lane closes — nothing in `NodeCanvasCompositor.ts`
  * read a layer's OWN `tracks` field before this PR (K2/K3 only ever passed
@@ -83,14 +84,14 @@ const imageTemplateWith = (layers: readonly CreativeTemplateLayer[]): BriefTempl
 });
 
 async function renderStill(req: TemplateRequest): Promise<Buffer> {
-  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
   const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
   NodeCanvasCompositor.draw(ctx, prepared, 1);
   return ctx.canvas.toBuffer("image/png");
 }
 
 async function renderTimelineAt(req: TemplateRequest, t: number, copyT: number): Promise<Buffer> {
-  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", projectRoot());
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
   const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
   NodeCanvasCompositor.draw(ctx, prepared, t, undefined, copyT, 1);
   return ctx.canvas.toBuffer("image/png");
@@ -201,7 +202,7 @@ describe("K4: authored tracks compose with a preset in the fixed fold order (K-D
     const prepared = await NodeCanvasCompositor.prepare(
       request({ template }),
       "Inter",
-      projectRoot(),
+      fsInputs(projectRoot()),
     );
     const canvas = createCanvas(prepared.width, prepared.height);
     const ctx = canvas.getContext("2d");

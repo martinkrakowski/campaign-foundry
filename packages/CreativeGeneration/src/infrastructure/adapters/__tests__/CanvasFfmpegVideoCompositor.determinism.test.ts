@@ -6,6 +6,7 @@ import { CanvasFfmpegVideoCompositor } from "../CanvasFfmpegVideoCompositor.js";
 import { canonicalMp4Request } from "./canonical-mp4-request.js";
 
 import { projectRoot } from "@campaignfoundry/shared";
+import { fsInputs } from "./fs-inputs.js";
 const require = createRequire(import.meta.url);
 const ffmpegStatic = require("ffmpeg-static") as string | null;
 const ffmpegPath = typeof ffmpegStatic === "string" ? ffmpegStatic : null;
@@ -39,10 +40,10 @@ describe("CanvasFfmpegVideoCompositor determinism probe (VG1)", () => {
     { timeout: 60_000 },
     async () => {
       const first = await new CanvasFfmpegVideoCompositor({
-        assetRoot: projectRoot(),
+        inputs: fsInputs(projectRoot()),
       }).compositeVideo(canonicalMp4Request());
       const second = await new CanvasFfmpegVideoCompositor({
-        assetRoot: projectRoot(),
+        inputs: fsInputs(projectRoot()),
       }).compositeVideo(canonicalMp4Request());
       expect(sha256(second.video)).toBe(sha256(first.video));
       expect(Buffer.from(second.video).equals(Buffer.from(first.video))).toBe(true);
