@@ -104,6 +104,24 @@ export interface PresignGetOptions {
   readonly expiresInSeconds: number;
   /** Defaults to the adapter's own clock; passed in so a window is testable. */
   readonly now?: number;
+  /**
+   * The value this object stands for at this revision, sent as the query
+   * parameter `v` and signed with the rest (PT-4f, D209a).
+   *
+   * **A NAMED field, never a generic query map**, and the reason is exactly the
+   * signature: a map handed to `URL.searchParams` lands in the query string the
+   * signature covers, so a caller could put `X-Amz-Expires` in it and decide its
+   * own window, or add an `X-Amz-*` parameter of its own. One named parameter
+   * cannot be misused that way, and `v` is chosen because it is not an
+   * `X-Amz-*` or a `response-*` name — so it rides the URL without displacing
+   * anything SigV4 or S3 reserve.
+   *
+   * It is what carries a report's revision into the URL the server signed
+   * (D204), so a browser re-fetches exactly when the bytes behind it changed
+   * instead of on every poll tick, and it is signed rather than appended by the
+   * client — a client-appended `?v=` is one a caller can edit to anything.
+   */
+  readonly version?: string;
   readonly responseContentDisposition?: string;
   readonly responseContentType?: string;
 }

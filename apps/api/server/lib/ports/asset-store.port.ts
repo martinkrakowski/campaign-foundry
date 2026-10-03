@@ -1,3 +1,5 @@
+import type { ObjectKey } from "@campaignfoundry/CampaignOrchestration";
+
 /**
  * A bare uuid, in the one case Postgres renders an `asset.id` in (D203's shape
  * rule, C4's reference syntax).
@@ -103,6 +105,29 @@ export interface AssetStorePort {
    * ids existed.
    */
   assetOwner(id: string): Promise<AssetOwner | undefined>;
+
+  /**
+   * The object key holding one asset's bytes, or `undefined` (PT-4f, D209b).
+   *
+   * Added for the `?name=` redirect alone, and it is the smallest thing that can
+   * answer it: `GET /campaigns/assets?name=` under `s3` answers 302 to a freshly
+   * presigned location, which needs a KEY and nothing else — no bytes, no
+   * metadata, no HEAD round-trip. An object missing behind a row that exists is
+   * the store's own 404 after the redirect, which is a deliberate change from
+   * `readAsset`'s.
+   *
+   * **It never checks that the object EXISTS.** A key is derived from a row, not
+   * from a listing, so this stays one query on the backends that have rows and no
+   * query at all on fs — and a second actor's write or delete between the lookup
+   * and the browser's GET is the store's business, not a race this method could
+   * close anyway.
+   *
+   * `undefined` for a back that has no keys at all (fs: an asset is named by its
+   * path), for a reference that does not resolve, for a row this org does not
+   * hold — another tenant's is ABSENT, never forbidden, exactly as
+   * {@link AssetStorePort.readAssetById} answers — and for a name no row carries.
+   */
+  assetObjectKey(briefId: string, name: string): Promise<ObjectKey | undefined>;
 
   /**
    * List assets available for a brief.

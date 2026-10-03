@@ -3,8 +3,16 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
+import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
+import { resetProjectRoot } from "@campaignfoundry/shared";
 
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
+import { resetObjectStoreClient, setObjectStoreClient } from "../../../lib/object-store/index.js";
+import { getAssetStore, resetAssetStore } from "../../../lib/ports/index.js";
+// The STATIC handler, for the describe at the bottom — see its note on why it
+// cannot go through `web()`.
+import staticAssetsGet from "../assets.get.js";
+import { mountTenantRoute } from "../../__tests__/tenant-harness.js";
 const web = async (root: string) => {
   vi.resetModules();
   process.env.PROJECT_ROOT = root;
@@ -217,5 +225,99 @@ describe("GET /campaigns/assets", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ assets: [] });
     spy.mockRestore();
+  });
+});
+
+/**
+ * PT-4f, D209b: the LISTING is unchanged on both backends, so it signs nothing.
+ *
+ * **Static imports here, unlike every test above.** `web()` calls
+ * `vi.resetModules()`, so the handler it mounts runs against a FRESH module graph
+ * — and an object store installed through this file's imports would be an instance
+ * that handler never asks. A `presignGet` spy on it would be watching a store
+ * nobody calls, which is a green test proving nothing. Both the handler and the
+ * store below come from the same graph, so a call would be counted.
+ */
+describe("GET /campaigns/assets mints no signed URL on fs (PT-4f, D209b)", () => {
+  let dir: string;
+  let store: InMemoryObjectStore;
+  const origRoot = process.env.PROJECT_ROOT;
+  const SAVED = process.env.OBJECT_STORE;
+
+  beforeEach(() => {
+    // fs, explicitly: this is the assertion that the listing is not s3-shaped.
+    delete process.env.OBJECT_STORE;
+    dir = mkdtempSync(join(tmpdir(), "cf-assets-get-nosign-"));
+    mkdirSync(join(dir, "briefs"), { recursive: true });
+    process.env.PROJECT_ROOT = dir;
+    const briefDir = join(dir, "assets", "inputs", "camp");
+    mkdirSync(briefDir, { recursive: true });
+    writeFileSync(join(briefDir, "logo.png"), png);
+    writeFileSync(join(briefDir, "photo.jpg"), jpeg);
+    resetProjectRoot();
+    resetAssetStore();
+    store = new InMemoryObjectStore();
+    setObjectStoreClient(store);
+  });
+
+  afterEach(() => {
+    resetAssetStore();
+    resetObjectStoreClient();
+    resetProjectRoot();
+    rmSync(dir, { recursive: true, force: true });
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+    if (SAVED === undefined) delete process.env.OBJECT_STORE;
+    else process.env.OBJECT_STORE = SAVED;
+    vi.restoreAllMocks();
+  });
+
+  test("the listing body is fs's exact strings and the store is never asked to sign", async () => {
+    const presign = vi.spyOn(store, "presignGet");
+    const call = mountTenantRoute(staticAssetsGet, {
+      path: "/campaigns/assets",
+      tenant: LOCAL_TENANT,
+    });
+    const res = await call(new Request("http://x/campaigns/assets?briefId=camp"));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      assets: [
+        {
+          name: "logo.png",
+          type: "image/png",
+          size: png.length,
+          thumbnailUrl: "/api/pipeline/campaigns/assets?briefId=camp&name=logo.png",
+        },
+        {
+          name: "photo.jpg",
+          type: "image/jpeg",
+          size: jpeg.length,
+          thumbnailUrl: "/api/pipeline/campaigns/assets?briefId=camp&name=photo.jpg",
+        },
+      ],
+    });
+    // `thumbnailUrl` never expires and costs no signing: a campaign with forty
+    // inputs would pay forty signings on every poll tick otherwise.
+    expect(presign).not.toHaveBeenCalled();
+  });
+
+  test("?name= streams the bytes and never asks the store for a key", async () => {
+    const presign = vi.spyOn(store, "presignGet");
+    const key = vi.spyOn(getAssetStore(LOCAL_TENANT), "assetObjectKey");
+    const call = mountTenantRoute(staticAssetsGet, {
+      path: "/campaigns/assets",
+      tenant: LOCAL_TENANT,
+    });
+    const res = await call(new Request("http://x/campaigns/assets?briefId=camp&name=logo.png"));
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(png);
+    // The redirect branch is taken on `objectStore() === "s3"` alone, never on
+    // "the store answered undefined for the key" — which is what fs answers for
+    // every asset it has, because it has no keys at all.
+    expect(key).not.toHaveBeenCalled();
+    expect(presign).not.toHaveBeenCalled();
   });
 });

@@ -10,7 +10,7 @@ import {
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import { hashBytes } from "../../../lib/brief-files.js";
 import type { SqlClient } from "../../../lib/db/sql-client.js";
-import { inputPrefix } from "../../../lib/object-store/object-keys.js";
+import { inputKey, inputPrefix } from "../../../lib/object-store/object-keys.js";
 import {
   objectStoreClient,
   resetObjectStoreClient,
@@ -18,10 +18,12 @@ import {
 } from "../../../lib/object-store/index.js";
 import type { ResolvedCampaign } from "../../../lib/ports/brief-store.port.js";
 import { getAssetStore, resetAssetStore } from "../../../lib/ports/index.js";
+import { SIGNED_URL_EXPIRES_SECONDS, signingInstant } from "../../../lib/signed-urls.js";
 import { ObjectAssetStore } from "../../../lib/ports/object-asset-store.js";
 import { PgBriefStore } from "../../../lib/ports/pg-brief-store.js";
 import type { TenantContext } from "../../../lib/tenant.js";
 import assetsPostHandler from "../assets.post.js";
+import assetsGetHandler from "../assets.get.js";
 import createHandler from "../index.post.js";
 import duplicateHandler from "../briefs/[id]/duplicate.post.js";
 import {
@@ -212,6 +214,253 @@ describe("POST /campaigns/assets on Postgres (PT-4b, DoD 2)", () => {
     expect((await post(local, { briefId: "mine" })).status).toBe(201);
     expect((await post(OTHER_ORG, { briefId: "mine" })).status).toBe(404);
     expect(await assetCount(harness.db)).toBe(1);
+  });
+});
+
+/**
+ * `GET /campaigns/assets` under `s3` (PT-4f, D209b).
+ *
+ * STATIC handler imports and the same harness as the POST suite above, for the
+ * reason that suite's header gives: a re-import per request would rebuild the
+ * module graph, so the injected database and object store would never reach the
+ * route. Here that matters twice over — the redirect is signed by the injected
+ * store, and the zero-`presignGet` assertions are about THAT instance.
+ *
+ * The listing is unchanged on BOTH backends (D209b): `thumbnailUrl` stays the
+ * route URL, which never expires and costs no signing per listed asset, and that
+ * URL answers the 302 below. Every assertion here is about the redirect existing
+ * and the listing staying cheap, not about a presigned URL replacing it.
+ */
+describe("GET /campaigns/assets under s3 (PT-4f, D209b)", () => {
+  let harness: PgHarness;
+  let store: InMemoryObjectStore;
+  const SAVED = process.env.OBJECT_STORE;
+
+  const get = (tenant: TenantContext, query: string) =>
+    mountTenantRoute(assetsGetHandler, { path: "/campaigns/assets", tenant })(
+      new Request(`http://x/campaigns/assets${query}`),
+    );
+
+  /** A campaign of `local`'s with one uploaded asset, and the row's own id. */
+  const withOneAsset = async (slug: string): Promise<{ campaignId: string; assetId: string }> => {
+    await new PgBriefStore(harness.db, "local", "u", [], []).createCampaign(slug);
+    const res = await post2(local, { briefId: slug });
+    expect(res.status).toBe(201);
+    const { rows } = await harness.db.query<{ campaign_id: string; id: string }>(
+      `select campaign_id, id from asset where org_id = 'local' order by name`,
+    );
+    return { campaignId: rows[0]!.campaign_id, assetId: rows[0]!.id };
+  };
+
+  const post2 = (tenant: TenantContext, body: Record<string, unknown>) =>
+    mountTenantRoute(assetsPostHandler, {
+      method: "POST",
+      path: "/campaigns/assets",
+      tenant,
+    })(
+      new Request("http://x/campaigns/assets", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "logo.png",
+          contentBase64: PNG.toString("base64"),
+          ...body,
+        }),
+      }),
+    );
+
+  beforeEach(async () => {
+    process.env.OBJECT_STORE = "s3";
+    harness = await setupPgHarness();
+    store = new InMemoryObjectStore();
+    setObjectStoreClient(store);
+    resetAssetStore();
+  });
+
+  afterEach(async () => {
+    resetAssetStore();
+    resetObjectStoreClient();
+    vi.restoreAllMocks();
+    if (SAVED === undefined) delete process.env.OBJECT_STORE;
+    else process.env.OBJECT_STORE = SAVED;
+    await harness.cleanup();
+  });
+
+  test("?name= answers 302 to the row's own presigned key, with no body", async () => {
+    const { campaignId, assetId } = await withOneAsset("redirect-one");
+    const presign = vi.spyOn(store, "presignGet");
+    const res = await get(local, "?briefId=redirect-one&name=logo.png");
+
+    expect(res.status).toBe(302);
+    // The location is the presigned URL for the key the UPLOAD wrote — read back
+    // through the row, not re-derived, because a redirect that pointed anywhere
+    // else would send a browser to an object this upload never wrote.
+    const key = inputKey("local", campaignId, assetId);
+    const location = res.headers.get("location")!;
+    expect(new URL(location).pathname).toContain(`/${key}`);
+    expect(location).toBe(
+      await store.presignGet(key, {
+        expiresInSeconds: SIGNED_URL_EXPIRES_SECONDS,
+        now: signingInstant(Date.now()),
+      }),
+    );
+    // The signing call itself: the row's key, the window's floor as `now`, and no
+    // version or disposition — asserted on the CALL rather than on the URL, so it
+    // does not depend on the fake's digest being re-derived here.
+    expect(presign).toHaveBeenCalledWith(key, {
+      expiresInSeconds: 1200,
+      now: signingInstant(Date.now()),
+    });
+    // `no-store`, and the mutation that drops it is caught by the next assert: a
+    // cached 302 outlives the window it was signed in and replays into a 403.
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.text()).toBe("");
+  });
+
+  test("the redirect is signed in its window, with no version and no disposition", async () => {
+    await withOneAsset("redirect-two");
+    const res = await get(local, "?briefId=redirect-two&name=logo.png");
+    const parsed = new URL(res.headers.get("location")!);
+    expect(parsed.searchParams.get("X-Amz-Expires")).toBe("1200");
+    expect(parsed.searchParams.get("X-Amz-Signature")).toMatch(/^[0-9a-f]{64}$/);
+    // An input's bytes change on upload, not on a report revision, and the
+    // drawing is for a GET: a `v` here would be a cache-buster nothing sets, and
+    // a disposition would download a thumbnail the grid shows inline.
+    expect(parsed.searchParams.has("v")).toBe(false);
+    expect(parsed.searchParams.has("response-content-disposition")).toBe(false);
+  });
+
+  test("the listing is unchanged and signs NOTHING (zero presignGet)", async () => {
+    await withOneAsset("list-one");
+    const presign = vi.spyOn(store, "presignGet");
+    const res = await get(local, "?briefId=list-one");
+
+    expect(res.status).toBe(200);
+    // Byte-identical to fs's listing string, slug-based and all. A presigned
+    // listing URL would expire, and the grid holds these across a poll cycle.
+    expect(await res.json()).toEqual({
+      assets: [
+        {
+          id: (await harness.db.query<{ id: string }>(`select id from asset`)).rows[0]!.id,
+          name: "logo.png",
+          type: "image/png",
+          size: PNG.length,
+          thumbnailUrl: "/api/pipeline/campaigns/assets?briefId=list-one&name=logo.png",
+        },
+      ],
+    });
+    // One signing PER LISTED ASSET would make a campaign with forty inputs pay
+    // forty on every tick. The route URL is what carries them, and it is this
+    // same route that answers 302 above.
+    expect(presign).not.toHaveBeenCalled();
+  });
+
+  test("an unknown name answers today's 404 body with ZERO presignGet calls", async () => {
+    await withOneAsset("missing-one");
+    const presign = vi.spyOn(store, "presignGet");
+    const res = await get(local, "?briefId=missing-one&name=absent.png");
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'Asset "absent.png" not found.' });
+    // An absent row is answered from the ROWS, before anything is signed.
+    expect(presign).not.toHaveBeenCalled();
+  });
+
+  // Item 3: a row that EXISTS must never read as absent. Mapping a signing
+  // failure onto the 404 told the UI an asset was gone when nobody deleted it,
+  // and pointed an operator at a deletion instead of at a bucket refusing to sign.
+  test("a store that cannot sign answers 500, never 'Asset not found'", async () => {
+    await withOneAsset("unsignable-one");
+    vi.spyOn(store, "presignGet").mockRejectedValue(
+      new Error("The object store could not be reached for presignGet."),
+    );
+
+    const res = await get(local, "?briefId=unsignable-one&name=logo.png");
+
+    // 500, like every other store failure in this codebase — and the body never
+    // says the asset is missing, because it is not.
+    expect(res.status).toBe(500);
+    expect(await res.text()).not.toContain("not found");
+    // And the 404 above is still the answer for a name no row holds, which is what
+    // makes the pair a distinction rather than one answer used twice.
+    vi.restoreAllMocks();
+    const absent = await get(local, "?briefId=unsignable-one&name=absent.png");
+    expect(absent.status).toBe(404);
+    expect(await absent.json()).toEqual({ error: 'Asset "absent.png" not found.' });
+  });
+
+  test("a hidden campaign answers today's 404 body with ZERO presignGet calls", async () => {
+    await harness.db.query(
+      `insert into team (id, name, "memberCount", org_id, created_at) values ('t9', 'Hidden', 0, 'local', now())`,
+    );
+    await new PgBriefStore(harness.db, "local", "owner", ["owner"], []).createCampaign(
+      "hidden-two",
+      {
+        teamId: "t9",
+      },
+    );
+    const minted = await post2(
+      // Uploaded by a member of the campaign's OWN team, so the asset really
+      // exists; `local` below is in team t1 and cannot see the campaign at all.
+      { orgId: "local", userId: "u9", roles: [], teamIds: ["t9"] },
+      { briefId: "hidden-two" },
+    );
+    expect(minted.status).toBe(201);
+
+    const presign = vi.spyOn(store, "presignGet");
+    // `local` is in team t1 and the campaign is in t9: hidden from it by D166.
+    const res = await get(local, "?briefId=hidden-two&name=logo.png");
+
+    expect(res.status).toBe(404);
+    // The IDENTICAL body a missing asset gets, so the answer never says which
+    // applies — and nothing was signed before the check refused.
+    expect(await res.json()).toEqual({ error: 'Asset "logo.png" not found.' });
+    expect(presign).not.toHaveBeenCalled();
+  });
+
+  test("another org's same slug redirects to THAT org's own key, never the first org's", async () => {
+    await harness.db.query(
+      `insert into org (id, name, slug, created_at) values ('other', 'Other', 'other', now())`,
+    );
+    await new PgBriefStore(harness.db, "local", "u", [], []).createCampaign("shared-slug");
+    expect((await post2(local, { briefId: "shared-slug" })).status).toBe(201);
+    // Org B holds the SAME slug: a slug is unique per org, not globally, so this is
+    // a real second campaign rather than a hypothetical one.
+    await new PgBriefStore(harness.db, "other", "u", [], []).createCampaign("shared-slug");
+    expect((await post2(OTHER_ORG, { briefId: "shared-slug" })).status).toBe(201);
+
+    const presign = vi.spyOn(store, "presignGet");
+    const res = await get(OTHER_ORG, "?briefId=shared-slug&name=logo.png");
+
+    expect(res.status).toBe(302);
+    // B's own row, under B's own org: a signed URL to A's asset would be a
+    // cross-tenant read dressed as a 302.
+    const { rows } = await harness.db.query<{ id: string }>(
+      `select id from asset where org_id = 'other'`,
+    );
+    expect(new URL(res.headers.get("location")!).pathname).toContain(`/org/other/campaign/`);
+    expect(new URL(res.headers.get("location")!).pathname).toContain(rows[0]!.id);
+    expect(presign).toHaveBeenCalledTimes(1);
+
+    // And org A's own caller never signs anything under B's prefix.
+    const mine = await get(local, "?briefId=shared-slug&name=logo.png");
+    expect(new URL(mine.headers.get("location")!).pathname).toContain("/org/local/campaign/");
+  });
+
+  test("a row whose OBJECT is gone still redirects — the store answers 404 after it", async () => {
+    const { assetId } = await withOneAsset("vanished-one");
+    const { rows } = await harness.db.query<{ campaign_id: string }>(
+      `select campaign_id from asset`,
+    );
+    await store.delete(inputKey("local", rows[0]!.campaign_id, assetId));
+
+    const res = await get(local, "?briefId=vanished-one&name=logo.png");
+    // A deliberate change from `readAsset`'s 404: no HEAD round-trip here, so the
+    // redirect is issued and the STORE is what says the bytes are gone. Asking
+    // first would double the round trips of every thumbnail in a listing.
+    expect(res.status).toBe(302);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await store.get(inputKey("local", rows[0]!.campaign_id, assetId))).toBeUndefined();
   });
 });
 

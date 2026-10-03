@@ -168,6 +168,7 @@ export class InMemoryObjectStore implements ObjectStorePort {
     assertObjectKey(key);
     const url = new URL(`${this.publicEndpoint}/${this.bucket}/${key}`);
     url.searchParams.set("X-Amz-Expires", String(options.expiresInSeconds));
+    if (options.version !== undefined) url.searchParams.set("v", options.version);
     if (options.responseContentDisposition !== undefined) {
       url.searchParams.set("response-content-disposition", options.responseContentDisposition);
     }
@@ -179,13 +180,32 @@ export class InMemoryObjectStore implements ObjectStorePort {
   }
 
   /**
-   * A digest of what a real signature covers — the key and the window — so two
-   * keys never collide and a changed expiry changes it.
+   * A digest of what a real signature covers, so two keys never collide and a
+   * changed option changes it.
+   *
+   * **`version` and `responseContentDisposition` are in it, and that is the point
+   * rather than completeness** (PT-4f, D209a). Both are parameters in the query
+   * SigV4 signs, so a digest that covered only the key and the window would hand
+   * back the SAME signature for two URLs a real store treats as different
+   * objects-in-time — and the fake would then be the one adapter on which
+   * "changing `v` changes the URL" is false, which is precisely the claim the
+   * conformance case exists to check. `responseContentType` is covered by the
+   * same argument and was left out of that sentence only because nothing signs one
+   * today; it is included below so the two cannot be told apart by omission.
    */
   private digest(key: ObjectKey, options: PresignGetOptions): string {
     const moment = options.now ?? this.now();
     return createHash("sha256")
-      .update(`${key} ${options.expiresInSeconds} ${moment}`)
+      .update(
+        [
+          key,
+          options.expiresInSeconds,
+          moment,
+          options.version ?? "",
+          options.responseContentDisposition ?? "",
+          options.responseContentType ?? "",
+        ].join(" "),
+      )
       .digest("hex");
   }
 }
