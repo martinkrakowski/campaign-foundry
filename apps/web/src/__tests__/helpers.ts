@@ -146,7 +146,14 @@ export const jobOk = (result: MockReport) => {
 };
 
 type PostFn = (url: string, init: RequestInit) => Response | Promise<Response>;
-type GetFn = (url: string) => Response | Promise<Response>;
+/**
+ * A GET handler. `init` is optional so every existing handler, which takes only the URL,
+ * stays valid — but a test that cares about the REQUEST rather than the route needs it:
+ * `fetchPersistedRun`'s refresh-only timeout reaches `fetch` as a `signal` (PT-4g3), and
+ * a handler that ignores it would hand back a promise no abort can settle, which is the
+ * one thing that test is there to contradict.
+ */
+type GetFn = (url: string, init?: RequestInit) => Response | Promise<Response>;
 
 const isPlanUrl = (u: string) => u.includes("/campaigns/plan");
 const isPackagePostUrl = (u: string) => /\/campaigns\/package(?:\?|$)/.test(u);
@@ -504,7 +511,7 @@ export const mockPipelineApi = (opts: MockPipelineApiOptions = {}) => {
         );
       }
     }
-    return Promise.resolve(opts.result ? opts.result(u) : json(report));
+    return Promise.resolve(opts.result ? opts.result(u, req) : json(report));
   });
 };
 

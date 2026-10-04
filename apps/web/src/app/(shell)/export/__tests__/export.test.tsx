@@ -1,11 +1,13 @@
-import { describe, test, expect, beforeEach } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
+import { screen, waitFor, within, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect } from "react";
 import {
   renderWithRun,
   seedPersistedRun,
   makeAsset,
   makeMotionAsset,
+  jobOk,
   json,
   mockPipelineApi,
   seedDecisions,
@@ -13,7 +15,7 @@ import {
   fsUrls,
   s3Urls,
 } from "@/__tests__/helpers";
-import { API, useRun } from "@/lib/run-context";
+import { API, URL_REFRESH_MS, useRun } from "@/lib/run-context";
 import * as messages from "@/components/campaign/messages";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
@@ -753,5 +755,144 @@ describe("ExportPage — every row href is the server's field (D204/D212)", () =
         expect(attr.value).not.toContain("/output/");
       }
     }
+  });
+});
+
+/**
+ * PT-4g3 fix 1 (F4) — a signed-URL refresh must not refetch the package manifests.
+ *
+ * **The export page calls `loadPackages` from an effect keyed on its identity**
+ * (`export/page.tsx`: `useEffect(() => { void loadPackages(); }, [loadPackages])`).
+ * Memoised on `[brief.id, run]`, a same-report refresh gives that callback a new identity
+ * every four minutes — so the URL refreshing that keeps the grid's images alive also
+ * re-downloaded every stored package manifest for the campaign, forever, while the page
+ * sat there. `loadPackages` is now keyed on what it actually READS (`run?.target.id`).
+ */
+describe("ExportPage — a signed-URL refresh does not refetch packages (PT-4g3 F4)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (document as unknown as Record<string, unknown>).visibilityState;
+  });
+
+  /**
+   * The two ids whose disagreement is the whole point: the campaign the SHELL holds
+   * (`brief.id`) and the campaign the RUN on screen was written under (`ranCampaignId`).
+   * A "Run this draft" run is the only way they differ, and it is the only way a
+   * `[brief.id]` keying could satisfy the no-refetch assertion below while dropping the
+   * package manifests for the campaign actually on screen.
+   */
+  let ids: { briefId: string; ranCampaignId: string | null } = { briefId: "", ranCampaignId: null };
+  function ObserveIds() {
+    const { brief, ranCampaignId } = useRun();
+    // In an EFFECT, not in the render body: this must record what React COMMITTED, and a
+    // render-phase assignment can leave a value from a pass that was thrown away.
+    useEffect(() => {
+      ids = { briefId: brief.id, ranCampaignId };
+    }, [brief.id, ranCampaignId]);
+    return null;
+  }
+
+  const advance = async (ms: number) => {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  };
+  const settle = async () => {
+    for (let i = 0; i < 8; i += 1) await advance(0);
+  };
+  const packageReadsFor = (campaignId: string) =>
+    vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([u]) =>
+        String(u).includes(`/campaigns/packages/${encodeURIComponent(campaignId)}`),
+      ).length;
+  const packageReads = () =>
+    vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([u]) => String(u).includes("/campaigns/packages")).length;
+
+  test("one refresh, zero package reads — and a draft run still re-lists them", async () => {
+    vi.useFakeTimers();
+    const row = makeAsset({ productId: "alpha", outputPath: "alpha/1x1.png" });
+    const seeded = seedPersistedRun([row]);
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      packages: (url) =>
+        json({
+          platforms: [
+            {
+              platformId: `p${url.includes("on-screen-draft") ? "draft" : "seed"}`,
+              items: [item()],
+            },
+          ],
+        }),
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [row],
+          log: { entries: [], campaignId: "on-screen-draft" },
+        }),
+      result: (url) => {
+        // The draft run's own re-read, keyed on the campaign the POST actually ran.
+        if (url.includes("campaignId=on-screen-draft")) {
+          return json({
+            halted: false,
+            assets: [{ ...row, ...s3Urls(row, "rev-draft") }],
+            log: { entries: [], campaignId: "on-screen-draft" },
+          });
+        }
+        if (!url.includes("/campaigns/result")) return json({ halted: false, assets: [] });
+        read += 1;
+        return json({
+          halted: false,
+          assets: [{ ...row, ...s3Urls(row, read === 1 ? "rev-1" : "rev-2") }],
+          log: { entries: [], campaignId: "seed" },
+        });
+      },
+    });
+    renderWithRun(
+      <>
+        <RunDraft />
+        <ObserveIds />
+        <ExportPage />
+      </>,
+    );
+    await settle();
+    // The page hydrated once, which is the read this test measures everything else against.
+    const baseline = packageReads();
+    // Counted per campaign, because the mount also asks once with no run on screen at
+    // all (`run?.target.id ?? brief.id`, and there is neither yet) — so the TOTAL is not a
+    // per-campaign figure, and "no new reads for the shell's campaign" has to be said
+    // about that campaign alone.
+    const seedBaseline = packageReadsFor("seed");
+    expect(baseline).toBeGreaterThan(seedBaseline);
+
+    // Three refresh ticks: a new callback identity each time under the old keying.
+    await advance(URL_REFRESH_MS);
+    await advance(URL_REFRESH_MS);
+    await advance(URL_REFRESH_MS);
+    expect(read).toBeGreaterThan(1);
+    expect(packageReads()).toBe(baseline);
+
+    // **And the case `run?.target.id` exists for.** "Run this draft" commits a run whose
+    // target is the DRAFT's campaign while `brief.id` stays `seed` — the only way the two
+    // ids can disagree, and the only way a `[brief.id]` keying could pass the assertions
+    // above while dropping the package manifests for the campaign actually on screen.
+    expect(ids.briefId).toBe("seed");
+    await act(async () => {
+      screen.getByText("run draft").click();
+    });
+    await settle();
+    expect(ids.briefId).toBe("seed");
+    expect(ids.ranCampaignId).toBe("on-screen-draft");
+    // The manifests come back FOR THE DRAFT'S CAMPAIGN — stated first, because it is the
+    // assertion that distinguishes `run?.target.id` from `brief.id`, and a `[brief.id]`
+    // keying makes no request at all rather than a differently-targeted one. Then the
+    // total, and the shell's own campaign, which `brief.id` never moved away from.
+    expect(packageReadsFor("on-screen-draft")).toBeGreaterThan(0);
+    expect(packageReads()).toBeGreaterThan(baseline);
+    expect(packageReadsFor("seed")).toBe(seedBaseline);
   });
 });

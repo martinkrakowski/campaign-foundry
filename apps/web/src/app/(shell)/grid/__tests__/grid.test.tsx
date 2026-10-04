@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { screen, waitFor, within, fireEvent } from "@testing-library/react";
+import { screen, waitFor, within, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
 import {
@@ -22,6 +22,7 @@ import {
   DECISIONS_UNREADABLE_MESSAGE,
   useRun,
   API,
+  URL_REFRESH_MS,
   type Asset,
 } from "@/lib/run-context";
 import GridPage from "../page";
@@ -1313,5 +1314,80 @@ describe("GridPage — the page's ?campaign= (PT-5c3, D180)", () => {
     mockPipelineApi({ result: () => json({ error: "Not found" }, 404) });
     renderWithRun(<GridPage />);
     expect(await screen.findByText(/Start orchestrating assets/)).toBeTruthy();
+  });
+});
+
+/**
+ * PT-4g3 (D215) — the grid's own half of a signed-URL refresh.
+ *
+ * **The filter is the assertion.** `assetVersion` is half of this page's `filtersKey`,
+ * so a refresh that bumped it would drop the reviewer back on `DEFAULT_FILTERS` and
+ * leave them looking at creatives they had filtered out — four times an hour, for
+ * signatures. So this sets a filter, lets the refresh land, and states that the filter
+ * and the tile both survived it while the tile's `src` moved to the next window.
+ *
+ * `fireEvent`, not `userEvent`: under fake timers user-event runs on a clock of its own,
+ * and all this needs is one `change` on a native `<select>`.
+ */
+describe("GridPage — a signed-URL refresh keeps the reviewer's filters (PT-4g3)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("the filter survives the re-read, and the tile's src moves to the next window", async () => {
+    vi.useFakeTimers();
+    const alpha = makeAsset({ productId: "alpha", outputPath: "alpha/1x1.png" });
+    const beta = makeAsset({ productId: "beta", outputPath: "beta/1x1.png" });
+    const seeded = seedPersistedRun([alpha, beta]);
+    const firstWindow = { ...alpha, ...s3Urls(alpha, "rev-1") };
+    const secondWindow = { ...alpha, ...s3Urls(alpha, "rev-2") };
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) =>
+        String(url).includes("/campaigns/result?campaignId=seed")
+          ? json({
+              halted: false,
+              // The same two rows and the same report both times: only alpha's
+              // signatures move, which is what two reads inside one signing window look
+              // like (D204 — the window is what makes the URL the cache entry).
+              assets: [
+                read++ === 0 ? firstWindow : secondWindow,
+                { ...beta, ...s3Urls(beta, "rev-1") },
+              ],
+              log: { entries: [], campaignId: "seed" },
+            })
+          : json({ halted: false, assets: [], log: null }),
+    });
+    const advance = async (ms: number) => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    };
+    const settle = async () => {
+      for (let i = 0; i < 8; i += 1) await advance(0);
+    };
+    renderWithRun(<GridPage />);
+    await settle();
+
+    const tileSrc = () =>
+      screen.queryByRole("img", { name: "alpha @ 1:1 · default" })?.getAttribute("src") ?? null;
+    expect(screen.getByText(/Showing 2 of 2/)).toBeTruthy();
+    expect(tileSrc()).toBe(firstWindow.outputUrl);
+
+    fireEvent.change(screen.getByLabelText("Product"), { target: { value: "alpha" } });
+    expect(screen.getByText(/Showing 1 of 1/)).toBeTruthy();
+    expect(screen.queryByRole("img", { name: "beta @ 1:1 · default" })).toBeNull();
+
+    await advance(URL_REFRESH_MS);
+    await settle();
+
+    // The filter is STILL applied — an `assetVersion` bump would have reset it to ""
+    // and put beta back on screen — and the tile's src is the next window's URL.
+    expect((screen.getByLabelText("Product") as HTMLSelectElement).value).toBe("alpha");
+    expect(screen.getByText(/Showing 1 of 1/)).toBeTruthy();
+    expect(screen.queryByRole("img", { name: "beta @ 1:1 · default" })).toBeNull();
+    expect(tileSrc()).toBe(secondWindow.outputUrl);
+    expect(tileSrc()).toContain("v=rev-2");
   });
 });

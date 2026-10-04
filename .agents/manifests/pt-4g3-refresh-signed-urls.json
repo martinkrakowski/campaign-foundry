@@ -1,0 +1,210 @@
+{
+  "version": 1,
+  "lane": "PT-4g3-refresh-signed-urls",
+  "mutations": [
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "export function holdsExpiringUrls(result: RunResult): boolean {\n  return (result.assets ?? []).some((a) =>\n    ASSET_URL_FIELDS.some((f) => {\n      const u = usableUrl(a[f]);\n      return u !== undefined && !u.startsWith(\"/\");\n    }),\n  );\n}",
+      "after": "export function holdsExpiringUrls(result: RunResult): boolean {\n  return (result.assets ?? []).some(() => true);\n}",
+      "because": "D215(b): the refresh exists ONLY because an `s3` URL expires, and the predicate is what says so without the web knowing how the backend signs (D204). Answer `true` for every report and the effect arms on fs, where the URLs are `/api/pipeline/output/…` paths that never expire: a timer, a `visibilitychange` listener and one `GET /campaigns/result` every four minutes, forever, on the backend whose whole promise is that it behaves exactly as it did before this lane. The failing test is 'fs: an hour on screen and two visibility changes make no request at all', which counts `/campaigns/result?campaignId=seed` reads rather than renderings — so it fails on the REQUEST, not on a symptom of it. The mutation keeps `.some()` and its parameter so the change stays local to the claim being made (a URL that expires) instead of deleting the loop: dropping the field scan outright would leave `ASSET_URL_FIELDS` unreferenced and would also make an EMPTY report arm the timer, which is a second, different defect.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "fs: an hour on screen and two visibility changes make no request at all"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "          setRun((prev) =>\n            prev === issued ? { result: merged.result, target: issued.target } : prev,\n          );\n          lastReadAt = Date.now();",
+      "after": "          setRun((prev) =>\n            prev === issued ? { result: merged.result, target: issued.target } : prev,\n          );\n          setDecisions({});\n          lastReadAt = Date.now();",
+      "because": "D215(c) is the whole reason this lane may not simply 're-commit the result': on the same-report branch the ONLY thing that changed is a set of signatures, and the reviewer's verdicts are about the creatives those signatures point at, so they are still exactly as true. `setDecisions({})` here would drop them — and, because the decisions effect re-runs on `assetVersion` rather than on `decisions`, it would drop them SILENTLY: `decisionsLoaded` stays true, no `/campaigns/decisions` read goes out, and the grid keeps rendering review controls over creatives it no longer holds a verdict for, so a reviewer sees an unapproved tile that is in fact approved and can save that over it. The failing test is 'a same-report refresh keeps the verdicts, their loaded flag, assetVersion and the decisions read', which seeds an approved verdict, refreshes, and asserts the map, the loaded flag, the version and the decision-read count all stand still. Mutation 2's sibling — adding `setAssetVersion((v) => v + 1)` instead — is caught by that same test on the version and the extra decisions read, and also by the grid test's filter assertion, since `assetVersion` is half of `filtersKey`. RE-ANCHORED in fix round 1: this mutation used to be written against the plain `setRun({ result: d, target: issued.target })`, which F1 replaced with the functional updater, so the before-text stopped occurring and `mutate:verify` refused it (Rule 2). The claim is unchanged; the anchor now sits on the updater line, which is what the mutation must interrupt. RE-ANCHORED in fix round 2: item 1 moved the membership heal ABOVE the merge and the commit now carries `merged.result` rather than `d`, so the old before-text stopped occurring and `mutate:verify` refused it (Rule 2). The claim is untouched.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "a same-report refresh keeps the verdicts, their loaded flag, assetVersion and the decisions read"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "    return () => {\n      cancelled = true;\n      stopTimer();\n      document.removeEventListener(\"visibilitychange\", onVisibilityChange);\n    };\n  }, [refreshCampaign]);",
+      "after": "    return () => {\n      cancelled = true;\n      document.removeEventListener(\"visibilitychange\", onVisibilityChange);\n    };\n  }, [refreshCampaign]);",
+      "because": "One pending timeout and one listener, and this cleanup is the only thing that owns them. Leave `clearTimeout` out and the handle is still live after the provider is gone: on unmount — and on every campaign switch and every campaign that stops holding expiring URLs, which re-runs this cleanup with the provider still mounted — the pending `refresh` fires minutes later against a screen that no longer exists or no longer shows this campaign. The read's own guards would drop the COMMIT (`mountedRef`, `cancelled`, the identity term), so nothing would be visibly corrupted, which is exactly why a mutation here has to be caught on the REQUEST and not on state: the defect is a background `GET /campaigns/result` for a campaign nobody is looking at, forever, on every campaign change. The failing test is 'after unmount nothing is read, and a switch to an fs-backed campaign stops the old one's reads', which counts reads per campaign after each of the two teardowns — and it catches the switch case too, because that cleanup is the same one. `stopTimer` is still called from `arm` and from the hidden branch, so the mutated file has no unused symbol and parses; the mutation changes the lifetime rule and nothing else.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "after unmount nothing is read, and a switch to an fs-backed campaign stops the old one's reads"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "        if (\n          !mountedRef.current ||\n          cancelled ||\n          runSeq.current !== owned ||\n          runRef.current !== issued\n        )\n          return;",
+      "after": "        if (!mountedRef.current || cancelled || runRef.current !== issued) return;",
+      "because": "The run token is what separates 'this read was issued for the run on screen' from 'a run started, or the campaign changed, since it went out'. `runSeq` is bumped by exactly two callers — `beginRun` (a run actually starts) and `clearRunState` (a brief switch invalidates) — and the identity term below cannot catch either: neither commits a new run object, so `runRef.current` still reads `issued` and the read would sail through and re-commit over a screen a newer run now owns. The failing test is 'a read issued before a run started is dropped once the run token moves': the refresh read is held open, `execute()` is pressed so `beginRun` moves the token, the run object is untouched because the job has not answered, and the held answer is then a perfectly good read of the SAME report with fresher URLs — so the only thing that can keep `rev-late` off the screen is this term. The mutation keeps the other three operands, so the file still compiles and the guard is still a guard; it removes one conjunct of four, which is the smallest edit that changes the claim.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "a read issued before a run started is dropped once the run token moves"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "          setRun((prev) =>\n            prev === issued ? { result: merged.result, target: issued.target } : prev,\n          );",
+      "after": "          setRun({ result: d, target: issued.target });",
+      "because": "Fix round 1, F1. The functional form is the load-bearing half of the identity check, and the `runRef.current` term above it is only the short-circuit. **`runRef.current` is the LAST RENDERED run; an updater sees every `setRun` queued since that render.** `adoptJob`'s commit (`setRun({ result: persisted, target })`) and `regenerateRejected`'s are plain commits from promise continuations that do NOT bump `runSeq` — `beginRun` moves the token when the run STARTS, not when it commits — and React 19 renders default-lane updates in a later macrotask. So a job commit and this read landing in ONE batch both pass the `runRef` guard, and the plain set here is applied LAST and wins, putting the previous report back on the grid. The failing test is 'a job commit and a stale refresh in ONE batch: the job's result stays on screen', and the BATCH is the test: the job's re-read and the held refresh read are resolved inside one `act()` with no render between them. A `settle()` in the middle would render, the `runRef` guard would catch it, and the test would pass against the bug it exists for — which is exactly what the round-1 version of this lane's identity test did. This mutation is also what makes the updater's false side reachable at all: with the plain set there is no second check to cover. RE-ANCHORED in fix round 2: item 1 changed the committed result from `d` to `merged.result`, so the updater line this mutation rewrites no longer had the old text. The claim is untouched, and the mutation is now also the whole-report commit that item 1 exists to stop.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "a job commit and a stale refresh in ONE batch: the job's result stays on screen"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "      if (document.visibilityState === \"hidden\") return;\n      timer = setTimeout(() => void refresh(), delayMs);",
+      "after": "      timer = setTimeout(() => void refresh(), delayMs);",
+      "because": "Fix round 1, F2. `arm` is the only thing that owns the timeout handle, and THREE paths reach it with the tab hidden: the effect arming on a mount that is already hidden; `onVisibilityChange` hiding, which stops the timer and then falls through to here from a read that was already in flight; and that read's own `finally`, which is the reviewer's headline case — a read in flight when the tab hides settles afterwards and arms a fresh four-minute timer from inside the hide, and every four minutes after that, for the life of the page, in a background that may not be online. Nothing is lost by the check: becoming visible schedules the remainder (`onVisibilityChange`), measured from `lastReadAt`, so it is exactly the delay the hidden timer would have waited. TWO tests fail on this mutation and the manifest names the first: 'a hidden tab is never polled: a read in flight at hide time schedules nothing' (which sees eight intervals' worth of requests across half an hour hidden) and 'an effect that arms while the tab is ALREADY hidden schedules nothing' (which sees fifteen across an hour, from the mount arming alone). Both count `/campaigns/result` reads rather than renderings, because with the request's own guards in place nothing would be visibly corrupted — the defect is the request itself.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "a hidden tab is never polled: a read in flight at hide time schedules nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "          setRun((prev) =>\n            prev === issued ? { result: merged.result, target: issued.target } : prev,\n          );",
+      "after": "          setRun((prev) => (prev === issued ? { result: d, target: issued.target } : prev));",
+      "because": "Fix round 2, item 1. `urlFields` in `signed-urls.ts` signs each of the seven `*Url` fields on its OWN and omits only the ones it could not — a refused path, a store that would not sign — so one stalled row answers 200 with that one field missing. Committing `d` whole therefore takes a WORKING creative off the screen: its poster becomes a placeholder and its download link is gone, until the next tick and the next signing window. The failing test is 'a PARTIAL signing failure renews what it can and keeps the field it could not', which signs asset 1 at the next window and omits asset 2's `outputUrl` while carrying its other fields — so the mutation fails on the row it should have left alone, and the sibling assertion shows the merge is per FIELD and not per row (asset 2's `outputDownloadUrl` still comes from the read). Note the mutation keeps the functional `setRun`: reverting THAT as well is mutation 5, and mixing the two would leave a test that cannot tell which guard did the work.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "a PARTIAL signing failure renews what it can and keeps the field it could not"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "        // or held. So it comes before every early return below.\n        setMembershipError(null);\n        if (sameReport(issued.result, d)) {",
+      "after": "        // or held. So it comes before every early return below.\n        if (sameReport(issued.result, d)) {",
+      "because": "the one membership heal on a 200 is removed. It now sits straight after the null check, before every early return (same report renewing nothing, a changed report held during a signing outage), so with it gone a 403-then-200 sequence leaves the no-organisation banner up. The pinned test drives a denial, then an unsigned 200 of the same report, and reads membershipError as still set.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "a healed membership clears on any 200, signed or not"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "        if (\n          (d.assets?.length ?? 0) > 0 &&\n          holdsExpiringUrls(issued.result) &&\n          !holdsExpiringUrls(d)\n        )\n          return;",
+      "after": "        if (false as boolean) return;",
+      "because": "Fix round 2, item 2, and the same defect as item 1 on the OTHER branch — RE-ANCHORED once more after the row-count term was added, which is itself part of the claim: a halted, log-only run is a real change of report with nothing to sign, and refusing it would strand the grid on creatives the server has already replaced. A changed report that arrives unsigned is worse than an unchanged one: committing it hands the grid a report whose every row has a path and no URL, AND stands the refresh down permanently — `holdsExpiringUrls` is then false of the committed run, so the effect returns before arming, no tick ever follows, and only a reload brings the links back. `false as boolean` rather than `if (false)`: TypeScript treats a statically-dead branch as unreachable and would stop narrowing inside it, and the widened form compiles while changing only the claim.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "a changed report arriving unsigned is held, and the next signed tick commits it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "        const d = await fetchPersistedRun(issued.target.id, undefined, giveUp.signal).catch(\n          (err) => {",
+      "after": "        const d = await fetchPersistedRun(issued.target.id).catch(\n          (err) => {",
+      "because": "Fix round 2, item 3. `fetchPersistedRun` had no timeout and no abort, so a request that never answered held `inFlight` for ever: the `finally` never ran, `arm` was never reached, and the URLs on screen simply aged out — twenty minutes after the last good read there was no tick left to replace them, and nothing on screen said why. The failing test is 'a read that never settles is given up on, and the next tick is issued': its handler returns a promise that only settles when the request's signal aborts, which is how a real `fetch` behaves, so with the signal dropped the read hangs and the tick after it never happens. The test fails on the READ COUNT rather than on a rendering, because with every commit guard in place a stalled read changes nothing visible — the defect is that nothing is left to renew.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "a read that never settles is given up on, and the next tick is issued"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "  }, [brief.id, run?.target.id]);",
+      "after": "  }, [brief.id]);",
+      "because": "Fix round 2, item 4. `loadPackages` names `run?.target.id` because that is the campaign the manifests live under (R6), and the export page calls it from an effect keyed on its identity. Keying it on `brief.id` ALONE passes the no-refetch half of the test — `brief.id` does not move on a refresh — so a test that only counts requests cannot tell the two keyings apart. The case that does is 'Run this draft': `execute(override)` commits a run whose target is the DRAFT's campaign while `brief.id` stays put, and those are the only two ids that can disagree. The failing test is 'one refresh, zero package reads — and a draft run still re-lists them', and it states the discrimination per campaign (`packageReadsFor(\"on-screen-draft\") > 0`) rather than in totals, because a `[brief.id]` keying makes NO request at all rather than a differently-targeted one — which the total assertion cannot name.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/export/__tests__/export.test.tsx",
+        "-t",
+        "one refresh, zero package reads — and a draft run still re-lists them"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "        // or held. So it comes before every early return below.\n        setMembershipError(null);\n        if (sameReport(issued.result, d)) {",
+      "after": "        // or held. So it comes before every early return below.\n        if (sameReport(issued.result, d)) {",
+      "because": "the same removal, pinned to the CHANGED-report case: the different-report branch holds an unsigned changed report back with an early return, and before this fix the heal sat below that return. With the heal gone, the 403-then-changed-unsigned-200 sequence leaves the banner up.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "clears on a CHANGED report"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
