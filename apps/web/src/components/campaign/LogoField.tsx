@@ -176,7 +176,11 @@ export function LogoField({
             <div className="min-w-0 flex-1">
               <span
                 className="block font-mono text-[11px] font-medium text-text-primary truncate max-w-[200px] sm:max-w-xs"
-                title={shownName}
+                // The FULL ref, not the name: the tooltip answers "which file exactly",
+                // and the directory is the half that separates two campaigns with
+                // the same basename. An id ref always arrives with a `displayName`,
+                // so the uuid is never what a tooltip shows.
+                title={displayName ?? value}
               >
                 {shownName}
               </span>

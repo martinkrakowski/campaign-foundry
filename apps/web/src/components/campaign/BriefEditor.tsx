@@ -647,20 +647,38 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // JOINED STRING rather than on `state` — see the comment on the effect.
   const unresolvedAssetRefs = collectUnresolvedAssetRefs(state, campaignAssets);
   const unresolvedAssetRefsKey = unresolvedAssetRefs.join(",");
+  // Whether the fetch below is in flight, which `describeAssetRef` needs to keep an
+  // unresolved id reading "Loading asset…" for the length of the request. The
+  // listing is never re-read from scratch — a new id joins one that already landed
+  // — so without this an id picked mid-session reads "Unavailable asset" for a round
+  // trip, which is a claim the data does not support yet.
+  const [assetsRefetching, setAssetsRefetching] = useState(false);
   useEffect(() => {
     // Nothing is unresolved, so nothing to ask for. On fs this is every brief, and
     // the gate is why the editor's first render costs no request at all.
-    if (unresolvedAssetRefsKey === "") return;
+    if (unresolvedAssetRefsKey === "") {
+      // A fetch that was in flight for the key that has just been satisfied does not
+      // get to leave this flag set on its way out.
+      setAssetsRefetching(false);
+      return;
+    }
     let cancelled = false;
     const controller = new AbortController();
+    setAssetsRefetching(true);
     listAssets(state.briefId, controller.signal)
       .then((res) => {
-        if (!cancelled) setCampaignAssets(res.assets);
+        if (!cancelled) {
+          setCampaignAssets(res.assets);
+          setAssetsRefetching(false);
+        }
       })
       .catch(() => {
         // An unreadable listing is an empty one, not an absent one: the display
         // has to leave "Loading…" and the `[]` is what makes it do so.
-        if (!cancelled) setCampaignAssets([]);
+        if (!cancelled) {
+          setCampaignAssets([]);
+          setAssetsRefetching(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -2968,6 +2986,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               onChooseScene={(index) => setAssetTarget({ kind: "beat", index })}
               sectionPlayhead={sectionPlayhead}
               assets={campaignAssets}
+              assetsRefetching={assetsRefetching}
             />
           </div>
           <div>
@@ -2977,6 +2996,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               errors={sectionErrorsVisible("products")}
               onChooseFromBin={(key) => setAssetTarget({ kind: "product", key })}
               assets={campaignAssets}
+              assetsRefetching={assetsRefetching}
             />
           </div>
           <div>
@@ -3102,6 +3122,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // sections that read it would otherwise go on drawing the listing as it was
     // before it landed — a logo stuck on "Loading asset…" for the life of the page,
     // with every render count in the suite reporting the form as healthy.
+    // `assetsRefetching` moves on the same fetch, for the same reason.
     [
       state,
       dispatch,
@@ -3111,6 +3132,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       errors,
       validationStands,
       campaignAssets,
+      assetsRefetching,
       reveal,
       handleValidate,
     ],

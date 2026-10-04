@@ -8,7 +8,7 @@ import type { EditorState, EditorAction } from "@/components/campaign/editor-sta
 import type { FieldErrors } from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
 import { LogoField } from "@/components/campaign/LogoField";
-import { uploadAsset, listAssets, isBriefsApiError, unknownErrorMessage } from "@/lib/briefs-api";
+import { uploadAsset, isBriefsApiError, unknownErrorMessage } from "@/lib/briefs-api";
 import type { AssetEntry } from "@/lib/briefs-api";
 import { assetRefFor, describeAssetRef, isAssetId } from "@/lib/asset-refs";
 import { assetFileName, fileToBase64 } from "@/components/campaign/editor-state";
@@ -17,23 +17,29 @@ import { assetFileName, fileToBase64 } from "@/components/campaign/editor-state"
  * The ref to store when the upload answered 409 — the asset is already there, so
  * the brief should point at the existing one rather than at the rejected name.
  *
- * The listing is the only thing that knows which ref that is: the 409 carries no
- * body, and an entry under the object backend is named by its id. So the entry is
- * looked up by name and `assetRefFor` decides the ref shape, exactly as it does for
- * a pick. Every way this can fail to learn that — the request rejecting, no entry
- * carrying the name, an entry with no id — answers today's path string instead,
- * which is the ref the server accepts on either backend. It never throws: the
- * caller is already handling an error, and turning "the upload failed" into "the
- * listing also failed" would report a second failure the operator cannot act on.
+ * The listing the editor has ALREADY loaded is the only place that ref can be read
+ * from: the 409 carries no body, and an entry under the object backend is named by
+ * its id. So the entry is looked up by name in what is in memory and `assetRefFor`
+ * decides the ref shape, exactly as it does for a pick.
+ *
+ * **It asks for nothing.** A 409 arrives from a POST the host already refused, and
+ * reaching for the listing over the network to answer it would be a request the
+ * filesystem backend never made before this lane — on fs there is no id to find, so
+ * the answer is today's path either way. Every way this can fail to find the entry
+ * — never fetched, the asset is not in it, the entry has no id — answers today's
+ * path string, which is the ref the server accepts on either backend.
+ *
+ * Synchronous, and that is the point: with nothing to await there is no dispatch
+ * after an async boundary, so no "is this section still mounted" question and no
+ * `AbortSignal` that nothing would read.
  */
-async function refForExistingAsset(briefId: string, name: string): Promise<string> {
-  try {
-    const { assets } = await listAssets(briefId);
-    const entry = assets.find((candidate) => candidate.name === name);
-    return entry === undefined ? `assets/inputs/${briefId}/${name}` : assetRefFor(entry, briefId);
-  } catch {
-    return `assets/inputs/${briefId}/${name}`;
-  }
+function refForExistingAsset(
+  briefId: string,
+  name: string,
+  listing: readonly AssetEntry[] | undefined,
+): string {
+  const entry = listing?.find((candidate) => candidate.name === name);
+  return entry === undefined ? `assets/inputs/${briefId}/${name}` : assetRefFor(entry, briefId);
 }
 
 function ProductRow({
@@ -45,6 +51,7 @@ function ProductRow({
   onChooseFromBin,
   errors,
   assets,
+  assetsRefetching,
 }: {
   product: EditorState["products"][number];
   index: number;
@@ -59,6 +66,12 @@ function ProductRow({
    * resolves with nothing and `undefined` is never even read.
    */
   assets?: readonly AssetEntry[];
+  /**
+   * Whether a listing request is in flight right now (see `describeAssetRef`). An id
+   * the landed listing does not hold reads "Loading asset…" until the fetch settles,
+   * rather than flashing a name-less tile for a round trip.
+   */
+  assetsRefetching?: boolean;
 }) {
   const [editingId, setEditingId] = useState(false);
   const hasIdError = Boolean(errors[`product-${index}-id`]);
@@ -67,7 +80,9 @@ function ProductRow({
   // tile renders a uuid. A path ref resolves with its own basename and takes none of
   // the three resolved props, so a filesystem-shaped brief renders byte for byte as
   // it always has.
-  const logo = isAssetId(product.logoPath) ? describeAssetRef(product.logoPath, assets) : undefined;
+  const logo = isAssetId(product.logoPath)
+    ? describeAssetRef(product.logoPath, assets, assetsRefetching)
+    : undefined;
 
   return (
     <div className="space-y-4 rounded-lg border border-border bg-surface p-4">
@@ -197,6 +212,7 @@ export function ProductsSection({
   errors,
   onChooseFromBin,
   assets,
+  assetsRefetching,
 }: {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
@@ -218,6 +234,8 @@ export function ProductsSection({
    * field says out loud rather than rendering a uuid.
    */
   assets?: readonly AssetEntry[];
+  /** Whether a listing request is in flight right now — see `ProductRow`. */
+  assetsRefetching?: boolean;
 }) {
   const [uploadError, setUploadError] = useState<string | undefined>();
   const [uploadingKeys, setUploadingKeys] = useState<ReadonlySet<number>>(new Set());
@@ -241,14 +259,12 @@ export function ProductsSection({
     } catch (error) {
       if (isBriefsApiError(error) && error.status === 409) {
         // 409 means the asset already exists, so the POST never ran and there is no
-        // response body to read an id from — only the listing knows it. Any failure
-        // to learn that (the request errored, the entry is gone, the entry has no
-        // id) falls back to today's path, which is a ref the server accepts
-        // whatever it turns out to be.
+        // response body to read an id from — the listing the editor already holds is
+        // where it is. No request: a 409 is not a reason to go and ask again.
         dispatch({
           type: "setProduct",
           key,
-          patch: { logoPath: await refForExistingAsset(state.briefId, name) },
+          patch: { logoPath: refForExistingAsset(state.briefId, name, assets) },
         });
       } else {
         setUploadError(unknownErrorMessage(error, messages.productUploadErrorFallback));
@@ -292,6 +308,7 @@ export function ProductsSection({
           onChooseFromBin={() => onChooseFromBin(product.key)}
           errors={errors}
           assets={assets}
+          assetsRefetching={assetsRefetching}
         />
       ))}
     </SectionShell>

@@ -12,6 +12,7 @@ import {
   OutputSection,
 } from "../sections";
 import { ErrorStrip } from "../ErrorStrip";
+import { API } from "@/lib/run-context";
 import * as messages from "../messages";
 
 const json = (body: unknown, status = 200) =>
@@ -946,26 +947,115 @@ describe("ProductsSection", () => {
     );
   });
 
-  // A 409 carries no body, so the listing is the only place the existing asset's
-  // ref can be read from. Every failure to learn it must still store a ref the
-  // server accepts — which is why the fallback is the path and never `undefined`.
-  test("a 409 whose listing carries the asset's id stores the id", async () => {
+  // A 409 carries no body, so the campaign's LISTING — the one the editor has
+  // already loaded, published down as `assets` — is the only place the existing
+  // asset's ref can be read from. Every failure to find it there must still store a
+  // ref the server accepts, which is why the fallback is the path and never
+  // `undefined`. And none of that may cost a request: the 409 branch reads what is
+  // already in memory, so the answer for a filesystem-shaped brief is today's.
+  test("a 409 whose loaded listing carries the asset's id stores the id, and asks nothing", async () => {
     const id = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
     const dispatch = vi.fn();
-    vi.mocked(globalThis.fetch).mockImplementation((url) => {
-      const target = String(url);
-      if (target.includes("/campaigns/assets?")) {
+    // 409 to EVERY call, so a stray GET cannot be answered quietly — it would show
+    // up as a second call in the assertion below, which is the whole point.
+    mockFetch(() => json({ error: "exists" }, 409));
+    const s = state();
+    render(
+      <ProductsSection
+        state={s}
+        dispatch={dispatch}
+        errors={{}}
+        onChooseFromBin={vi.fn()}
+        assets={[{ id, name: "product-logo.png", type: "image/png", size: 10, thumbnailUrl: "" }]}
+      />,
+    );
+
+    await uploadFile(logoInput());
+
+    await waitFor(() =>
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "setProduct",
+        key: s.products[0].key,
+        patch: { logoPath: id },
+      }),
+    );
+    // One request: the POST that was refused. The listing was in memory.
+    expect(vi.mocked(globalThis.fetch).mock.calls.map((c) => String(c[0]))).toEqual([
+      `${API}/campaigns/assets`,
+    ]);
+  });
+
+  test("a 409 whose loaded listing holds no such entry falls back to the path", async () => {
+    const dispatch = vi.fn();
+    mockFetch(() => json({ error: "exists" }, 409));
+    const s = state();
+    render(
+      <ProductsSection
+        state={s}
+        dispatch={dispatch}
+        errors={{}}
+        onChooseFromBin={vi.fn()}
+        assets={[
+          {
+            id: "9c5b94b1-35ad-49bb-b118-8e8fc24af80e",
+            name: "other.png",
+            type: "image/png",
+            size: 10,
+            thumbnailUrl: "",
+          },
+        ]}
+      />,
+    );
+
+    await uploadFile(logoInput());
+
+    await waitFor(() =>
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "setProduct",
+        key: s.products[0].key,
+        patch: { logoPath: "assets/inputs/camp/product-logo.png" },
+      }),
+    );
+  });
+
+  test("a 409 whose loaded listing names an entry with no id falls back to the path (fs)", async () => {
+    const dispatch = vi.fn();
+    mockFetch(() => json({ error: "exists" }, 409));
+    const s = state();
+    render(
+      <ProductsSection
+        state={s}
+        dispatch={dispatch}
+        errors={{}}
+        onChooseFromBin={vi.fn()}
+        assets={[{ name: "product-logo.png", type: "image/png", size: 1, thumbnailUrl: "" }]}
+      />,
+    );
+
+    await uploadFile(logoInput());
+
+    await waitFor(() =>
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "setProduct",
+        key: s.products[0].key,
+        patch: { logoPath: "assets/inputs/camp/product-logo.png" },
+      }),
+    );
+  });
+
+  // The filesystem case, pinned as a SEQUENCE rather than as an outcome: fs has no
+  // ids, so the gate never fetched the listing and a 409 has nothing to consult.
+  // Reaching for one anyway costs a request the filesystem host never made before
+  // this lane, and a test that only checked the stored path would not see it.
+  test("a 409 on fs makes no request beyond the refused POST", async () => {
+    const dispatch = vi.fn();
+    vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      // The listing is fs-shaped, so there is no id to find even if it were asked.
+      if (method === "GET" && String(url).includes("/campaigns/assets?")) {
         return Promise.resolve(
           json({
-            assets: [
-              {
-                id,
-                name: "product-logo.png",
-                type: "image/png",
-                size: 10,
-                thumbnailUrl: "",
-              },
-            ],
+            assets: [{ name: "product-logo.png", type: "image/png", size: 1, thumbnailUrl: "" }],
           }),
         );
       }
@@ -980,57 +1070,12 @@ describe("ProductsSection", () => {
       expect(dispatch).toHaveBeenCalledWith({
         type: "setProduct",
         key: s.products[0].key,
-        patch: { logoPath: id },
-      }),
-    );
-  });
-
-  test("a 409 whose listing holds no such entry falls back to the path", async () => {
-    const dispatch = vi.fn();
-    vi.mocked(globalThis.fetch).mockImplementation((url) =>
-      Promise.resolve(
-        String(url).includes("/campaigns/assets?")
-          ? json({ assets: [] })
-          : json({ error: "exists" }, 409),
-      ),
-    );
-    const s = state();
-    render(<ProductsSection state={s} dispatch={dispatch} errors={{}} onChooseFromBin={vi.fn()} />);
-
-    await uploadFile(logoInput());
-
-    await waitFor(() =>
-      expect(dispatch).toHaveBeenCalledWith({
-        type: "setProduct",
-        key: s.products[0].key,
         patch: { logoPath: "assets/inputs/camp/product-logo.png" },
       }),
     );
-  });
-
-  test("a 409 whose listing names an entry with no id falls back to the path (fs)", async () => {
-    const dispatch = vi.fn();
-    vi.mocked(globalThis.fetch).mockImplementation((url) =>
-      Promise.resolve(
-        String(url).includes("/campaigns/assets?")
-          ? json({
-              assets: [{ name: "product-logo.png", type: "image/png", size: 1, thumbnailUrl: "" }],
-            })
-          : json({ error: "exists" }, 409),
-      ),
-    );
-    const s = state();
-    render(<ProductsSection state={s} dispatch={dispatch} errors={{}} onChooseFromBin={vi.fn()} />);
-
-    await uploadFile(logoInput());
-
-    await waitFor(() =>
-      expect(dispatch).toHaveBeenCalledWith({
-        type: "setProduct",
-        key: s.products[0].key,
-        patch: { logoPath: "assets/inputs/camp/product-logo.png" },
-      }),
-    );
+    expect(vi.mocked(globalThis.fetch).mock.calls.map((c) => String(c[0]))).toEqual([
+      `${API}/campaigns/assets`,
+    ]);
   });
 
   test("any other upload failure is surfaced in the section", async () => {
