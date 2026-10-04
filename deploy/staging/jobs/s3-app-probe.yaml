@@ -61,15 +61,17 @@ spec:
               # A new Pod is not admitted by k3s's kube-router NetworkPolicy for its
               # first few seconds, and until then every request answers 000. So the
               # PUT retries ONLY on 000 (nothing answered), never on an HTTP status:
-              # a 403 from a wrong key still fails at once. 20 tries with a 2 s
-              # connect timeout stay inside deploy.sh's 2-minute wait.
-              try=1
+              # a 403 from a wrong key still fails at once. The retrying is bounded
+              # by a 60 s DEADLINE, not a try count, because a connection that opens
+              # and then stalls also reads 000 after --max-time: no new try starts
+              # past 60 s, so the worst case (a last try started at 59 s, plus the
+              # GET and the DELETE) stays near 90 s, inside deploy.sh's 2-minute wait.
+              deadline=$(( $(date +%s) + 60 ))
               while :; do
                 code=$(curl -K /tmp/aws/curl.conf --aws-sigv4 aws:amz:us-east-1:s3 \
                   --connect-timeout 2 --max-time 10 -s -o /dev/null -w '%{http_code}' \
                   -X PUT --data-binary @/tmp/aws/put.body "$url") || code=000
-                [ "$code" = 000 ] && [ "$try" -lt 20 ] || break
-                try=$((try + 1))
+                [ "$code" = 000 ] && [ "$(date +%s)" -lt "$deadline" ] || break
                 sleep 1
               done
               if [ "$code" != 200 ]; then
