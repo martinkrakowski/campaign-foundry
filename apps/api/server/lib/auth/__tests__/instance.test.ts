@@ -159,6 +159,22 @@ describe("auth() (PT-1a)", () => {
     expect(auth()).toBe(fake);
   });
 
+  describe("organization deletion is off (PT-9a0)", () => {
+    const build = () => {
+      process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+      process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+      return auth();
+    };
+
+    test("the organization plugin is configured with disableOrganizationDeletion", () => {
+      const plugin = build().options.plugins?.find((p) => p.id === "organization") as unknown as {
+        options: { disableOrganizationDeletion?: boolean };
+      };
+      expect(plugin.options.disableOrganizationDeletion).toBe(true);
+    });
+  });
+
   describe("cookie security behind proxy (Finding 2)", () => {
     test("sets useSecureCookies: true when WEB_ORIGIN is https", () => {
       process.env.BETTER_AUTH_SECRET = "s".repeat(32);
