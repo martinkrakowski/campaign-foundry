@@ -7,6 +7,7 @@ import {
   hasAllowedAudioMagic,
   assetContentType,
   assetRelPath,
+  collectRefs,
 } from "../asset-files.js";
 import {
   BRIEF_SCHEMA_VERSION,
@@ -509,5 +510,59 @@ describe("rewriteAssetPath and rewriteAssetPaths", () => {
     } as unknown as import("@campaignfoundry/CampaignOrchestration").CampaignBrief;
     expect(rewriteAssetPaths(invalidBrief, "a", "b")).toEqual(invalidBrief);
     expect(extractSourceAssetBriefIds(invalidBrief, "b")).toEqual([]);
+  });
+});
+
+describe("collectRefs", () => {
+  test("returns all four ref fields deduplicated, imported straight from this module", () => {
+    // D226: the walk PT-8a1's ref classification and PT-9's 9d both import is THIS
+    // export, so the test imports it from `./asset-files.js` and not through
+    // `brief-asset-refs.js` — a re-export that stopped working would compile here.
+    const brief = {
+      schemaVersion: BRIEF_SCHEMA_VERSION,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      id: "target-camp",
+      targetRegion: "US",
+      targetAudience: "all",
+      campaignMessage: "msg",
+      products: [
+        {
+          id: "p1",
+          name: "P1",
+          primaryColor: "#111111",
+          logoPath: "assets/inputs/target-camp/logo.png",
+          inputAsset: "assets/inputs/target-camp/bed.mp3",
+        },
+        // No `inputAsset` (the branch's other half), sharing p1's logo and bed: a ref
+        // is a pure function of itself, so the same one in four fields is one entry.
+        {
+          id: "p2",
+          name: "P2",
+          primaryColor: "#222222",
+          logoPath: "assets/inputs/target-camp/logo.png",
+          inputAsset: "assets/inputs/target-camp/bed.mp3",
+        },
+      ],
+      audio: {
+        path: "assets/inputs/target-camp/bed.mp3",
+        rights: { licenceId: "lic-1", source: "acme" },
+      },
+      copy: {
+        timeline: {
+          transition: "cut" as const,
+          keyBeat: 1,
+          beats: [
+            { text: "Alpha", weight: 1, background: "assets/inputs/target-camp/scene.png" },
+            { text: "Beta", weight: 1 },
+          ],
+        },
+      },
+    };
+
+    expect(collectRefs(brief)).toEqual([
+      "assets/inputs/target-camp/logo.png",
+      "assets/inputs/target-camp/bed.mp3",
+      "assets/inputs/target-camp/scene.png",
+    ]);
   });
 });
