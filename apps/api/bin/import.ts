@@ -47,7 +47,9 @@ function parseFlags(argv: readonly string[]): SourceFlags | string {
       continue;
     }
     const value = argv[i + 1];
-    if (value === undefined) return `${flag} needs a value.`;
+    // A following FLAG is not a value: `--org --switched-at …` would otherwise make the org
+    // `--switched-at` and then report the timestamp as an unknown flag (CodeRabbit on #681).
+    if (value === undefined || value.startsWith("--")) return `${flag} needs a value.`;
     i++;
     if (flag === "--project-root") flags = { ...flags, projectRoot: value };
     else if (flag === "--output-root") flags = { ...flags, outputRoot: value };

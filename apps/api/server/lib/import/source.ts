@@ -55,6 +55,22 @@ export type ProbeOutcome =
 /** Named apart from the un-parseable one so a test can tell which branch refused (req 4). */
 export const SWITCHED_AT_REQUIRED = "--switched-at <iso> is required";
 
+/**
+ * Whether `yyyy-mm-dd` names a real calendar day. `new Date("2026-02-31T00:00:00Z")` quietly
+ * normalises to 3 March, so the plan header (the verbatim flag) and the import context (the
+ * parsed Date) would disagree (CodeRabbit on #681). `setUTCFullYear`, not `Date.UTC`, which
+ * remaps years 0000–0099.
+ */
+function isCalendarDate(datePart: string): boolean {
+  const day = new Date(0);
+  day.setUTCFullYear(
+    Number(datePart.slice(0, 4)),
+    Number(datePart.slice(5, 7)) - 1,
+    Number(datePart.slice(8, 10)),
+  );
+  return day.toISOString().slice(0, 10) === datePart;
+}
+
 /** An ISO 8601 date-time that carries its own offset: `Z` or `±hh:mm`. */
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
 
@@ -160,7 +176,11 @@ export async function resolveSource(flags: SourceFlags): Promise<SourceOutcome> 
   // reads as local time, so the same flag would name different instants on different hosts
   // while the plan echoed one verbatim value.
   const when = new Date(flags.switchedAt);
-  if (!ISO_INSTANT.test(flags.switchedAt) || Number.isNaN(when.getTime())) {
+  if (
+    !ISO_INSTANT.test(flags.switchedAt) ||
+    Number.isNaN(when.getTime()) ||
+    !isCalendarDate(flags.switchedAt.slice(0, 10))
+  ) {
     return {
       ok: false,
       reason: `--switched-at <iso> is not a valid date: ${JSON.stringify(flags.switchedAt)}`,

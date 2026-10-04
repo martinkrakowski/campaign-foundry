@@ -132,9 +132,22 @@ describe("import CLI (PT-8a)", () => {
       ],
     });
 
+    // A REAL per-campaign refusal too, not just a skipped sample: a ref to a file that
+    // does not exist (CodeRabbit on #681). Refusals are content of the plan, not its exit.
+    writeBrief(root!, "camp-broken.yaml", {
+      id: "camp-broken",
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/gone.png" },
+      ],
+    });
+
     expect(await main(planArgv(), deps)).toBe(0);
-    const plan = JSON.parse(out[3]!) as { samples: { skipped: number } };
+    const plan = JSON.parse(out[3]!) as {
+      samples: { skipped: number };
+      refusals: readonly { slug: string | null }[];
+    };
     expect(plan.samples.skipped).toBe(1);
+    expect(plan.refusals).toEqual([expect.objectContaining({ slug: "camp-broken" })]);
   });
 
   test("--include-samples is read by plan", async () => {
@@ -235,6 +248,7 @@ describe("import CLI (PT-8a)", () => {
   test("a flag with no value, and a flag this command does not take, both refuse", async () => {
     for (const [argv, reason] of [
       [["plan", "--org"], "--org needs a value."],
+      [["plan", "--org", "--switched-at", "2026-10-01T00:00:00Z"], "--org needs a value."],
       [["plan", "--bogus", "x"], "--bogus is not a flag this command takes."],
     ] as const) {
       const { err, deps } = io();

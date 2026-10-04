@@ -228,6 +228,15 @@ describe("resolveSource (PT-8a reqs 1-4)", () => {
     expect(reason).not.toBe(SWITCHED_AT_REQUIRED);
   });
 
+  test("req 4: an impossible calendar date is refused, not normalised", async () => {
+    expect(
+      await resolveSource({ includeSamples: false, switchedAt: "2026-02-31T00:00:00Z" }),
+    ).toEqual({
+      ok: false,
+      reason: '--switched-at <iso> is not a valid date: "2026-02-31T00:00:00Z"',
+    });
+  });
+
   test("req 4: an instant with no timezone is refused, since it names a different instant per host", async () => {
     expect(
       await resolveSource({ includeSamples: false, switchedAt: "2026-10-01T00:00:00" }),
