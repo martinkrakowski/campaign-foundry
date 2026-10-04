@@ -120,6 +120,23 @@
         "no completed_at, beside another"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "after": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t) | last | .c) // \"cancelled\") end)})'",
+      "because": "the id tiebreak is dropped, so two runs of one name that completed in the same second keep their input order (jq's sort is stable). The test lists the newer, higher-id failure first, so the older success ends last, bad comes back empty and the PR merges; expect(result.status).toBe(1) reads 0.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "completed in the same second"
+      ],
+      "verdict": "caught"
     }
   ]
 }

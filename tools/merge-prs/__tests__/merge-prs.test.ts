@@ -2152,6 +2152,27 @@ describe.skipIf(!hasZsh())("merge-prs.sh — check-run verdicts per name", () =>
     }
   });
 
+  test("two runs of one name that completed in the same second: the higher id decides", () => {
+    // completed_at has one-second resolution, so a tie is real, and the id is the
+    // tiebreak. The failure is listed FIRST so a sort on completed_at alone (stable,
+    // keeping input order) would leave the older success last and merge.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_CHECK_RUNS: JSON.stringify([
+          run(BUILD, "failure", "2026-10-03T18:10:00Z", 2),
+          run(BUILD, "success", "2026-10-03T18:10:00Z", 1),
+        ]),
+      });
+
+      expect(result.status).toBe(1);
+      expect(mergedByStub(harness)).toBe("");
+      expect(result.stdout).toContain(`CHECKS FAILED for #${PR_ONE.pr}: ${BUILD}`);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
   test("a completed run with no completed_at, beside another of its name, refuses instead of being ranked oldest", () => {
     // Defaulting a null completed_at to "" ranks that run OLDEST, so here the
     // newer failure would be superseded by the older success and the PR would
