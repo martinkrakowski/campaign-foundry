@@ -147,7 +147,7 @@ echo "==> prove the app key"
 remote kubectl -n "$NS" delete job s3-app-probe --ignore-not-found
 cat deploy/staging/jobs/s3-app-probe.yaml | remote kubectl apply -f -
 if ! remote kubectl -n "$NS" wait job/s3-app-probe --for=condition=complete --timeout=2m; then
-  remote kubectl -n "$NS" logs job/s3-app-probe
+  remote kubectl -n "$NS" logs job/s3-app-probe || true
   echo 'deploy.sh: the app key cannot round-trip an object in bucket campaign-foundry; see the probe log above' >&2
   exit 1
 fi
