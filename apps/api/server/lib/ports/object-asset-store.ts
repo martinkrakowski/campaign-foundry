@@ -100,7 +100,7 @@ export class ObjectAssetStore implements AssetStorePort {
    * brief. PT-4k1 did NOT rewrite it into a key shape, and here is why that is
    * still right: the web writes this path into the brief until PT-4l teaches it
    * to send an id, and the SERVER is what normalises such a ref — first
-   * org-scoped against the campaign it names, and then (PT-4k2, D208d) into the
+   * org-scoped against the campaign it names, and then (PT-4k2b, D208d) into the
    * asset's own id at the save-time check. A path this returns is an input to
    * that check, not an output of it.
    */
@@ -376,12 +376,15 @@ export class ObjectAssetStore implements AssetStorePort {
    * `<stem>-<from><ext>`, then `-2`, `-3` — so a duplicated campaign's brief
    * names the same files on both backends.
    *
-   * **Interim, documented, NOT fixed (PT-4k1, C4):** until PT-4k2 lands, an id
-   * ref that reaches a WRITTEN brief bypasses `extractSourceAssetBriefIds`, which
-   * matches paths only — so the save-time team check does not see it, and a
-   * copied brief can carry an id ref whose campaign this caller cannot see. PT-4k2's
-   * `resolveBriefAssetRefs` closes this; until it does, a path ref is the only
-   * form that check has ever covered, and this lane does not widen it.
+   * **The id-ref gap PT-4k1 left is CLOSED (PT-4k2b, D208 D, D210 a/c).** An id ref
+   * reaches a written brief through `resolveBriefAssetRefs`' `save` mode, which team-checks
+   * it (`assetOwner` is org-scoped only, so the team half is the explicit
+   * `campaignVisibility` call) and refuses a hidden campaign, another org's, an absent row
+   * and a ref naming no campaign with ONE 404 — and every write route then copies the
+   * foreign owners it named, so this map's `<source id> → <target id>` entry is what
+   * remaps them. What `extractSourceAssetBriefIds` could not see, because it matches paths
+   * only, is now seen by all four write routes (`briefs.post`, `briefs/[id].put`,
+   * `duplicate.post`, `index.post`), and off `s3` the path-derived rule is unchanged.
    */
   async copyAssets(fromBriefId: string, toBriefId: string): Promise<Record<string, string>> {
     if (fromBriefId === toBriefId) return {};
@@ -433,9 +436,10 @@ export class ObjectAssetStore implements AssetStorePort {
       } catch (error) {
         // The same compensation `writeAsset` makes, and for the same reason: the
         // object is written before the row that will name it, and nobody rolls
-        // this call back — `briefs.post.ts` runs it with no release step. So EITHER
-        // half failing has to give the object back, or it sits under the target's
-        // prefix with nothing that will ever name it.
+        // this call back — `briefs.post.ts` runs it with no release step, and
+        // neither does `briefs/[id].put.ts` (which has no reservation to release).
+        // So EITHER half failing has to give the object back, or it sits under the
+        // target's prefix with nothing that will ever name it.
         await this.discard(targetKey);
         // A concurrent copy of one name is the only `23505` left here (every
         // same-hash case above `continue`s before it gets this far), and it is

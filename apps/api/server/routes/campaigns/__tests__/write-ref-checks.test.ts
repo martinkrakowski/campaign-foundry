@@ -426,9 +426,18 @@ describe("the write routes under s3 — every ref stored as an id the caller can
     }
   };
 
-  /** A campaign delta of zero and a `copyAssets` never called: the shape of a refusal. */
-  const expectRefusal = async (before: Counts, copyAssets: { mock: { calls: unknown[] } }) => {
+  /** What a refusal may not change: the three row counts, all of them. */
+  const expectNoRows = async (before: Counts): Promise<void> => {
     expect(await counts(harness.db)).toEqual(before);
+  };
+
+  /**
+   * A campaign delta of zero and a `copyAssets` never called: the shape of a refusal that
+   * happens BEFORE any copy. The race tests below are the mirror — their `copyAssets` ran
+   * on purpose, so they assert the rows alone.
+   */
+  const expectRefusal = async (before: Counts, copyAssets: { mock: { calls: unknown[] } }) => {
+    await expectNoRows(before);
     expect(copyAssets.mock.calls).toEqual([]);
   };
 
@@ -445,6 +454,25 @@ describe("the write routes under s3 — every ref stored as an id the caller can
 
   const putOwnHidden = async (): Promise<unknown> => {
     const res = await put(ONLY_T2, CMP_PUT, baseBrief(CMP_PUT, pathRef(CMP_PUT)));
+    expect(res.status).toBe(404);
+    return res.json();
+  };
+
+  /**
+   * `duplicate.post`'s own hidden-campaign 404 for the very same source: `ONLY_T2` is
+   * outside `source`'s team, so this route's own `resolveCampaignRef` gate answers, and
+   * the body names the router param — which is what makes it the right comparison for a
+   * ref refusal instead of a literal string (D210 c).
+   */
+  const dupOwnHidden = async (source: string): Promise<unknown> => {
+    const res = await duplicate(ONLY_T2, source, unique("copy"));
+    expect(res.status).toBe(404);
+    return res.json();
+  };
+
+  /** `index.post`'s own, for the same source and the same reason. */
+  const createOwnHidden = async (source: string): Promise<unknown> => {
+    const res = await createFrom(ONLY_T2, { name: unique("copy"), source });
     expect(res.status).toBe(404);
     return res.json();
   };
@@ -488,58 +516,78 @@ describe("the write routes under s3 — every ref stored as an id the caller can
   });
 
   /**
-   * `duplicate.post` and `index.post` are PT-4k2b2's: they are not wired to the helper
-   * yet, and D211(a) requires them to behave EXACTLY as they do today — which means an
-   * id-shaped ref in a source brief is still invisible to the path-derived check they
-   * run, so the id-shaped matrix above cannot be asserted for them yet.
+   * The two copy routes, once they are wired to the helper (PT-4k2b2).
    *
-   * What IS true today, and what this pins, is that a PATH naming a hidden campaign still
-   * answers 404 before any slug is claimed or any asset is copied — and that the body
-   * names the SLUG READ OUT OF THE REF (`duplicate.post.ts:246`, `index.post.ts:336`).
-   * That name is the oracle D210(c) exists to close, and closing it is precisely what
-   * PT-4k2b2's `BriefRefNotFoundError` branch does; until then the two bodies are
-   * deliberately NOT equal, so each is pinned literally rather than compared.
+   * They refuse through the SAME body they give for a source they cannot see, which is
+   * the D210(c) change and the reason the literal `Brief "<slug>" not found.` these two
+   * used to answer — naming the slug read OUT of the ref, the oracle a guessable slug
+   * turns into a probe — is gone from `s3`. Every case below is compared against the
+   * route's own hidden-source 404 rather than against a string, so the assertion is that
+   * the two are indistinguishable, not that a message reads well.
+   *
+   * A source brief is seeded with `createBrief` as OWNER, never through the route: the
+   * refs under test are exactly the ones the route now refuses to store, so the fixture
+   * has to be able to write them directly. It must also carry a resolvable neutral ref —
+   * a brief whose OTHER fields name the source's own asset row — or the resolve would
+   * refuse from a field the case is not about (the header's own rule, inverted).
    */
-  describe.each(FIELDS)("the two copy routes — the %s field", (field) => {
-    /** A source brief of `id`'s own, carrying `ref` in the one field under test. */
-    const seedSource = async (id: string, ref: string): Promise<void> => {
-      await ownerStore.createBrief(withRef(field, ref, id, pathRef(id)), { teamId: "t1" });
-    };
+  const seedSourceBrief = async (
+    field: Field,
+    ref: string | ((slug: string) => string),
+    prefix: string,
+  ): Promise<{ slug: string; campaignId: string }> => {
+    const slug = unique(prefix);
+    const { campaignId } = await ownerStore.createCampaign(slug, { teamId: "t1" });
+    await upload(OWNER, slug, "logo.png");
+    await ownerStore.createBrief(
+      withRef(field, typeof ref === "function" ? ref(slug) : ref, slug, pathRef(slug)),
+      { teamId: "t1" },
+    );
+    return { slug, campaignId };
+  };
 
-    test("duplicate answers 404 naming the parsed slug, and mints nothing", async () => {
-      const source = unique("src-dup");
-      await ownerStore.createCampaign(source, { teamId: "t1" });
-      await seedSource(source, pathRef(THEIRS));
-      const copyAssets = vi.spyOn(ObjectAssetStore.prototype, "copyAssets");
-      const snapshot = await counts(harness.db);
+  describe.each(FIELDS)("duplicate.post — the %s field", (field) => {
+    test.each(REFUSALS)(
+      "%s answers the hidden-campaign body with zero side effects",
+      async (which) => {
+        const copyAssets = vi.spyOn(ObjectAssetStore.prototype, "copyAssets");
+        const ref = await refusalRef(which);
+        const source = (await seedSourceBrief(field, ref, "src-dup")).campaignId;
+        // **The source is addressed by its uuid, not its slug, and that is the whole
+        // reason this comparison can fail.** The refusal's own body names `template.id`,
+        // which is the source's SLUG, so with a slug-addressed request the ref-named body
+        // and the hidden-source body are the same string whether or not this route maps
+        // the refusal — and the oracle would be unpinned. Addressing by uuid is also what
+        // the web does, and it is where the two bodies genuinely differ.
+        const before = await dupOwnHidden(source);
+        const snapshot = await counts(harness.db);
+        copyAssets.mockClear();
 
-      const res = await duplicate(ONLY_T1, source, "A Copy");
-      expect(res.status).toBe(404);
-      expect(await res.json()).toEqual({ error: `Brief "${THEIRS}" not found.` });
-      await expectRefusal(snapshot, copyAssets);
-      // The same route, for the same source, answers `Brief "<source>" not found.` when
-      // the SOURCE is what this caller cannot see — which is why the two are different
-      // assertions today, and why PT-4k2b2 collapses them.
-      expect((await (await duplicate(ONLY_T2, source, "A Copy")).json()).error).toBe(
-        `Brief "${source}" not found.`,
-      );
-    });
+        const res = await duplicate(ONLY_T1, source, unique("copy"));
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual(before);
+        await expectRefusal(snapshot, copyAssets);
+      },
+    );
+  });
 
-    test("a sourced create answers 404 naming the parsed slug, and mints nothing", async () => {
-      const source = unique("src-create");
-      await ownerStore.createCampaign(source, { teamId: "t1" });
-      await seedSource(source, pathRef(THEIRS));
-      const copyAssets = vi.spyOn(ObjectAssetStore.prototype, "copyAssets");
-      const snapshot = await counts(harness.db);
+  describe.each(FIELDS)("index.post — the %s field", (field) => {
+    test.each(REFUSALS)(
+      "%s answers the hidden-campaign body with zero side effects",
+      async (which) => {
+        const copyAssets = vi.spyOn(ObjectAssetStore.prototype, "copyAssets");
+        const ref = await refusalRef(which);
+        const source = (await seedSourceBrief(field, ref, "src-create")).campaignId;
+        const before = await createOwnHidden(source);
+        const snapshot = await counts(harness.db);
+        copyAssets.mockClear();
 
-      const res = await createFrom(ONLY_T1, { name: "A Copy", source });
-      expect(res.status).toBe(404);
-      expect(await res.json()).toEqual({ error: `Brief "${THEIRS}" not found.` });
-      await expectRefusal(snapshot, copyAssets);
-      expect((await (await createFrom(ONLY_T2, { name: "A Copy", source })).json()).error).toBe(
-        `Brief "${source}" not found.`,
-      );
-    });
+        const res = await createFrom(ONLY_T1, { name: unique("copy"), source });
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual(before);
+        await expectRefusal(snapshot, copyAssets);
+      },
+    );
   });
 
   test("briefs.post stores a path ref to the target's OWN asset as its id, and copies nothing", async () => {
@@ -683,6 +731,118 @@ describe("the write routes under s3 — every ref stored as an id the caller can
     expect(await res.json()).toEqual({ error: `Brief "${slug}" not found.` });
     expect(copyAssets).toHaveBeenCalled();
     expect(Number((await counts(harness.db)).versions)).toBe(snapshot.versions);
+  });
+
+  /**
+   * The source's OWN path ref is normalised to an id and stored under the COPY's campaign.
+   *
+   * **No `copyAssets`-free case exists on a copy route**, and that is not an omission: a
+   * path ref naming the SOURCE names a campaign the route is about to copy wholesale, so
+   * `copyAssets(source, target)` always runs and is exactly what turns that id into the
+   * target's. The D208(D) half is what this asserts — the stored ref is an id, not the
+   * path the source carried — and `copyAssets` is asserted to have been called with the
+   * source, so the id cannot have come from anywhere else.
+   */
+  test("duplicate stores the source's own PATH ref as the copy's own asset id", async () => {
+    const copyAssets = vi.spyOn(ObjectAssetStore.prototype, "copyAssets");
+    const source = (await seedSourceBrief("products[].logoPath", pathRef, "src-own-path")).slug;
+    const res = await duplicate(ONLY_T1, source, unique("copy"));
+    expect(res.status).toBe(201);
+    const stored = (await res.json()).brief as CampaignBrief;
+    const ref = readRef(stored, "products[].logoPath");
+    expect(ref).not.toContain("/");
+    expect((await store().assetOwner(ref))?.slug).toBe(stored.id);
+    expect(copyAssets).toHaveBeenCalledWith(source, stored.id);
+  });
+
+  test("a sourced create stores the source's own PATH ref as the copy's own asset id", async () => {
+    const copyAssets = vi.spyOn(ObjectAssetStore.prototype, "copyAssets");
+    const source = (await seedSourceBrief("products[].logoPath", pathRef, "src-own-path-c")).slug;
+    const res = await createFrom(ONLY_T1, { name: unique("copy"), source });
+    expect(res.status).toBe(201);
+    const { slug } = (await res.json()) as { slug: string };
+    const stored = (await ownerStore.findBriefById(slug))!.brief;
+    const ref = readRef(stored, "products[].logoPath");
+    expect(ref).not.toContain("/");
+    expect((await store().assetOwner(ref))?.slug).toBe(slug);
+    expect(copyAssets).toHaveBeenCalledWith(source, slug);
+  });
+
+  test("CARRY ITEM 2: duplicate brings a THIRD campaign's asset id over, and the copy outlives it", async () => {
+    // The gap this lane closes on these two routes: the copy-source list was
+    // `extractSourceAssetBriefIds`, which matches PATHS only. A source brief naming a
+    // third campaign's asset by ID therefore named no copy source at all, so the copy
+    // went on to SHARE that id — and deleting the third campaign left the copy's logo
+    // pointing at an asset in no campaign at all.
+    const third = await freshSource();
+    const source = (await seedSourceBrief("products[].logoPath", third.id, "src-third-dup")).slug;
+    const res = await duplicate(ONLY_T1, source, unique("copy"));
+    expect(res.status).toBe(201);
+    const stored = (await res.json()).brief as CampaignBrief;
+    const refs = storedRefs(stored);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).not.toBe(third.id);
+    expect((await store().assetOwner(refs[0]!))?.slug).toBe(stored.id);
+    // ...and now the third campaign is gone, which is the whole point of copying.
+    await store().deleteAssets(third.slug);
+    expect((await store().readAssetById(refs[0]!))?.equals(PNG_ALT)).toBe(true);
+  });
+
+  test("CARRY ITEM 2 on index.post: a sourced create brings a THIRD campaign's id over", async () => {
+    const third = await freshSource();
+    const source = (await seedSourceBrief("products[].logoPath", third.id, "src-third-create"))
+      .slug;
+    const res = await createFrom(ONLY_T1, { name: unique("copy"), source });
+    expect(res.status).toBe(201);
+    const { slug } = (await res.json()) as { slug: string };
+    const stored = (await ownerStore.findBriefById(slug))!.brief;
+    const refs = storedRefs(stored);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).not.toBe(third.id);
+    expect((await store().assetOwner(refs[0]!))?.slug).toBe(slug);
+    await store().deleteAssets(third.slug);
+    expect((await store().readAssetById(refs[0]!))?.equals(PNG_ALT)).toBe(true);
+  });
+
+  test("RACE on duplicate: a copy that maps nothing releases the minted campaign and frees its assets", async () => {
+    // The source's OWN copy is left real, so the target really does hold copied rows when
+    // the third campaign's copy answers `{}` — which is what makes the freed-asset half
+    // of the delta an assertion rather than a count of zero that was always zero.
+    const third = await freshSource();
+    const source = (await seedSourceBrief("products[].logoPath", third.id, "src-race-dup")).slug;
+    const real = ObjectAssetStore.prototype.copyAssets;
+    const copyAssets = vi
+      .spyOn(ObjectAssetStore.prototype, "copyAssets")
+      .mockImplementation(async function (this: ObjectAssetStore, from: string, to: string) {
+        return from === third.slug ? {} : await real.call(this, from, to);
+      });
+    const snapshot = await counts(harness.db);
+
+    const res = await duplicate(ONLY_T1, source, unique("copy"));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: `Brief "${source}" not found.` });
+    expect(copyAssets).toHaveBeenCalled();
+    // Every one of the three counts: the copied rows were freed, no version was written,
+    // and the reservation was released.
+    await expectNoRows(snapshot);
+  });
+
+  test("RACE on index.post: a copy that maps nothing releases the minted campaign and frees its assets", async () => {
+    const third = await freshSource();
+    const source = (await seedSourceBrief("products[].logoPath", third.id, "src-race-create")).slug;
+    const real = ObjectAssetStore.prototype.copyAssets;
+    const copyAssets = vi
+      .spyOn(ObjectAssetStore.prototype, "copyAssets")
+      .mockImplementation(async function (this: ObjectAssetStore, from: string, to: string) {
+        return from === third.slug ? {} : await real.call(this, from, to);
+      });
+    const snapshot = await counts(harness.db);
+
+    const res = await createFrom(ONLY_T1, { name: unique("copy"), source });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: `Brief "${source}" not found.` });
+    expect(copyAssets).toHaveBeenCalled();
+    await expectNoRows(snapshot);
   });
 });
 

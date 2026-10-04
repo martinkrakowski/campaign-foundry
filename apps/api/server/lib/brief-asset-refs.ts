@@ -144,10 +144,10 @@ export async function resolveBriefAssetRefs(
   // `assertSourceVisible` refuses `"hidden"` only (letting `"absent"` through, which a
   // directory of demo assets answers), makes no call at all on a backend with no teams,
   // and raises a plain `CampaignNotFoundError(fromId)`, so `Brief "<slug>" not found.`
-  // off s3 is what `duplicate.post` and `index.post` already answer and both still call
-  // `assertSourceVisible` themselves (PT-4k2b2 retires those last two call sites and
-  // this docstring with them). `assertVisible` would refuse anything `!== "visible"`,
-  // inventing a 404 staging has never given.
+  // off s3 is what `duplicate.post` and `index.post` already answer — through THIS branch,
+  // since PT-4k2b2 retired their last two direct call sites along with the docstring that
+  // described them. `assertVisible` would refuse anything `!== "visible"`, inventing a 404
+  // staging has never given.
   if (opts.mode === "save" && objectStore() !== "s3") {
     const copyFrom = extractSourceAssetBriefIds(brief, opts.target);
     for (const fromId of copyFrom) {
