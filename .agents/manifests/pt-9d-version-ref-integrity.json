@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-9d-version-ref-integrity",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "      `select id from asset where campaign_id = $1 and id = any($2::uuid[]) for share`,\n      [campaignId, uuidRefs],",
+      "after": "      `select id from asset where id = any($1::uuid[]) for share`,\n      [uuidRefs],",
+      "because": "the `campaign_id = $1` equality comes off the ref check's WHERE clause, leaving `id = any($1::uuid[])` and the array as the sole parameter — both the template line and the params line immediately below it, because renumbering one without the other would leave a `$2` in the params array with no `$2` left in the query, which fails as a driver error rather than as the missing-filter semantics this claims. The witness is a uuid ref naming ANOTHER campaign's `asset` row in the SAME org: with the campaign predicate gone the select matches on the id alone, so any campaign in the database owning that row satisfies it, the shortfall never fires, and `rejects.toBeInstanceOf(BriefRefNotFoundError)` fails — the cross-campaign ref is committed as a dangling version. Same-org on purpose: this is a campaign-scope claim, and an `org_id` refusal would confound it with a tenant question the two-param shape deliberately never asks. This is the one mutation in the manifest because it is the one `mutate:verify` can replay everywhere on PGlite, with no real server and no `TEST_DATABASE_URL` — CI's manifest-replay step runs before the `Test` step that exports that variable. The lane's other mutation, dropping `for share` from this same select, needs a live two-connection Postgres (the interleaving proof in `pg-brief-store.concurrency.test.ts`) and so is run by hand and reported in the lane report rather than handed to `mutate:verify` at all.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-brief-store.test.ts",
+        "-t",
+        "naming another campaign's asset is refused"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

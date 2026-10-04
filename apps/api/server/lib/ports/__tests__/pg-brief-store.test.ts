@@ -11,6 +11,7 @@ import { emptyDatabase, migratedDatabase } from "../../db/__tests__/pglite-clien
 import { loadMigrations, migrate } from "../../db/migrate.js";
 import { resetDatabase, setDatabase } from "../../db/database.js";
 import { hashBytes } from "../../brief-files.js";
+import { BriefRefNotFoundError } from "../../brief-asset-refs.js";
 import { LOCAL_TENANT } from "../../tenant.js";
 import { FsBriefStore } from "../fs-brief-store.js";
 import { PgBriefStore } from "../pg-brief-store.js";
@@ -1381,6 +1382,227 @@ describe("the campaign tombstone (PT-9a1, D231, D233)", () => {
     expect(outcome).toMatchObject({ code: "EEXIST" });
   });
 });
+
+/**
+ * D236: a brief version may only name ids that are `asset` rows of its own
+ * campaign, checked inside the version's own transaction.
+ *
+ * The write-side checks in `brief-asset-refs.ts` ran in an EARLIER transaction,
+ * so without this a deleter committing in the gap leaves a committed version
+ * naming a row that no longer exists. The store learns which mode it is in from
+ * the registry's sixth constructor argument and never from env, which is why
+ * every store below states its mode explicitly.
+ */
+describe("the version's own ref check (PT-9d, D236)", () => {
+  let db: SqlClient;
+  /** The s3-mode store: the check on. Every positive case below uses this one. */
+  let s3: PgBriefStore;
+
+  beforeEach(async () => {
+    db = await migratedDatabase();
+    s3 = new PgBriefStore(db, "local", "local", [], [], true);
+  });
+  afterEach(async () => {
+    await db.end();
+  });
+
+  /** One `asset` row (0016) on this campaign, as an upload would leave it. */
+  const seedAsset = async (campaignId: string, name = "logo.png"): Promise<string> => {
+    const { rows } = await db.query<{ id: string }>(
+      `insert into asset (org_id, campaign_id, kind, name, size, sha256, content_type)
+       values ('local', $1, 'input', $2, 3, $3, 'image/png') returning id`,
+      [campaignId, name, "0".repeat(64)],
+    );
+    return rows[0]!.id;
+  };
+
+  /** `brief()` with one product whose every ref is `ref` — a uuid, or a path. */
+  const briefWithRef = (id: string, ref: string): CampaignBrief => ({
+    ...brief(id),
+    products: [
+      {
+        id: "prod-1",
+        name: "Product 1",
+        primaryColor: "#1473E6",
+        logoPath: ref,
+        inputAsset: ref,
+      },
+    ],
+  });
+
+  /** A uuid that names no `asset` row anywhere in this database. */
+  const ORPHAN_UUID = "11111111-2222-4333-8444-555555555555";
+
+  /**
+   * A `SqlClient` that records every statement its transactions' inner
+   * `tx.query` sees. A success alone cannot tell "skipped the query" from "ran
+   * it and vacuously passed", so the skip is observed, not inferred.
+   */
+  const recordingClient = (inner: SqlClient): { client: SqlClient; statements: string[] } => {
+    const statements: string[] = [];
+    return {
+      statements,
+      client: {
+        ...inner,
+        transaction: (work) =>
+          inner.transaction((tx) =>
+            work({
+              ...tx,
+              query: async <R>(text: string, params?: readonly unknown[]) => {
+                statements.push(text);
+                return tx.query<R>(text, params);
+              },
+            }),
+          ),
+      },
+    };
+  };
+
+  /** The recorded statements that read the `asset` table. */
+  const assetReads = (statements: readonly string[]): string[] =>
+    statements.filter((text) => text.includes("from asset"));
+
+  test("an asset row deleted after the caller's own check refuses the write and adds no version", async () => {
+    const { campaignId } = await s3.createCampaign("race");
+    const assetId = await seedAsset(campaignId);
+    // The caller's own `resolveBriefAssetRefs` check already ran and passed:
+    // version 1 committed naming this id, which is what makes the delete below
+    // a race the store has to catch rather than a ref that never existed.
+    await s3.createBrief(briefWithRef("race", assetId));
+    // A deleter that takes no campaign-row lock commits here.
+    await db.query(`delete from asset where id = $1`, [assetId]);
+
+    await expect(s3.rewriteBrief(briefWithRef("race", assetId))).rejects.toBeInstanceOf(
+      BriefRefNotFoundError,
+    );
+    // The other half: the refusal rolled the whole transaction back, so the
+    // version that would have named the freed row was never written. Still 1,
+    // not 2 — the same count-the-rows proof PT-9a1's tombstone uses.
+    const { rows } = await db.query<{ n: number }>(
+      `select count(*)::int as n from brief_version where campaign_id = $1`,
+      [campaignId],
+    );
+    expect(rows[0]!.n).toBe(1);
+  });
+
+  test("a uuid ref naming another campaign's asset is refused, in the same org", async () => {
+    const mine = await s3.createCampaign("mine");
+    const theirs = await s3.createCampaign("theirs");
+    const foreign = await seedAsset(theirs.campaignId);
+    // A same-org sibling campaign, so this is a cross-campaign ref and never an
+    // org-isolation question: `campaign_id = $1` is what separates them.
+    await s3.createBrief(brief("mine-with-a-version"));
+    // Both transaction bodies, since each owns its own insertion point.
+    await expect(s3.createBrief(briefWithRef("mine", foreign))).rejects.toBeInstanceOf(
+      BriefRefNotFoundError,
+    );
+    await expect(
+      s3.rewriteBrief(briefWithRef("mine-with-a-version", foreign)),
+    ).rejects.toBeInstanceOf(BriefRefNotFoundError);
+    // And neither wrote a version: the shortfall is caught before `dumpBrief`.
+    const { rows } = await db.query<{ n: number }>(
+      `select count(*)::int as n from brief_version where campaign_id = $1`,
+      [mine.campaignId],
+    );
+    expect(rows[0]!.n).toBe(0);
+  });
+
+  test("a brief with no refs at all, and one whose every ref is a path, skip the asset query", async () => {
+    // No refs at all: `collectRefs` returns nothing, so there is no array to ask
+    // about. Products empty, and no audio, no beat backgrounds.
+    const noRefs = recordingClient(db);
+    await new PgBriefStore(noRefs.client, "local", "local", [], [], true).createBrief({
+      ...brief("no-refs"),
+      products: [],
+    });
+    expect(assetReads(noRefs.statements)).toEqual([]);
+
+    // Every ref a path, and no uuid among them: a path cast to `::uuid[]` would
+    // raise 22P02, a driver error rather than a refusal, so `isAssetId` has to
+    // filter before the query rather than after it.
+    const paths = recordingClient(db);
+    await new PgBriefStore(paths.client, "local", "local", [], [], true).createBrief(
+      briefWithRef("all-paths", "assets/inputs/all-paths/logo.png"),
+    );
+    expect(assetReads(paths.statements)).toEqual([]);
+
+    // The POSITIVE CONTROL, through the identical wrapper: a brief naming one
+    // real uuid ref against a seeded row DOES reach the query. Without it the
+    // two assertions above are unfalsifiable — a wrapper that recorded nothing
+    // at all would make them pass while proving nothing.
+    const real = recordingClient(db);
+    const realStore = new PgBriefStore(real.client, "local", "local", [], [], true);
+    const { campaignId } = await realStore.createCampaign("one-real-ref");
+    const assetId = await seedAsset(campaignId);
+    await realStore.createBrief(briefWithRef("one-real-ref", assetId));
+    expect(assetReads(real.statements)).toHaveLength(1);
+  });
+
+  test("an explicit assetIds false accepts a uuid-shaped ref naming no asset row", async () => {
+    // D208 D: with fs there are no ids, so a uuid-shaped ref is a path like any
+    // other. Spelled out as `false` rather than omitted — the explicit-mode
+    // proof, beside the constructor default's own test below.
+    const off = new PgBriefStore(db, "local", "local", [], [], false);
+    const { campaignId } = await off.createCampaign("fs-mode");
+    await expect(off.createBrief(briefWithRef("fs-mode", ORPHAN_UUID))).resolves.toMatchObject({
+      campaignId,
+    });
+    await expect(off.rewriteBrief(briefWithRef("fs-mode", ORPHAN_UUID))).resolves.toMatchObject({
+      campaignId,
+    });
+    // D208 D says "unchanged", so this is the whole claim: the uuid-shaped ref
+    // is stored verbatim, not rewritten into a path and not refused.
+    expect((await latestBody(db, campaignId)).products[0]!.logoPath).toBe(ORPHAN_UUID);
+  });
+
+  test("the constructor default is off, as the three-argument call sites expect", async () => {
+    // Three arguments, exactly as the 100+ non-Owned call sites construct this
+    // store. A default of `true` would both refuse these briefs and change what
+    // every one of those files means, so the default is a requirement and not
+    // an implementation detail.
+    const defaulted = new PgBriefStore(db, "local", "local");
+    const { campaignId } = await defaulted.createCampaign("defaulted");
+    await expect(
+      defaulted.createBrief(briefWithRef("defaulted", ORPHAN_UUID)),
+    ).resolves.toMatchObject({ campaignId });
+    await expect(
+      defaulted.rewriteBrief(briefWithRef("defaulted", ORPHAN_UUID)),
+    ).resolves.toMatchObject({ campaignId });
+  });
+
+  test("a campaign whose own slug is uuid-shaped text is checked identically to a normal slug", async () => {
+    // D246 read for H5: `id` and `slug` share one text space, so a caller may
+    // address a campaign by a uuid-shaped slug of its own. `SAFE_ID_PATTERN`
+    // admits this text (lowercase hex and `-`). The check must key on the
+    // resolved `campaign.id` surrogate and on nothing about `brief.id`'s own
+    // shape, or a uuid-slugged campaign would silently skip it.
+    const uuidSlug = "3f2b8c14-9d0e-4a51-b6c7-8e9f0a1b2c3d";
+    const { campaignId } = await s3.createCampaign(uuidSlug);
+    const assetId = await seedAsset(campaignId);
+
+    await expect(s3.createBrief(briefWithRef(uuidSlug, assetId))).resolves.toMatchObject({
+      campaignId,
+    });
+    await db.query(`delete from asset where id = $1`, [assetId]);
+    await expect(s3.rewriteBrief(briefWithRef(uuidSlug, assetId))).rejects.toBeInstanceOf(
+      BriefRefNotFoundError,
+    );
+    const { rows } = await db.query<{ n: number }>(
+      `select count(*)::int as n from brief_version where campaign_id = $1`,
+      [campaignId],
+    );
+    expect(rows[0]!.n).toBe(1);
+  });
+});
+
+/** The stored body of this campaign's latest version, parsed. */
+async function latestBody(db: SqlClient, campaignId: string): Promise<CampaignBrief> {
+  const { rows } = await db.query<{ body: string }>(
+    `select body from brief_version where campaign_id = $1 order by version desc limit 1`,
+    [campaignId],
+  );
+  return JSON.parse(rows[0]!.body) as CampaignBrief;
+}
 
 /**
  * The tombstone's own shape (PT-9a1, D231, D233 r2). Separate from the reader

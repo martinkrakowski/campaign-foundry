@@ -4,9 +4,11 @@ import {
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
 import { dumpBrief, errorMessage } from "@campaignfoundry/shared";
+import { collectRefs } from "../asset-files.js";
 import { BRIEF_SOURCE_EXTS, hashBytes, isErrno } from "../brief-files.js";
 import type { SqlClient, SqlQuery } from "../db/sql-client.js";
 import { parseBriefText, type ParseBriefOptions } from "../load-brief.js";
+import { isAssetId } from "./asset-store.port.js";
 import type {
   BriefStorePort,
   BriefWriteOptions,
@@ -110,6 +112,15 @@ export class PgBriefStore implements BriefStorePort {
    * every existing call site (PT-3d's tests, and any lane that never assigns a
    * team) still sees exactly the org-wide campaigns team scope always allowed,
    * since a campaign with no team is visible regardless of role or team.
+   *
+   * `assetIds` is D208 D's mode flag and it defaults to OFF, which is the only
+   * value every existing call site may see: with fs there are no ids at all, so
+   * a uuid-shaped ref is a path like any other and stays unchallenged — turning
+   * the check on by default would refuse 108 call sites' worth of briefs that
+   * name no `asset` row and have never meant to. It is a parameter and not an env
+   * read so this file never learns which backend it is in; `ports/index.ts` is
+   * the one reader, and it bakes the answer into the memo key the same way the
+   * `assets`/`outputs` registries already bake s3-ness in (D236).
    */
   constructor(
     private readonly db: SqlClient,
@@ -117,6 +128,7 @@ export class PgBriefStore implements BriefStorePort {
     private readonly actor: string,
     private readonly roles: readonly string[] = [],
     private readonly teamIds: readonly string[] = [],
+    private readonly assetIds: boolean = false,
   ) {}
 
   /**
@@ -344,6 +356,67 @@ export class PgBriefStore implements BriefStorePort {
   }
 
   /**
+   * D236: a brief version may only name ids that are `asset` rows of THIS
+   * campaign, checked inside the very transaction that writes the version.
+   * The write-side checks in `brief-asset-refs.ts` ran in an EARLIER one, so
+   * without this a deleter committing between that check and this write leaves
+   * a committed version naming a row that no longer exists — the PT-4b
+   * residual, which freeing "inside one statement" never closed.
+   *
+   * Called once per transaction, after `campaignId` is final on every branch
+   * and immediately before `dumpBrief` and the version insert. Later than the
+   * EEXIST/tombstone refusals deliberately: a campaign this caller cannot see,
+   * or one that is deleted, answers with its OWN error rather than a confusing
+   * "asset not found" about a campaign they were never shown.
+   *
+   * `for share` is the BACKSTOP, not the primary serialiser: the campaign row
+   * lock these two transactions already hold is what every PT-9 deleter takes
+   * too, and this holds the asset rows against one that does not (D236).
+   *
+   * **No `org_id` predicate, and that is the two-param shape D236 specifies**
+   * rather than an oversight: `campaignId` was resolved org-scoped a few lines
+   * above in this same transaction, and `asset.campaign_id` is a uuid FK to one
+   * global `campaign.id` primary key, so `campaign_id = $1` already pins the org
+   * transitively — a second `org_id = $1` would be redundant, not a missing
+   * tenant filter, and the unique `(campaign_id, kind, name)` index serves the
+   * lookup as it stands.
+   */
+  private async assertRefsExist(
+    tx: SqlQuery,
+    campaignId: string,
+    brief: CampaignBrief,
+  ): Promise<void> {
+    // Off `s3` this never even collects the refs (D208 D): fs has no ids.
+    if (!this.assetIds) return;
+    // Filtered BEFORE the database, not after: a path-shaped ref cast to
+    // `::uuid[]` raises 22P02, which is a driver error and not a refusal.
+    const uuidRefs = collectRefs(brief).filter(isAssetId);
+    // Zero surviving refs skips the query entirely rather than running
+    // `any($2::uuid[])` against an empty array.
+    if (uuidRefs.length === 0) return;
+    const { rows } = await tx.query<{ id: string }>(
+      `select id from asset where campaign_id = $1 and id = any($2::uuid[]) for share`,
+      [campaignId, uuidRefs],
+    );
+    // `collectRefs` dedupes through a `Set`, so the survivors are distinct and a
+    // count is a membership test.
+    if (rows.length !== uuidRefs.length) {
+      // Dynamic, never a static import at the top of this file. The class body
+      // runs at module load and extends `CampaignNotFoundError` from
+      // `ownership.ts`, which itself imports `ports/index.js` — a static edge
+      // here closes `ownership -> ports/index -> pg-brief-store ->
+      // brief-asset-refs -> extends <CampaignNotFoundError, still in the
+      // temporal dead zone>` and throws "Class extends value undefined" at
+      // import time, on the first request that reaches the cluster through
+      // `ownership.ts` first, whether or not this check ever runs. A dynamic
+      // import is evaluated at CALL time, once every module in the process has
+      // finished its own top-level body, so no such order can bite.
+      const { BriefRefNotFoundError } = await import("../brief-asset-refs.js");
+      throw new BriefRefNotFoundError(brief.id);
+    }
+  }
+
+  /**
    * `teamId` stays three-state all the way to the write (D177, PT-5b2):
    * `undefined` (the route passed none) must NOT become `createCampaign`'s
    * "no team" default when this write turns out to be the first Save onto an
@@ -436,6 +509,7 @@ export class PgBriefStore implements BriefStorePort {
         // insert back with the rest of the transaction.
         assertNotReserved(brief.id);
       }
+      await this.assertRefsExist(tx, campaignId, brief);
       const yaml = dumpBrief(brief);
       const revision = hashBytes(Buffer.from(yaml, "utf8"));
       await tx.query(
@@ -631,6 +705,7 @@ export class PgBriefStore implements BriefStorePort {
         if (teamId !== null) await this.assertTeamInOrg(tx, teamId);
         await tx.query(`update campaign set team_id = $1 where id = $2`, [teamId, campaignId]);
       }
+      await this.assertRefsExist(tx, campaignId, brief);
       const yaml = dumpBrief(brief);
       const revision = hashBytes(Buffer.from(yaml, "utf8"));
       await tx.query(
