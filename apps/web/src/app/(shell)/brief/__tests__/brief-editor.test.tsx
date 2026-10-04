@@ -3431,9 +3431,9 @@ describe("BriefPage — the editor is one scrolling column (SG1 / SG-D2)", () =>
      * The abort flag alone was not enough of an assertion: it says the request was
      * cancelled, and says nothing about what the answer would have done. Switching
      * campaigns is the case where that is observable — the editor is still mounted,
-     * so a `setCampaignAssets` from the first campaign's late answer would install
-     * a listing that has no entry for the second campaign's ids, and every id in it
-     * would read "Unavailable asset" for good.
+     * so a `setStoredAssets` from the first campaign's late answer would evict the
+     * second campaign's listing, and every id of the second campaign would read
+     * "Loading asset…" until the gate asked again.
      */
     test("a listing that lands after a campaign switch does not overwrite the new one", async () => {
       const first = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
