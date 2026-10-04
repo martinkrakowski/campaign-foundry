@@ -343,7 +343,7 @@ async function sweep(
         // gets out of exactly that state.
         await untemplate(session, datname);
       }
-      await session.query(`drop database ${identifier(datname)} with (force)`);
+      await dropDatabase((text) => session.query(text), datname);
       dropped.push(datname);
     } catch (error) {
       // Somebody without this lock has it, and what they are doing is the drop
@@ -365,7 +365,7 @@ export async function dropHarnessDatabase(name: string): Promise<void> {
   const session = await maintenanceSession();
   try {
     await untemplate(session, name);
-    await session.query(`drop database ${identifier(name)} with (force)`);
+    await dropDatabase((text) => session.query(text), name);
   } finally {
     await session.end();
   }
@@ -406,7 +406,10 @@ async function buildTemplate(
     return name;
   }
   if (existing.rows.length > 0) {
-    await session.query(`drop database ${identifier(name)} with (force)`);
+    // On THIS session, which holds the build lock: a lock is held by a session,
+    // and a drop taken on another one would not be covered by it. It is also
+    // where the fallback in `dropDatabase` has to arrive, for the same reason.
+    await dropDatabase((text) => session.query(text), name);
   }
   await session.query(`create database ${identifier(name)}`);
   const build = pgClient(cloneConfig(name));
@@ -540,9 +543,61 @@ function isGoneOrGoing(error: unknown): boolean {
   );
 }
 
+/**
+ * Drop one database, with `with (force)` and — if, and only if, that is refused
+ * with 42501 — exactly one plain drop behind it.
+ *
+ * The refusal this exists for is most often an autovacuum worker inside a fresh
+ * clone. A forced drop asks `TerminateOtherDBBackends` to signal every process in
+ * the target database, and that asks `has_privs_of_role` about each one; an
+ * autovacuum worker never sets its own `roleId` (`InitializeSessionUserIdStandalone`
+ * leaves it `InvalidOid`), so a role that is not a superuser and is not in
+ * `pg_signal_backend` — `cf_test` has CREATEDB and nothing more — is refused with
+ * 42501 whenever one is in there. The server log says so in its own words: 538
+ * `permission denied to terminate process`, every statement a forced drop of a
+ * `cf_t_…` and every target a clone 0–2 s old — which is a clone's own teardown,
+ * and never a sweep.
+ *
+ * A plain `drop database` goes through `CountOtherDBBackends` instead, which
+ * SIGTERMs the autovacuum workers itself — no permission check on that path — and
+ * waits up to 5 s for them to go. Hence no loop and no sleep here: Postgres owns
+ * that wait.
+ *
+ * 42501 is not only an autovacuum worker. Not owning the database, or a session
+ * inside it that this role may not signal, is refused the same way. So this is
+ * not a diagnosis: ANY 42501 on the forced statement earns exactly one plain drop,
+ * which succeeds for the autovacuum worker and otherwise fails honestly — the same
+ * 42501, or 55006 for a session still connected — inside Postgres's own 5 s. Every
+ * other code, and every error from the plain drop, is rethrown unchanged, and the
+ * plain drop is not retried: a third statement would be a loop wearing a disguise.
+ *
+ * CI never reaches the branch. Its service connects as a superuser, and a
+ * superuser passes the check the forced drop makes, so the fallback is dead code
+ * there — which is why this is proven by the unit tests in
+ * `test-database.test.ts` rather than by a server.
+ *
+ * `run` is the caller's, not a session this opens: three of the four call sites
+ * must drop on the session they already hold, because `pg_advisory_lock` is held
+ * by a SESSION and a drop taken on another one would not be covered by it. That
+ * includes the fallback — a plain drop issued on a fresh session would deadlock
+ * against the lock the sweep and the build are holding.
+ */
+export async function dropDatabase(
+  run: (text: string) => Promise<unknown>,
+  name: string,
+): Promise<void> {
+  const quoted = identifier(name);
+  try {
+    await run(`drop database ${quoted} with (force)`);
+  } catch (error) {
+    if ((error as { code?: string }).code !== "42501") throw error;
+    await run(`drop database ${quoted}`);
+  }
+}
+
 /** Drop a database, from the maintenance connection: a database cannot drop itself. */
 export async function drop(name: string): Promise<void> {
-  await maintenanceStatement(`drop database ${identifier(name)} with (force)`);
+  await dropDatabase(maintenanceStatement, name);
 }
 
 /** A `SqlClient` whose `end()` also drops the database it was opened against. */

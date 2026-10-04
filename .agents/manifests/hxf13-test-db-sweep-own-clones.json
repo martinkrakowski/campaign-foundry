@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "lane": "HXF13-test-db-sweep-own-clones",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/db/__tests__/test-database.ts",
+      "before": "    if ((error as { code?: string }).code !== \"42501\") throw error;",
+      "after": "    if ((error as { code?: string }).code !== \"4250X\") throw error;",
+      "because": "The 42501 branch is the whole fix, so making it unreachable must be caught by the test that claims it: with the code compared against a value Postgres never sends, a forced drop refused for an autovacuum worker is rethrown and the clone is left behind — the exact leak this lane exists to close, and the 538 errors in the server log.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/test-database.test.ts",
+        "-t",
+        "dropDatabase"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/db/__tests__/test-database.ts",
+      "before": "  } catch (error) {\n    if ((error as { code?: string }).code !== \"42501\") throw error;\n    await run(`drop database ${quoted}`);",
+      "after": "  } catch {\n    await run(`drop database ${quoted}`);",
+      "because": "The condition is the claim \"only 42501 falls back\". Without it every refusal gets a second statement, and a database a live session still holds (55006) would be dropped a second time and fail again — so the test that asserts one statement and the caller's own error object is the only thing standing between a widened fallback and a doubled wait on every contended drop.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/test-database.test.ts",
+        "-t",
+        "dropDatabase"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/db/__tests__/test-database.ts",
+      "before": "    if ((error as { code?: string }).code !== \"42501\") throw error;\n    await run(`drop database ${quoted}`);\n  }",
+      "after": "    if ((error as { code?: string }).code !== \"42501\") throw error;\n    try {\n      await run(`drop database ${quoted}`);\n    } catch (second) {\n      await run(`drop database ${quoted} with (force)`);\n      throw second;\n    }\n  }",
+      "because": "A third statement after a failed plain drop is a retry loop wearing a disguise, and the brief allows no loop and no sleep: Postgres's own CountOtherDBBackends has already waited its bounded 5 s, so a second attempt only spends it again on a database that is still in use. The test that counts the statements is the one that fails, and it fails before the error assertion, so the loop is what the report names.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/test-database.test.ts",
+        "-t",
+        "dropDatabase"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
