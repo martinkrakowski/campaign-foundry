@@ -55,6 +55,9 @@ export type ProbeOutcome =
 /** Named apart from the un-parseable one so a test can tell which branch refused (req 4). */
 export const SWITCHED_AT_REQUIRED = "--switched-at <iso> is required";
 
+/** An ISO 8601 date-time that carries its own offset: `Z` or `±hh:mm`. */
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
 /**
  * The org a root was written under — the inverse of `tenantRoot`
  * (`run-environment.ts:121`).
@@ -153,8 +156,11 @@ export async function resolveSource(flags: SourceFlags): Promise<SourceOutcome> 
   if (flags.switchedAt === undefined) {
     return { ok: false, reason: SWITCHED_AT_REQUIRED };
   }
+  // An INSTANT, so a timezone is required (Qodo on #681): `new Date("2026-10-01T00:00:00")`
+  // reads as local time, so the same flag would name different instants on different hosts
+  // while the plan echoed one verbatim value.
   const when = new Date(flags.switchedAt);
-  if (Number.isNaN(when.getTime())) {
+  if (!ISO_INSTANT.test(flags.switchedAt) || Number.isNaN(when.getTime())) {
     return {
       ok: false,
       reason: `--switched-at <iso> is not a valid date: ${JSON.stringify(flags.switchedAt)}`,

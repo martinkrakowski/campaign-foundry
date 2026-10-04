@@ -9,6 +9,7 @@ import {
   PNG,
   briefYaml,
   dropRoot,
+  linkAt,
   makeRoot,
   writeAt,
   writeBrief,
@@ -146,6 +147,44 @@ describe("scanBriefs (PT-8a reqs 6-11)", () => {
    * plan would show a campaign with no name, `apply` would create it with `name: null`, and
    * nothing anywhere would say a `campaign.json` existed at all. D227 is never silent.
    */
+  test("a SYMLINKED briefs/<slug>/ is refused, not read through for its campaign.json", async () => {
+    root = makeRoot();
+    inputs(root);
+    campaign(root, "camp-a");
+    writeAt(root, join("elsewhere", "campaign.json"), '{"name":"Foreign","type":"x"}');
+    linkAt(root, join("briefs", "camp-a"), join(root, "elsewhere"));
+
+    const result = await scanBriefs(context(root));
+
+    expect(result.campaigns).toEqual([]);
+    expect(result.refusals).toEqual([
+      expect.objectContaining({
+        slug: "camp-a",
+        reason:
+          "campaign.json could not be read: briefs/camp-a is a symlink; the importer never follows one",
+      }),
+    ]);
+  });
+
+  test("a SYMLINKED campaign.json inside a real briefs/<slug>/ is refused too", async () => {
+    root = makeRoot();
+    inputs(root);
+    campaign(root, "camp-b");
+    writeAt(root, join("elsewhere", "meta.json"), '{"name":"Foreign","type":"x"}');
+    linkAt(root, join("briefs", "camp-b", "campaign.json"), join(root, "elsewhere", "meta.json"));
+
+    const result = await scanBriefs(context(root));
+
+    expect(result.campaigns).toEqual([]);
+    expect(result.refusals).toEqual([
+      expect.objectContaining({
+        slug: "camp-b",
+        reason:
+          "campaign.json could not be read: briefs/camp-b/campaign.json is a symlink; the importer never follows one",
+      }),
+    ]);
+  });
+
   test("FIX 5: a campaign.json that will not parse REFUSES its campaign", async () => {
     root = makeRoot();
     inputs(root);

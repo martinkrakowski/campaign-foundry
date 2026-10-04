@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import { lstat, readdir, readFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { isReservedCampaignId, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
@@ -100,6 +100,21 @@ function slugProblem(slug: string): string | undefined {
 /** `briefs/<slug>/campaign.json`'s meta, and whether the file was there at all. */
 async function readMeta(briefsDir: string, slug: string): Promise<MetaLookup> {
   try {
+    // Never through a link (Qodo on #681), as `fs-brief-store.ts`'s own meta reader: a
+    // symlinked `briefs/<slug>/` or `campaign.json` would take the name and type from
+    // wherever the link points. It is refused like any other unreadable `campaign.json`.
+    if ((await lstat(join(briefsDir, slug))).isSymbolicLink()) {
+      return {
+        present: true,
+        error: `briefs/${slug} is a symlink; the importer never follows one`,
+      };
+    }
+    if ((await lstat(join(briefsDir, slug, "campaign.json"))).isSymbolicLink()) {
+      return {
+        present: true,
+        error: `briefs/${slug}/campaign.json is a symlink; the importer never follows one`,
+      };
+    }
     const raw = await readFile(join(briefsDir, slug, "campaign.json"), "utf8");
     const parsed = JSON.parse(raw) as { name?: unknown; type?: unknown };
     return {
