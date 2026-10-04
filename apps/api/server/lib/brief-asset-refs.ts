@@ -1,5 +1,5 @@
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { extractSourceAssetBriefIds, rewriteAssetPaths } from "./asset-files.js";
+import { collectRefs, extractSourceAssetBriefIds, rewriteAssetPaths } from "./asset-files.js";
 import { objectStore } from "./config.js";
 import { parseStoredInputRef } from "./object-store/object-input-assets.js";
 import { assertSourceVisible, CampaignNotFoundError } from "./ownership.js";
@@ -7,6 +7,8 @@ import { isAssetId, type AssetStorePort } from "./ports/asset-store.port.js";
 import type { BriefStorePort } from "./ports/brief-store.port.js";
 import { getAssetStore, getBriefStore } from "./ports/index.js";
 import type { StorageScope } from "./run-environment.js";
+
+export { collectRefs };
 
 /**
  * A brief ref the caller may not use (PT-4k2a, D208 B/D, D210 a/c/d).
@@ -57,34 +59,6 @@ export interface ResolvedBriefRefs {
    * `foreignIds ∪ ownIds` rather than `foreignIds`.
    */
   readonly ownIds: ReadonlySet<string>;
-}
-
-/**
- * Every ref a brief carries, in the order {@link import("./asset-files.js").rewriteAssetPaths}
- * walks them: products (logo, then input asset), the brief's own `audio.path`, then every
- * `copy.timeline.beats[].background`.
- *
- * **The three groups are scanned independently**, the way
- * `extractSourceAssetBriefIds` scans them and against `rewriteAssetPaths`' own early
- * return: a brief whose `products` is missing or malformed must still have its audio and
- * its beat backgrounds checked, or a duplicate silently keeps refs from a campaign the
- * caller cannot see. Nothing here creates a key — a ref is read, never written, so the
- * absent-stays-absent discipline (`asset-files.ts`) has nothing to break here.
- */
-function collectRefs(brief: CampaignBrief): readonly string[] {
-  const refs: string[] = [];
-  for (const product of brief.products) {
-    refs.push(product.logoPath);
-    if (product.inputAsset !== undefined) refs.push(product.inputAsset);
-  }
-  if (brief.audio !== undefined) refs.push(brief.audio.path);
-  for (const beat of brief.copy?.timeline?.beats ?? []) {
-    if (beat.background !== undefined) refs.push(beat.background);
-  }
-  // Distinct refs only: every check below is a pure function of the ref, so a logo
-  // shared by ten products is one check, not ten (Qodo on #664 — preview runs this
-  // on every request, cached frame or not).
-  return [...new Set(refs)];
 }
 
 /** Refuse (404) a campaign the caller cannot SEE. `campaignVisibility` never throws to say "not found". */

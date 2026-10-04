@@ -72,6 +72,12 @@ fi
 # and not after it. Length is not enough on its own: the initContainer printf's
 # these values into JSON string literals, so a quote, a backslash or a newline
 # would pass a length check and then leave a corrupt s3.json behind.
+#
+# Since PT-4j the app keys are the `api` container's own object-store identity
+# (secretKeyRef, app.yaml), and neither is optional, so this same check is also
+# what keeps the app Pod out of CreateContainerConfigError: a missing mandatory
+# key is a Pod that never starts, and the kubelet only says so after Recreate
+# has already stopped the one that was running.
 echo "==> object-store secret"
 for key in admin-access-key admin-secret-key app-access-key app-secret-key; do
   SECRET_LEN=$(remote "kubectl -n $NS get secret seaweedfs-s3 -o jsonpath={.data.$key} 2>/dev/null | base64 -d 2>/dev/null | wc -c" | tr -d ' ')
@@ -130,6 +136,21 @@ echo "==> create the bucket"
 remote kubectl -n "$NS" delete job s3-bootstrap --ignore-not-found
 cat deploy/staging/jobs/s3-bootstrap.yaml | remote kubectl apply -f -
 remote kubectl -n "$NS" wait job/s3-bootstrap --for=condition=complete --timeout=5m
+
+# The app's own key, against the bucket, before the app is applied. The boot
+# guard reads the six S3_* variables and opens no socket, so a wrong bucket name
+# or a key that does not match the identities file the SeaweedFS Pod wrote at
+# startup passes it — and then every read answers ENOENT, a missing logo rather
+# than a misconfiguration. This runs after the bucket exists and before the
+# rollout, so the deploy stops while the old Pod is still serving.
+echo "==> prove the app key"
+remote kubectl -n "$NS" delete job s3-app-probe --ignore-not-found
+cat deploy/staging/jobs/s3-app-probe.yaml | remote kubectl apply -f -
+if ! remote kubectl -n "$NS" wait job/s3-app-probe --for=condition=complete --timeout=2m; then
+  remote kubectl -n "$NS" logs job/s3-app-probe || true
+  echo 'deploy.sh: the app key cannot round-trip an object in bucket campaign-foundry; see the probe log above' >&2
+  exit 1
+fi
 
 # The API consumes cf.run-requests at boot (KAFKA_CONSUME=true), so the topic and
 # the user's ACLs must be ready before the new app starts.
