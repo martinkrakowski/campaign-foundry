@@ -52,6 +52,57 @@
         "completed AFTER a success of the same check"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "gh api --paginate \"repos/{owner}/{repo}/commits/$head_sha/check-runs?per_page=100\"",
+      "after": "gh api \"repos/{owner}/{repo}/commits/$head_sha/check-runs?per_page=100\"",
+      "because": "Dropping --paginate from the one read that serves both the poll and the verdict, so the script asks for the first page and judges it as if it were every page. GitHub answers a bare check-runs read with 30 runs by default, so on a busy head the runs past 30 are simply not in the answer — and a failure among them is invisible while the first page is green. The stub is what makes this bite: STUB_CHECK_RUNS emits the second and later lines ONLY when the call carried the flag, so a read that stopped asking for pages stops getting them, which is the difference between a stub that proves the flag and one that proves only the join. The test it catches puts the failing run of the required check on page 2 and nothing about it on page 1: with the flag the mutant merges, so the refusal assertion fails. The single-page fixtures are invisible to it, because one page is all they ever had",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "reads join every page"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map({n: .[0].n, c: ((map(select(.c != \"cancelled\")) | sort_by(.t // \"\", .id // 0) | last | .c) // \"cancelled\")})'",
+      "after": "CHECK_VERDICTS_JQ='group_by(.n) | map({n: .[0].n, c: ((map(select(.c != \"cancelled\")) | sort_by(.id // 0) | last | .c) // \"cancelled\")})'",
+      "because": "the verdict sorted by id alone, dropping completed_at as the primary key. It is the wrong order rather than a coarser one: a check suite's ids are handed out when a run is CREATED, not when it finishes, so a run created later can finish earlier — on #661, run 111262813381 (success) completed at 18:45:11Z while the LOWER-numbered 111262823658 completed at 18:34:56Z. The test is the only fixture in the file where the two orders disagree, because every other fixture has ids that agree with completion order and so cannot tell the two keys apart; there the newer failure carries the LOWER id, which id-order reads as the older run and merges. completed_at stays the tiebreak in the honest program because a genuine tie (same second) is decided by the id, which is monotonic",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "a newer failure whose id is LOWER"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "    rc=$?\n    if [ \"$rc\" -ne 0 ]; then\n      # Dropped, not trimmed: a partial list must never reach a verdict read.\n      runs=''\n      unreadable=1\n    else\n      unreadable=0\n    fi",
+      "after": "    unreadable=0",
+      "because": "the read's exit status ignored, which is the hole the fix closed. --paginate STREAMS: page 1 is written to stdout before page 2 is requested, so a page that errors part way leaves the first one on stdout and then exits non-zero. Nothing drops that page — the `runs=$(gh api ...)` capture keeps whatever the command wrote before it failed — so the pages that did arrive are judged as though they were the whole answer, and a failing or pending check on the missing page cannot be seen. The fixture is that shape: page 1 is a green Build, the read then exits 1, and with the status ignored the mutant concludes on page 1 alone and MERGES. Nothing else in the file can see it, because every other fixture's read succeeds, and a succeeded read is the only case where the pages that arrived are also every page",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "fails after printing one page"
+      ],
+      "verdict": "caught"
     }
   ]
 }

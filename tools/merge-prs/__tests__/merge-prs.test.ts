@@ -35,8 +35,13 @@ import { fileURLToPath } from "node:url";
  *
  * `STUB_CHECK_RUNS` replaces that one successful `Build` run with a whole
  * check-run list, as the JSON the script's own `--jq` projection would have
- * produced. It is how the verdict tests below put a name beside a cancelled
- * run, a failure or a skip: the projection keeps only the name, status,
+ * produced. One line is one page: the stub emits the second and later lines ONLY
+ * when the call carried `--paginate`, so a script that stops asking for pages
+ * stops getting them. `STUB_GH_CHECK_RUNS_EXIT` makes that read exit non-zero
+ * after printing, which is what a page that errors part way through looks like
+ * to the script. It is how the verdict tests below put a name beside a cancelled
+ * run, a failure or a skip, and how the pagination tests put a failing check on
+ * a page the script never receives: the projection keeps only the name, status,
  * conclusion, completed_at and id, so a fixture written in that shape is read
  * by the script exactly as the forge's data is. Every fixture must say
  * `"s":"completed"` — a run that is not completed is counted as pending, and the
@@ -310,6 +315,13 @@ function makeHarness(): Harness {
     "    # projected run list the conclusion poll wants. A raw API body here",
     "    # reads as zero checks registered and zero required, and the run then",
     "    # waits out 10 minutes of polling before refusing the PR.",
+    "    # Whether this call asked for pages is read BEFORE anything shifts, and",
+    "    # the --jq loop below shifts its way through the same argv — a detection",
+    "    # loop placed after it sees an argv that has already lost the flag.",
+    "    paginated=0",
+    '    for arg in "$@"; do',
+    '      if [ "$arg" = "--paginate" ]; then paginated=1; break; fi',
+    "    done",
     '    jq=""',
     "    while [ $# -gt 0 ]; do",
     '      if [ "$1" = "--jq" ]; then jq="${2:-}"; break; fi',
@@ -322,12 +334,33 @@ function makeHarness(): Harness {
     '    case "$jq" in',
     "      *length*) printf '1\\n' ;;",
     "      # STUB_CHECK_RUNS is the run list itself, verbatim: one JSON array,",
-    "      # or SEVERAL, which is what `gh api --paginate` prints and what the",
-    "      # script's `jq -s` reads join. Written as an `if` on an expansion that",
-    "      # is EMPTY when unset, never as a default INSIDE the expansion: a `}`",
-    "      # inside such a default ends it, and the stub would print half a",
-    "      # fixture instead of a run list.",
-    '      *) if [ -n "${STUB_CHECK_RUNS:-}" ]; then printf \'%s\\n\' "$STUB_CHECK_RUNS"; else printf \'[{"n":"Build","s":"completed","c":"success"}]\\n\'; fi ;;',
+    "      # or SEVERAL LINES of them, which is what `gh api --paginate` prints.",
+    "      # Written as an `if` on an expansion that is EMPTY when unset, never",
+    "      # as a default INSIDE the expansion: a `}` inside such a default ends",
+    "      # it, and the stub would print half a fixture instead of a run list.",
+    '      *) if [ -n "${STUB_CHECK_RUNS:-}" ]; then',
+    "        # Pages after the first are emitted ONLY when the call asked for",
+    "        # them. This is the whole reason a two-page fixture can catch a",
+    "        # script that drops `--paginate`: a stub that printed every page",
+    "        # regardless would let the read carry on without the flag and the",
+    "        # join would still see page 2, so the flag would be untested.",
+    "        # `head -n 1` on the un-paginated path, because without the flag gh",
+    "        # prints exactly one page — the first.",
+    '        if [ "$paginated" -eq 1 ]; then',
+    "          printf '%s\\n' \"$STUB_CHECK_RUNS\"",
+    "        else",
+    "          printf '%s\\n' \"$STUB_CHECK_RUNS\" | head -n 1",
+    "        fi",
+    "      else",
+    '        printf \'[{"n":"Build","s":"completed","c":"success"}]\\n\'',
+    "      fi",
+    "      # STUB_GH_CHECK_RUNS_EXIT makes the run list read FAIL, after the",
+    "      # pages have already been printed — which is the shape that matters:",
+    "      # `--paginate` streams each page as it arrives, so a page that errors",
+    "      # part way through leaves page 1 on stdout and exits non-zero. The",
+    "      # script must refuse rather than judge the page it did get.",
+    '      if [ -n "${STUB_GH_CHECK_RUNS_EXIT:-}" ]; then exit "$STUB_GH_CHECK_RUNS_EXIT"; fi',
+    "      ;;",
     "    esac",
     "    ;;",
     "  *)",
@@ -2036,11 +2069,12 @@ describe.skipIf(!hasZsh())("merge-prs.sh — check-run verdicts per name", () =>
   });
 
   test("the reads join every page's array: a failure on a later page still refuses", () => {
-    // `gh api --paginate` prints ONE JSON array PER PAGE, and the stub prints
-    // STUB_CHECK_RUNS verbatim — so two arrays here are two pages. The failure is
-    // on the second, and nothing on the first mentions it: read one page, this
-    // merges. The stub answers `--paginate` as if the whole list came back at
-    // once, so this proves the reads join, not that gh fetched page 2.
+    // `gh api --paginate` prints ONE JSON array PER PAGE, and STUB_CHECK_RUNS
+    // holds one per line — so two lines here are two pages. The failure is on the
+    // second, and nothing on the first mentions it: read one page, this merges.
+    // The stub emits the second line only when the call carried `--paginate`, so
+    // this also pins that flag — a script that stopped asking for pages would
+    // get the first page alone and merge.
     const harness = makeHarness();
     try {
       const result = runMergePrs(harness, [specOf(PR_ONE)], {
@@ -2048,6 +2082,66 @@ describe.skipIf(!hasZsh())("merge-prs.sh — check-run verdicts per name", () =>
           JSON.stringify([run(BUILD, "success", "2026-10-03T18:00:00Z", 1)]),
           JSON.stringify([run(BUILD, "failure", "2026-10-03T18:10:00Z", 2)]),
         ].join("\n"),
+      });
+
+      expect(result.status).toBe(1);
+      expect(mergedByStub(harness)).toBe("");
+      expect(result.stdout).toContain(`CHECKS FAILED for #${PR_ONE.pr}: ${BUILD}`);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("a check-runs read that fails after printing one page refuses instead of merging on the pages it did get", () => {
+    // The gap this row is about. `--paginate` STREAMS: page 1 is on stdout
+    // before page 2 is asked for, so a page that errors part way leaves the
+    // first one behind and exits non-zero. `runs=$(gh api … || echo '[]')` does
+    // not drop that page — the `||` only chooses whether to run the echo, and
+    // both streams land in the substitution — so page 1 is judged as if it were
+    // the whole answer. Page 1 here is green, and the failing check the run must
+    // not merge past is on the page that never arrived.
+    //
+    // One poll attempt and no sleep, because the answer being tested is what
+    // happens when the read NEVER succeeds; the defaults are 120 at 15s.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_CHECK_RUNS: JSON.stringify([run(BUILD, "success", "2026-10-03T18:00:00Z", 1)]),
+        STUB_GH_CHECK_RUNS_EXIT: "1",
+        CHECK_POLL_ATTEMPTS: "1",
+        CHECK_POLL_SECONDS: "0",
+      });
+
+      // Refused, and refused for the reason that is true: the list was never
+      // read in full, which is not the same claim as "something is pending".
+      expect(result.status).toBe(1);
+      expect(mergedByStub(harness)).toBe("");
+      expect(result.stdout).toContain(`CHECKS COULD NOT BE READ for #${PR_ONE.pr}`);
+      // It never claimed the checks were still pending — nothing was known about
+      // them — and it never called them green.
+      expect(result.stdout).not.toContain("CHECKS STILL PENDING");
+      expect(result.stdout).not.toContain("checks green on");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("a newer failure whose id is LOWER than an older success still refuses", () => {
+    // completed_at is the order that decides, and id is only the tiebreak — so a
+    // fixture where the two disagree is the only thing that can say which one the
+    // verdict read uses. This is not hypothetical: on #661 the successful run
+    // 111262813381 completed at 18:45:11Z and the earlier-numbered
+    // 111262823658 at 18:34:56Z, so id order and completion order are genuinely
+    // different orders here. Sorted by id, this fixture merges.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_CHECK_RUNS: JSON.stringify([
+          // Older completion, HIGHER id.
+          run(BUILD, "success", "2026-10-03T18:00:00Z", 2),
+          // Newer completion, LOWER id — the newest run, and it failed.
+          run(BUILD, "failure", "2026-10-03T18:10:00Z", 1),
+        ]),
       });
 
       expect(result.status).toBe(1);
