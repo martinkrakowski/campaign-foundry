@@ -197,6 +197,11 @@ export function authOptions(deps: AuthDeps) {
         // until PT-7 (metering) and PT-2 (authorisation) exist.
         allowUserToCreateOrganization: false,
         invitationLimit: 0,
+        // PT-9a0 (C2): Better Auth exposes `POST /organization/delete` to any org owner
+        // unless this is set. Deleting an org must go through PT-9's purge (every
+        // org-scoped table and object prefix, D166/D170), never this cascade, which
+        // knows nothing about campaigns, assets or objects.
+        disableOrganizationDeletion: true,
       }),
     ],
   };

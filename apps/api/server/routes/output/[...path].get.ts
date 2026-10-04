@@ -1,4 +1,5 @@
 import { extname, posix } from "node:path";
+import { objectStore } from "../../lib/config.js";
 import { getBriefStore, getOutputStore } from "../../lib/ports/index.js";
 
 import { requestTenant } from "../../lib/tenant.js";
@@ -52,8 +53,30 @@ export function parseByteRange(
  * (ELOOP) instead of following the new link, and using one handle for both
  * size and bytes means whatever the path does afterward cannot desync the
  * response's Content-Length from what is actually streamed.
+ *
+ * Under `OBJECT_STORE=s3` this route answers 404 for EVERY request before it
+ * reads anything (D204, PT-4i): the bytes come through the presigned URLs
+ * `result.get` signs, so there is no output-root-relative path left to serve and
+ * this route remains the fs read path.
  */
 export default defineEventHandler(async (event) => {
+  // The MODE, and nothing else (PT-4i, D204). This is the same rule
+  // `assets.get.ts:77-83` follows and for the same reason it cannot be "the
+  // store answered `missing`": `ObjectOutputStore` answers `missing` for
+  // everything, so a branch written on that answer would be true by accident on
+  // a deployment whose store is misconfigured, and it would put a database round
+  // trip and a bucket question in front of a route that has no bytes to serve.
+  // `supportsTeams` is true under s3 (it needs `STORE_BACKEND=postgres`), so
+  // below this guard the route would resolve a campaign and ask about its
+  // visibility on every request — which is how one class of path could tell
+  // itself apart by the time its answer took. So a malformed path answers 404
+  // here rather than the 400 the traversal guard gives it on fs, where the route
+  // exists and that guard is its contract.
+  if (objectStore() === "s3") {
+    setResponseStatus(event, 404);
+    return { error: "Not found" };
+  }
+
   const rawPath = getRouterParam(event, "path") ?? "";
   const normalized = posix.normalize(rawPath);
   if (normalized === ".." || normalized.startsWith("../") || posix.isAbsolute(normalized)) {
