@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "PT-8a1-import-scan-and-plan",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/scan.ts",
+      "before": "      refuse(refusals, null, path, errorMessage(error));\n",
+      "after": "\n",
+      "because": "This is the ONLY statement that turns a per-file read or parse failure into a refusal, so deleting it leaves `parsed` without the file and the file in neither `campaigns` nor `refusals` — F8's \"capture the parser's message, never throw and never skip\" becomes a silent drop. Note the mechanism precisely, because the row's phrasing is not quite what happens: the mutant does not report the brief IMPORTABLE (a brief that failed `parseBriefText` never had an id, so there is nothing to import it as) — it reports it NOWHERE, which is the same defect wearing a quieter hat. Requirement 6's test is what catches it, and it catches it on the refusal list rather than on the campaign list: it plants the retired `\"kind\": \"html\"` layer fixture beside a valid brief and asserts `result.refusals` is exactly one entry carrying `load-brief.ts:270-272`'s own message. With the line gone that array is empty, so the assertion fails while `result.campaigns` still equals `[\"camp-ok\"]` — which is what makes this mutation about the refusal and not about discovery.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/scan.test.ts",
+        "-t",
+        "req 6: one brief's parse failure is its own refusal, with the parser's message"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/classify.ts",
+      "before": "  return hasAllowedImageMagic(bytes)\n    ? undefined\n    : `${JSON.stringify(name)} is not a PNG or JPEG file.`;\n",
+      "after": "\n",
+      "because": "With the image half of D222's magic check gone, `inputRuleProblem` returns `undefined` for every image whose name and size passed — so a `.png` full of text reads as a valid PNG, its ref keeps its `root-level`/`own-campaign` category, and the campaign importing it is PLANNED instead of refused. That is the exact defect D222 exists to close: importing with a path left in place renders ENOENT under s3 and keeps D214(c)'s dirty-after-Save behaviour alive. The `-t` names requirement 11's magic test rather than any other of this lane's tests because that one asserts the WHOLE campaign is refused with the ref named — `ref \"assets/inputs/fake.png\": \"fake.png\" is not a PNG or JPEG file.` — and the fixture is built so name and size both PASS (`fake.png`, a handful of bytes), leaving the magic rule as the only one it can fail. Requirement 12's `refused-file` test would also flip, and its audio twin would still pass, since this line is the image branch alone.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/scan.test.ts",
+        "-t",
+        "req 11: a ref whose MAGIC does not match its extension refuses the WHOLE brief"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/source.ts",
+      "before": "  if (flags.switchedAt === undefined) {\n    return { ok: false, reason: SWITCHED_AT_REQUIRED };\n  }\n",
+      "after": "\n",
+      "because": "`--switched-at` is a REQUIRED flag (req 4): a default would classify every campaign against an instant nobody chose. Deleting this guard does not let the run proceed — it falls into the UN-PARSEABLE refusal, because `new Date(undefined)` is an Invalid Date and the next line is exactly the check that says so. That is why the two refusals carry two different messages, and it is the only reason requirement 4's missing-flag test can tell which branch ran: it asserts `--switched-at <iso> is required` verbatim, and the mutant answers `--switched-at <iso> is not a valid date: \"undefined\"` instead. A single shared message would have made this mutation survive with the run still refusing, which is the difference between a missing flag being a fixable mistake and a missing flag being a mystery.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/source.test.ts",
+        "-t",
+        "req 4: a MISSING --switched-at refuses with its own message"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/classify.ts",
+      "before": "    if (st.isSymbolicLink()) {\n      return {\n        ref,\n        kind: \"unsafe\",\n        reason: \"the ref is a symlink; the importer never follows one\",\n      };\n    }\n",
+      "after": "\n",
+      "because": "What this mutation proves is the DIAGNOSIS, and it is worth being exact about that, because the obvious reading of the branch is wrong. Deleting it does NOT restore the read-through hazard: `lstatSync` never follows a link, so `st.isFile()` is false for EVERY symlink and the following `!st.isFile()` branch already refuses one before any read. The safety half of this fix belongs to the choice of `lstat` over `stat`/`existsSync`, not to this branch. What the branch buys is that the two failures stay distinguishable. A link is answered `unsafe` + \"the ref is a symlink; the importer never follows one\", which tells the operator to remove the link; the mutant answers `refused-file` + \"is not a regular file\", which tells them to put a regular file there — and a file they create BESIDE the link leaves the link in place, still pointing wherever it pointed, still one `readFileSync` away from being read. The assertion that fails is the whole object: `kind` `unsafe` → `refused-file` and the reason string, on the symlink test only. The directory test is unaffected, and so is the dangling-symlink test in its KIND but not its reason — which is the point of pinning this branch rather than the `lstat` call: the link's own answer is what is under test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/classify.test.ts",
+        "-t",
+        "a SYMLINK at the ref path is unsafe: the importer never follows one"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
