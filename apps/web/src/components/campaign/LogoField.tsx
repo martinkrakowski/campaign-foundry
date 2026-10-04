@@ -7,8 +7,22 @@ import * as messages from "@/components/campaign/messages";
 import { formatBytes } from "@/lib/briefs-api";
 
 export interface LogoFieldProps {
-  /** The current logo path (e.g. "assets/inputs/camp/hydra-logo.png"). */
+  /** The current logo path (e.g. "assets/inputs/camp/hydra-logo.png"), or an asset id (D203). */
   readonly value: string;
+  /**
+   * The NAME to show for `value`, when the caller can resolve one (D203).
+   *
+   * Under the object backend a stored logo is an asset row's uuid, which is
+   * unreadable as text and carries no extension — so the caller resolves it
+   * through the campaign's asset listing and passes the file's name here. Absent,
+   * the field renders `value` exactly as it always has, which is the right answer
+   * for a path ref and for every filesystem-shaped brief.
+   *
+   * It names the DISPLAY only. The screen-reader mirror below keeps the raw ref as
+   * its `value`, because that is the field's own editable value and the one a test
+   * or a paste reads back.
+   */
+  readonly displayName?: string;
   /** Optional resolved thumbnail data URL or preview URL (e.g. from L5 asset store or local upload). */
   readonly thumbnailUrl?: string;
   /** Primary product colour used to tint the type icon badge. */
@@ -43,6 +57,7 @@ export interface LogoFieldProps {
  */
 export function LogoField({
   value,
+  displayName,
   thumbnailUrl,
   productColor,
   fileSize,
@@ -80,7 +95,18 @@ export function LogoField({
       ? value
       : undefined);
 
-  const extMatch = value.match(/\.([a-zA-Z0-9]+)$/);
+  // What the tile READS. `displayName` wins whenever the caller could resolve one,
+  // because a stored asset id is a uuid: showing it would put a 36-character
+  // opaque string where the operator expects `hydra-logo.png`, with no extension
+  // to read and nothing to compare against the bin. Absent it, the ref's own
+  // basename is the label — which for a path ref is unchanged from before.
+  const shownName =
+    displayName ?? (value.includes("/") ? value.slice(value.lastIndexOf("/") + 1) : value);
+
+  // The badge reads the same string as the label: an extension is a property of a
+  // file's NAME, and an id has none. Without a name to read, an unresolvable ref
+  // degrades to today's `IMG` rather than inventing one.
+  const extMatch = shownName.match(/\.([a-zA-Z0-9]+)$/);
   const fileExt = extMatch ? extMatch[1].toUpperCase() : "IMG";
 
   return (
@@ -150,9 +176,13 @@ export function LogoField({
             <div className="min-w-0 flex-1">
               <span
                 className="block font-mono text-[11px] font-medium text-text-primary truncate max-w-[200px] sm:max-w-xs"
-                title={value}
+                // The FULL ref, not the name: the tooltip answers "which file exactly",
+                // and the directory is the half that separates two campaigns with
+                // the same basename. An id ref always arrives with a `displayName`,
+                // so the uuid is never what a tooltip shows.
+                title={displayName ?? value}
               >
-                {value.includes("/") ? value.slice(value.lastIndexOf("/") + 1) : value}
+                {shownName}
               </span>
               <span className="flex items-center gap-1 font-mono text-[10px] text-text-muted">
                 <span className="uppercase tracking-wider text-text-muted">{fileExt}</span>

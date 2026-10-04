@@ -556,3 +556,92 @@ describe("TimelineSection — TL4's bed reaches the section tape too", () => {
     }
   });
 });
+
+// D203/#666 — the chip's text is `describeAssetRef`'s label. Under the object
+// backend a beat's `background` is an asset row's uuid, and today's
+// `background.split("/").pop()` has no `/` to split on, so the chip rendered the
+// uuid itself: a 36-character string on the one control that is supposed to say
+// which scene a beat uses.
+describe("TimelineSection — the beat scene chip", () => {
+  const ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+  const listing = [
+    {
+      id: ID,
+      name: "summer-pool.png",
+      type: "image/png",
+      size: 2048,
+      thumbnailUrl: "/api/pipeline/campaigns/assets?briefId=camp&name=summer-pool.png",
+    },
+  ];
+
+  const withBackground = (background: string | undefined): EditorState => {
+    const state = withBeats([{ text: "One", weight: 1 }]);
+    return {
+      ...state,
+      timeline: {
+        ...state.timeline,
+        beats: [
+          { ...state.timeline.beats[0], ...(background === undefined ? {} : { background }) },
+        ],
+      },
+    };
+  };
+
+  test("a beat naming no scene still says so", () => {
+    render(
+      <TimelineSection
+        state={withBackground(undefined)}
+        dispatch={vi.fn()}
+        onChooseScene={() => {}}
+        assets={listing}
+      />,
+    );
+    expect(screen.getByText(messages.timelineBeatSceneNone)).toBeTruthy();
+  });
+
+  test("an id background shows the asset's name", () => {
+    render(
+      <TimelineSection
+        state={withBackground(ID)}
+        dispatch={vi.fn()}
+        onChooseScene={() => {}}
+        assets={listing}
+      />,
+    );
+    expect(screen.getByText("summer-pool.png")).toBeTruthy();
+    expect(screen.queryByText(ID)).toBeNull();
+  });
+
+  test("an unknown id says the asset is unavailable, never the uuid", () => {
+    render(
+      <TimelineSection
+        state={withBackground(ID)}
+        dispatch={vi.fn()}
+        onChooseScene={() => {}}
+        assets={[]}
+      />,
+    );
+    expect(screen.getByText(messages.assetUnavailable)).toBeTruthy();
+    expect(screen.queryByText(ID)).toBeNull();
+  });
+
+  test("an id whose listing has not arrived says it is loading", () => {
+    render(
+      <TimelineSection state={withBackground(ID)} dispatch={vi.fn()} onChooseScene={() => {}} />,
+    );
+    expect(screen.getByText(messages.assetPending)).toBeTruthy();
+    expect(screen.queryByText(ID)).toBeNull();
+  });
+
+  test("a path background still shows its basename (fs is unchanged)", () => {
+    render(
+      <TimelineSection
+        state={withBackground("assets/inputs/camp/summer-pool.png")}
+        dispatch={vi.fn()}
+        onChooseScene={() => {}}
+        assets={listing}
+      />,
+    );
+    expect(screen.getByText("summer-pool.png")).toBeTruthy();
+  });
+});

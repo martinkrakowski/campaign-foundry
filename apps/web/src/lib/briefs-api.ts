@@ -8,6 +8,7 @@ import {
   type CampaignType,
 } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { handleAuthError, type NoMembershipError } from "./auth-errors";
+import { isAssetId } from "./asset-refs";
 
 export type {
   CopyPool,
@@ -35,6 +36,13 @@ export interface BriefEntry {
 
 export interface AssetUploadResult {
   path: string;
+  /**
+   * The asset row's uuid, when the backend has one. OPTIONAL because only the
+   * Postgres backend does: `assets.post` echoes `id` under s3 and the key is absent
+   * everywhere else, so a caller that stores `id ?? path` writes a path on fs and
+   * an id on s3 without knowing which backend it is talking to.
+   */
+  id?: string;
 }
 
 /** What this host can produce, from the API's boot probe (`GET /campaigns/capabilities`). */
@@ -496,6 +504,13 @@ export interface AssetEntry {
   type: string;
   size: number;
   thumbnailUrl: string;
+  /**
+   * The asset row's own uuid (D203). OPTIONAL because only the Postgres backend
+   * has one: `ObjectAssetStore` sets it on every entry, `FsAssetStore` never does.
+   * Its presence is the only thing the web reads to tell an id ref from a path one,
+   * so entries are passed through untouched rather than filtered or normalised.
+   */
+  id?: string;
 }
 
 export async function uploadAsset(input: {
@@ -511,7 +526,15 @@ export async function uploadAsset(input: {
   ) {
     throw new BriefsApiError("Invalid response", 200);
   }
-  return { path: (data as { path: string }).path };
+  const path = (data as { path: string }).path;
+  // The id is passed on only when it is one — a body that answers with a
+  // malformed `id`, or none at all, is treated as a backend with no ids, because
+  // that is what a caller storing `id ?? path` must conclude. The key is ABSENT in
+  // that case rather than `undefined`, so a response shape and a resolved ref stay
+  // the same claim all the way through.
+  const id = (data as { id?: unknown }).id;
+  if (typeof id === "string" && isAssetId(id)) return { path, id };
+  return { path };
 }
 
 /**

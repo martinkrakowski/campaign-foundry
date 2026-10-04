@@ -130,6 +130,21 @@ export const logoChooseFromBin = "Choose from bin";
 export const logoEmpty = "No logo yet — upload a PNG or JPEG";
 export const logoUpload = "Upload";
 
+// --- Asset references (D203/D208) ---
+
+/**
+ * An asset reference stored as an id, while the campaign's asset listing is still
+ * in flight. Not an error: the name arrives with the listing, and showing a uuid
+ * in its place would be worse than waiting.
+ */
+export const assetPending = "Loading asset…";
+/**
+ * An asset reference stored as an id that the listing cannot resolve — the asset
+ * was deleted, or the listing itself failed. The ref is still a valid one to save,
+ * so this says the name is unavailable rather than that the value is wrong.
+ */
+export const assetUnavailable = "Unavailable asset";
+
 // --- Treatments ---
 
 /** `treatment-N-id` */
