@@ -38,8 +38,8 @@
     },
     {
       "file": "apps/api/server/lib/ports/object-asset-store.ts",
-      "before": "      `select id from campaign where org_id = $1 and slug = $2`,\n      [this.orgId, slug],",
-      "after": "      `select id from campaign where slug = $1`,\n      [slug],",
+      "before": "      `select id from campaign where org_id = $1 and slug = $2 and deleted_at is null`,\n      [this.orgId, slug],",
+      "after": "      `select id from campaign where slug = $1 and deleted_at is null`,\n      [slug],",
       "because": "the slug lookup stops being org-scoped, and a slug is not globally unique: the constraint is `unique (org_id, slug)`, so two orgs may hold the same one and `campaignKnown`'s world is full of them. Without `org_id` the lookup returns SOME row, and which one is a planner's choice — so two orgs that both picked `spring-sale` silently share one campaign's asset rows, and `readAsset` reads whatever the winning row points at. The route test cannot see this: `PgBriefStore.resolveCampaign` 404s a cross-org ref long before the adapter is asked, which is why the adapter carries its own cross-tenant test (one slug, one asset, in each of two orgs).",
       "command": [
         "yarn",
