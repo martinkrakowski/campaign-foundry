@@ -21,7 +21,7 @@
     },
     {
       "file": "apps/api/server/lib/ports/pg-brief-store.ts",
-      "before": "  async campaignVisibility(id: string): Promise<\"absent\" | \"visible\" | \"hidden\"> {\n    if (CANONICAL_UUID_PATTERN.test(id)) {\n      const { rows } = await this.db.query<{ team_id: string | null; deleted_at: string | null }>(\n        `select team_id, deleted_at from campaign where org_id = $1 and id = $2`,\n        [this.orgId, id.toLowerCase()],\n      );\n      const byId = rows[0];\n      if (byId) {\n        return byId.deleted_at !== null || !this.visible(byId.team_id) ? \"hidden\" : \"visible\";\n      }\n    }\n    const { rows } = await this.db.query<{ team_id: string | null; deleted_at: string | null }>(\n      `select team_id, deleted_at from campaign where org_id = $1 and slug = $2`,\n      [this.orgId, id],\n    );\n    const row = rows[0];\n    if (!row) return \"absent\";\n    if (row.deleted_at !== null) return \"hidden\";\n    return this.visible(row.team_id) ? \"visible\" : \"hidden\";\n  }",
+      "before": "  async campaignVisibility(id: string): Promise<\"absent\" | \"visible\" | \"hidden\"> {\n    let idHidden = false;\n    if (CANONICAL_UUID_PATTERN.test(id)) {\n      const { rows } = await this.db.query<{ team_id: string | null; deleted_at: string | null }>(\n        `select team_id, deleted_at from campaign where org_id = $1 and id = $2`,\n        [this.orgId, id.toLowerCase()],\n      );\n      const byId = rows[0];\n      if (byId && byId.deleted_at === null && this.visible(byId.team_id)) return \"visible\";\n      // An id match the caller may NOT see (team-hidden or tombstoned) falls through\n      // to the slug lookup, exactly as in `resolveCampaign`: a VISIBLE campaign whose\n      // slug happens to be that uuid text must still answer \"visible\", or every route\n      // that re-checks the slug `resolveCampaign` returned would 404 it. Only when the\n      // slug lookup finds nothing visible does the hidden id decide.\n      idHidden = byId !== undefined;\n    }\n    const { rows } = await this.db.query<{ team_id: string | null; deleted_at: string | null }>(\n      `select team_id, deleted_at from campaign where org_id = $1 and slug = $2`,\n      [this.orgId, id],\n    );\n    const row = rows[0];\n    // \"hidden\", never \"absent\", when the only match is an id the caller may not see:\n    // \"absent\" would reopen `campaignKnown`'s report fallback for that campaign.\n    if (!row) return idHidden ? \"hidden\" : \"absent\";\n    if (row.deleted_at !== null) return \"hidden\";\n    return this.visible(row.team_id) ? \"visible\" : \"hidden\";\n  }",
       "after": "  async campaignVisibility(id: string): Promise<\"absent\" | \"visible\" | \"hidden\"> {\n    const { rows } = await this.db.query<{ team_id: string | null }>(\n      `select team_id from campaign where org_id = $1 and slug = $2`,\n      [this.orgId, id],\n    );\n    const row = rows[0];\n    if (!row) return \"absent\";\n    return this.visible(row.team_id) ? \"visible\" : \"hidden\";\n  }",
       "because": "the whole `campaignVisibility` rewrite is undone at once — the uuid branch AND the tombstone check — because they are one piece of new code answering one question, and the interesting failure is what the OLD body did rather than which of the two halves is gone. The witness is a tombstoned campaign that already GENERATED: its `report` rows survive the tombstone (D232 step 3 is what deletes them), keyed by the slug and by the uuid as text (D246). `campaignKnown` (`ownership.ts:157`) reads a bare \"absent\" as \"never created\" and falls through to `reportKnown`, which finds the planted row and returns — so the route answers 200 with the report instead of 404. The uuid case is the sharper half and the reason this lane exists: `resolveCampaign` is itself filtered, so `result.get.ts:40`'s `resolved?.slug ?? campaignId` hands the RAW UUID TEXT to this method, and the old slug-only query finds no row for that text at all — so a uuid-addressed deleted campaign was reachable even with a tombstone check present on the slug branch. Both cases fail on `expect(res.status).toBe(404)` with the planted report served.",
       "command": [
@@ -67,6 +67,40 @@
         "apps/api/server/lib/ports/__tests__/pg-draft-store.test.ts",
         "-t",
         "a campaign tombstoned after the id was in hand refuses the write"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "      if (byId && byId.deleted_at === null && this.visible(byId.team_id)) return \"visible\";",
+      "after": "      if (byId) return byId.deleted_at === null && this.visible(byId.team_id) ? \"visible\" : \"hidden\";",
+      "because": "a hidden or tombstoned id match answers hidden at once instead of falling through to the slug lookup, the pre-fix shape Qodo flagged on #680. A visible campaign whose slug equals that uuid then reads hidden, and `expect(await owner.campaignVisibility(uuid)).toBe(\"visible\")` gets \"hidden\".",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-brief-store.test.ts",
+        "-t",
+        "whose slug is a tombstoned campaign's uuid"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "        where org_id = $1 and slug = $2 and deleted_at is null\n          and not exists",
+      "after": "        where org_id = $1 and slug = $2\n          and not exists",
+      "because": "releaseCampaign deletes a tombstoned versionless row again, freeing its slug while its deletion row is queued. `expect(await owner.releaseCampaign(\"blank\")).toBe(false)` gets true.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-brief-store.test.ts",
+        "-t",
+        "releaseCampaign leaves a tombstoned versionless row"
       ],
       "verdict": "caught"
     }

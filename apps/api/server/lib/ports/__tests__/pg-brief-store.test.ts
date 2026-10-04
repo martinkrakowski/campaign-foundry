@@ -1318,6 +1318,38 @@ describe("the campaign tombstone (PT-9a1, D231, D233)", () => {
     expect(await owner.campaignVisibility("00000000-0000-4000-8000-000000000000")).toBe("absent");
   });
 
+  test("a visible campaign whose slug is a tombstoned campaign's uuid answers visible", async () => {
+    // Qodo on #680: an id match the caller may not see must fall through to the slug
+    // lookup, as `resolveCampaign` does, or the visible campaign that `resolveCampaign`
+    // DID resolve would 404 on every route that re-checks its slug.
+    const uuid = await tombstone("gone");
+    await owner.createBrief(brief(uuid));
+    expect(await owner.campaignVisibility(uuid)).toBe("visible");
+  });
+
+  test("a visible campaign whose slug is a team-hidden campaign's uuid answers visible to the outsider", async () => {
+    const hidden = await owner.createBrief(brief("t2-only"), { teamId: "t2" });
+    await owner.createBrief(brief(hidden.campaignId!));
+    const outsider = new PgBriefStore(db, "local", "u1", [], ["t1"]);
+    expect(await outsider.campaignVisibility(hidden.campaignId!)).toBe("visible");
+  });
+
+  test("releaseCampaign leaves a tombstoned versionless row for the purge", async () => {
+    // Qodo on #680: a sourced create whose first Save loses the race to a tombstone
+    // calls releaseCampaign from its error handler; the row must survive for the
+    // queued purge, its slug still taken.
+    await owner.createCampaign("blank");
+    await db.query(`update campaign set deleted_at = now() where org_id = $1 and slug = $2`, [
+      "local",
+      "blank",
+    ]);
+    expect(await owner.releaseCampaign("blank")).toBe(false);
+    const { rows } = await db.query<{ count: number }>(
+      `select count(*)::int as count from campaign where org_id = 'local' and slug = 'blank'`,
+    );
+    expect(rows[0]!.count).toBe(1);
+  });
+
   // PT-9-2, D233: the race backstop. `createBrief`'s conflict branch reads the
   // row UNFILTERED (filtering it would leave `existing` empty right after the
   // insert's own conflict proved the row exists) and throws EEXIST on a

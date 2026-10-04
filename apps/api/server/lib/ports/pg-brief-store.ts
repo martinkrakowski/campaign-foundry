@@ -185,22 +185,29 @@ export class PgBriefStore implements BriefStorePort {
    * them the two ARE the same answer.
    */
   async campaignVisibility(id: string): Promise<"absent" | "visible" | "hidden"> {
+    let idHidden = false;
     if (CANONICAL_UUID_PATTERN.test(id)) {
       const { rows } = await this.db.query<{ team_id: string | null; deleted_at: string | null }>(
         `select team_id, deleted_at from campaign where org_id = $1 and id = $2`,
         [this.orgId, id.toLowerCase()],
       );
       const byId = rows[0];
-      if (byId) {
-        return byId.deleted_at !== null || !this.visible(byId.team_id) ? "hidden" : "visible";
-      }
+      if (byId && byId.deleted_at === null && this.visible(byId.team_id)) return "visible";
+      // An id match the caller may NOT see (team-hidden or tombstoned) falls through
+      // to the slug lookup, exactly as in `resolveCampaign`: a VISIBLE campaign whose
+      // slug happens to be that uuid text must still answer "visible", or every route
+      // that re-checks the slug `resolveCampaign` returned would 404 it. Only when the
+      // slug lookup finds nothing visible does the hidden id decide.
+      idHidden = byId !== undefined;
     }
     const { rows } = await this.db.query<{ team_id: string | null; deleted_at: string | null }>(
       `select team_id, deleted_at from campaign where org_id = $1 and slug = $2`,
       [this.orgId, id],
     );
     const row = rows[0];
-    if (!row) return "absent";
+    // "hidden", never "absent", when the only match is an id the caller may not see:
+    // "absent" would reopen `campaignKnown`'s report fallback for that campaign.
+    if (!row) return idHidden ? "hidden" : "absent";
     if (row.deleted_at !== null) return "hidden";
     return this.visible(row.team_id) ? "visible" : "hidden";
   }
@@ -549,11 +556,17 @@ export class PgBriefStore implements BriefStorePort {
    * process — campaigns are never otherwise deleted, so this delete only
    * ever fires from the same request that reserved the row moments before,
    * inside the SAME lock.
+   *
+   * A TOMBSTONED row is never released (PT-9a1, Qodo on #680): if a deletion
+   * commits between a sourced create's `createCampaign` and its first Save, the
+   * Save throws EEXIST and the route's error handler calls this. Deleting the row
+   * there would free its slug while its `deletion` row is still queued; the row
+   * is the purge's to remove.
    */
   async releaseCampaign(slug: string): Promise<boolean> {
     const { rows } = await this.db.query<{ id: string }>(
       `delete from campaign
-        where org_id = $1 and slug = $2
+        where org_id = $1 and slug = $2 and deleted_at is null
           and not exists (select 1 from brief_version where campaign_id = campaign.id)
        returning id`,
       [this.orgId, slug],
