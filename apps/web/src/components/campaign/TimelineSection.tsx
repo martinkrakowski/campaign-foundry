@@ -55,6 +55,7 @@ export function TimelineSection({
   onChooseScene,
   sectionPlayhead,
   assets,
+  assetsRefetching,
 }: {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
@@ -80,6 +81,14 @@ export function TimelineSection({
    * is not a thing an operator can read a beat's scene off.
    */
   assets?: readonly AssetEntry[];
+  /**
+   * Whether a listing request is in flight right now (see `describeAssetRef`). A
+   * beat whose `background` is an id the landed listing does not hold reads
+   * "Loading asset…" until the fetch settles, not "Unavailable asset" — a beat chip
+   * that says the wrong thing about the scene is worse than one that admits it is
+   * still being looked up.
+   */
+  assetsRefetching?: boolean;
 }) {
   const beats = state.timeline.beats;
   const blocked = addBeatBlockedBy(state);
@@ -225,7 +234,7 @@ export function TimelineSection({
                     >
                       {beat.background === undefined
                         ? messages.timelineBeatSceneNone
-                        : describeAssetRef(beat.background, assets).label}
+                        : describeAssetRef(beat.background, assets, assetsRefetching).label}
                     </button>
                     {beat.background === undefined ? null : (
                       <button

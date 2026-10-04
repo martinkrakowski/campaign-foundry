@@ -25,6 +25,7 @@ export function CopySection({
   onChooseScene,
   sectionPlayhead,
   assets,
+  assetsRefetching,
 }: {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
@@ -46,6 +47,8 @@ export function CopySection({
    * owns a picker, so it publishes only what `TimelineSection` needs to name an id.
    */
   assets?: readonly AssetEntry[];
+  /** Whether a listing request is in flight right now — passed straight through. */
+  assetsRefetching?: boolean;
 }) {
   const { briefId, pool } = state;
 
@@ -214,6 +217,7 @@ export function CopySection({
             onChooseScene={onChooseScene}
             sectionPlayhead={sectionPlayhead}
             assets={assets}
+            assetsRefetching={assetsRefetching}
           />
         </div>
       ) : null}

@@ -3424,56 +3424,245 @@ describe("BriefPage — the editor is one scrolling column (SG1 / SG-D2)", () =>
       expect(document.body.textContent).not.toContain(ID);
     });
 
-    test("a listing that lands after the editor is gone is dropped, and its request aborted", async () => {
-      // Both outcomes of the late answer, because the guard is on each: a `then`
-      // and a `catch` that both installed their result would write to a component
-      // that no longer exists, and React's complaint about that arrives in a
-      // different test's console rather than in this one.
-      for (const outcome of ["resolves", "fails"] as const) {
-        let settle: (result: { assets: unknown[] } | Error) => void = () => {};
-        let signal: AbortSignal | undefined;
-        const stored = { ...brief("ok"), products: [{ ...brief("ok").products[0], logoPath: ID }] };
-        vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
-          const u = String(url);
-          const method = (init?.method ?? "GET").toUpperCase();
-          if (u.includes("/campaigns/assets?briefId=")) {
-            signal = (init as RequestInit | undefined)?.signal ?? undefined;
-            return new Promise((resolve, reject) => {
-              settle = (result) =>
-                result instanceof Error
-                  ? reject(result)
-                  : resolve(json(result, 200) as unknown as Response);
-            });
+    /**
+     * A listing that settles after the editor has LEFT this campaign must not
+     * overwrite the new campaign's listing.
+     *
+     * The abort flag alone was not enough of an assertion: it says the request was
+     * cancelled, and says nothing about what the answer would have done. Switching
+     * campaigns is the case where that is observable — the editor is still mounted,
+     * so a `setCampaignAssets` from the first campaign's late answer would install
+     * a listing that has no entry for the second campaign's ids, and every id in it
+     * would read "Unavailable asset" for good.
+     */
+    test("a listing that lands after a campaign switch does not overwrite the new one", async () => {
+      const first = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+      const second = "9c5b94b1-35ad-49bb-b118-8e8fc24af80e";
+      const entry = (id: string, name: string) => ({
+        id,
+        name,
+        type: "image/png",
+        size: 1,
+        thumbnailUrl: "",
+      });
+      let settleFirst: (assets: unknown[]) => void = () => {};
+      let nextFetches = 0;
+      const storedFor = (id: string, logoId: string) => ({
+        ...brief(id),
+        products: [{ ...brief(id).products[0], logoPath: logoId }],
+      });
+      vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+        const u = String(url);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (u.includes("/campaigns/assets?briefId=ok")) {
+          // The FIRST campaign's listing is held open across the switch.
+          return new Promise((resolve) => {
+            settleFirst = (assets) => resolve(json({ assets }, 200) as unknown as Response);
+          });
+        }
+        if (u.includes("/campaigns/assets?briefId=next")) {
+          nextFetches += 1;
+          // The SECOND request for this campaign is HELD. A late answer from the
+          // campaign the editor left would overwrite the listing, and the gate would
+          // then legitimately notice the missing entry and ask again — which would
+          // REPAIR the visible label and hide the wrong write behind a good one. With
+          // the repair held, the wrong write is visible, which is the claim.
+          if (nextFetches === 1) {
+            return Promise.resolve(json({ assets: [entry(second, "next-logo.png")] }));
           }
-          if (method === "GET" && u === `${API}/campaigns/capabilities`) {
-            return Promise.resolve(json({ motion: true }));
-          }
-          if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
-            return Promise.resolve(
-              json({ briefs: [{ file: "ok.yaml", brief: stored, revision: "r1" }] }),
-            );
-          }
-          return Promise.resolve(json({}, 404));
-        });
-        const view = renderWithRun(<Editor id="ok" />);
-        await waitFor(() =>
-          expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
-        );
-        expect(await screen.findByText(messages.assetPending), outcome).toBeTruthy();
-        expect(signal?.aborted, outcome).toBe(false);
-
-        view.unmount();
-        // The abort is the half that is observable; the late answer must then install
-        // nothing, which is what `cancelled` is for.
-        expect(signal?.aborted, outcome).toBe(true);
-        await act(async () => {
-          settle(
-            outcome === "resolves"
-              ? { assets: [{ id: ID, name: NAME, type: "image/png", size: 1, thumbnailUrl: "" }] }
-              : new Error("late failure"),
+          return new Promise(() => {});
+        }
+        if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+          return Promise.resolve(json({ motion: true }));
+        }
+        if (method === "GET" && u === `${API}/campaigns/briefs`) {
+          // The LISTING is how the editor finds a brief by route id, and it is asked
+          // again after the switch. Both campaigns live in it from the start, which
+          // is what makes the switch a re-read rather than a lucky cache hit.
+          return Promise.resolve(
+            json({
+              briefs: [
+                { file: "ok.yaml", brief: storedFor("ok", first), revision: "r1" },
+                { file: "next.yaml", brief: storedFor("next", second), revision: "r1" },
+              ],
+            }),
           );
-        });
-      }
+        }
+        if (method === "GET" && u.startsWith(`${API}/campaigns/briefs/`)) {
+          const id = u.slice(`${API}/campaigns/briefs/`.length);
+          return Promise.resolve(
+            json({
+              file: `${id}.yaml`,
+              brief: storedFor(id, id === "ok" ? first : second),
+              revision: "r1",
+            }),
+          );
+        }
+        return Promise.resolve(json({}, 404));
+      });
+      const view = renderWithRun(<Editor id="ok" />);
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
+      );
+      await waitFor(() => expect(logoMirror()?.value).toBe(first));
+      // The route changes the way Next changes it: a new `briefId` prop on the SAME
+      // editor instance. The whole provider tree is rebuilt, as W1's rerender test
+      // does, because `renderWithRun`'s wrapper IS the tree and rerender replaces it.
+      view.rerender(
+        <ShellProviders>
+          <CreateCampaignProvider>
+            <Editor id="next" />
+            <CreateCampaignDialog />
+          </CreateCampaignProvider>
+        </ShellProviders>,
+      );
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("next"),
+      );
+      expect(await screen.findByText("next-logo.png")).toBeTruthy();
+      expect(nextFetches).toBe(1);
+
+      // The held answer arrives now, for a campaign the editor has left.
+      await act(async () => {
+        settleFirst([entry(first, "ok-logo.png")]);
+      });
+
+      // It must have changed nothing, and the LABEL is the assertion rather than a
+      // call count: a second campaign's name on screen is a wrong write no amount of
+      // correct fetching afterwards can un-happen. The repair fetch above is held, so
+      // a wrong write cannot hide behind a good one.
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByText("next-logo.png")).toBeTruthy();
+      expect(screen.queryByText("ok-logo.png")).toBeNull();
+      expect(screen.queryByText(messages.assetUnavailable)).toBeNull();
+      expect(screen.queryByText(messages.assetPending)).toBeNull();
+      // And nothing was re-asked to fix it, which is the same claim from the other
+      // side: there was never anything wrong to fix.
+      expect(nextFetches).toBe(1);
+
+      // The `catch` side of the same guard, which the switch above cannot reach:
+      // there is nothing left to observe on an unmounted editor, so this is what
+      // pins it — a failure arriving late must not install an empty listing either,
+      // which would be the one that turns every id into "Unavailable asset".
+      let settleAfterUnmount: (cause: unknown) => void = () => {};
+      let signal: AbortSignal | undefined;
+      vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+        const u = String(url);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (u.includes("/campaigns/assets?briefId=")) {
+          signal = (init as RequestInit | undefined)?.signal ?? undefined;
+          return new Promise((_resolve, reject) => {
+            settleAfterUnmount = reject;
+          });
+        }
+        if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+          return Promise.resolve(json({ motion: true }));
+        }
+        if (method === "GET" && u === `${API}/campaigns/briefs`) {
+          return Promise.resolve(
+            json({
+              briefs: [
+                { file: "ok.yaml", brief: storedFor("ok", first), revision: "r1" },
+                { file: "next.yaml", brief: storedFor("next", second), revision: "r1" },
+              ],
+            }),
+          );
+        }
+        return Promise.resolve(json({}, 404));
+      });
+      // A clean document for the second half — `screen` queries the whole body, and
+      // two editors at once would make every lookup ambiguous.
+      view.unmount();
+      const second2 = renderWithRun(<Editor id="ok" />);
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
+      );
+      await waitFor(() => expect(signal).toBeDefined());
+      second2.unmount();
+      expect(signal?.aborted).toBe(true);
+      await act(async () => {
+        settleAfterUnmount(new Error("late failure"));
+      });
+    });
+
+    /**
+     * A refetch in flight is not a settled "unavailable".
+     *
+     * The listing is never re-read from scratch — a new id joins a listing that is
+     * already landed — so the refetch's window has to read as loading, or every id
+     * picked in that window flashes a name-less tile for a round trip. The two
+     * labels are claims: one says "not asked yet", the other says "asked, and it is
+     * not there". Between them sits the request.
+     */
+    test("an id added while a refetch is in flight reads loading, not unavailable", async () => {
+      const landed = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+      const fresh = "9c5b94b1-35ad-49bb-b118-8e8fc24af80e";
+      const entry = (id: string, name: string) => ({
+        id,
+        name,
+        type: "image/png",
+        size: 1,
+        thumbnailUrl: "",
+      });
+      let refetches = 0;
+      let settleRefetch: (assets: unknown[]) => void = () => {};
+      // Product 0's logo is already an id the first listing resolves; product 1's is a
+      // path, and becomes a NEW id mid-test. Both products are needed: the claim is
+      // that one keeps its name while the other waits, which two products state and
+      // one cannot.
+      const stored = {
+        ...brief("ok"),
+        products: [{ ...brief("ok").products[0], logoPath: landed }, brief("ok").products[1]],
+      };
+      vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+        const u = String(url);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (u.includes("/campaigns/assets?briefId=")) {
+          refetches += 1;
+          if (refetches === 1) {
+            return Promise.resolve(json({ assets: [entry(landed, "alpha.png")] }));
+          }
+          // The refetch is HELD, so the pending window is observable.
+          return new Promise((resolve) => {
+            settleRefetch = (assets) => resolve(json({ assets }, 200) as unknown as Response);
+          });
+        }
+        if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+          return Promise.resolve(json({ motion: true }));
+        }
+        if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+          return Promise.resolve(
+            json({ briefs: [{ file: "ok.yaml", brief: stored, revision: "r1" }] }),
+          );
+        }
+        return Promise.resolve(json({}, 404));
+      });
+      renderWithRun(<Editor id="ok" />);
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
+      );
+      expect(await screen.findByText("alpha.png")).toBeTruthy();
+
+      // Product 1's logo becomes an id the landed listing has never seen.
+      const mirrors = screen
+        .getAllByLabelText("Logo Path")
+        .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
+      fireEvent.change(mirrors[1] as HTMLInputElement, { target: { value: fresh } });
+
+      // Mid-request: loading, and specifically NOT the "asked and it is not there"
+      // the settled-listing rule would otherwise produce.
+      await waitFor(() => expect(refetches).toBe(2));
+      expect(screen.getByText(messages.assetPending)).toBeTruthy();
+      expect(screen.queryByText(messages.assetUnavailable)).toBeNull();
+      // The id that WAS in the listing keeps its name through the refetch.
+      expect(screen.getByText("alpha.png")).toBeTruthy();
+
+      await act(async () => {
+        settleRefetch([entry(landed, "alpha.png"), entry(fresh, "beta.png")]);
+      });
+      expect(await screen.findByText("beta.png")).toBeTruthy();
     });
   });
 

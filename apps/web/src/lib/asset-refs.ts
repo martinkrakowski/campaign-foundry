@@ -91,10 +91,19 @@ export type AssetRefState = "path" | "found" | "pending" | "unavailable";
  * an empty listing: an empty listing HAS been fetched and says the asset is gone.
  * A failed fetch resolves to `[]` for the same reason — an unknown asset is
  * unknown, and must not read "Loading…" forever.
+ *
+ * `refetching` is the third claim, and the one this had been missing: a request is
+ * in flight. The listing is never re-read from scratch — a new id joins one that has
+ * already landed — so between the two an id the listing does not hold is neither
+ * resolved nor refuted, and reporting it as "Unavailable asset" puts a name-less
+ * tile in front of the operator for the length of a round trip. While a fetch is in
+ * flight an unresolved id reads pending, and only the settled answer may call it
+ * unavailable.
  */
 export function describeAssetRef(
   ref: string,
   listing: readonly AssetEntry[] | undefined,
+  refetching = false,
 ): { label: string; thumbnailUrl?: string; size?: number; state: AssetRefState } {
   if (!isAssetId(ref)) {
     // The ref with no `/` is its own basename — today's `value.includes("/")`
@@ -104,7 +113,11 @@ export function describeAssetRef(
   }
   if (listing === undefined) return { label: messages.assetPending, state: "pending" };
   const entry = listing.find((candidate) => candidate.id === ref);
-  if (entry === undefined) return { label: messages.assetUnavailable, state: "unavailable" };
+  if (entry === undefined) {
+    return refetching
+      ? { label: messages.assetPending, state: "pending" }
+      : { label: messages.assetUnavailable, state: "unavailable" };
+  }
   return {
     label: entry.name,
     thumbnailUrl: entry.thumbnailUrl,

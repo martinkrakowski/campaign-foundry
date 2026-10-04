@@ -137,6 +137,28 @@ describe("LogoField", () => {
     const ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
     const NAME = "hydra-bottle-logo.png";
 
+    test("a path ref's tooltip is the full path, an id ref's is the name", () => {
+      // Two different questions, two different answers. The tooltip answers "what
+      // exactly is in this field", where the directory is the half that distinguishes
+      // one campaign's asset from another's with the same basename — so a path ref
+      // keeps it. And an id ref never shows a uuid, which `displayName ?? value`
+      // guarantees because an id ref always arrives WITH a displayName.
+      const path = render(
+        <LogoField
+          value="assets/inputs/camp/hydra-bottle-logo.png"
+          onChange={vi.fn()}
+          onUploadFile={vi.fn()}
+        />,
+      );
+      expect(screen.getByText("hydra-bottle-logo.png").getAttribute("title")).toBe(
+        "assets/inputs/camp/hydra-bottle-logo.png",
+      );
+      path.unmount();
+
+      render(<LogoField value={ID} displayName={NAME} onChange={vi.fn()} onUploadFile={vi.fn()} />);
+      expect(screen.getByText(NAME).getAttribute("title")).toBe(NAME);
+    });
+
     test("shows displayName as the label and the title, and reads the badge from it", () => {
       render(
         <LogoField

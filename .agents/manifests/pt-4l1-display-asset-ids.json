@@ -6,7 +6,7 @@
       "file": "apps/web/src/lib/asset-refs.ts",
       "before": "  if (ref === undefined) return false;\n  if (entry.id !== undefined && ref === entry.id) return true;\n  return ref === pathRefFor(briefId, entry.name) || ref === entry.name;",
       "after": "  if (ref === undefined) return false;\n  return ref === pathRefFor(briefId, entry.name) || ref === entry.name;",
-      "because": "PT-4l1 mutation 1 (the picker matches by path only). Under the object backend a stored ref IS the asset row's uuid, so with the id clause dropped there is no path and no filename left to compare and the Asset Bin cannot say which asset the field already holds. FAILS ON: expect(screen.getByText(\"Selected\")).toBeTruthy(); — apps/web/src/components/campaign/__tests__/AssetPickerDrawer.test.tsx:211, TestingLibraryElementError: Unable to find an element with the text: Selected.",
+      "because": "PT-4l1 mutation 1 (the picker matches by path only). Under the object backend a stored ref IS the asset row's uuid, so with the id clause dropped there is no path and no filename left to compare and the Asset Bin cannot say which asset the field already holds. FAILS ON: expect(screen.getByText(\"Selected\")).toBeTruthy(); — apps/web/src/components/campaign/__tests__/AssetPickerDrawer.test.tsx, TestingLibraryElementError: Unable to find an element with the text: Selected.",
       "command": [
         "yarn",
         "vitest",
@@ -21,9 +21,9 @@
     },
     {
       "file": "apps/web/src/lib/asset-refs.ts",
-      "before": "  if (entry === undefined) return { label: messages.assetUnavailable, state: \"unavailable\" };",
-      "after": "  if (entry === undefined) return { label: ref, state: \"unavailable\" };",
-      "because": "PT-4l1 mutation 2 (an unknown id renders the uuid). A deleted asset's name is unknown, and a 36-character string is the one thing an operator cannot read a logo off - which is the whole reason this branch says so plainly. FAILS ON: expect(screen.getByText(messages.assetUnavailable)).toBeTruthy(); — apps/web/src/components/campaign/sections/__tests__/ProductsSection.test.tsx:144, TestingLibraryElementError: Unable to find an element with the text: Unavailable asset.",
+      "before": "      : { label: messages.assetUnavailable, state: \"unavailable\" };",
+      "after": "      : { label: ref, state: \"unavailable\" };",
+      "because": "PT-4l1 mutation 2 (an unknown id renders the uuid). A deleted asset's name is unknown, and a 36-character string is the one thing an operator cannot read a logo off - which is the whole reason this branch says so plainly. Re-anchored in fix round 1 because the ternary this lives in grew a `refetching` arm; the claim is unchanged. FAILS ON: expect(screen.getByText(messages.assetUnavailable)).toBeTruthy(); — apps/web/src/components/campaign/sections/__tests__/ProductsSection.test.tsx, TestingLibraryElementError: Unable to find an element with the text: Unavailable asset.",
       "command": [
         "yarn",
         "vitest",
@@ -38,9 +38,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "    if (unresolvedAssetRefsKey === \"\") return;",
-      "after": "    if (false) return;",
-      "because": "PT-4l1 mutation 5 (the listing fetch loses its gate). `false` is the condition the id-ref gate is there to prevent: the editor then asks for the campaign's asset listing on EVERY draft, including the filesystem-shaped ones that hold no id ref and have no use for the answer. FAILS ON: expect(calls.filter((c) => c.url.includes(\"/campaigns/assets?bri... — apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx:3264, AssertionError: expected [ { …(2) } ] to deeply equal []. Every fs fetch sequence in the suite depends on this gate.",
+      "before": "    if (unresolvedAssetRefsKey === \"\") {\n      // A fetch that was in flight for the key that has just been satisfied does not\n      // get to leave this flag set on its way out.\n      setAssetsRefetching(false);\n      return;\n    }",
+      "after": "    if (false) {\n      setAssetsRefetching(false);\n      return;\n    }",
+      "because": "PT-4l1 mutation 5 (the listing fetch loses its gate). `false` is the condition the id-ref gate is there to prevent: the editor then asks for the campaign's asset listing on EVERY draft, including the filesystem-shaped ones that hold no id ref and have no use for the answer. Re-anchored in fix round 1 because the early return grew a statement; the claim is unchanged. FAILS ON: expect(calls.filter((c) => c.url.includes(\"/campaigns/assets?bri... — apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx, AssertionError: expected [ { ...(2) } ] to deeply equal []. Every fs fetch sequence in the suite depends on this gate.",
       "command": [
         "yarn",
         "vitest",
@@ -50,6 +50,91 @@
         "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
         "-t",
         "a path-only brief never asks for the asset listing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/sections/ProductsSection.tsx",
+      "before": "      dispatch({ type: \"setProduct\", key, patch: { logoPath: id ?? path } });",
+      "after": "      dispatch({ type: \"setProduct\", key, patch: { logoPath: path } });",
+      "because": "PT-4l1 fix round 1, write side (a): the upload ignores the id the response carried and stores the path beside it. That is the shape #666 removed - under the object backend the server then has to resolve the ref by name on every later read, and the brief reads dirty the instant a Save succeeds. FAILS ON: expect(dispatch).toHaveBeenCalledWith({ — apps/web/src/components/campaign/__tests__/sections.test.tsx, the assertion that a `{ path, id }` upload stores the id.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/sections.test.tsx",
+        "-t",
+        "an upload answering an id stores the id, not the path"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/briefs-api.ts",
+      "before": "  if (typeof id === \"string\" && isAssetId(id)) return { path, id };",
+      "after": "  if (typeof id === \"string\" && isAssetId(id)) return { path };",
+      "because": "PT-4l1 fix round 1, write side (b): uploadAsset validates the backend's id and then drops it, so no caller can store one and the entire write side collapses back to paths however good the backend's answer was. FAILS ON: .resolves.toStrictEqual({ path: \"assets/inputs/camp/logo.png\", id }); — apps/web/src/lib/__tests__/briefs-api.test.ts, showing { path: ... } instead.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/briefs-api.test.ts",
+        "-t",
+        "uploads an asset and passes the backend's id through"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/sections/ProductsSection.tsx",
+      "before": "  const entry = listing?.find((candidate) => candidate.name === name);",
+      "after": "  const entry = (undefined as readonly AssetEntry[] | undefined)?.find(\n    (candidate) => candidate.name === name,\n  );",
+      "because": "PT-4l1 fix round 1, item 1: the 409 path stops reading the loaded listing, so it can only answer with today's path. A literal \"fetch it again\" edit is NOT expressible as one mutation here and the difference is worth stating: reintroducing the request needs the `listAssets` import back AND the call site awaiting, and those are two edit sites while this tool replaces one contiguous block - while the one-site version that awaits does not compile (a Promise<string> assigned to `logoPath`). So the compilable single-edit form of the same regression is anchored here, and it is caught by the test whose subject is the answer the no-request rule depends on. FAILS ON: expect(dispatch).toHaveBeenCalledWith({ ... patch: { logoPath: id } ... }) — apps/web/src/components/campaign/__tests__/sections.test.tsx, receiving today's path instead of the id.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/sections.test.tsx",
+        "-t",
+        "a 409 whose loaded listing carries the asset's id stores the id, and asks nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/asset-refs.ts",
+      "before": "  if (entry === undefined) {\n    return refetching\n      ? { label: messages.assetPending, state: \"pending\" }\n      : { label: messages.assetUnavailable, state: \"unavailable\" };\n  }",
+      "after": "  if (entry === undefined) return { label: messages.assetUnavailable, state: \"unavailable\" };",
+      "because": "PT-4l1 fix round 1, item 2: the pending check ignores the fetch in flight, so an id picked mid-session reads \"Unavailable asset\" for the length of a round trip - a settled verdict the data has not delivered. FAILS ON: expect(screen.getByText(messages.assetPending)).toBeTruthy(); — apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx, Unable to find an element with the text: Loading asset…. The same assertion, restated at the helper, is in apps/web/src/lib/__tests__/asset-refs.test.ts.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "an id added while a refetch is in flight reads loading, not unavailable"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "      .then((res) => {\n        if (!cancelled) {\n          setCampaignAssets(res.assets);\n          setAssetsRefetching(false);\n        }\n      })",
+      "after": "      .then((res) => {\n        setCampaignAssets(res.assets);\n        setAssetsRefetching(false);\n      })",
+      "because": "PT-4l1 fix round 1, item 4: the `cancelled` guard on the resolve side, which used to be asserted only as an aborted signal. A listing that answers after the editor has left the campaign would install itself over the new campaign's, and every id in it would read \"Unavailable asset\" for good - until the gate noticed the missing entry and re-asked, which REPAIRS the label and so hides the wrong write behind a good one. The test holds that repair fetch open so the wrong write is visible rather than self-healing. FAILS ON: expect(screen.getByText(\"next-logo.png\")).toBeTruthy(); - apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx, TestingLibraryElementError: Unable to find an element with the text: next-logo.png.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a listing that lands after a campaign switch does not overwrite the new one"
       ],
       "verdict": "caught"
     }
