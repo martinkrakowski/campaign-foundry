@@ -536,8 +536,20 @@ export const assetLabel = (
  * it was not given renders the honest placeholder rather than inventing one
  * (D212/D213).
  */
-export const usableUrl = (value: unknown): string | undefined =>
-  typeof value === "string" && value !== "" ? value : undefined;
+export const usableUrl = (value: unknown): string | undefined => {
+  if (typeof value !== "string" || value === "") return undefined;
+  // Only the two shapes the server mints: a same-origin path (fs: `/api/pipeline/…`)
+  // or an absolute http(s) URL (s3: a presigned GET). Anything else — `javascript:`,
+  // `data:`, a protocol-relative `//host` — lands in an `href` or `src`, and the
+  // report is untrusted JSON, so it reads as absent and renders the placeholder.
+  if (value.startsWith("/")) return value.startsWith("//") ? undefined : value;
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "https:" || protocol === "http:" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 /** Canvas raster + encode budget per frame (wave-4 perf spike), for the encode estimate. */
 export const ENCODE_MS_PER_FRAME = 7;
