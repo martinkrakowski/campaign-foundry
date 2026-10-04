@@ -21,6 +21,10 @@ import {
 import { loadBrief } from "../../../lib/load-brief.js";
 
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
+import { getBriefStore } from "../../../lib/ports/index.js";
+import briefsGetHandler from "../briefs.get.js";
+import briefsPostHandler from "../briefs.post.js";
+import { mountTenantApp, setupPgHarness, type PgHarness } from "../../__tests__/tenant-harness.js";
 type Method = "get" | "post" | "put";
 
 const mount = (routes: { method: Method; path: string; handler: EventHandler }[]) => {
@@ -2070,4 +2074,107 @@ describe("authoring briefs", () => {
       expect(body.brief.campaignMessage).toBe("From cache");
     });
   });
+});
+
+/**
+ * PT-9a2, D233 r2 — the tombstone filter PT-9a1 shipped, through the two
+ * `briefs` routes that reach it.
+ *
+ * **Postgres only, and pg is the only backend that HAS a tombstone**: `fs` has
+ * no `campaign` row to carry `deleted_at`, so these cases cannot be `describe.each`-
+ * paired with it the way the suites above are. The fixture is planted the way the
+ * lane's rule says — raw SQL on the harness's own `db`, never through a route —
+ * because no writer sets `deleted_at` until PT-9f, so there is no other way to
+ * make one.
+ *
+ * Static handler imports, unlike every describe above in this file: those call
+ * `vi.resetModules()` and re-import through a FRESH registry, while
+ * `setupPgHarness` mounts its database on the one this file's imports came from.
+ * A route loaded after a reset would ask a `database()` nothing has patched.
+ */
+describe("the briefs routes and a tombstone (PT-9a2, D233 r2)", () => {
+  const api = mountTenantApp(
+    [
+      { method: "post", path: "/campaigns/briefs", handler: briefsPostHandler },
+      { method: "get", path: "/campaigns/briefs", handler: briefsGetHandler },
+    ],
+    LOCAL_TENANT,
+  );
+  const save = (id: string) => api(jsonReq("http://x/campaigns/briefs", "POST", brief({ id })));
+  const listed = () => api(new Request("http://x/campaigns/briefs"));
+
+  /** Mint a campaign and save exactly one version — the fixture the rule names. */
+  const oneSavedVersion = async (harness: PgHarness, id: string): Promise<string> => {
+    await getBriefStore(LOCAL_TENANT).createCampaign(id);
+    expect((await save(id)).status).toBe(201);
+    const { rows } = await harness.db.query<{ n: number }>(
+      "select count(*)::int as n from brief_version bv join campaign c on c.id = bv.campaign_id where c.slug = $1",
+      [id],
+    );
+    expect(rows[0]!.n).toBe(1);
+    return id;
+  };
+
+  /** The tombstone itself, planted the way the lane's rule words it. */
+  const tombstone = (harness: PgHarness, slug: string): Promise<unknown> =>
+    harness.db.query(`update campaign set deleted_at = now() where org_id = $1 and slug = $2`, [
+      LOCAL_TENANT.orgId,
+      slug,
+    ]);
+
+  test("a tombstoned campaign is omitted from the briefs listing", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await oneSavedVersion(harness, "gone-camp");
+      // The control, in the same org and the same listing: a filter that
+      // over-reaches fails HERE rather than passing on the omission below.
+      await oneSavedVersion(harness, "live-camp");
+      const before = (await (await listed()).json()) as { briefs: { brief: { id: string } }[] };
+      expect(before.briefs.map((entry) => entry.brief.id).sort()).toEqual([
+        "gone-camp",
+        "live-camp",
+      ]);
+
+      await tombstone(harness, "gone-camp");
+
+      const res = await listed();
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { briefs: { brief: { id: string } }[] };
+      expect(body.briefs.map((entry) => entry.brief.id)).toEqual(["live-camp"]);
+      // The row is still there — hidden, not deleted, which is what makes the
+      // omission a filter rather than a missing campaign.
+      const { rows } = await harness.db.query<{ deleted_at: string | null }>(
+        "select deleted_at from campaign where org_id = $1 and slug = $2",
+        [LOCAL_TENANT.orgId, "gone-camp"],
+      );
+      expect(rows[0]!.deleted_at).not.toBeNull();
+    } finally {
+      await harness.cleanup();
+    }
+  }, 15000);
+
+  test("POST /campaigns/briefs onto a tombstoned slug answers 404 before createBrief runs", async () => {
+    const harness = await setupPgHarness();
+    try {
+      await oneSavedVersion(harness, "gone-camp");
+      await tombstone(harness, "gone-camp");
+
+      const res = await save("gone-camp");
+      expect(res.status).toBe(404);
+      // The same body an unknown target answers, so a deleted campaign cannot be
+      // told from one that was never minted.
+      expect(await res.json()).toEqual({ error: `Campaign "gone-camp" not found` });
+
+      // The gate is `campaignMeta` at `briefs.post.ts:140`, which runs BEFORE
+      // `createBrief` — so the version count is untouched. A version written
+      // into a tombstoned campaign would resurrect it in the listing above.
+      const { rows } = await harness.db.query<{ n: number }>(
+        "select count(*)::int as n from brief_version bv join campaign c on c.id = bv.campaign_id where c.slug = $1",
+        ["gone-camp"],
+      );
+      expect(rows[0]!.n).toBe(1);
+    } finally {
+      await harness.cleanup();
+    }
+  }, 15000);
 });

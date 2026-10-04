@@ -624,6 +624,75 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
           await harness.cleanup();
         }
       });
+
+      // PT-9a2, D233 r2: the tombstone filter PT-9a1 shipped, through both draft
+      // routes' `campaignMeta` gate. Each case is served BEFORE the tombstone and
+      // refused after it, so the 404 below cannot be an id that was never a
+      // campaign — and the PUT case reads the stored draft back, because a gate
+      // that answered 404 after the write would still leave the row changed.
+      //
+      // The explicit 15000 is not politeness: `setupPgHarness` migrates a whole
+      // database, which is over vitest's 5 s default under PGlite (the suite's
+      // PGlite pass scopes to these cases by name, `-t "tombstone"`, and they have
+      // to run there).
+      test("GET /campaigns/:id/draft 404s for a tombstoned campaign", async () => {
+        const harness = await setup();
+        const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+        try {
+          const api = mount();
+          const { slug } = await mintCampaign(api, "Tombstoned Draft Read");
+          expect((await api.save(sampleBrief(slug))).status).toBe(201);
+          expect(await (await api.getDraft(slug)).json()).toEqual({ draft: null });
+
+          await pgHarness.db.query(
+            `update campaign set deleted_at = now() where org_id = $1 and slug = $2`,
+            ["local", slug],
+          );
+
+          const res = await api.getDraft(slug);
+          expect(res.status).toBe(404);
+          // The same body an unknown campaign answers — a deleted campaign cannot
+          // be told from one that never existed.
+          expect(await res.json()).toEqual({ error: `Campaign "${slug}" not found.` });
+        } finally {
+          await harness.cleanup();
+        }
+      }, 15000);
+
+      test("PUT /campaigns/:id/draft 404s for a tombstoned campaign", async () => {
+        const harness = await setup();
+        const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+        try {
+          const api = mount();
+          const { slug, campaignId } = await mintCampaign(api, "Tombstoned Draft Write");
+          const saved = await api.save(sampleBrief(slug));
+          expect(saved.status).toBe(201);
+          const { revision } = (await saved.json()) as { revision: string };
+          expect(
+            (await api.putDraft(slug, { state: { v: 1 }, baseRevision: revision })).status,
+          ).toBe(200);
+
+          await pgHarness.db.query(
+            `update campaign set deleted_at = now() where org_id = $1 and slug = $2`,
+            ["local", slug],
+          );
+
+          const res = await api.putDraft(slug, { state: { v: 2 }, baseRevision: revision });
+          expect(res.status).toBe(404);
+          expect(await res.json()).toEqual({ error: `Campaign "${slug}" not found.` });
+
+          // The gate is `campaignMeta`, which runs BEFORE the body is parsed, so
+          // the autosave write never reached the store: what is stored is still
+          // what the pre-tombstone PUT wrote.
+          const { rows } = await pgHarness.db.query<{ state: unknown }>(
+            "select state from draft where campaign_id = $1",
+            [campaignId],
+          );
+          expect(rows[0]!.state).toEqual({ v: 1 });
+        } finally {
+          await harness.cleanup();
+        }
+      }, 15000);
     }
   },
 );
