@@ -371,14 +371,22 @@ describe("GridPage", () => {
     const rerolled = { ...original, attempt: 1, treatment: "headline-bottom-bold" };
     localStorage.setItem("cf:brief-picked", "1");
     seedDecisions({ "alpha/v0": "rejected" });
+    // D213: a re-roll commits from a re-read of `GET /campaigns/result`, and the
+    // server writes that report BEFORE it completes the job — so the store moves when
+    // the job answers, and the result read is what puts the new tile on screen.
+    let stored: unknown[] = [original];
     mockPipelineApi({
       report: { halted: false, assets: [original], log: { entries: [], campaignId: "seed" } },
-      job: () =>
-        jobOk({
+      job: () => {
+        stored = [rerolled];
+        return jobOk({
           halted: false,
           assets: [rerolled],
           log: { entries: [], campaignId: "seed" },
-        }),
+        });
+      },
+      result: () =>
+        json({ halted: false, assets: stored, log: { entries: [], campaignId: "seed" } }),
       opened: {
         id: "seed",
         brief: {
@@ -882,6 +890,9 @@ describe("GridPage — motion cells", () => {
     });
     const seeded = seedPersistedRun([original]);
     let body: unknown;
+    // D213: as above — the merged report is written before the job completes, so the
+    // re-read that commits the re-roll answers the re-rolled row.
+    let stored: unknown[] = [original];
     mockPipelineApi({
       opened: seeded,
       report: { halted: false, assets: [original], log: { entries: [], campaignId: "seed" } },
@@ -889,8 +900,16 @@ describe("GridPage — motion cells", () => {
         body = JSON.parse(String(init.body));
         return json({ jobId: "job-2" }, 202);
       },
-      job: () =>
-        jobOk({ halted: false, assets: [rerolled], log: { entries: [], campaignId: "seed" } }),
+      job: () => {
+        stored = [rerolled];
+        return jobOk({
+          halted: false,
+          assets: [rerolled],
+          log: { entries: [], campaignId: "seed" },
+        });
+      },
+      result: () =>
+        json({ halted: false, assets: stored, log: { entries: [], campaignId: "seed" } }),
     });
     renderWithRun(<Harness />);
     await screen.findByLabelText(LABEL);

@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "lane": "PT-4g1-api-download-urls-and-reread",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/signed-urls.ts",
+      "before": "  {\n    field: \"outputDownloadUrl\",\n    source: \"outputPath\",\n    disposition: (path) => `attachment; filename=\"${lastSegment(path)}\"`,\n  },",
+      "after": "  {\n    field: \"outputDownloadUrl\",\n    source: \"outputPath\",\n  },",
+      "because": "D212: the disposition on `outputDownloadUrl` is the WHOLE reason the field exists. `<a download>` is ignored for a cross-origin target and a presigned URL is on the store's origin by definition, so with the disposition dropped the download button opens the PNG in a new tab instead of saving it — the exact failure D209(d) left open and D212 closes. The filename is asserted as `attachment; filename=\"1x1.png\"` on the path's OWN last segment, not merely as a non-null header, because a disposition that named the campaign or the product would satisfy a presence check and still save a file no user recognises. Only this lane's own test fails: the sibling `proofUrl`/`htmlBundleUrl` dispositions are untouched by this mutation.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/signed-urls.test.ts",
+        "-t",
+        "outputDownloadUrl: attachment under the path's own last segment"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/signed-urls.ts",
+      "before": "  if (objectStore() !== \"s3\") return { url: outputRouteUrl(path, revision) };",
+      "after": "  if (objectStore() !== \"s3\")\n    return { url: outputRouteUrl(path, disposition === undefined ? revision : undefined) };",
+      "because": "D212's fs half: the download fields ARE the display fields on fs, byte for byte. There is no store to sign a disposition with, `<a download>` works same-origin, and the output route has no query that would carry one — so a second, differing string here would be a URL the server can only answer correctly by accident, and a web client would hold a link that resolves to bytes it cannot name. The mutation is subtle because it looks like a fix: it threads the disposition through as a query the route ignores, which keeps the path right and the string wrong. TWO of this lane's tests fail: the new 'on fs the download fields are byte-for-byte outputUrl/videoUrl' (which exists to state the D212 invariant in the fs direction) and PT-4f's own fs test at signed-urls.test.ts:230, because `proofUrl` and `htmlBundleUrl` carry a disposition too and would lose their `?v=` revision at the same time.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/signed-urls.test.ts",
+        "-t",
+        "on fs the download fields are byte-for-byte outputUrl/videoUrl"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "      if (persisted) {\n        // A re-roll's own completed payload (`outcome.result.assets`) carries only",
+      "after": "      if (persisted && (false as boolean)) {\n        // A re-roll's own completed payload (`outcome.result.assets`) carries only",
+      "because": "D213: the re-read is what every completed run commits from, and skipping that commit reinstates the defect the plan recorded — `adoptJob` falls through to `setRun({ result: outcome.result })`, the JOB payload, which the jobs route answers exactly as stored. That payload carries no `*Url` at all (`withAssetUrls` runs on `result.get` alone), so every creative on screen would have to be told where its bytes are by the client, which is a 404 under `s3`. The failing test is the STATE-level D213 (a) 'after Generate the tile shows result.get\\'s outputUrl, not the job\\'s', whose fixture gives the job handler and the result handler DIFFERENT rows — the job's on the marker score 0.1 and no URLs, the result's on 0.9 and the signed ones — and whose report is keyed to a campaign of the test's own, so the mount restore's concurrent reads cannot commit a row that satisfies the assertions instead. A fall-through therefore fails `expect(committed.complianceScore).toBe(0.9)` on the score, before it ever reaches the URL. A grid test asserting a rendered `src` cannot see this at all: the consumers are PT-4g2's and still build their own URLs, so the tile would look identical either way. THE FORM MATTERS: the mutation gates the COMMIT BRANCH rather than wrapping the re-read in a block, so the braces stay balanced and the mutated file is still a valid program — the earlier `if (false) {` form replaced a closing brace without adding one, so the file failed to transform and every test importing it failed, which proved only that the file does not parse (CodeRabbit, Qodo). `false` is WIDENED to `boolean` by the `as` so TypeScript does not treat the block as statically dead: `if (false && persisted)` also compiles under esbuild but fails `yarn typecheck` with three errors, because the dead block loses the narrowing `outcome.kind === \"completed\"` and `persisted !== null` that its own body depends on.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "after Generate the tile shows result.get's outputUrl, not the job's"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

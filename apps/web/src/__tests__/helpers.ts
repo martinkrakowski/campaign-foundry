@@ -59,6 +59,17 @@ export const renderWithRun = (ui: ReactElement) => render(createElement(ShellPro
 /** The canonical creative template a stored-brief fixture must carry (required since L3a). */
 export const storedTemplate = templateFromCanonical(DEFAULT_CAMPAIGN_TYPE);
 
+/**
+ * One classic asset: paths and compliance, and **no `*Url` field at all**.
+ *
+ * **Deliberate, not an oversight (D204/D213).** A default URL here would be a
+ * default the real system does not have: the API mints URLs per RESPONSE on
+ * `result.get`, and the jobs route mints none — so a fixture that conjured them at
+ * asset-construction time would put them where no real answer carries them, and
+ * every test would silently stop describing the ABSENT case. A test that means a
+ * URL says so explicitly, with {@link fsUrls} or {@link s3Urls} for the backend it
+ * means, and a test that means "the server could not sign one" is this.
+ */
 export const makeAsset = (over: Partial<Asset> = {}): Asset => ({
   productId: "alpha",
   aspectRatio: "1:1",
@@ -108,9 +119,30 @@ export type MockReport = {
 
 export const EMPTY_REPORT: MockReport = { halted: false, assets: [], log: null };
 
+/**
+ * The completed job's snapshot, as `GET /campaigns/jobs/:id` answers it.
+ *
+ * **Every `*Url` key is stripped here, not only in {@link jobSnapshot}.** That
+ * route returns the job exactly as stored and mints no URLs (D204, D213):
+ * `withAssetUrls` runs on `result.get` alone, after its ownership check. Stripping
+ * in the one builder every test goes through means a test that passes its OWN `job`
+ * handler gets the real jobs-route shape too — otherwise a fixture's signed URLs
+ * would ride the job payload into the commit, and a test could pass on a URL the
+ * server never sends through that route (Qodo, CodeRabbit). It is what makes "the
+ * committed row came from the result read" an assertion rather than a hope.
+ */
 export const jobOk = (result: MockReport) => {
   const n = result.halted ? 0 : (result.assets?.length ?? 0);
-  return json({ status: "completed", done: n, total: n, log: result.log ?? null, result });
+  return json({
+    status: "completed",
+    done: n,
+    total: n,
+    log: result.log ?? null,
+    result: {
+      ...result,
+      ...(result.assets !== undefined ? { assets: result.assets.map(stripAssetUrls) } : {}),
+    },
+  });
 };
 
 type PostFn = (url: string, init: RequestInit) => Response | Promise<Response>;
@@ -211,10 +243,120 @@ export const fakeDecisionsApi = (verdicts: Verdicts = {}) => {
   };
 };
 
+/**
+ * The default completed-job payload: the seeded report with a `log`, and — as the
+ * jobs route answers it — **no `*Url` on any row**.
+ *
+ * The strip is the same one {@link jobOk} applies, and it is here as well so the
+ * default `job` handler and a test's own one cannot disagree about what a job
+ * payload is. A fixture's signed URLs must reach the shell through
+ * `GET /campaigns/result` and nowhere else (D204, D213).
+ */
 const jobSnapshot = (report: MockReport): MockReport => ({
   ...report,
+  ...(report.assets !== undefined ? { assets: report.assets.map(stripAssetUrls) } : {}),
   log: report.log ?? { entries: [] },
 });
+
+/** One report row with every `*Url` key removed — a non-object row passes through. */
+function stripAssetUrls(row: unknown): unknown {
+  if (typeof row !== "object" || row === null || Array.isArray(row)) return row;
+  const kept: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (!key.endsWith("Url")) kept[key] = value;
+  }
+  return kept;
+}
+
+/**
+ * The store's own origin and prefix, as an `s3` deployment signs them (D204).
+ * Deliberately not the fs route: a fixture whose URLs were same-origin could not
+ * tell a display URL from a download one, which is the whole difference D212 adds.
+ */
+const S3_ORIGIN = "https://objects.example";
+const S3_BUCKET = "campaign-foundry";
+const S3_PREFIX = "org/local/campaign/00000000-0000-4000-8000-000000000000/renders";
+/** A 64-hex signature, so a URL parsed in an assertion is recognisably a signed one. */
+const S3_SIGNATURE = "b".repeat(64);
+
+/** A path's own last segment — the filename a `s3` attachment is signed under. */
+const lastSegment = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
+
+/**
+ * `*Url` fields shaped as the fs backend mints them (D204, D209c): the output route
+ * plus the path, with the report revision as the single `?v=` query.
+ *
+ * **The two download fields are the SAME STRING as their display siblings here**,
+ * which is D212's fs half: the URL is same-origin, `<a download>` works, and there
+ * is no store to sign a second, disposition-carrying signature. So `fsUrls` is a
+ * total function of the row and the revision, and `toBe` equality against its own
+ * `outputUrl` is an invariant a test can state rather than a coincidence.
+ */
+export const fsUrls = (asset: Asset, revision = FS_REVISION): Partial<Asset> => {
+  const route = (path: string): string => `${API}/output/${path}?v=${revision}`;
+  const outputUrl = route(asset.outputPath);
+  const videoUrl = asset.videoPath === undefined ? undefined : route(asset.videoPath);
+  const urls: Partial<Asset> = { outputUrl, outputDownloadUrl: outputUrl };
+  if (videoUrl !== undefined) {
+    urls.videoUrl = videoUrl;
+    urls.videoDownloadUrl = videoUrl;
+  }
+  if (asset.proofPath !== undefined) urls.proofUrl = route(asset.proofPath);
+  if (asset.htmlFallbackPath !== undefined) urls.htmlFallbackUrl = route(asset.htmlFallbackPath);
+  if (asset.htmlBundlePath !== undefined)
+    urls.htmlBundleUrl = `${API}/output/${asset.htmlBundlePath}?v=${revision}`;
+  return urls;
+};
+
+/** The revision an `fsUrls` fixture carries unless a test names another. */
+export const FS_REVISION = "9f".repeat(32);
+
+/**
+ * `*Url` fields shaped as the `s3` backend mints them (D204, D209a, D212): a
+ * presigned GET on the STORE'S origin, a 20-minute expiry, the report revision as
+ * the signed `v`, and — for the two download fields — `response-content-disposition`
+ * under the path's own last segment.
+ *
+ * **Each download URL differs from its display sibling by exactly that one
+ * parameter**, which is the point of the fixture: a consumer that reached for
+ * `outputUrl` where it should have reached for `outputDownloadUrl` fails a `toBe`
+ * here, instead of passing on a shape the two backends happen to share.
+ */
+export const s3Urls = (asset: Asset, revision = FS_REVISION): Partial<Asset> => {
+  // The key drops the campaign's SLUG (it is in the prefix) — the same join the
+  // exporter made, so a fixture URL names a key a real report could have written.
+  // `asAttachment` names the file under the disposition; without it the URL is the
+  // DISPLAY one, which is what makes the pair distinguishable at all.
+  const signed = (path: string, asAttachment?: string): string => {
+    const key = `${S3_PREFIX}/${path.slice(path.indexOf("/") + 1)}`;
+    const params = new URLSearchParams({
+      "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+      "X-Amz-Expires": "1200",
+      v: revision,
+      "X-Amz-Signature": S3_SIGNATURE,
+      ...(asAttachment === undefined
+        ? {}
+        : { "response-content-disposition": `attachment; filename="${asAttachment}"` }),
+    });
+    return `${S3_ORIGIN}/${S3_BUCKET}/${key}?${params.toString()}`;
+  };
+  const attach = (path: string): string => signed(path, lastSegment(path));
+  const urls: Partial<Asset> = {
+    outputUrl: signed(asset.outputPath),
+    outputDownloadUrl: attach(asset.outputPath),
+  };
+  if (asset.videoPath !== undefined) {
+    urls.videoUrl = signed(asset.videoPath);
+    urls.videoDownloadUrl = attach(asset.videoPath);
+  }
+  if (asset.proofPath !== undefined) urls.proofUrl = attach(asset.proofPath);
+  if (asset.htmlFallbackPath !== undefined) urls.htmlFallbackUrl = signed(asset.htmlFallbackPath);
+  // The bundle is signed under a FIXED name whatever its path is called, because it
+  // is a directory index rather than one file among many.
+  if (asset.htmlBundlePath !== undefined)
+    urls.htmlBundleUrl = signed(asset.htmlBundlePath, "index.html");
+  return urls;
+};
 
 /**
  * The campaign the shell should restore on mount, as the SERVER now holds it
