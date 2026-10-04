@@ -130,12 +130,12 @@ export class ObjectOutputStore implements OutputStorePort {
     const prefix = packagePrefix(this.orgId, uuid);
     const groups = groupByPlatform(await this.store.list(prefix), prefix);
 
-    const manifests: object[] = [];
-    for (const [platformId, listed] of groups) {
-      const manifest = await this.manifestOf(prefix, platformId, listed);
-      if (manifest !== undefined) manifests.push(manifest);
-    }
-    return manifests;
+    // Concurrent per platform: `groups` is already in platform-id order, and
+    // `Promise.all` keeps it.
+    const manifests = await Promise.all(
+      [...groups].map(([platformId, listed]) => this.manifestOf(prefix, platformId, listed)),
+    );
+    return manifests.filter((manifest): manifest is object => manifest !== undefined);
   }
 
   /**
@@ -204,9 +204,9 @@ export class ObjectOutputStore implements OutputStorePort {
    * `get` it is gone, which means a newer commit for the same platform committed
    * and swept G between the two calls. Re-listing this platform's prefix once
    * finds the newer generation and serves THAT, which is the right answer: it is
-   * the package the campaign has now. Once, not in a loop — a generation that
-   * cannot be read twice in a row is not a race, it is a bucket that cannot be
-   * read, and that is a 500 rather than a package quietly missing.
+   * the package the campaign has now. Once, not in a loop: a manifest still
+   * missing after the re-list is skipped, like an unreadable fs manifest, so one
+   * platform cannot cost the campaign the others.
    *
    * A store that REFUSES propagates, as it does in `ObjectAssetStore`: a bucket
    * that cannot be listed is a 500, and turning that into an empty listing would
@@ -260,7 +260,9 @@ export class ObjectOutputStore implements OutputStorePort {
     async function* chunks(): AsyncGenerator<Buffer> {
       const object = await store.get(key);
       if (object === undefined) throw gone();
-      if (object.bytes.length > 0) yield Buffer.from(object.bytes);
+      // A view over the store's own bytes, not a copy: a 100 MiB clip is held once.
+      const { bytes } = object;
+      if (bytes.length > 0) yield Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     }
     return Readable.from(chunks());
   }
