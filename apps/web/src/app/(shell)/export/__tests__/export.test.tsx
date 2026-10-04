@@ -1,5 +1,5 @@
-import { describe, test, expect, beforeEach } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
+import { screen, waitFor, within, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   renderWithRun,
@@ -13,7 +13,7 @@ import {
   fsUrls,
   s3Urls,
 } from "@/__tests__/helpers";
-import { API, useRun } from "@/lib/run-context";
+import { API, URL_REFRESH_MS, useRun } from "@/lib/run-context";
 import * as messages from "@/components/campaign/messages";
 import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/campaign-types";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
@@ -753,5 +753,86 @@ describe("ExportPage — every row href is the server's field (D204/D212)", () =
         expect(attr.value).not.toContain("/output/");
       }
     }
+  });
+});
+
+/**
+ * PT-4g3 fix 1 (F4) — a signed-URL refresh must not refetch the package manifests.
+ *
+ * **The export page calls `loadPackages` from an effect keyed on its identity**
+ * (`export/page.tsx`: `useEffect(() => { void loadPackages(); }, [loadPackages])`).
+ * Memoised on `[brief.id, run]`, a same-report refresh gives that callback a new identity
+ * every four minutes — so the URL refreshing that keeps the grid's images alive also
+ * re-downloaded every stored package manifest for the campaign, forever, while the page
+ * sat there. `loadPackages` is now keyed on what it actually READS (`run?.target.id`).
+ */
+describe("ExportPage — a signed-URL refresh does not refetch packages (PT-4g3 F4)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (document as unknown as Record<string, unknown>).visibilityState;
+  });
+
+  const advance = async (ms: number) => {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  };
+  const settle = async () => {
+    for (let i = 0; i < 8; i += 1) await advance(0);
+  };
+  const packageReads = () =>
+    vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([u]) => String(u).includes("/campaigns/packages")).length;
+
+  test("one refresh, zero package reads — and a different campaign still loads them", async () => {
+    vi.useFakeTimers();
+    const row = makeAsset({ productId: "alpha", outputPath: "alpha/1x1.png" });
+    const seeded = seedPersistedRun([row]);
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      packages: () =>
+        json({
+          platforms: [{ platformId: "instagram-feed", items: [{ path: "x.png" }] }],
+        }),
+      result: (url) => {
+        if (url.includes("campaignId=other")) {
+          return json({ halted: false, assets: [], log: { entries: [], campaignId: "other" } });
+        }
+        if (!url.includes("/campaigns/result")) return json({ halted: false, assets: [] });
+        read += 1;
+        return json({
+          halted: false,
+          assets: [{ ...row, ...s3Urls(row, read === 1 ? "rev-1" : "rev-2") }],
+          log: { entries: [], campaignId: "seed" },
+        });
+      },
+    });
+    renderWithRun(
+      <>
+        <SwitchToOther />
+        <ExportPage />
+      </>,
+    );
+    await settle();
+    // The page hydrated once, which is the read this test measures everything else against.
+    const baseline = packageReads();
+    expect(baseline).toBeGreaterThan(0);
+
+    // Three refresh ticks: a new callback identity each time under the old keying.
+    await advance(URL_REFRESH_MS);
+    await advance(URL_REFRESH_MS);
+    await advance(URL_REFRESH_MS);
+    expect(read).toBeGreaterThan(1);
+    expect(packageReads()).toBe(baseline);
+
+    // **And a campaign that actually moves still loads.** `run?.target.id` is what the
+    // callback reads, so a different campaign is a different read — not a suppressed one.
+    await act(async () => {
+      screen.getByText("switch run").click();
+    });
+    await settle();
+    expect(packageReads()).toBeGreaterThan(baseline);
   });
 });

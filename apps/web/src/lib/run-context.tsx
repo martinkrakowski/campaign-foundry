@@ -1728,6 +1728,15 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // A cleanup that lands while a read is in flight has already answered "never
       // again" for this arming; the one after it must not resurrect a timer.
       if (cancelled) return;
+      // **And a hidden tab schedules nothing.** Three paths reach this with the tab
+      // hidden: the effect arming on a mount that is already hidden, `onVisibilityChange`
+      // hiding (which stops the timer and falls through to here only via a read that was
+      // already in flight), and that read's own `finally`. Without this the timer is
+      // re-armed every four minutes by a tab nobody is looking at — a request into a
+      // background that may not even be online, for the life of the page. Nothing is
+      // lost: becoming visible schedules the remainder (`onVisibilityChange`), which is
+      // measured from `lastReadAt` and so is exactly the delay this would have waited.
+      if (document.visibilityState === "hidden") return;
       timer = setTimeout(() => void refresh(), delayMs);
     }
 
@@ -1804,22 +1813,36 @@ export function RunProvider({ children }: { children: ReactNode }) {
            * defaults. A refresh changes signatures, so neither may move.
            *
            * Allowed while a job runs: the grid keeps rendering the previous assets while
-           * `loading` is a per-cell overlay, and the report on disk is still the one on
-           * screen until the job writes its own (`generate.post.ts` writes the report,
-           * THEN completes the job).
+           * a run is in flight (`loading` is a per-cell overlay), and the report on disk
+           * is still the one on screen until the job writes its own (`generate.post.ts`
+           * writes the report, THEN completes the job).
            *
-           * A plain object commit, beside `issued`'s own target — which IS the recorded
-           * one (R6), and the same object `prev.target` would name.
-           *
-           * **NOT a functional `setRun` re-testing `prev` against `issued`.** That test
-           * has no actor: `runRef.current` is assigned at RENDER time, so it is by
-           * construction the very state value an updater is applied to, and the guard
-           * above has already proved it is `issued`. Two checks of one fact, one of them
-           * unreachable — so this keeps the one that is both load-bearing and testable: a
-           * job commits after its own `beginRun`, so the run token does NOT move there,
-           * and the identity term is the only thing that catches that read.
+           * A signing OUTAGE — not a change of report. The server answers 200 with every
+           * `*Url` omitted when it cannot sign (`signed-urls.ts`'s `signingFailure`), and
+           * stripping URLs is exactly what `sameReport` does, so that answer arrives here
+           * as "the same report with no URLs". Committing it would take every `src` and
+           * `href` off the screen AND stand the refresh down for good: `holdsExpiringUrls`
+           * would turn false, the effect would return before arming, and no later tick
+           * would ever come. A bucket outage would blank the grid permanently on the
+           * strength of one 200. So the read is kept and nothing is claimed — the
+           // `finally` re-arms, and the next tick either heals or says so again.
            */
-          setRun({ result: d, target: issued.target });
+          if (!holdsExpiringUrls(d)) return;
+          /**
+           * The functional form is the load-bearing half of the identity check, and the
+           * `runRef.current` guard above is only its short-circuit.
+           *
+           * **`runRef.current` is the LAST RENDERED run; an updater sees every `setRun`
+           * queued since that render.** A job's own commit is a PLAIN `setRun` from a
+           * promise continuation that does not bump `runSeq` (`adoptJob` bumps it in
+           * `beginRun`, at the START of the run, not at its commit), and React 19 renders
+           * default-lane updates in a later macrotask. So a job commit and this read
+           * landing in ONE batch both pass the `runRef` guard — and then a plain `setRun`
+           * here would be applied LAST and win, putting the previous report back on the
+           * grid. The updater re-tests against the state it is actually applied to, which
+           * is the state that decides what the reviewer sees.
+           */
+          setRun((prev) => (prev === issued ? { result: d, target: issued.target } : prev));
           // A successful read is proof of membership, as in `adoptJob`'s re-read (F6).
           setMembershipError(null);
           lastReadAt = Date.now();
@@ -2218,7 +2241,15 @@ export function RunProvider({ children }: { children: ReactNode }) {
       if (briefIdRef.current !== briefId) return; // aborted by a brief switch
       setPackageError(unknownErrorMessage(e, "Failed to list packages"));
     }
-  }, [brief.id, run]);
+    // `run?.target.id` and NOT `run` (PT-4g3): the export page calls this from an effect
+    // keyed on this callback's identity, so depending on the whole run gives every
+    // identity — a signed-URL refresh's same-report commit among them — a fresh
+    // `GET /campaigns/packages` it has no reason to make. Keyed on what is actually READ,
+    // the identity moves when the campaign on screen moves, which is the only thing that
+    // changes what the route answers. It deliberately does NOT move on a same-campaign
+    // re-run: packaging is explicit, so a new report for the same campaign has not
+    // changed which manifests exist for it.
+  }, [brief.id, run?.target.id]);
 
   const value = useMemo<RunContextValue>(
     () => ({

@@ -6361,6 +6361,227 @@ describe("RunProvider — signed URL refresh (PT-4g3)", () => {
     expect(result.current.assets[0].outputUrl).toContain("v=rev-job");
   });
 
+  test("a job commit and a stale refresh in ONE batch: the job's result stays on screen", async () => {
+    // F1. The `runRef.current` guard alone cannot see this, and the mechanism is the
+    // batch: `runRef.current` is the LAST RENDERED run, while an updater sees every
+    // `setRun` queued since that render. `adoptJob`'s commit is a PLAIN `setRun` from a
+    // promise continuation that does NOT bump `runSeq` — `beginRun` moved the token when
+    // the run STARTED, and this refresh read was issued after that — and React 19 renders
+    // default-lane updates in a later macrotask. So both commits land before any render,
+    // both pass the `runRef` guard, and a plain `setRun` here is applied LAST and wins.
+    //
+    // **Everything below is inside ONE `act()`, and no render happens in the middle.**
+    // That is the whole point: a `settle()` between the two resolutions would render, the
+    // guard would catch it, and the test would pass against the bug it exists for.
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    const jobHeld = deferred();
+    const jobReRead = deferred();
+    const refreshHeld = deferred();
+    // What the job produces, and what it commits from: a DIFFERENT product, so the two
+    // candidates are distinguishable by identity alone and not by a URL.
+    const jobRow = row({ productId: "p9", outputPath: "p9/1x1.png" });
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () => jobHeld.promise,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        read += 1;
+        // 1: the mount restore. 2: the refresh (held). 3: adoptJob's re-read (held).
+        if (read === 1) return onDisk("seed", [signed(first, "rev-1")]);
+        if (read === 2) return refreshHeld.promise;
+        return jobReRead.promise;
+      },
+    });
+    const { result } = setup();
+    await settle();
+
+    // Generate FIRST, so the token the refresh will own is the job's, then let the tick
+    // issue its read against that same token. Its promise is never awaited: the job is
+    // driven by hand below, and what matters here is that `beginRun` has already run.
+    await act(async () => {
+      void result.current.execute();
+    });
+    await settle();
+    expect(result.current.loading).toBe(true);
+    await advance(URL_REFRESH_MS);
+    expect(read).toBe(2);
+
+    // The job settles, and its re-read goes out and is held too. No commit yet.
+    await act(async () => {
+      jobHeld.resolve(
+        jobOk({ halted: false, assets: [jobRow], log: { entries: [], campaignId: "seed" } }),
+      );
+    });
+    await settle();
+    expect(read).toBe(3);
+    expect(result.current.assets.map((a) => a.productId)).toEqual(["p1"]);
+
+    // ONE batch: the job's re-read lands (it commits), then the stale refresh lands. Both
+    // resolutions are issued in issue order and take the same route, so they take the
+    // same shape of hops and the job's commit is queued first.
+    await act(async () => {
+      jobReRead.resolve(onDisk("seed", [signed(jobRow, "rev-job")]));
+      refreshHeld.resolve(onDisk("seed", [signed(first, "rev-stale")]));
+    });
+    await settle();
+
+    // The job's result is on screen, and the stale read's URLs are nowhere in it.
+    expect(result.current.assets.map((a) => a.productId)).toEqual(["p9"]);
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(jobRow, "rev-job").outputUrl);
+    expect(result.current.assets[0].outputUrl).not.toContain("v=rev-stale");
+  });
+
+  test("a hidden tab is never polled: a read in flight at hide time schedules nothing", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    const held = deferred();
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        read += 1;
+        // Read 1 is the mount restore; read 2 is the tick, which this test holds open;
+        // every read after it answers with its own revision, so a URL that moves is a
+        // read that happened rather than a stale promise resolving twice.
+        return read === 1
+          ? onDisk("seed", [signed(first, "rev-1")])
+          : read === 2
+            ? held.promise
+            : onDisk("seed", [signed(first, `rev-${read}`)]);
+      },
+    });
+    const { result } = setup();
+    await settle();
+    const baseline = readsFor("seed");
+
+    // The tick issues its read; the tab hides while it is out.
+    await advance(URL_REFRESH_MS);
+    expect(readsFor("seed")).toBe(baseline + 1);
+    visibility("hidden");
+
+    // The read settles while hidden. Its `finally` is the one place a fresh timer could
+    // be armed from here, and a hidden tab must not have one.
+    await act(async () => {
+      held.resolve(onDisk("seed", [signed(first, "rev-2")]));
+    });
+    await settle();
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-2").outputUrl);
+
+    // Half an hour of hidden tab: eight intervals, and not one of them a request.
+    await advance(30 * 60_000);
+    expect(readsFor("seed")).toBe(baseline + 1);
+
+    // Showing the tab reads at once, because the read above DID land and the URLs are
+    // now half an hour old — stale, so the trigger refreshes rather than scheduling. The
+    // timer is armed again from that read, not from the moment the tab came back.
+    visibility("visible");
+    expect(readsFor("seed")).toBe(baseline + 2);
+    await settle();
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-3").outputUrl);
+    await advance(URL_REFRESH_MS);
+    expect(readsFor("seed")).toBe(baseline + 3);
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-4").outputUrl);
+  });
+
+  test("an effect that arms while the tab is ALREADY hidden schedules nothing", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    let served = 0;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) =>
+        String(url).includes("/campaigns/result?campaignId=seed")
+          ? onDisk("seed", [signed(first, `rev-${++served}`)])
+          : onDisk("seed", []),
+    });
+    // Hidden BEFORE the provider mounts, so the run commits — and the effect arms —
+    // with the tab already hidden. A user who opens the tab to find a background tab
+    // holding a run is the ordinary case; a timer firing there before they ever look
+    // is not what this lane is for.
+    visibility("hidden");
+    const { result } = setup();
+    await settle();
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+    const baseline = readsFor("seed");
+
+    await advance(60 * 60_000);
+    expect(readsFor("seed")).toBe(baseline);
+
+    // Visible: the read is stale (an hour), so it happens at once, and the timer is
+    // armed again from there.
+    visibility("visible");
+    expect(readsFor("seed")).toBe(baseline + 1);
+    await settle();
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-2").outputUrl);
+    await advance(URL_REFRESH_MS);
+    expect(readsFor("seed")).toBe(baseline + 2);
+  });
+
+  test("a signing outage keeps the screen and keeps the timer: the next tick heals", async () => {
+    // F3. The server answers 200 with every `*Url` OMITTED when it cannot sign
+    // (`signed-urls.ts`'s `signingFailure` — a bucket that will not sign is an outage, not
+    // an error, and the route degrades rather than 500s). `sameReport` strips exactly
+    // those keys, so that answer arrives at the same-report branch looking identical apart
+    // from the URLs. Commit it and every `src` and `href` leaves the screen, and because
+    // `holdsExpiringUrls` is then false the effect STANDS DOWN — so one 200 from a stalled
+    // bucket would blank the grid permanently, with no timer left to heal it.
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    // What the outage looks like: the stored report, unsigned — the paths are still there,
+    // which is what makes it the same report.
+    const unsigned = onDisk("seed", [first]);
+    let read = 0;
+    let outage = true;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        read += 1;
+        if (read === 1) return onDisk("seed", [signed(first, "rev-1")]);
+        if (outage) return unsigned;
+        return onDisk("seed", [signed(first, `rev-${read + 1}`)]);
+      },
+    });
+    const { result } = setup();
+    await settle();
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+    const baseline = readsFor("seed");
+
+    await advance(URL_REFRESH_MS);
+    expect(readsFor("seed")).toBe(baseline + 1);
+    // The old URLs are still on screen: nothing was claimed and nothing was lost.
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+    expect(result.current.assets).toHaveLength(1);
+
+    // **And the timer is still armed** — the difference between a degraded read and a
+    // dead one. One tick later the route is asked again.
+    //
+    // One interval per `advance`, because that is what happens: each tick is its own
+    // macrotask with a render in between. Compressing three ticks into one `advance`
+    // would queue three commits in ONE batch, where `runRef.current` is the same stale
+    // run for all three and the F1 updater collapses them to the first — a state no
+    // browser produces, and one this test would then be measuring instead of the outage.
+    outage = false;
+    await advance(URL_REFRESH_MS);
+    expect(readsFor("seed")).toBe(baseline + 2);
+    expect(result.current.assets[0].outputUrl).toContain("v=rev-4");
+
+    // And it keeps ticking: the refresh stands down only when the run stops holding
+    // expiring URLs, and this one still does.
+    await advance(URL_REFRESH_MS);
+    expect(readsFor("seed")).toBe(baseline + 3);
+    expect(result.current.assets[0].outputUrl).toContain("v=rev-5");
+    expect(result.current.assets[0].outputUrl).not.toBe(s3Urls(first, "rev-1").outputUrl);
+  });
+
   test("a 403 no_membership on the re-read shows the membership error and changes nothing", async () => {
     vi.useFakeTimers();
     const first = row();
