@@ -6,6 +6,8 @@ import { cn } from "@/lib/cn";
 import { TimelineTape, beatUnderFloor } from "@/components/campaign/TimelineTape";
 import { useViewportMinWidth, RAIL_VIEWPORT_MIN_PX } from "@/lib/use-viewport-min-width";
 import * as messages from "@/components/campaign/messages";
+import { describeAssetRef } from "@/lib/asset-refs";
+import type { AssetEntry } from "@/lib/briefs-api";
 import {
   addBeatBlockedBy,
   approvedHeadlineTexts,
@@ -52,6 +54,8 @@ export function TimelineSection({
   warnings = {},
   onChooseScene,
   sectionPlayhead,
+  assets,
+  assetsRefetching,
 }: {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
@@ -70,6 +74,21 @@ export function TimelineSection({
     committedSec: number;
     commit: (sec: number) => void;
   } | null;
+  /**
+   * The campaign's asset listing (D203), threaded from `BriefEditor` through
+   * `CopySection`. Read only where a beat's `background` is an id ref: the chip's
+   * text is that ref's name, and without the listing a stored id is a uuid, which
+   * is not a thing an operator can read a beat's scene off.
+   */
+  assets?: readonly AssetEntry[];
+  /**
+   * Whether a listing request is in flight right now (see `describeAssetRef`). A
+   * beat whose `background` is an id the landed listing does not hold reads
+   * "Loading asset…" until the fetch settles, not "Unavailable asset" — a beat chip
+   * that says the wrong thing about the scene is worse than one that admits it is
+   * still being looked up.
+   */
+  assetsRefetching?: boolean;
 }) {
   const beats = state.timeline.beats;
   const blocked = addBeatBlockedBy(state);
@@ -195,7 +214,11 @@ export function TimelineSection({
                       leaving the absence unreadable. The cap is NOT counted here:
                       a fourth distinct scene is refused by `scenesProblem`
                       through `validateTimeline`, and this surface only reports
-                      it — a local count is the debt this lane exists to stop. */}
+                      it — a local count is the debt this lane exists to stop.
+                      The chip's TEXT is `describeAssetRef`'s label: the same
+                      basename it always showed for a path ref, and the asset's name
+                      for an id ref, which a `split("/").pop()` would leave as the
+                      uuid itself. */}
                   <span className="flex items-center gap-1">
                     <button
                       type="button"
@@ -211,7 +234,7 @@ export function TimelineSection({
                     >
                       {beat.background === undefined
                         ? messages.timelineBeatSceneNone
-                        : beat.background.split("/").pop()}
+                        : describeAssetRef(beat.background, assets, assetsRefetching).label}
                     </button>
                     {beat.background === undefined ? null : (
                       <button

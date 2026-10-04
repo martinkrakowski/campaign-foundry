@@ -119,13 +119,22 @@ const unsequencedBrief = (() => {
 type Saved = Record<string, unknown>;
 
 /**
+ * The bin's listing as the filesystem backend answers it: an entry with NO `id` key
+ * (`FsAssetStore` never sets one). Every test here that has no reason to think about
+ * ids gets this, so the default is the shape a filesystem brief really has.
+ */
+const DEFAULT_ASSETS: Record<string, unknown>[] = [
+  { name: "dusk.png", size: 2048, type: "image/png" },
+];
+
+/**
  * Routes the editor's calls and records every brief a save wrote.
  *
  * The PUT handler echoes the body back as the stored entry, which is what the real
  * route does — so the editor adopts exactly what it sent and a second save in the
  * same test starts from the state the first one left.
  */
-const routes = (brief: Record<string, unknown>): Saved[] => {
+const routes = (brief: Record<string, unknown>, assets?: Record<string, unknown>[]): Saved[] => {
   const saved: Saved[] = [];
   let revision = 1;
   vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
@@ -135,9 +144,7 @@ const routes = (brief: Record<string, unknown>): Saved[] => {
       return Promise.resolve(json({ motion: true }));
     }
     if (u.includes("/campaigns/assets")) {
-      return Promise.resolve(
-        json({ assets: [{ name: "dusk.png", size: 2048, type: "image/png" }] }),
-      );
+      return Promise.resolve(json({ assets: assets ?? DEFAULT_ASSETS }));
     }
     if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
       return Promise.resolve(
@@ -197,8 +204,8 @@ const save = async (user: ReturnType<typeof userEvent.setup>) =>
   user.click(screen.getByRole("button", { name: /^Save$/ }));
 
 /** Mounts the editor at the brief's own route and waits for the brief to land. */
-const open = async (brief: Record<string, unknown>) => {
-  const saved = routes(brief);
+const open = async (brief: Record<string, unknown>, assets?: Record<string, unknown>[]) => {
+  const saved = routes(brief, assets);
   renderWithRun(<BriefEditor briefId="clip" />);
   await waitFor(() =>
     expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("clip"),
@@ -215,7 +222,7 @@ const open = async (brief: Record<string, unknown>) => {
 };
 
 const copyBlock = (brief: Saved | undefined) =>
-  brief?.copy as { timeline?: { beats?: { text: string }[] } } | undefined;
+  brief?.copy as { timeline?: { beats?: { text: string; background?: string }[] } } | undefined;
 
 const beatTexts = (brief: Saved | undefined): unknown =>
   copyBlock(brief)?.timeline?.beats?.map((b) => b.text);
@@ -446,6 +453,39 @@ describe("SG6′ — the copy sequence says when it will not be saved", () => {
 
     await user.click(screen.getByRole("button", { name: messages.timelineBeatSceneClearLabel(1) }));
     await waitFor(() => expect(chip().textContent).toBe(messages.timelineBeatSceneNone));
+  });
+
+  /**
+   * D203/#666 — the same gesture on a host that has ids.
+   *
+   * A beat's `background` is stored as an asset row's uuid under the object backend,
+   * and the chip's text is what an operator reads a beat's scene off. So the pick has
+   * to write the id (only the listing knows it, and the server resolves that one) and
+   * the chip has to say the asset's NAME — which is the gated listing resolving it,
+   * the same fetch the logo tile needs and the same one this lane gates.
+   */
+  test("picking an asset with an id for a beat stores the id and names it on the chip", async () => {
+    const user = userEvent.setup();
+    const id = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+    const saved = await open(sequencedBrief, [
+      { id, name: "dusk.png", size: 2048, type: "image/png" },
+    ]);
+
+    const chip = () => screen.getByRole("button", { name: messages.timelineBeatSceneLabel(1) });
+    await user.click(chip());
+    await screen.findByRole("dialog", { name: "Asset Bin" });
+    await user.click(await screen.findByRole("button", { name: "Choose dusk.png" }));
+
+    // The chip names the asset rather than rendering the uuid it holds.
+    await waitFor(() => expect(chip().textContent).toBe("dusk.png"));
+    expect(chip().textContent).not.toContain(id);
+
+    // And the DRAFT holds the id — which is what a Save writes, so this reads the
+    // stored brief rather than a prop: a chip that showed the name while the draft
+    // held a path would pass every assertion above.
+    await save(user);
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(copyBlock(saved[0])?.timeline?.beats?.[0]).toMatchObject({ background: id });
   });
 
   /**

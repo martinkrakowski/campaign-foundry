@@ -5327,6 +5327,116 @@ describe("the audio block survives the editor untouched (VE3a, D11)", () => {
 });
 
 /**
+ * D203/D208 — an asset id in a STORED ref survives the editor untouched.
+ *
+ * This is a test-only assertion about code this lane does not touch, and it is the
+ * load-bearing one. Under the object backend PT-4k2b1 rewrites every ref a PUT
+ * stores to the asset row's uuid, so a brief saved on s3 and reopened here arrives
+ * holding an id in all four ref fields. If any normalisation between `parseBrief`
+ * and `toBrief` treated a uuid as not-a-path — dropped it as malformed, trimmed it
+ * as an extensionless name, or rejected it as an unreachable asset — the editor
+ * would silently STRIP the reference on the next Save and the creative would lose
+ * its logo, its input image, its scene and its music bed with no error anywhere.
+ *
+ * All four fields, not one: `logoPath` and `background` have controls that read
+ * them, while `inputAsset` and `audio.path` have none, so nothing else in the web
+ * would notice the loss.
+ */
+describe("an asset id in a stored ref survives fromBrief → toBrief (D203/D208)", () => {
+  const LOGO_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+  const INPUT_ID = "9c5b94b1-35ad-49bb-b118-8e8fc24af80e";
+  const SCENE_ID = "b6e8f1c2-7d3a-4a51-9c88-1f0b6d2e7a45";
+  const BED_ID = "c7a1b2d3-4e5f-4a6b-8c9d-0e1f2a3b4c5d";
+  // `normalizeAudioDraft` refuses an audio record whose `rights` are not a complete
+  // one, and a refused block is DROPPED — so a bed with no rights would test
+  // nothing about the path.
+  const rights = {
+    licenceId: "LIC-42",
+    source: "Acme Library",
+    expiresOn: "2027-01-01",
+    territories: ["DE"],
+  };
+
+  const briefWithIds = (): CampaignBrief =>
+    ({
+      ...savedBrief({
+        audio: { path: BED_ID, rights },
+      }),
+      mode: "variation",
+      // `canSerializeTimeline` needs motion in the draft's formats, or `toBrief`
+      // writes no `copy.timeline` at all and the scene ref would be untestable.
+      output: { formats: ["static", "motion"], platforms: ["instagram-feed"] },
+      // The editor's own materialised variation block, spelled out rather than
+      // left to default, so the whole-brief comparison below measures the FOUR REFS
+      // and not the fact that a `variation`-mode brief grows a block it arrived
+      // without. The default it copies is the one `toBrief` writes for a draft
+      // that never declared one.
+      variation: {
+        count: 12,
+        minDistance: 2,
+        coverage: { perProduct: 1, perRatio: 1 },
+        axes: {
+          layout: ["headline-top", "headline-bottom"],
+          tone: ["bold", "subtle"],
+          background: { source: ["procedural"] },
+          paletteShift: [0, 0.1, 0.2],
+        },
+      } as unknown as CampaignBrief["variation"],
+      products: [
+        {
+          id: "alpha",
+          name: "A",
+          primaryColor: "#1473E6",
+          logoPath: LOGO_ID,
+          inputAsset: INPUT_ID,
+        },
+      ],
+      copy: {
+        timeline: {
+          beats: [{ text: "Stay wild.", weight: 3, background: SCENE_ID }],
+          transition: "fade",
+          keyBeat: 1,
+        },
+      },
+    }) as CampaignBrief;
+
+  test("every ref field round-trips byte for byte", () => {
+    const brief = briefWithIds();
+    const state = fromBrief(brief, { file: "camp.yaml" });
+
+    // The DRAFT holds the ids, one field at a time, before anything is serialised.
+    expect(state.products[0].logoPath).toBe(LOGO_ID);
+    expect(state.products[0].inputAsset).toBe(INPUT_ID);
+    expect(state.timeline.beats[0].background).toBe(SCENE_ID);
+    expect(state.audio?.path).toBe(BED_ID);
+
+    const emitted = toBrief(state);
+    expect(emitted.products[0].logoPath).toBe(LOGO_ID);
+    expect(emitted.products[0].inputAsset).toBe(INPUT_ID);
+    expect(emitted.copy?.timeline?.beats[0].background).toBe(SCENE_ID);
+    expect(emitted.audio?.path).toBe(BED_ID);
+
+    // The whole brief, not four reads: a normaliser that rewrote some OTHER field
+    // while leaving these four alone would still be a lost save.
+    expect(valuesEqual(emitted, brief)).toBe(true);
+  });
+
+  test("the loaded draft opens clean — no edit, so nothing is owed to the server", () => {
+    // `isDirtySinceSave` compares `toBrief(state)` with the saved snapshot, so a
+    // ref that round-trips by value is also a draft that does not read as unsaved
+    // the instant it is opened.
+    const state = fromBrief(briefWithIds(), { file: "camp.yaml" });
+    expect(isDirtySinceSave(state)).toBe(false);
+  });
+
+  test("canonicalBrief keeps the ids, which is what makes the comparison above stable", () => {
+    const brief = briefWithIds();
+    expect(canonicalBrief(brief).products[0].logoPath).toBe(LOGO_ID);
+    expect(canonicalBrief(brief).copy?.timeline?.beats[0].background).toBe(SCENE_ID);
+  });
+});
+
+/**
  * SL1 — `variation.occupancy` survives the editor untouched, the `audio`
  * block's rule (VE3a, D11) applied to the slot record.
  *

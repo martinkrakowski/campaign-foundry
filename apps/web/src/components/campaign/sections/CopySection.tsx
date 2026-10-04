@@ -14,6 +14,7 @@ import {
 import { SectionShell, Field } from "./IdentitySection";
 import { TimelineSection } from "@/components/campaign/TimelineSection";
 import { getPool } from "@/lib/briefs-api";
+import type { AssetEntry } from "@/lib/briefs-api";
 
 export function CopySection({
   state,
@@ -23,6 +24,8 @@ export function CopySection({
   onOpenPool,
   onChooseScene,
   sectionPlayhead,
+  assets,
+  assetsRefetching,
 }: {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
@@ -38,6 +41,14 @@ export function CopySection({
     committedSec: number;
     commit: (sec: number) => void;
   } | null;
+  /**
+   * The campaign's asset listing (D203), threaded from `BriefEditor` to the beat
+   * scene chip. It passes straight through: this section neither reads a ref nor
+   * owns a picker, so it publishes only what `TimelineSection` needs to name an id.
+   */
+  assets?: readonly AssetEntry[];
+  /** Whether a listing request is in flight right now — passed straight through. */
+  assetsRefetching?: boolean;
 }) {
   const { briefId, pool } = state;
 
@@ -205,6 +216,8 @@ export function CopySection({
             warnings={warnings}
             onChooseScene={onChooseScene}
             sectionPlayhead={sectionPlayhead}
+            assets={assets}
+            assetsRefetching={assetsRefetching}
           />
         </div>
       ) : null}
