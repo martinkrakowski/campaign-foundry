@@ -206,6 +206,39 @@ describe("classifyRefs is total (PT-8a1 fix round 1, FIX 1)", () => {
     root = undefined;
   });
 
+  test("a ref that walks THROUGH a regular file is refused-file, not a thrown ENOTDIR", () => {
+    root = makeRoot();
+    // `throwIfNoEntry` suppresses ENOENT only: `lstat` on a path whose parent is a FILE
+    // throws ENOTDIR, which used to escape classify and end the whole run (Fable re-check).
+    writeAt(root, "assets/inputs/camp-notdir/logo.png", PNG);
+    const ref = "assets/inputs/camp-notdir/logo.png/x.png";
+    const [result] = classifyRefs(context(root), campaignFor(root, "camp-notdir", ref));
+
+    expect(result).toMatchObject({
+      ref,
+      kind: "refused-file",
+      reason: expect.stringMatching(/^could not be read: ENOTDIR/),
+    });
+  });
+
+  test("a SYMLINKED PARENT directory is unsafe: lstat on the leaf alone reads through it", () => {
+    root = makeRoot();
+    // `lstat` refuses to follow only the FINAL component. Without the parent walk this
+    // answers own-campaign, and the magic check passing proves the bytes were read from
+    // OUTSIDE assets/.
+    writeAt(root, "elsewhere/photo.png", PNG);
+    linkAt(root, join("assets", "inputs", "camp-dirlink"), join(root, "elsewhere"));
+    const ref = "assets/inputs/camp-dirlink/photo.png";
+
+    expect(classifyRefs(context(root), campaignFor(root, "camp-dirlink", ref))).toEqual([
+      {
+        ref,
+        kind: "unsafe",
+        reason: '"inputs/camp-dirlink" is a symlinked directory; the importer never follows one',
+      },
+    ]);
+  });
+
   test("a ref that is not a string is unsafe, not a thrown ERR_INVALID_ARG_TYPE", () => {
     root = makeRoot();
     // `parseBrief` never type-checks `products[].logoPath`, so `5` reaches

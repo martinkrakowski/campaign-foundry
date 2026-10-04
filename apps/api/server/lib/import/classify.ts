@@ -127,28 +127,52 @@ function classify(ctx: StepContext, campaign: ScannedCampaign, ref: unknown): Re
   }
   const rel = relative(resolve(ctx.projectRoot, "assets"), path);
   const kind = shapeKind(rel, campaign.slug);
-  const st = lstatSync(path, { throwIfNoEntry: false });
-  if (st === undefined) {
-    return { ref, kind: "missing", reason: `no file at ${JSON.stringify(ref)}` };
-  }
-  if (st.isSymbolicLink()) {
-    return { ref, kind: "unsafe", reason: "the ref is a symlink; the importer never follows one" };
-  }
-  // Not a file and not a link: a directory left where an asset belongs, or a FIFO, whose
-  // `st.size` is 0 — so the size cap would pass it and the read would never return.
-  if (!st.isFile()) {
-    return {
-      ref,
-      kind: "refused-file",
-      reason: `${JSON.stringify(basename(rel))} is not a regular file.`,
-    };
-  }
+  // ONE try from here down: `throwIfNoEntry` suppresses ENOENT and nothing else, so `lstat`
+  // still throws ENOTDIR (a ref that walks through a regular file), EACCES (a parent the
+  // process may not search), ENAMETOOLONG, and ERR_INVALID_ARG_VALUE (the NUL a YAML "\0"
+  // escape puts in a ref). Every one of those is file content, and none may end the run.
   try {
+    const st = lstatSync(path, { throwIfNoEntry: false });
+    if (st === undefined) {
+      return { ref, kind: "missing", reason: `no file at ${JSON.stringify(ref)}` };
+    }
+    // `lstat` does not follow the FINAL component, but it follows every parent: a symlinked
+    // `assets/inputs/<slug>` would be read through to wherever it points. Each directory
+    // between `assets/` and the file is asked by name, so the answer is about the link and
+    // not about whatever it currently resolves to.
+    const assetsBase = resolve(ctx.projectRoot, "assets");
+    const parts = rel.split("/");
+    for (let depth = 1; depth < parts.length; depth++) {
+      const dir = parts.slice(0, depth);
+      if (lstatSync(resolve(assetsBase, ...dir)).isSymbolicLink()) {
+        return {
+          ref,
+          kind: "unsafe",
+          reason: `${JSON.stringify(dir.join("/"))} is a symlinked directory; the importer never follows one`,
+        };
+      }
+    }
+    if (st.isSymbolicLink()) {
+      return {
+        ref,
+        kind: "unsafe",
+        reason: "the ref is a symlink; the importer never follows one",
+      };
+    }
+    // Not a file and not a link: a directory left where an asset belongs, or a FIFO, whose
+    // `st.size` is 0 — so the size cap would pass it and the read would never return.
+    if (!st.isFile()) {
+      return {
+        ref,
+        kind: "refused-file",
+        reason: `${JSON.stringify(basename(rel))} is not a regular file.`,
+      };
+    }
     const problem = inputRuleProblem(path, basename(rel));
     return problem === undefined ? { ref, kind } : { ref, kind: "refused-file", reason: problem };
   } catch (error) {
-    // EACCES on a mode-000 file, and anything else the read can raise. A refusal naming the
-    // reason is the same KIND of fact the three upload rules produce, so it belongs here.
+    // EACCES on a mode-000 file, ENOTDIR through a file, a NUL in the ref, and anything else
+    // the filesystem can raise: a refusal naming the reason, never a throw.
     return { ref, kind: "refused-file", reason: `could not be read: ${errorMessage(error)}` };
   }
 }

@@ -199,10 +199,11 @@ export async function scanBriefs(ctx: StepContext): Promise<ScanResult> {
   // reported as a versionless reservation. Narrowing that list would be a behaviour change
   // FIX 4 did not ask for.
   const sampleFiles = ctx.includeSamples ? [] : files.filter(isSample);
+  // By stem, the same stem FIX 3 uses: a sample brief may be .yaml, .yml or .json.
+  const sampleStems = new Set(sampleFiles.map((file) => basename(file, extname(file))));
   const skippedSampleDirs = ctx.includeSamples ? [] : dirs.filter(isSample);
   const skipped =
-    sampleFiles.length +
-    skippedSampleDirs.filter((dir) => !sampleFiles.includes(`${dir}.yaml`)).length;
+    sampleFiles.length + skippedSampleDirs.filter((dir) => !sampleStems.has(dir)).length;
 
   const parsed: Parsed[] = [];
   const unparsed = new Set<string>();

@@ -279,6 +279,31 @@ meta: &a
     expect(result.refusals).toEqual([]);
   });
 
+  test("req 9: a .yml sample's sidecar is not a second skip either", async () => {
+    root = makeRoot();
+    inputs(root);
+    writeBrief(root, "sample-pooled.yml", { id: "sample-pooled", ...singleRefProduct() });
+    writeAt(root, join("briefs", "sample-pooled", "pools.json"), "{}");
+
+    const result = await scanBriefs(context(root));
+
+    expect(result.samples).toEqual({ skipped: 1, imported: 0 });
+  });
+
+  test("FIX 1: a ref lstat THROWS on is refused, and the scan still resolves", async () => {
+    root = makeRoot();
+    inputs(root);
+    campaign(root, "camp-kept");
+    campaign(root, "camp-notdir", "assets/inputs/logo.png/x.png");
+
+    const result = await scanBriefs(context(root));
+
+    expect(result.campaigns.map((one) => one.slug)).toEqual(["camp-kept"]);
+    expect(result.refusals).toHaveLength(1);
+    expect(result.refusals[0]).toMatchObject({ slug: "camp-notdir" });
+    expect(result.refusals[0]!.reason).toMatch(/could not be read: ENOTDIR/);
+  });
+
   test("req 10: a slug that fails SAFE_ID_PATTERN is refused BY THE PARSER, per file", async () => {
     root = makeRoot();
     inputs(root);
