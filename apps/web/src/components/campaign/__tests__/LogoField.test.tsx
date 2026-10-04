@@ -128,4 +128,90 @@ describe("LogoField", () => {
     const input = screen.getByLabelText(messages.logoPathAria);
     expect(input.getAttribute("aria-describedby")).toBe("logo-error-id");
   });
+
+  // D203/#666 — under the object backend `value` is a uuid. Everything below is
+  // about the one rule that follows from it: nothing a person can read may be that
+  // uuid, and everything that reads `value` as a NAME (the label, the title, the
+  // extension badge) has to read `displayName` instead.
+  describe("an asset id ref", () => {
+    const ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+    const NAME = "hydra-bottle-logo.png";
+
+    test("shows displayName as the label and the title, and reads the badge from it", () => {
+      render(
+        <LogoField
+          value={ID}
+          displayName={NAME}
+          fileSize={2048}
+          onChange={vi.fn()}
+          onUploadFile={vi.fn()}
+        />,
+      );
+
+      const label = screen.getByText(NAME);
+      expect(label.getAttribute("title")).toBe(NAME);
+      // Twice: the badge in the tile and the extension in the meta line. Both come
+      // from the name — an id has no extension, so a badge read off `value` would
+      // say IMG for every logo on the host.
+      expect(screen.getAllByText("PNG")).toHaveLength(2);
+      expect(screen.getByText("2.0 KB")).toBeTruthy();
+    });
+
+    test("renders the resolved thumbnail", () => {
+      const thumbnailUrl = "/api/pipeline/campaigns/assets?briefId=camp-1&name=hydra.png";
+      render(
+        <LogoField
+          value={ID}
+          displayName={NAME}
+          thumbnailUrl={thumbnailUrl}
+          onChange={vi.fn()}
+          onUploadFile={vi.fn()}
+        />,
+      );
+      const img = screen.getByAltText(messages.logoPreviewAlt) as HTMLImageElement;
+      expect(img.getAttribute("src")).toBe(thumbnailUrl);
+    });
+
+    test("shows no uuid anywhere visible, while the mirror input keeps the raw ref", () => {
+      const { container } = render(
+        <LogoField
+          value={ID}
+          displayName={messages.assetUnavailable}
+          onChange={vi.fn()}
+          onUploadFile={vi.fn()}
+        />,
+      );
+
+      expect(container.textContent).not.toContain(ID);
+      for (const titled of container.querySelectorAll("[title]")) {
+        expect(titled.getAttribute("title")).not.toContain(ID);
+      }
+      expect(screen.getByText(messages.assetUnavailable)).toBeTruthy();
+      // No thumbnail was resolved, so there is no <img> and the badge degrades to
+      // today's IMG rather than inventing an extension the uuid does not carry.
+      expect(screen.queryByAltText(messages.logoPreviewAlt)).toBeNull();
+      expect(screen.getAllByText("IMG")).toHaveLength(2);
+
+      // The mirror input is the field's OWN editable value: it is what a paste, a
+      // test and the server all read back, so it keeps the ref even when the tile
+      // refuses to show it.
+      const mirror = screen.getByLabelText(messages.logoPathAria) as HTMLInputElement;
+      expect(mirror.value).toBe(ID);
+    });
+
+    test("a path ref with no displayName renders exactly as before", () => {
+      // The control's default has to be untouched, or every filesystem-shaped
+      // brief in the product changes shape the moment a field gains a prop.
+      const { container } = render(
+        <LogoField
+          value="assets/inputs/camp/hydra-bottle-logo.png"
+          onChange={vi.fn()}
+          onUploadFile={vi.fn()}
+        />,
+      );
+      expect(screen.getByText("hydra-bottle-logo.png")).toBeTruthy();
+      expect(screen.getAllByText("PNG")).toHaveLength(2);
+      expect(container.textContent).not.toContain("assets/inputs/camp/");
+    });
+  });
 });

@@ -901,9 +901,124 @@ describe("ProductsSection", () => {
     );
   });
 
+  // D203/#661 — the upload's response is the only thing that knows which ref
+  // shape this backend uses, so the id it answers with is the ref that gets stored.
+  // Storing the path instead would leave a ref the server must resolve by name on
+  // every later read.
+  test("an upload answering an id stores the id, not the path", async () => {
+    const id = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+    const dispatch = vi.fn();
+    mockFetch(() => json({ path: "assets/inputs/camp/alpha-logo.png", id }, 201));
+    const s = state();
+    render(<ProductsSection state={s} dispatch={dispatch} errors={{}} onChooseFromBin={vi.fn()} />);
+
+    await uploadFile(logoInput());
+
+    await waitFor(() =>
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "setProduct",
+        key: s.products[0].key,
+        patch: { logoPath: id },
+      }),
+    );
+    // The path came back too, and must not be the one stored.
+    expect(dispatch).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        patch: { logoPath: "assets/inputs/camp/alpha-logo.png" },
+      }),
+    );
+  });
+
   test("a 409 means the asset already exists, so the conventional path is used", async () => {
     const dispatch = vi.fn();
     mockFetch(() => json({ error: "exists" }, 409));
+    const s = state();
+    render(<ProductsSection state={s} dispatch={dispatch} errors={{}} onChooseFromBin={vi.fn()} />);
+
+    await uploadFile(logoInput());
+
+    await waitFor(() =>
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "setProduct",
+        key: s.products[0].key,
+        patch: { logoPath: "assets/inputs/camp/product-logo.png" },
+      }),
+    );
+  });
+
+  // A 409 carries no body, so the listing is the only place the existing asset's
+  // ref can be read from. Every failure to learn it must still store a ref the
+  // server accepts — which is why the fallback is the path and never `undefined`.
+  test("a 409 whose listing carries the asset's id stores the id", async () => {
+    const id = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+    const dispatch = vi.fn();
+    vi.mocked(globalThis.fetch).mockImplementation((url) => {
+      const target = String(url);
+      if (target.includes("/campaigns/assets?")) {
+        return Promise.resolve(
+          json({
+            assets: [
+              {
+                id,
+                name: "product-logo.png",
+                type: "image/png",
+                size: 10,
+                thumbnailUrl: "",
+              },
+            ],
+          }),
+        );
+      }
+      return Promise.resolve(json({ error: "exists" }, 409));
+    });
+    const s = state();
+    render(<ProductsSection state={s} dispatch={dispatch} errors={{}} onChooseFromBin={vi.fn()} />);
+
+    await uploadFile(logoInput());
+
+    await waitFor(() =>
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "setProduct",
+        key: s.products[0].key,
+        patch: { logoPath: id },
+      }),
+    );
+  });
+
+  test("a 409 whose listing holds no such entry falls back to the path", async () => {
+    const dispatch = vi.fn();
+    vi.mocked(globalThis.fetch).mockImplementation((url) =>
+      Promise.resolve(
+        String(url).includes("/campaigns/assets?")
+          ? json({ assets: [] })
+          : json({ error: "exists" }, 409),
+      ),
+    );
+    const s = state();
+    render(<ProductsSection state={s} dispatch={dispatch} errors={{}} onChooseFromBin={vi.fn()} />);
+
+    await uploadFile(logoInput());
+
+    await waitFor(() =>
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "setProduct",
+        key: s.products[0].key,
+        patch: { logoPath: "assets/inputs/camp/product-logo.png" },
+      }),
+    );
+  });
+
+  test("a 409 whose listing names an entry with no id falls back to the path (fs)", async () => {
+    const dispatch = vi.fn();
+    vi.mocked(globalThis.fetch).mockImplementation((url) =>
+      Promise.resolve(
+        String(url).includes("/campaigns/assets?")
+          ? json({
+              assets: [{ name: "product-logo.png", type: "image/png", size: 1, thumbnailUrl: "" }],
+            })
+          : json({ error: "exists" }, 409),
+      ),
+    );
     const s = state();
     render(<ProductsSection state={s} dispatch={dispatch} errors={{}} onChooseFromBin={vi.fn()} />);
 

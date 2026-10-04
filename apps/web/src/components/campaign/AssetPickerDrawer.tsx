@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Button, DrawerShell, DialogHead, Eyebrow, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatBytes, listAssets, unknownErrorMessage, type AssetEntry } from "@/lib/briefs-api";
+import { refMatchesAsset } from "@/lib/asset-refs";
 export { formatBytes };
 
 export interface AssetPickerDrawerProps {
@@ -11,7 +12,16 @@ export interface AssetPickerDrawerProps {
   open: boolean;
   onClose: () => void;
   onSelect?: (asset: AssetEntry) => void;
-  selectedPath?: string;
+  /**
+   * Whatever ref the target field currently holds, so the bin can say which of its
+   * entries is already chosen.
+   *
+   * Named for the ref rather than for a path because under the object backend it
+   * is an asset id (D203) and matching by path or filename loses the highlight on
+   * the very asset the field already has — see `refMatchesAsset`, which is the one
+   * place that decides what "already chosen" means.
+   */
+  selectedRef?: string;
 }
 
 export function AssetPickerDrawer({
@@ -19,7 +29,7 @@ export function AssetPickerDrawer({
   open,
   onClose,
   onSelect,
-  selectedPath,
+  selectedRef,
 }: AssetPickerDrawerProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
@@ -87,8 +97,7 @@ export function AssetPickerDrawer({
         ) : (
           <ul className="space-y-2" aria-label="Asset list">
             {assets.map((asset) => {
-              const assetPath = `assets/inputs/${briefId}/${asset.name}`;
-              const isSelected = selectedPath === assetPath || selectedPath === asset.name;
+              const isSelected = refMatchesAsset(selectedRef, asset, briefId);
               const displayType = (asset.type ?? "image/png").replace("image/", "").toUpperCase();
 
               return (

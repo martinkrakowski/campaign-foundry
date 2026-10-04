@@ -8,8 +8,33 @@ import type { EditorState, EditorAction } from "@/components/campaign/editor-sta
 import type { FieldErrors } from "@/components/campaign/validate";
 import { SectionShell, Field } from "./IdentitySection";
 import { LogoField } from "@/components/campaign/LogoField";
-import { uploadAsset, isBriefsApiError, unknownErrorMessage } from "@/lib/briefs-api";
+import { uploadAsset, listAssets, isBriefsApiError, unknownErrorMessage } from "@/lib/briefs-api";
+import type { AssetEntry } from "@/lib/briefs-api";
+import { assetRefFor, describeAssetRef, isAssetId } from "@/lib/asset-refs";
 import { assetFileName, fileToBase64 } from "@/components/campaign/editor-state";
+
+/**
+ * The ref to store when the upload answered 409 — the asset is already there, so
+ * the brief should point at the existing one rather than at the rejected name.
+ *
+ * The listing is the only thing that knows which ref that is: the 409 carries no
+ * body, and an entry under the object backend is named by its id. So the entry is
+ * looked up by name and `assetRefFor` decides the ref shape, exactly as it does for
+ * a pick. Every way this can fail to learn that — the request rejecting, no entry
+ * carrying the name, an entry with no id — answers today's path string instead,
+ * which is the ref the server accepts on either backend. It never throws: the
+ * caller is already handling an error, and turning "the upload failed" into "the
+ * listing also failed" would report a second failure the operator cannot act on.
+ */
+async function refForExistingAsset(briefId: string, name: string): Promise<string> {
+  try {
+    const { assets } = await listAssets(briefId);
+    const entry = assets.find((candidate) => candidate.name === name);
+    return entry === undefined ? `assets/inputs/${briefId}/${name}` : assetRefFor(entry, briefId);
+  } catch {
+    return `assets/inputs/${briefId}/${name}`;
+  }
+}
 
 function ProductRow({
   product,
@@ -19,6 +44,7 @@ function ProductRow({
   onLogoFile,
   onChooseFromBin,
   errors,
+  assets,
 }: {
   product: EditorState["products"][number];
   index: number;
@@ -27,10 +53,21 @@ function ProductRow({
   onLogoFile: (key: number, productId: string, file: File) => Promise<void> | void;
   onChooseFromBin: (key: number) => void;
   errors: FieldErrors;
+  /**
+   * The campaign's asset listing, or `undefined` while it has not been fetched.
+   * Consulted only for an id ref: a path ref already carries its own name, so it
+   * resolves with nothing and `undefined` is never even read.
+   */
+  assets?: readonly AssetEntry[];
 }) {
   const [editingId, setEditingId] = useState(false);
   const hasIdError = Boolean(errors[`product-${index}-id`]);
   const showIdInput = editingId || product.idTouched || hasIdError;
+  // An id ref (D203) has to be turned back into a name through the listing, or the
+  // tile renders a uuid. A path ref resolves with its own basename and takes none of
+  // the three resolved props, so a filesystem-shaped brief renders byte for byte as
+  // it always has.
+  const logo = isAssetId(product.logoPath) ? describeAssetRef(product.logoPath, assets) : undefined;
 
   return (
     <div className="space-y-4 rounded-lg border border-border bg-surface p-4">
@@ -126,6 +163,9 @@ function ProductRow({
           <LogoField
             value={product.logoPath}
             productColor={product.primaryColor}
+            displayName={logo?.label}
+            thumbnailUrl={logo?.thumbnailUrl}
+            fileSize={logo?.size}
             onChange={(path) =>
               dispatch({ type: "setProduct", key: product.key, patch: { logoPath: path } })
             }
@@ -156,6 +196,7 @@ export function ProductsSection({
   dispatch,
   errors,
   onChooseFromBin,
+  assets,
 }: {
   state: EditorState;
   dispatch: Dispatch<EditorAction>;
@@ -171,6 +212,12 @@ export function ProductsSection({
    * product key whose logo the bin would fill.
    */
   onChooseFromBin: (key: number) => void;
+  /**
+   * The campaign's asset listing (D203), published by `BriefEditor` and read only
+   * where a product's logo is an id ref. Absent means "not fetched", which the
+   * field says out loud rather than rendering a uuid.
+   */
+  assets?: readonly AssetEntry[];
 }) {
   const [uploadError, setUploadError] = useState<string | undefined>();
   const [uploadingKeys, setUploadingKeys] = useState<ReadonlySet<number>>(new Set());
@@ -181,18 +228,27 @@ export function ProductsSection({
     const name = assetFileName(file.name, productId);
     try {
       const contentBase64 = await fileToBase64(file);
-      const { path } = await uploadAsset({
+      // `id ?? path`, not `path`: under the object backend the upload answers with
+      // the asset row's uuid and that is the ref the server's own resolver reads
+      // back. Under fs no answer carries an id, so this is the same path string as
+      // before — without a backend probe, and without one request more than fs.
+      const { path, id } = await uploadAsset({
         briefId: state.briefId,
         name,
         contentBase64,
       });
-      dispatch({ type: "setProduct", key, patch: { logoPath: path } });
+      dispatch({ type: "setProduct", key, patch: { logoPath: id ?? path } });
     } catch (error) {
       if (isBriefsApiError(error) && error.status === 409) {
+        // 409 means the asset already exists, so the POST never ran and there is no
+        // response body to read an id from — only the listing knows it. Any failure
+        // to learn that (the request errored, the entry is gone, the entry has no
+        // id) falls back to today's path, which is a ref the server accepts
+        // whatever it turns out to be.
         dispatch({
           type: "setProduct",
           key,
-          patch: { logoPath: `assets/inputs/${state.briefId}/${name}` },
+          patch: { logoPath: await refForExistingAsset(state.briefId, name) },
         });
       } else {
         setUploadError(unknownErrorMessage(error, messages.productUploadErrorFallback));
@@ -235,6 +291,7 @@ export function ProductsSection({
           onLogoFile={onLogoFile}
           onChooseFromBin={() => onChooseFromBin(product.key)}
           errors={errors}
+          assets={assets}
         />
       ))}
     </SectionShell>

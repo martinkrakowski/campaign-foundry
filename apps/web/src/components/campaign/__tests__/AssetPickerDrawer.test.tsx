@@ -122,7 +122,7 @@ describe("AssetPickerDrawer", () => {
         open={true}
         onClose={onClose}
         onSelect={onSelect}
-        selectedPath="assets/inputs/camp-1/other.png"
+        selectedRef="assets/inputs/camp-1/other.png"
       />,
     );
 
@@ -135,7 +135,7 @@ describe("AssetPickerDrawer", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  test("shows Selected variant when selectedPath matches", async () => {
+  test("shows Selected variant when selectedRef matches the asset path", async () => {
     const mockAssets: briefsApi.AssetEntry[] = [
       {
         name: "logo.png",
@@ -152,7 +152,7 @@ describe("AssetPickerDrawer", () => {
         open={true}
         onClose={() => {}}
         onSelect={() => {}}
-        selectedPath="assets/inputs/camp-1/logo.png"
+        selectedRef="assets/inputs/camp-1/logo.png"
       />,
     );
 
@@ -161,7 +161,7 @@ describe("AssetPickerDrawer", () => {
     });
   });
 
-  test("shows Selected variant when selectedPath matches basename", async () => {
+  test("shows Selected variant when selectedRef matches the bare filename", async () => {
     const mockAssets: briefsApi.AssetEntry[] = [
       {
         name: "logo.png",
@@ -178,13 +178,70 @@ describe("AssetPickerDrawer", () => {
         open={true}
         onClose={() => {}}
         onSelect={() => {}}
-        selectedPath="logo.png"
+        selectedRef="logo.png"
       />,
     );
 
     await waitFor(() => {
       expect(screen.getByText("Selected")).toBeTruthy();
     });
+  });
+
+  // D203/#666 — the case the rename exists for. Under the object backend a PUT
+  // stores the asset row's uuid, so the ref the field holds matches the entry on
+  // its id and on nothing else: there is no path and no filename left to compare.
+  test("shows Selected when selectedRef is an entry's id", async () => {
+    const id = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+    const mockAssets: briefsApi.AssetEntry[] = [
+      { id, name: "logo.png", type: "image/png", size: 2048, thumbnailUrl: "" },
+    ];
+    vi.spyOn(briefsApi, "listAssets").mockResolvedValueOnce({ assets: mockAssets });
+
+    const { container } = render(
+      <AssetPickerDrawer
+        briefId="camp-1"
+        open={true}
+        onClose={() => {}}
+        onSelect={() => {}}
+        selectedRef={id}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Selected")).toBeTruthy();
+    });
+    // The highlight is not only the button's label: the row itself is tinted, so a
+    // scan of the list shows which asset is chosen.
+    expect(container.querySelector(".border-brand-primary")).toBeTruthy();
+  });
+
+  test("highlights nothing when selectedRef is an id no listed entry carries", async () => {
+    const mockAssets: briefsApi.AssetEntry[] = [
+      {
+        id: "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+        name: "logo.png",
+        type: "image/png",
+        size: 2048,
+        thumbnailUrl: "",
+      },
+    ];
+    vi.spyOn(briefsApi, "listAssets").mockResolvedValueOnce({ assets: mockAssets });
+
+    const { container } = render(
+      <AssetPickerDrawer
+        briefId="camp-1"
+        open={true}
+        onClose={() => {}}
+        onSelect={() => {}}
+        selectedRef="9c5b94b1-35ad-49bb-b118-8e8fc24af80e"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Choose logo.png" })).toBeTruthy();
+    });
+    expect(screen.queryByText("Selected")).toBeNull();
+    expect(container.querySelector(".border-brand-primary")).toBeNull();
   });
 
   test("aborts in-flight request and ignores late responses when unmounted during fetch", async () => {

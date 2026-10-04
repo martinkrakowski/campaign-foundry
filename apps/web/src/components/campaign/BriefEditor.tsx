@@ -24,6 +24,8 @@ import {
   CAPABILITIES_MAX_RETRIES,
   unknownErrorMessage,
   isBriefsApiError,
+  listAssets,
+  type AssetEntry,
   type BriefEntry,
   type PlanVariant,
 } from "@/lib/briefs-api";
@@ -94,6 +96,7 @@ import { HeadlinePoolDrawer } from "@/components/campaign/HeadlinePoolDrawer";
 import { LayerPropsSheet } from "@/components/campaign/LayerPropsSheet";
 import { tAtSecond, trackDiamonds } from "@/components/campaign/track-diamonds";
 import { AssetPickerDrawer } from "@/components/campaign/AssetPickerDrawer";
+import { assetRefFor, isAssetId } from "@/lib/asset-refs";
 import { ModePanel } from "@/components/campaign/ModePanel";
 import { SectionOutline } from "@/components/ui/section-outline";
 import { EstimateFromPlan } from "@/components/campaign/EstimatePanel";
@@ -481,6 +484,43 @@ export function PlayheadHost({
  * whole life of the page, rather than for the one render before something adopts a
  * brief behind the route's back.
  */
+/**
+ * The draft's asset refs that are stored as IDS and that the listing cannot name
+ * yet — the editor's own reason to fetch it, as a value.
+ *
+ * A brief reference is one of four fields, and all four are read here so the gate
+ * cannot be passed by a draft that holds its id in the one place nobody looks:
+ * `products[].logoPath` and `products[].inputAsset`, `copy.timeline.beats[].
+ * background`, and `audio.path`. Two of them have no control in the web that reads
+ * or writes their value today (`inputAsset` and `audio.path`) — but PT-4k2b1
+ * rewrites EVERY ref to an id on save under the object backend, so a saved brief
+ * can arrive holding one in either, and a gate that skipped them would leave a uuid
+ * in the field with nothing that could resolve it.
+ *
+ * The shape decision is `isAssetId`'s, not a prefix test: a path is what the
+ * filesystem backend stores and it resolves itself.
+ */
+function collectUnresolvedAssetRefs(
+  state: EditorState,
+  listing: AssetEntry[] | undefined,
+): string[] {
+  const refs: string[] = [];
+  for (const product of state.products) {
+    if (isAssetId(product.logoPath)) refs.push(product.logoPath);
+    if (isAssetId(product.inputAsset)) refs.push(product.inputAsset);
+  }
+  for (const beat of state.timeline.beats) {
+    if (beat.background !== undefined && isAssetId(beat.background)) refs.push(beat.background);
+  }
+  const audioPath = state.audio?.path;
+  if (audioPath !== undefined && isAssetId(audioPath)) refs.push(audioPath);
+  // Sorted so the joined key is a function of the SET, not of the order the draft
+  // happens to hold the refs in — reordering a product must not read as a new one.
+  return [...new Set(refs)]
+    .filter((ref) => !(listing ?? []).some((entry) => entry.id === ref))
+    .sort();
+}
+
 export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const blank = routeId === undefined;
   const { setBrief: setRunBrief, execute } = useRun();
@@ -587,6 +627,54 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const [assetTarget, setAssetTarget] = useState<
     { kind: "product"; key: number } | { kind: "beat"; index: number } | null
   >(null);
+  /**
+   * D203/D208 — the campaign's asset listing, and nothing else about it.
+   *
+   * `undefined` means NOT FETCHED, which is a claim the display needs and an empty
+   * array cannot make: a logo stored as an asset id shows "Loading asset…" until
+   * this lands, then its name. A fetch that fails sets `[]`, so the same logo then
+   * says "Unavailable asset" — an unknown name is unknown, and must not read
+   * "Loading…" for the rest of the session.
+   *
+   * It is fetched at all ONLY when the draft holds an id ref, which on the
+   * filesystem backend never happens. A path ref already carries its own name, so
+   * a path-only brief asks nothing and every fs request sequence in the suite is
+   * unchanged — see the gate below.
+   */
+  const [campaignAssets, setCampaignAssets] = useState<AssetEntry[] | undefined>(undefined);
+  // The draft's asset-id refs, sorted, minus those the listing already resolves.
+  // Both halves are primitives, deliberately, and the effect below depends on the
+  // JOINED STRING rather than on `state` — see the comment on the effect.
+  const unresolvedAssetRefs = collectUnresolvedAssetRefs(state, campaignAssets);
+  const unresolvedAssetRefsKey = unresolvedAssetRefs.join(",");
+  useEffect(() => {
+    // Nothing is unresolved, so nothing to ask for. On fs this is every brief, and
+    // the gate is why the editor's first render costs no request at all.
+    if (unresolvedAssetRefsKey === "") return;
+    let cancelled = false;
+    const controller = new AbortController();
+    listAssets(state.briefId, controller.signal)
+      .then((res) => {
+        if (!cancelled) setCampaignAssets(res.assets);
+      })
+      .catch(() => {
+        // An unreadable listing is an empty one, not an absent one: the display
+        // has to leave "Loading…" and the `[]` is what makes it do so.
+        if (!cancelled) setCampaignAssets([]);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+    // `unresolvedAssetRefsKey`, NOT the draft. It is the sorted, joined set of
+    // refs the listing cannot name, so it changes when an id ref appears, changes
+    // or is resolved, and changes on NO other edit — a keystroke in the campaign
+    // name or a swatch is not a ref, and a dependency on the draft object would
+    // refetch on every one of them. Resolving every ref empties it, which is how
+    // "at most one request per key" holds: a second visit to a key the fetch
+    // already answered (type an id, delete it, type it again) re-enters this
+    // effect only to find the gate shut.
+  }, [unresolvedAssetRefsKey, state.briefId]);
   // D14 — the replace confirmation's parked action, the two-phase form of the old
   // synchronous `window.confirm` gate: a dirty draft ends the gesture here, the
   // ConfirmDialog asks, and the confirm (or the refusal) finishes the story.
@@ -2879,6 +2967,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               onOpenPool={() => setPoolDrawerOpen(true)}
               onChooseScene={(index) => setAssetTarget({ kind: "beat", index })}
               sectionPlayhead={sectionPlayhead}
+              assets={campaignAssets}
             />
           </div>
           <div>
@@ -2887,6 +2976,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               dispatch={dispatch}
               errors={sectionErrorsVisible("products")}
               onChooseFromBin={(key) => setAssetTarget({ kind: "product", key })}
+              assets={campaignAssets}
             />
           </div>
           <div>
@@ -3007,6 +3097,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     // and nothing here is a fresh-per-render closure. `validationStands` is the one
     // genuinely new input, and it is a BOOLEAN derived from the snapshot, so it moves
     // at most twice per Validate press rather than on every snapshot identity.
+    // `campaignAssets` is the other, and for the reason this docstring gives for a
+    // missing dependency at all: it changes ONCE per gated fetch, and the two
+    // sections that read it would otherwise go on drawing the listing as it was
+    // before it landed — a logo stuck on "Loading asset…" for the life of the page,
+    // with every render count in the suite reporting the form as healthy.
     [
       state,
       dispatch,
@@ -3015,6 +3110,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       draftBrief,
       errors,
       validationStands,
+      campaignAssets,
       reveal,
       handleValidate,
     ],
@@ -3279,7 +3375,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
             briefId={state.briefId}
             open
             onClose={() => setAssetTarget(null)}
-            selectedPath={
+            selectedRef={
               target.kind === "product"
                 ? state.products.find((p) => p.key === target.key)?.logoPath
                 : state.timeline.beats[target.index]?.background
@@ -3289,14 +3385,18 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               // the type says what the render already guaranteed. A guard would be
               // an unreachable branch — `AssetPickerDrawer` returns null while
               // closed, so conditional mounting is exactly what `open` did.
-              const path = `assets/inputs/${state.briefId}/${asset.name}`;
+              // `assetRefFor`, not a template: the bin's entry carries the asset's
+              // id where the backend has one, and storing THAT is what lets the
+              // server's own resolver read it back. On fs no entry carries one and
+              // this is the same path string as before.
+              const ref = assetRefFor(asset, state.briefId);
               if (target.kind === "product") {
-                dispatch({ type: "setProduct", key: target.key, patch: { logoPath: path } });
+                dispatch({ type: "setProduct", key: target.key, patch: { logoPath: ref } });
               } else {
                 // The whole reason the target is discriminated: a bare key cannot
                 // say whether 0 means product 0 or beat 0, and this write would
                 // silently land on the other one.
-                dispatch({ type: "setBeatBackground", index: target.index, background: path });
+                dispatch({ type: "setBeatBackground", index: target.index, background: ref });
               }
               setAssetTarget(null);
             }}

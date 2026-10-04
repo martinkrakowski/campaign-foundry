@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "lane": "PT-4l1-display-asset-ids",
+  "mutations": [
+    {
+      "file": "apps/web/src/lib/asset-refs.ts",
+      "before": "  if (ref === undefined) return false;\n  if (entry.id !== undefined && ref === entry.id) return true;\n  return ref === pathRefFor(briefId, entry.name) || ref === entry.name;",
+      "after": "  if (ref === undefined) return false;\n  return ref === pathRefFor(briefId, entry.name) || ref === entry.name;",
+      "because": "PT-4l1 mutation 1 (the picker matches by path only). Under the object backend a stored ref IS the asset row's uuid, so with the id clause dropped there is no path and no filename left to compare and the Asset Bin cannot say which asset the field already holds. FAILS ON: expect(screen.getByText(\"Selected\")).toBeTruthy(); — apps/web/src/components/campaign/__tests__/AssetPickerDrawer.test.tsx:211, TestingLibraryElementError: Unable to find an element with the text: Selected.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.test.tsx",
+        "-t",
+        "shows Selected when selectedRef is an entry's id"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/asset-refs.ts",
+      "before": "  if (entry === undefined) return { label: messages.assetUnavailable, state: \"unavailable\" };",
+      "after": "  if (entry === undefined) return { label: ref, state: \"unavailable\" };",
+      "because": "PT-4l1 mutation 2 (an unknown id renders the uuid). A deleted asset's name is unknown, and a 36-character string is the one thing an operator cannot read a logo off - which is the whole reason this branch says so plainly. FAILS ON: expect(screen.getByText(messages.assetUnavailable)).toBeTruthy(); — apps/web/src/components/campaign/sections/__tests__/ProductsSection.test.tsx:144, TestingLibraryElementError: Unable to find an element with the text: Unavailable asset.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/sections/__tests__/ProductsSection.test.tsx",
+        "-t",
+        "says the asset is unavailable when the listing does not have it, never the uuid"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "    if (unresolvedAssetRefsKey === \"\") return;",
+      "after": "    if (false) return;",
+      "because": "PT-4l1 mutation 5 (the listing fetch loses its gate). `false` is the condition the id-ref gate is there to prevent: the editor then asks for the campaign's asset listing on EVERY draft, including the filesystem-shaped ones that hold no id ref and have no use for the answer. FAILS ON: expect(calls.filter((c) => c.url.includes(\"/campaigns/assets?bri... — apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx:3264, AssertionError: expected [ { …(2) } ] to deeply equal []. Every fs fetch sequence in the suite depends on this gate.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a path-only brief never asks for the asset listing"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

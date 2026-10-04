@@ -3114,6 +3114,370 @@ describe("BriefPage — the editor is one scrolling column (SG1 / SG-D2)", () =>
   });
 
   /**
+   * D203/#666, end to end and in both directions at once.
+   *
+   * Under the object backend a saved brief's refs ARE asset ids (PT-4k2b1), and
+   * `assets.post`/`listAssets` answer with one. Two things then have to be true at
+   * once, and they pull in opposite directions: the ref STORED must be the id — a
+   * path would send the server back to resolving by name — and the ref SHOWN must
+   * be the asset's name, because an id displayed is a 36-character string where
+   * the operator expects `brand-logo.png`.
+   *
+   * So this drives the whole loop: pick an entry that carries an id, and assert the
+   * mirror input (the field's own value, the thing a Save sends) holds the id while
+   * the tile beside it shows the name. Both halves, because a lane that resolved
+   * the display but stored the path — or the reverse — passes half of this.
+   */
+  describe("asset ids (D203/#666)", () => {
+    const ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+    const NAME = "brand-logo.png";
+
+    /** `routes()` plus the asset listing, which the gated fetch and the bin share. */
+    const assetRoutes = (listing: Record<string, unknown>[]) => {
+      const calls: { url: string; method: string }[] = [];
+      vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+        const u = String(url);
+        const method = (init?.method ?? "GET").toUpperCase();
+        calls.push({ url: u, method });
+        if (u.includes("/campaigns/assets?briefId=")) {
+          return Promise.resolve(json({ assets: listing }));
+        }
+        if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+          return Promise.resolve(json({ motion: true }));
+        }
+        if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+          return Promise.resolve(json({ briefs: [entry("ok", "r1")] }));
+        }
+        return Promise.resolve(json({}, 404));
+      });
+      return calls;
+    };
+
+    const logoMirror = () =>
+      screen
+        .getAllByLabelText("Logo Path")
+        .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file")[0] as
+        | HTMLInputElement
+        | undefined;
+
+    test("picking an entry with an id stores the id and shows the name", async () => {
+      const user = userEvent.setup();
+      assetRoutes([{ id: ID, name: NAME, type: "image/png", size: 4096, thumbnailUrl: "" }]);
+      renderWithRun(<Editor id="ok" />);
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
+      );
+
+      await user.click(screen.getAllByRole("button", { name: messages.logoChooseFromBin })[0]);
+      await screen.findByRole("dialog", { name: "Asset Bin" });
+      await user.click(await screen.findByRole("button", { name: `Choose ${NAME}` }));
+
+      // The mirror input is the field's own editable value — what the Save sends.
+      await waitFor(() => expect(logoMirror()?.value).toBe(ID));
+      // …and the tile a person reads shows the name, never the id.
+      expect(await screen.findByText(NAME)).toBeTruthy();
+      expect(document.body.textContent).not.toContain(ID);
+    });
+
+    test("a loaded brief whose logo is an id shows the listing's name after the gated fetch", async () => {
+      // The brief as the server stored it under s3: a path rewritten to the id.
+      const stored = { ...brief("ok"), products: [{ ...brief("ok").products[0], logoPath: ID }] };
+      const calls = assetRoutes([
+        { id: ID, name: NAME, type: "image/png", size: 4096, thumbnailUrl: "" },
+      ]);
+      vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+        const u = String(url);
+        const method = (init?.method ?? "GET").toUpperCase();
+        calls.push({ url: u, method });
+        if (u.includes("/campaigns/assets?briefId=")) {
+          return Promise.resolve(
+            json({
+              assets: [{ id: ID, name: NAME, type: "image/png", size: 4096, thumbnailUrl: "" }],
+            }),
+          );
+        }
+        if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+          return Promise.resolve(json({ motion: true }));
+        }
+        if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+          return Promise.resolve(
+            json({ briefs: [{ file: "ok.yaml", brief: stored, revision: "r1" }] }),
+          );
+        }
+        return Promise.resolve(json({}, 404));
+      });
+      renderWithRun(<Editor id="ok" />);
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
+      );
+
+      expect(logoMirror()?.value).toBe(ID);
+      expect(await screen.findByText(NAME)).toBeTruthy();
+      expect(document.body.textContent).not.toContain(ID);
+    });
+
+    test("an id the listing cannot name says so rather than showing the uuid", async () => {
+      const stored = { ...brief("ok"), products: [{ ...brief("ok").products[0], logoPath: ID }] };
+      assetRoutes([]);
+      vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+        const u = String(url);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (u.includes("/campaigns/assets?briefId=")) return Promise.resolve(json({ assets: [] }));
+        if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+          return Promise.resolve(json({ motion: true }));
+        }
+        if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+          return Promise.resolve(
+            json({ briefs: [{ file: "ok.yaml", brief: stored, revision: "r1" }] }),
+          );
+        }
+        return Promise.resolve(json({}, 404));
+      });
+      renderWithRun(<Editor id="ok" />);
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
+      );
+
+      expect(await screen.findByText(messages.assetUnavailable)).toBeTruthy();
+      expect(document.body.textContent).not.toContain(ID);
+      // The ref is still the id, and still editable: an unresolvable NAME is not an
+      // invalid value, and the draft stays exactly as the server wrote it.
+      expect(logoMirror()?.value).toBe(ID);
+    });
+
+    /**
+     * The gate's whole reason for existing, and the assertion that cannot be faked
+     * by a test that only counts requests on a path-only draft: on fs NO ref is an
+     * id, so the editor must ask for nothing at all. Every fetch sequence the rest
+     * of this suite pins depends on it.
+     */
+    test("a path-only brief never asks for the asset listing", async () => {
+      const calls = assetRoutes([]);
+      renderWithRun(<Editor id="ok" />);
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
+      );
+
+      expect(calls.filter((c) => c.url.includes("/campaigns/assets?briefId="))).toEqual([]);
+    });
+
+    test("typing into a non-ref field fetches the listing once, not once per keystroke", async () => {
+      const user = userEvent.setup();
+      const stored = { ...brief("ok"), products: [{ ...brief("ok").products[0], logoPath: ID }] };
+      const calls: string[] = [];
+      vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+        const u = String(url);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (u.includes("/campaigns/assets?briefId=")) {
+          calls.push(u);
+          return Promise.resolve(
+            json({
+              assets: [{ id: ID, name: NAME, type: "image/png", size: 4096, thumbnailUrl: "" }],
+            }),
+          );
+        }
+        if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+          return Promise.resolve(json({ motion: true }));
+        }
+        if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+          return Promise.resolve(
+            json({ briefs: [{ file: "ok.yaml", brief: stored, revision: "r1" }] }),
+          );
+        }
+        return Promise.resolve(json({}, 404));
+      });
+      renderWithRun(<Editor id="ok" />);
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
+      );
+      // The load's own listing fetch has landed, which is what the next assertion
+      // measures against — one, not one-per-keystroke.
+      await screen.findByText(NAME);
+      expect(calls).toHaveLength(1);
+
+      // A plain text field that is NOT a ref. `Campaign Name` would do, except a
+      // route-loaded brief's is read-only (the id is the route's word, D37).
+      await user.type(screen.getByLabelText("Target Audience"), " who hike");
+      await waitFor(() =>
+        expect((screen.getByLabelText("Target Audience") as HTMLInputElement).value).toBe(
+          "a who hike",
+        ),
+      );
+
+      expect(calls).toHaveLength(1);
+    });
+
+    /**
+     * The two ref fields NO control in the web reads or writes.
+     *
+     * `inputAsset` and `audio.path` have no editor surface — a product's id readout
+     * and the tape's audio lane both thread them without ever naming one. That is
+     * exactly why the gate has to read them: PT-4k2b1 rewrites every ref a PUT
+     * stores, so a brief saved on s3 and reopened arrives holding an id in a field
+     * no editor code will ever look at, and a gate built only from the fields that
+     * have controls would never fetch the listing that names it. It would fail
+     * silently — the ref stays valid, it simply has no name.
+     */
+    test("an id in a ref field with no control still opens the gate", async () => {
+      const rights = {
+        licenceId: "LIC-42",
+        source: "Acme Library",
+        expiresOn: "2027-01-01",
+        territories: ["DE"],
+      };
+      // One invisible id at a time. Together they would produce ONE fetch — the gate
+      // collects every ref before asking — and a single request cannot say which of
+      // the two fields opened it. Separated, each fetch is proof that field was read.
+      // Both cases carry the same PATH logo, so the tile assertion below holds for
+      // each of them: the gate opened on a field nothing controls, and the one field
+      // that does still reads exactly as it did before this lane.
+      const pathLogo = { logoPath: "assets/inputs/ok/a.png" };
+      const cases: readonly { readonly label: string; readonly brief: Record<string, unknown> }[] =
+        [
+          {
+            label: "products[].inputAsset",
+            brief: {
+              ...brief("ok"),
+              products: [
+                {
+                  ...brief("ok").products[0],
+                  ...pathLogo,
+                  inputAsset: "9c5b94b1-35ad-49bb-b118-8e8fc24af80e",
+                },
+              ],
+            },
+          },
+          {
+            label: "audio.path",
+            brief: {
+              ...brief("ok"),
+              products: [{ ...brief("ok").products[0], ...pathLogo }],
+              audio: { path: "b6e8f1c2-7d3a-4a51-9c88-1f0b6d2e7a45", rights },
+            },
+          },
+        ];
+
+      for (const { label, brief: stored } of cases) {
+        const calls = assetRoutes([]);
+        vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+          const u = String(url);
+          const method = (init?.method ?? "GET").toUpperCase();
+          if (u.includes("/campaigns/assets?briefId=")) {
+            calls.push({ url: u, method });
+            return Promise.resolve(json({ assets: [] }));
+          }
+          if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+            return Promise.resolve(json({ motion: true }));
+          }
+          if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+            return Promise.resolve(
+              json({ briefs: [{ file: "ok.yaml", brief: stored, revision: "r1" }] }),
+            );
+          }
+          return Promise.resolve(json({}, 404));
+        });
+        const view = renderWithRun(<Editor id="ok" />);
+        await waitFor(() =>
+          expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
+        );
+        await waitFor(() =>
+          expect(
+            calls.filter((c) => c.url.includes("/campaigns/assets?briefId=")),
+            `${label} must open the gate`,
+          ).toHaveLength(1),
+        );
+        // And the tile is untouched by any of it — a PATH logo reads as it always has.
+        expect(logoMirror()?.value).toBe("assets/inputs/ok/a.png");
+        expect(screen.getByText("a.png")).toBeTruthy();
+        view.unmount();
+      }
+    });
+
+    test("a listing that fails leaves the field saying unavailable, not loading", async () => {
+      const stored = { ...brief("ok"), products: [{ ...brief("ok").products[0], logoPath: ID }] };
+      vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+        const u = String(url);
+        const method = (init?.method ?? "GET").toUpperCase();
+        // A 500, not a thrown fetch: this is the shape a real failure has, and the
+        // one that used to leave the tile stuck — an absent listing reads as "not
+        // asked yet" forever, which is a promise nobody is going to keep.
+        if (u.includes("/campaigns/assets?briefId=")) {
+          return Promise.resolve(json({ error: "listing unavailable" }, 500));
+        }
+        if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+          return Promise.resolve(json({ motion: true }));
+        }
+        if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+          return Promise.resolve(
+            json({ briefs: [{ file: "ok.yaml", brief: stored, revision: "r1" }] }),
+          );
+        }
+        return Promise.resolve(json({}, 404));
+      });
+      renderWithRun(<Editor id="ok" />);
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
+      );
+
+      expect(await screen.findByText(messages.assetUnavailable)).toBeTruthy();
+      expect(screen.queryByText(messages.assetPending)).toBeNull();
+      expect(document.body.textContent).not.toContain(ID);
+    });
+
+    test("a listing that lands after the editor is gone is dropped, and its request aborted", async () => {
+      // Both outcomes of the late answer, because the guard is on each: a `then`
+      // and a `catch` that both installed their result would write to a component
+      // that no longer exists, and React's complaint about that arrives in a
+      // different test's console rather than in this one.
+      for (const outcome of ["resolves", "fails"] as const) {
+        let settle: (result: { assets: unknown[] } | Error) => void = () => {};
+        let signal: AbortSignal | undefined;
+        const stored = { ...brief("ok"), products: [{ ...brief("ok").products[0], logoPath: ID }] };
+        vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+          const u = String(url);
+          const method = (init?.method ?? "GET").toUpperCase();
+          if (u.includes("/campaigns/assets?briefId=")) {
+            signal = (init as RequestInit | undefined)?.signal ?? undefined;
+            return new Promise((resolve, reject) => {
+              settle = (result) =>
+                result instanceof Error
+                  ? reject(result)
+                  : resolve(json(result, 200) as unknown as Response);
+            });
+          }
+          if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+            return Promise.resolve(json({ motion: true }));
+          }
+          if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+            return Promise.resolve(
+              json({ briefs: [{ file: "ok.yaml", brief: stored, revision: "r1" }] }),
+            );
+          }
+          return Promise.resolve(json({}, 404));
+        });
+        const view = renderWithRun(<Editor id="ok" />);
+        await waitFor(() =>
+          expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
+        );
+        expect(await screen.findByText(messages.assetPending), outcome).toBeTruthy();
+        expect(signal?.aborted, outcome).toBe(false);
+
+        view.unmount();
+        // The abort is the half that is observable; the late answer must then install
+        // nothing, which is what `cancelled` is for.
+        expect(signal?.aborted, outcome).toBe(true);
+        await act(async () => {
+          settle(
+            outcome === "resolves"
+              ? { assets: [{ id: ID, name: NAME, type: "image/png", size: 1, thumbnailUrl: "" }] }
+              : new Error("late failure"),
+          );
+        });
+      }
+    });
+  });
+
+  /**
    * SG1's reveal contract: `reveal(section)` can no longer change a step, so it
    * must scroll the column — and stay scroll-only. This replaces the guided test
    * that asserted the opposite mechanism ("switches the step FIRST, then

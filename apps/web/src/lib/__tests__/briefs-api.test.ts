@@ -182,9 +182,74 @@ describe("createBrief / duplicateCampaign / uploadAsset", () => {
       });
       return json({ path: "assets/inputs/camp/logo.png" }, 201);
     });
+    const result = await uploadAsset({ briefId: "camp", name: "logo.png", contentBase64: "abc" });
+    // `toStrictEqual`, and the key checked by hand, because `toEqual` cannot see
+    // this: it treats a present-but-`undefined` key as absent. The two claims are
+    // different — "the backend has no ids" and "the backend sent `id: undefined`" —
+    // and only the first one is true of the filesystem backend.
+    expect(result).toStrictEqual({ path: "assets/inputs/camp/logo.png" });
+    expect("id" in result).toBe(false);
+  });
+
+  // D203/#661 — under the object backend `assets.post` answers `{ path, id }` and the
+  // id is the ref the server's own resolver reads back, so dropping it here is what
+  // leaves every logo a path the server must guess at.
+  test("uploads an asset and passes the backend's id through", async () => {
+    const id = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+    mockFetch(() => json({ path: "assets/inputs/camp/logo.png", id }, 201));
     await expect(
       uploadAsset({ briefId: "camp", name: "logo.png", contentBase64: "abc" }),
-    ).resolves.toEqual({ path: "assets/inputs/camp/logo.png" });
+    ).resolves.toStrictEqual({ path: "assets/inputs/camp/logo.png", id });
+  });
+
+  test("refuses an uploaded id that is not one, rather than passing it to the brief", async () => {
+    // A ref the server would read as a PATH is worse than no id: the editor would
+    // store it and the failure would surface later, on save, naming nothing useful.
+    for (const id of ["NOT-A-UUID", "", "assets/inputs/camp/logo.png", 42, null]) {
+      mockFetch(() => json({ path: "assets/inputs/camp/logo.png", id }, 201));
+      const result = await uploadAsset({
+        briefId: "camp",
+        name: "logo.png",
+        contentBase64: "abc",
+      });
+      expect(result).toStrictEqual({ path: "assets/inputs/camp/logo.png" });
+      expect("id" in result).toBe(false);
+    }
+  });
+
+  test("listAssets keeps the id on an entry (it is the only thing that names an id ref)", async () => {
+    mockFetch(() =>
+      json({
+        assets: [
+          {
+            id: "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+            name: "logo.png",
+            type: "image/png",
+            size: 2048,
+            thumbnailUrl: "/api/pipeline/campaigns/assets?briefId=camp&name=logo.png",
+          },
+        ],
+      }),
+    );
+    const { assets } = await listAssets("camp");
+    expect(assets[0].id).toBe("3f2504e0-4f89-41d3-9a0c-0305e82c3301");
+    // The whole shape, not just the one key: filtering entries to a known field
+    // list is how the id would go missing with every test still green.
+    expect(assets[0]).toStrictEqual({
+      id: "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+      name: "logo.png",
+      type: "image/png",
+      size: 2048,
+      thumbnailUrl: "/api/pipeline/campaigns/assets?briefId=camp&name=logo.png",
+    });
+  });
+
+  test("listAssets passes an fs entry through with no id key", async () => {
+    mockFetch(() =>
+      json({ assets: [{ name: "logo.png", type: "image/png", size: 1, thumbnailUrl: "" }] }),
+    );
+    const { assets } = await listAssets("camp");
+    expect("id" in assets[0]).toBe(false);
   });
 
   test("surfaces a 409 { error } and a non-JSON fallback", async () => {
