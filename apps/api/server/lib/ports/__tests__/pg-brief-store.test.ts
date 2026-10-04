@@ -1356,7 +1356,7 @@ describe("the campaign tombstone (PT-9a1, D231, D233)", () => {
  * reader: no lane after this one may change the shape without its own migration,
  * and each claim below is a way a later change could quietly break.
  */
-describe("0017_deletion migration (D231, D233 r2)", () => {
+describe("0017_deletion migration — the tombstone's shape (D231, D233 r2)", () => {
   /** Everything below 0017, applied — so 0017 is the only pending one. */
   const through0016 = async (db: SqlClient): Promise<void> => {
     const all = await loadMigrations();
