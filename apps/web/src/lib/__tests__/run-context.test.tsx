@@ -25,7 +25,11 @@ import {
   saveDecisions,
   handlePipelineResponseError,
   NO_ORGANISATION_YET_MESSAGE,
+  ASSET_URL_FIELDS,
+  URL_REFRESH_MS,
+  holdsExpiringUrls,
   type Asset,
+  type RunResult,
 } from "@/lib/run-context";
 import {
   json,
@@ -35,6 +39,7 @@ import {
   openedCampaign,
   renderWithRun,
   fakeDecisionsApi,
+  seedDecisions,
   seedPersistedRun,
   fsUrls,
   s3Urls,
@@ -5834,5 +5839,791 @@ describe("usableUrl — only the URL shapes the server mints", () => {
   ])("%s is NOT usable — it renders the placeholder, never an href", async (_label, value) => {
     const { usableUrl } = await import("@/lib/run-context");
     expect(usableUrl(value)).toBeUndefined();
+  });
+});
+
+/**
+ * PT-4g3 (D214(e), D215) — the shell re-reads `GET /campaigns/result` before the URLs
+ * on screen expire.
+ *
+ * **The shape of every test here is the clock.** `URL_REFRESH_MS` is four minutes of
+ * real time, so `vi.useFakeTimers()` is installed BEFORE `setup()` (the refresh timeout
+ * is armed at mount, and a fake installed after mount would not own it) and every flush
+ * goes through `advanceTimersByTimeAsync`. `waitFor`/`findBy*` are banned here for the
+ * usual reason — they poll the faked clock and hang.
+ *
+ * **Every read is counted by URL, never by handler call.** `mockPipelineApi`'s fallback
+ * `result` handler also answers `GET /campaigns/jobs?campaignId=`, so a handler-call
+ * counter is not a read counter; the assertions use `readsFor(campaignId)`.
+ *
+ * **The fixtures are the two windows of ONE report**: the first `result.get` answers
+ * with the rows signed at `rev-1`, the refresh with the same rows signed at `rev-2`. The
+ * report is therefore identical — only the signatures move, which is exactly the case
+ * the same-report branch exists for, and what a real two-reads-in-one-window costs.
+ */
+describe("RunProvider — signed URL refresh (PT-4g3)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    // The per-test override has to go: happy-dom defines `visibilityState` as a
+    // prototype getter, and a test-local `defineProperty` would shadow it for the next.
+    delete (document as unknown as Record<string, unknown>).visibilityState;
+  });
+
+  /** The row the seeded report carries: one static creative, and no URLs of its own. */
+  const row = (over: Partial<Asset> = {}): Asset =>
+    asset({ productId: "p1", outputPath: "p1/1x1.png", ...over });
+
+  /** That row as `result.get` sends it under `s3`: signed, and expiring. */
+  const signed = (a: Asset, revision: string): Asset => ({ ...a, ...s3Urls(a, revision) });
+
+  /** That row as `result.get` sends it under `fs`: the output route, which never expires. */
+  const onFs = (a: Asset): Asset => ({ ...a, ...fsUrls(a) });
+
+  /** A `GET /campaigns/result` answer for one campaign. */
+  const onDisk = (campaignId: string, assets: unknown[]) =>
+    json({ halted: false, assets, log: { entries: [], campaignId } });
+
+  /**
+   * The reads that named this campaign — the only ones a refresh of it can be. Keyed by
+   * campaign because a shell under test has more than one in play: the mount restore
+   * asks about the last-opened campaign while a re-roll asks about the run's own.
+   */
+  const readsFor = (campaignId: string) =>
+    vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([u]) => String(u).includes(`/campaigns/result?campaignId=${campaignId}`))
+      .length;
+
+  /** The campaign's decision reads, so "decisions were NOT re-fetched" is observable. */
+  const decisionReads = () =>
+    vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(
+        ([u, init]) =>
+          String(u).includes("/campaigns/decisions") &&
+          ((init as RequestInit | undefined)?.method ?? "GET") === "GET",
+      ).length;
+
+  /** Move the faked clock, letting whatever is already in flight settle. */
+  const advance = async (ms: number) => {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  };
+
+  /**
+   * Let the mount's own chain finish WITHOUT moving the clock. A `Response` body is
+   * read over several ticks, so "settled" is a number of turns of the microtask queue,
+   * not one.
+   */
+  const settle = async () => {
+    for (let i = 0; i < 8; i += 1) await advance(0);
+  };
+
+  /** Fake the document's visibility and dispatch — what the effect listens for. */
+  const visibility = (state: "hidden" | "visible") => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => state,
+    });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+  };
+
+  /** A promise whose settlement the test decides — a read held open mid-flight. */
+  const deferred = () => {
+    let resolve!: (value: Response) => void;
+    const promise = new Promise<Response>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  };
+
+  /**
+   * A decisions endpoint that HOLDS its second read open, so the state between a
+   * decisions clear and the reload that clear triggers is observable rather than a tick
+   * nobody can see. `held` is returned beside the endpoint and NOT on it, because
+   * `mockPipelineApi` takes the endpoint's own shape.
+   */
+  const gatedDecisions = (verdicts: Record<string, "approved" | "rejected">) => {
+    const server = fakeDecisionsApi(verdicts);
+    const held = deferred();
+    let gets = 0;
+    const endpoint = {
+      // `Promise.resolve`-ed by `mockPipelineApi`, so a promise is a legal answer here
+      // even though the endpoint's own type says `Response`.
+      handle: (url: string, init: RequestInit) =>
+        ((init.method ?? "GET") === "GET" && ++gets === 2
+          ? held.promise
+          : server.handle(url, init)) as Response,
+      retire: (init: RequestInit) => server.retire(init),
+      stored: () => server.stored(),
+      saveElsewhere: (next: Record<string, "approved" | "rejected">) => server.saveElsewhere(next),
+    };
+    return { endpoint, held };
+  };
+
+  test("holdsExpiringUrls is true only for a signed URL — never for an fs path, an unsigned row or an absent one", () => {
+    const a = row();
+    // `s3`: an absolute http(s) presigned GET on the store's own origin.
+    expect(holdsExpiringUrls({ halted: false, assets: [signed(a, "rev-1")] })).toBe(true);
+    // `fs`: same-origin paths, which `usableUrl` keeps and which never expire (D204).
+    expect(holdsExpiringUrls({ halted: false, assets: [onFs(a)] })).toBe(false);
+    // A row the server could not sign a URL for: no field is a URL at all.
+    expect(holdsExpiringUrls({ halted: false, assets: [a] })).toBe(false);
+    // A halted, log-only report carries NO `assets` key — `fetchPersistedRun` accepts
+    // one, so the predicate must not assume the field is there.
+    expect(holdsExpiringUrls({ halted: true, log: null } as unknown as RunResult)).toBe(false);
+    expect(ASSET_URL_FIELDS).toHaveLength(7);
+  });
+
+  test("s3, visible: after URL_REFRESH_MS exactly one more read, carrying the next window's URLs", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    const second = signed(first, "rev-2");
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) =>
+        String(url).includes("/campaigns/result?campaignId=seed")
+          ? onDisk("seed", [read++ === 0 ? signed(first, "rev-1") : second])
+          : onDisk("seed", []),
+    });
+
+    const { result } = setup();
+    await settle();
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+    const baseline = readsFor("seed");
+    expect(baseline).toBe(1);
+
+    await advance(URL_REFRESH_MS);
+
+    expect(readsFor("seed")).toBe(baseline + 1);
+    expect(result.current.assets[0].outputUrl).toBe(second.outputUrl);
+    expect(result.current.assets[0].outputUrl).toContain("v=rev-2");
+  });
+
+  test("the bound: nothing at three minutes, the re-read at four, and the constant under the five-minute floor", async () => {
+    vi.useFakeTimers();
+    // The whole reason for 4 and not 10: a URL read in the last second of its 15-minute
+    // signing window has 5 minutes of life, so a longer tick can hold an expired URL.
+    expect(URL_REFRESH_MS).toBeLessThan(5 * 60_000);
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) =>
+        String(url).includes("/campaigns/result?campaignId=seed")
+          ? onDisk("seed", [signed(first, "rev-1")])
+          : onDisk("seed", []),
+    });
+    const { result } = setup();
+    await settle();
+    const baseline = readsFor("seed");
+
+    await advance(3 * 60_000);
+    expect(readsFor("seed")).toBe(baseline);
+
+    await advance(60_000);
+    expect(readsFor("seed")).toBe(baseline + 1);
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+  });
+
+  test("hidden: no timer at all, and becoming visible refreshes at once because the URLs are stale", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    const second = signed(first, "rev-2");
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) =>
+        String(url).includes("/campaigns/result?campaignId=seed")
+          ? onDisk("seed", [read++ === 0 ? signed(first, "rev-1") : second])
+          : onDisk("seed", []),
+    });
+    const { result } = setup();
+    await settle();
+    const baseline = readsFor("seed");
+
+    visibility("hidden");
+    await advance(60 * 60_000);
+    expect(readsFor("seed")).toBe(baseline);
+
+    // An hour on screen is stale past any bound, so showing the tab refreshes NOW
+    // rather than waiting out a fresh interval.
+    visibility("visible");
+    expect(readsFor("seed")).toBe(baseline + 1);
+    await settle();
+    expect(result.current.assets[0].outputUrl).toBe(second.outputUrl);
+  });
+
+  test("visible before the timer is due: the REMAINDER is scheduled, so the read lands at 4 minutes and not at 6", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) =>
+        String(url).includes("/campaigns/result?campaignId=seed")
+          ? onDisk("seed", [signed(first, "rev-1")])
+          : onDisk("seed", []),
+    });
+    // No `result` needed: this test is entirely about WHEN the read happens, and the
+    // read count is the whole assertion.
+    setup();
+    await settle();
+    const baseline = readsFor("seed");
+
+    await advance(60_000);
+    visibility("hidden");
+    await advance(60_000);
+    visibility("visible");
+    await settle();
+    // Two minutes old is not stale, so showing the tab reads nothing…
+    expect(readsFor("seed")).toBe(baseline);
+
+    // …and the read lands on the ORIGINAL schedule (+4 min), not a fresh interval from
+    // the moment the tab came back (+6). The remainder is the whole point.
+    await advance(2 * 60_000);
+    expect(readsFor("seed")).toBe(baseline + 1);
+  });
+
+  test("fs: an hour on screen and two visibility changes make no request at all", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) =>
+        String(url).includes("/campaigns/result?campaignId=seed")
+          ? onDisk("seed", [onFs(first)])
+          : onDisk("seed", []),
+    });
+    const { result } = setup();
+    await settle();
+    expect(result.current.assets[0].outputUrl).toBe(fsUrls(first).outputUrl);
+    const baseline = readsFor("seed");
+
+    await advance(60 * 60_000);
+    visibility("hidden");
+    await advance(60_000);
+    visibility("visible");
+    await settle();
+
+    // No timer, no listener, no request: an fs URL is a same-origin path that never
+    // expires, so the effect returned before arming either (D215(b)). **The count is the
+    // assertion**, and it comes before the predicate below, because the request is the
+    // defect — the predicate is only here to say which answer produced it.
+    expect(readsFor("seed")).toBe(baseline);
+    expect(holdsExpiringUrls({ halted: false, assets: result.current.assets })).toBe(false);
+  });
+
+  test("a same-report refresh keeps the verdicts, their loaded flag, assetVersion and the decisions read", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    // Seeded on the TEST, not on one mock: the second `mockPipelineApi` below answers
+    // the campaign's decisions from the same seed.
+    seedDecisions({ "p1/1:1/default": "approved" });
+    const seeded = seedPersistedRun([first]);
+    const second = signed(first, "rev-2");
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) =>
+        String(url).includes("/campaigns/result?campaignId=seed")
+          ? onDisk("seed", [read++ === 0 ? signed(first, "rev-1") : second])
+          : onDisk("seed", []),
+    });
+    const { result } = setup();
+    await settle();
+    expect(result.current.decisions).toEqual({ "p1/1:1/default": "approved" });
+    expect(result.current.decisionsLoaded).toBe(true);
+    const version = result.current.assetVersion;
+    const decisionsBefore = decisionReads();
+
+    await advance(URL_REFRESH_MS);
+
+    expect(result.current.assets[0].outputUrl).toBe(second.outputUrl);
+    expect(result.current.decisions).toEqual({ "p1/1:1/default": "approved" });
+    expect(result.current.decisionsLoaded).toBe(true);
+    // `assetVersion` is a dependency of the decisions effect AND half of the grid's
+    // `filtersKey`, so a bump here would pause reviewing, drop a queued save and reset
+    // the reviewer's filters — four times an hour, for signatures.
+    expect(result.current.assetVersion).toBe(version);
+    expect(decisionReads()).toBe(decisionsBefore);
+  });
+
+  test("a DIFFERENT report while idle is committed as a new run — version up, verdicts cleared and reloaded", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first], {
+      decisions: { "p1/1:1/default": "approved" },
+    });
+    // Another tab ran this campaign: a second product the screen has never shown.
+    const ranElsewhere = signed(row({ productId: "p2", outputPath: "p2/1x1.png" }), "rev-2");
+    const server = gatedDecisions({ "p1/1:1/default": "approved" });
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      decisions: server.endpoint,
+      result: (url) =>
+        String(url).includes("/campaigns/result?campaignId=seed")
+          ? onDisk("seed", [read++ === 0 ? signed(first, "rev-1") : ranElsewhere])
+          : onDisk("seed", []),
+    });
+    const { result } = setup();
+    await settle();
+    expect(result.current.decisions).toEqual({ "p1/1:1/default": "approved" });
+    const version = result.current.assetVersion;
+
+    await advance(URL_REFRESH_MS);
+    await settle();
+
+    expect(result.current.assets.map((a) => a.productId)).toEqual(["p2"]);
+    expect(result.current.assets[0].outputUrl).toBe(ranElsewhere.outputUrl);
+    expect(result.current.assetVersion).toBe(version + 1);
+    // The verdicts are GONE and the reload they triggered is still out — which is what
+    // `decidable={decisionsLoaded && !loading}` reads as "reviewing is paused".
+    expect(result.current.decisions).toEqual({});
+    expect(result.current.decisionsLoaded).toBe(false);
+
+    await act(async () => {
+      server.held.resolve(json({ decisions: {}, revision: "rev-0" }));
+    });
+    await settle();
+    expect(result.current.decisionsLoaded).toBe(true);
+  });
+
+  test("a job in flight owns the screen: a different report commits nothing, the same one moves URLs only", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    // The job is held open so advancing the clock never drives the poller.
+    const jobHeld = deferred();
+    const bodies = [
+      [signed(first, "rev-1")],
+      // A DIFFERENT report — another tab's run — which must not be committed.
+      [signed(first, "rev-2"), signed(row({ productId: "p2", outputPath: "p2/1x1.png" }), "rev-2")],
+      // The SAME report again, with the next window's signatures.
+      [signed(first, "rev-3")],
+    ];
+    // Past the last body, keep serving the last one: a read this test did not plan for
+    // must still get a well-formed report rather than a crash.
+    const last = bodies[bodies.length - 1]!;
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () => jobHeld.promise,
+      result: (url) =>
+        String(url).includes("/campaigns/result?campaignId=seed")
+          ? onDisk("seed", bodies[read++] ?? last)
+          : onDisk("seed", []),
+    });
+    const { result } = setup();
+    await settle();
+    const before = result.current.assets;
+
+    // The job's promise is deliberately never awaited: the poller is held open, and the
+    // point is that the refresh tick moves nothing while `loading` is true.
+    await act(async () => {
+      void result.current.execute();
+    });
+    await settle();
+    expect(result.current.loading).toBe(true);
+
+    // Tick one: a different report, while `loading`. The job's own D213 re-read commits
+    // whatever it produces, so this read commits nothing.
+    await advance(URL_REFRESH_MS);
+    await settle();
+    expect(result.current.assets).toBe(before);
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.loading).toBe(true);
+    expect(result.current.regeneratingKeys).toBeNull();
+
+    // Tick two: the same report. The grid keeps rendering the previous assets while a
+    // run is in flight (`loading` is a per-cell overlay), so swapping the URLs is
+    // exactly right — and nothing else may move.
+    await advance(URL_REFRESH_MS);
+    await settle();
+    expect(result.current.assets).not.toBe(before);
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.assets[0].productId).toBe("p1");
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-3").outputUrl);
+    expect(result.current.loading).toBe(true);
+    expect(result.current.regeneratingKeys).toBeNull();
+    expect(result.current.decisions).toEqual({});
+  });
+
+  test("a read issued before a run started is dropped once the run token moves", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    const held = deferred();
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () => json({ status: "running", done: 0, total: 0, log: null }),
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        read += 1;
+        return read === 1 ? onDisk("seed", [signed(first, "rev-1")]) : held.promise;
+      },
+    });
+    const { result } = setup();
+    await settle();
+    const before = result.current.assets[0].outputUrl;
+    expect(before).toBe(s3Urls(first, "rev-1").outputUrl);
+
+    // The tick issues its read, and the answer is held open.
+    await advance(URL_REFRESH_MS);
+    expect(read).toBe(2);
+
+    // The second actor: Generate, whose `beginRun` moves the token this read owns — for
+    // a run that is now the one the screen belongs to. Its own promise is never awaited:
+    // the job answers "running" forever, and what matters is that the token has moved.
+    await act(async () => {
+      void result.current.execute();
+    });
+    await settle();
+    expect(result.current.loading).toBe(true);
+    expect(result.current.assets[0].outputUrl).toBe(before);
+
+    // The held answer is a perfectly good read of the SAME report, with fresher URLs.
+    await act(async () => {
+      held.resolve(onDisk("seed", [signed(first, "rev-late")]));
+    });
+    await settle();
+
+    expect(result.current.assets[0].outputUrl).toBe(before);
+    expect(result.current.assets[0].outputUrl).not.toBe(s3Urls(first, "rev-late").outputUrl);
+  });
+
+  test("a read in flight when a job commits is dropped — the job's result stays on screen", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    const held = deferred();
+    const jobHeld = deferred();
+    const committed = row({ productId: "p9", outputPath: "p9/1x1.png" });
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () => jobHeld.promise,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        read += 1;
+        if (read === 1) return onDisk("seed", [signed(first, "rev-1")]);
+        if (read === 2) return held.promise;
+        return onDisk("seed", [signed(committed, "rev-job")]);
+      },
+    });
+    const { result } = setup();
+    await settle();
+    expect(result.current.assets.map((a) => a.productId)).toEqual(["p1"]);
+
+    // Generate FIRST, so the token the refresh will own is the job's: `beginRun` runs on
+    // the POST's answer, and the job itself is then held open. A refresh issued BEFORE
+    // the POST would be caught by the seq guard instead, which is the previous test.
+    let exec!: Promise<void>;
+    await act(async () => {
+      exec = result.current.execute();
+    });
+    await settle();
+    expect(result.current.loading).toBe(true);
+
+    await advance(URL_REFRESH_MS);
+    expect(read).toBe(2);
+
+    // The job completes and commits. It moves the run but NOT the token.
+    await act(async () => {
+      jobHeld.resolve(
+        jobOk({ halted: false, assets: [committed], log: { entries: [], campaignId: "seed" } }),
+      );
+      await exec;
+    });
+    await settle();
+    expect(result.current.assets.map((a) => a.productId)).toEqual(["p9"]);
+    expect(result.current.loading).toBe(false);
+
+    // The stale read lands. It knows nothing about the job that has just committed, and
+    // committing over it would put the previous report back on the grid.
+    await act(async () => {
+      held.resolve(onDisk("seed", [signed(first, "rev-late")]));
+    });
+    await settle();
+    expect(result.current.assets.map((a) => a.productId)).toEqual(["p9"]);
+    expect(result.current.assets[0].outputUrl).toContain("v=rev-job");
+  });
+
+  test("a 403 no_membership on the re-read shows the membership error and changes nothing", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    let denied = false;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        return denied
+          ? json({ code: "no_membership" }, 403)
+          : onDisk("seed", [signed(first, "rev-1")]);
+      },
+    });
+    const { result } = setup();
+    await settle();
+    expect(result.current.membershipError).toBeNull();
+    denied = true;
+
+    await advance(URL_REFRESH_MS);
+
+    expect(result.current.membershipError).toBe(NO_ORGANISATION_YET_MESSAGE);
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+    expect(result.current.assets).toHaveLength(1);
+  });
+
+  test("a 200 that names no run, and a read that fails, both keep the screen (F6)", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    let served = 0;
+    let mode: "ok" | "absent" | "broken" = "ok";
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        if (mode === "absent") return json(EMPTY_REPORT);
+        if (mode === "broken") return json({ error: "boom" }, 500);
+        served += 1;
+        return onDisk("seed", [signed(first, `rev-${served}`)]);
+      },
+    });
+    const { result } = setup();
+    await settle();
+    const baseline = readsFor("seed");
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+
+    // A successful read that says "there is no run here": an absence, not a reason to
+    // empty the grid.
+    mode = "absent";
+    await advance(URL_REFRESH_MS);
+    await settle();
+    expect(readsFor("seed")).toBe(baseline + 1);
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+
+    // And a read that could not be made at all: also not an absence (D83/F6).
+    mode = "broken";
+    await advance(URL_REFRESH_MS);
+    await settle();
+    expect(readsFor("seed")).toBe(baseline + 2);
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.membershipError).toBeNull();
+
+    // The timer brings it back: the next good read commits as usual.
+    mode = "ok";
+    await advance(URL_REFRESH_MS);
+    await settle();
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-2").outputUrl);
+  });
+
+  test("a report the server replaced with a halted, log-only run is a DIFFERENT report", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        read += 1;
+        // No `assets` key at all — a halted run the API still counts as a run, and
+        // `fetchPersistedRun` accepts it. It is NOT the report on screen.
+        return read === 1
+          ? onDisk("seed", [signed(first, "rev-1")])
+          : json({ halted: true, log: { entries: [], campaignId: "seed" } });
+      },
+    });
+    const { result } = setup();
+    await settle();
+    const version = result.current.assetVersion;
+
+    await advance(URL_REFRESH_MS);
+    await settle();
+
+    expect(result.current.assets).toHaveLength(0);
+    expect(result.current.assetVersion).toBe(version + 1);
+    // And with no signed URL left on screen there is nothing to refresh: the effect
+    // stands down rather than keeping the timer running over an empty grid.
+    const reads = readsFor("seed");
+    await advance(60 * 60_000);
+    expect(readsFor("seed")).toBe(reads);
+  });
+
+  test("a visibility change while a read is in flight starts no second read", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    const held = deferred();
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        read += 1;
+        return read === 1 ? onDisk("seed", [signed(first, "rev-1")]) : held.promise;
+      },
+    });
+    const { result } = setup();
+    await settle();
+    const baseline = readsFor("seed");
+
+    await advance(URL_REFRESH_MS);
+    expect(readsFor("seed")).toBe(baseline + 1);
+    visibility("hidden");
+    visibility("visible");
+    expect(readsFor("seed")).toBe(baseline + 1);
+
+    await act(async () => {
+      held.resolve(onDisk("seed", [signed(first, "rev-2")]));
+    });
+    await settle();
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-2").outputUrl);
+  });
+
+  test("a failed read is not retried faster than 30 s, however the trigger arrives", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    let failing = false;
+    let served = 0;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        if (failing) return json({ error: "boom" }, 500);
+        served += 1;
+        return onDisk("seed", [signed(first, `rev-${served}`)]);
+      },
+    });
+    const { result } = setup();
+    await settle();
+    const baseline = readsFor("seed");
+    failing = true;
+
+    await advance(URL_REFRESH_MS);
+    await settle();
+    expect(readsFor("seed")).toBe(baseline + 1);
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+
+    // Five hide/show presses inside the floor: a user toggling tabs is not a signal
+    // that the API is back, so not one of them is a request.
+    for (let i = 0; i < 5; i += 1) {
+      visibility("hidden");
+      visibility("visible");
+      await advance(1_000);
+    }
+    expect(readsFor("seed")).toBe(baseline + 1);
+
+    // Past the floor, one more press is exactly one read — and it commits.
+    await advance(30_000);
+    failing = false;
+    visibility("hidden");
+    visibility("visible");
+    expect(readsFor("seed")).toBe(baseline + 2);
+    await settle();
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-2").outputUrl);
+  });
+
+  test("after unmount nothing is read, and a switch to an fs-backed campaign stops the old one's reads", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const other = row({ productId: "p2", outputPath: "p2/1x1.png" });
+    const seeded = seedPersistedRun([first]);
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) =>
+        String(url).includes("campaignId=other")
+          ? onDisk("other", [onFs(other)])
+          : String(url).includes("/campaigns/result?campaignId=seed")
+            ? onDisk("seed", [signed(first, "rev-1")])
+            : onDisk("seed", []),
+    });
+
+    // Unmount: the cleanup clears the pending timeout and the listener, and the read
+    // that is in flight (if any) is refused by `mountedRef`. **Twice over in this
+    // test** — the switch below tears the same provider down a second time, while it
+    // is still mounted, which is the late-cleanup case: it must be read-only on the
+    // state it does not own, or the new campaign's shell would lose its run.
+    const unmounted = setup();
+    await settle();
+    const beforeUnmount = readsFor("seed");
+    expect(beforeUnmount).toBe(1);
+    unmounted.unmount();
+    await advance(60 * 60_000);
+    expect(readsFor("seed")).toBe(beforeUnmount);
+
+    // A deliberate switch to an fs-backed campaign: nothing is armed for it at all, and
+    // the campaign left behind is never read again.
+    const { result } = setup();
+    await settle();
+    const seedReads = readsFor("seed");
+    await act(async () => {
+      result.current.setBrief({ ...result.current.brief, id: "other" } as never);
+    });
+    await settle();
+    expect(result.current.assets[0].outputUrl).toBe(fsUrls(other).outputUrl);
+    const otherReads = readsFor("other");
+    await advance(60 * 60_000);
+    visibility("hidden");
+    visibility("visible");
+    await advance(60_000);
+    expect(readsFor("other")).toBe(otherReads);
+    expect(readsFor("seed")).toBe(seedReads);
+  });
+
+  test("a read in flight when the campaign changes commits nothing", async () => {
+    vi.useFakeTimers();
+    const first = row();
+    const other = row({ productId: "p2", outputPath: "p2/1x1.png" });
+    const seeded = seedPersistedRun([first]);
+    const held = deferred();
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (String(url).includes("campaignId=other")) return onDisk("other", [onFs(other)]);
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        read += 1;
+        return read === 1 ? onDisk("seed", [signed(first, "rev-1")]) : held.promise;
+      },
+    });
+    const { result } = setup();
+    await settle();
+
+    await advance(URL_REFRESH_MS);
+    expect(read).toBe(2);
+
+    // The user moves to another campaign while the read is out: the effect is cleaned up,
+    // which is what the read checks before it commits anything.
+    await act(async () => {
+      result.current.setBrief({ ...result.current.brief, id: "other" } as never);
+    });
+    await settle();
+
+    await act(async () => {
+      held.resolve(onDisk("seed", [signed(first, "rev-late")]));
+    });
+    await settle();
+
+    expect(result.current.assets[0].outputUrl).toBe(fsUrls(other).outputUrl);
+    const reads = readsFor("seed");
+    await advance(60 * 60_000);
+    expect(readsFor("seed")).toBe(reads);
   });
 });

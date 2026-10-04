@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "PT-4g3-refresh-signed-urls",
+  "mutations": [
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "export function holdsExpiringUrls(result: RunResult): boolean {\n  return (result.assets ?? []).some((a) =>\n    ASSET_URL_FIELDS.some((f) => {\n      const u = usableUrl(a[f]);\n      return u !== undefined && !u.startsWith(\"/\");\n    }),\n  );\n}",
+      "after": "export function holdsExpiringUrls(result: RunResult): boolean {\n  return (result.assets ?? []).some(() => true);\n}",
+      "because": "D215(b): the refresh exists ONLY because an `s3` URL expires, and the predicate is what says so without the web knowing how the backend signs (D204). Answer `true` for every report and the effect arms on fs, where the URLs are `/api/pipeline/output/…` paths that never expire: a timer, a `visibilitychange` listener and one `GET /campaigns/result` every four minutes, forever, on the backend whose whole promise is that it behaves exactly as it did before this lane. The failing test is 'fs: an hour on screen and two visibility changes make no request at all', which counts `/campaigns/result?campaignId=seed` reads rather than renderings — so it fails on the REQUEST, not on a symptom of it. The mutation keeps `.some()` and its parameter so the change stays local to the claim being made (a URL that expires) instead of deleting the loop: dropping the field scan outright would leave `ASSET_URL_FIELDS` unreferenced and would also make an EMPTY report arm the timer, which is a second, different defect.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "fs: an hour on screen and two visibility changes make no request at all"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "          setRun({ result: d, target: issued.target });\n          // A successful read is proof of membership, as in `adoptJob`'s re-read (F6).\n          setMembershipError(null);\n          lastReadAt = Date.now();\n          return;",
+      "after": "          setDecisions({});\n          setRun({ result: d, target: issued.target });\n          // A successful read is proof of membership, as in `adoptJob`'s re-read (F6).\n          setMembershipError(null);\n          lastReadAt = Date.now();\n          return;",
+      "because": "D215(c) is the whole reason this lane may not simply 're-commit the result': on the same-report branch the ONLY thing that changed is a set of signatures, and the reviewer's verdicts are about the creatives those signatures point at, so they are still exactly as true. `setDecisions({})` here would drop them — and, because the decisions effect re-runs on `assetVersion` rather than on `decisions`, it would drop them SILENTLY: `decisionsLoaded` stays true, no `/campaigns/decisions` read goes out, and the grid keeps rendering review controls over creatives it no longer holds a verdict for, so a reviewer sees an unapproved tile that is in fact approved and can save that over it. The failing test is 'a same-report refresh keeps the verdicts, their loaded flag, assetVersion and the decisions read', which seeds an approved verdict, refreshes, and asserts the map, the loaded flag, the version and the decision-read count all stand still. Mutation 2's sibling — adding `setAssetVersion((v) => v + 1)` instead — is caught by that same test on the version and the extra decisions read, and also by the grid test's filter assertion, since `assetVersion` is half of `filtersKey`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "a same-report refresh keeps the verdicts, their loaded flag, assetVersion and the decisions read"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "    return () => {\n      cancelled = true;\n      stopTimer();\n      document.removeEventListener(\"visibilitychange\", onVisibilityChange);\n    };\n  }, [refreshCampaign]);",
+      "after": "    return () => {\n      cancelled = true;\n      document.removeEventListener(\"visibilitychange\", onVisibilityChange);\n    };\n  }, [refreshCampaign]);",
+      "because": "One pending timeout and one listener, and this cleanup is the only thing that owns them. Leave `clearTimeout` out and the handle is still live after the provider is gone: on unmount — and on every campaign switch and every campaign that stops holding expiring URLs, which re-runs this cleanup with the provider still mounted — the pending `refresh` fires minutes later against a screen that no longer exists or no longer shows this campaign. The read's own guards would drop the COMMIT (`mountedRef`, `cancelled`, the identity term), so nothing would be visibly corrupted, which is exactly why a mutation here has to be caught on the REQUEST and not on state: the defect is a background `GET /campaigns/result` for a campaign nobody is looking at, forever, on every campaign change. The failing test is 'after unmount nothing is read, and a switch to an fs-backed campaign stops the old one's reads', which counts reads per campaign after each of the two teardowns — and it catches the switch case too, because that cleanup is the same one. `stopTimer` is still called from `arm` and from the hidden branch, so the mutated file has no unused symbol and parses; the mutation changes the lifetime rule and nothing else.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "after unmount nothing is read, and a switch to an fs-backed campaign stops the old one's reads"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "        if (\n          !mountedRef.current ||\n          cancelled ||\n          runSeq.current !== owned ||\n          runRef.current !== issued\n        )\n          return;",
+      "after": "        if (!mountedRef.current || cancelled || runRef.current !== issued) return;",
+      "because": "The run token is what separates 'this read was issued for the run on screen' from 'a run started, or the campaign changed, since it went out'. `runSeq` is bumped by exactly two callers — `beginRun` (a run actually starts) and `clearRunState` (a brief switch invalidates) — and the identity term below cannot catch either: neither commits a new run object, so `runRef.current` still reads `issued` and the read would sail through and re-commit over a screen a newer run now owns. The failing test is 'a read issued before a run started is dropped once the run token moves': the refresh read is held open, `execute()` is pressed so `beginRun` moves the token, the run object is untouched because the job has not answered, and the held answer is then a perfectly good read of the SAME report with fresher URLs — so the only thing that can keep `rev-late` off the screen is this term. The mutation keeps the other three operands, so the file still compiles and the guard is still a guard; it removes one conjunct of four, which is the smallest edit that changes the claim.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "a read issued before a run started is dropped once the run token moves"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -157,6 +157,37 @@ const JOB_POLL_MAX_MS = 2_000;
 /** Consecutive non-OK / non-JSON polls tolerated before giving up on a running job. */
 const JOB_POLL_MAX_TRANSIENT = 5;
 
+/**
+ * How long the URLs on screen may be, and how long the shell waits before replacing
+ * them (PT-4g3, D214(e)/D215).
+ *
+ * **Strictly under five minutes, which is where this number comes from.** The server
+ * signs every URL at `signingInstant(now)` — `now` floored to its window's start —
+ * and it expires 20 minutes after that window STARTED (D204: a 15-minute window, a
+ * 20-minute expiry, the five minutes of overlap being the design). So a URL read at
+ * time `t` inside its window has between 5 minutes of life (read in the window's last
+ * second) and 20 (read in its first). A page that re-reads every 10 minutes can hold
+ * an expired URL for up to 5: it reads at W+14:59, the URL dies at W+20:00, and the
+ * next read is W+24:59. At 4 minutes the URLs on screen are never more than 4 minutes
+ * old, every freshly read URL has at least 5 minutes of life, and the remaining minute
+ * covers the request itself, browser clock skew and a timer that fires late.
+ *
+ * **The web's own number, deliberately not the API's constants imported.** D204 says
+ * the web must not know how the backend signs — only that its URLs expire. When a
+ * signing window changes, this file and the reasoning above are what a reviewer
+ * checks, not a number imported from the other side of the wire.
+ */
+export const URL_REFRESH_MS = 4 * 60 * 1000;
+
+/**
+ * The floor between two refresh ATTEMPTS (PT-4g3, D215). Both triggers — the timer and
+ * `visibilitychange` — ask this first, so a read that failed cannot be followed
+ * immediately by another however it was triggered: a user toggling tabs is not a
+ * signal that the API is back, and without the floor five hide/show presses would be
+ * five requests.
+ */
+const URL_REFRESH_MIN_GAP_MS = 30_000;
+
 const LOST_JOB_MESSAGE =
   "Run was interrupted (the pipeline API restarted before it finished). Showing the last saved result; run again to regenerate.";
 
@@ -563,6 +594,82 @@ export const usableUrl = (value: unknown): string | undefined => {
   }
 };
 
+/**
+ * The seven `*Url` fields of {@link Asset}, in one list (PT-4g3, D215) — every place a
+ * report row can carry a URL, and therefore the only keys a re-read is allowed to
+ * differ on. `satisfies` rather than a bare annotation so the list cannot drift from
+ * the type above: a field added to `Asset` and forgotten here would be a URL the
+ * refresh reads as report CONTENT, and the report would then look different on every
+ * tick — which is the branch that clears the reviewer's decisions.
+ */
+export const ASSET_URL_FIELDS = [
+  "outputUrl",
+  "videoUrl",
+  "proofUrl",
+  "htmlBundleUrl",
+  "htmlFallbackUrl",
+  "outputDownloadUrl",
+  "videoDownloadUrl",
+] as const satisfies readonly (keyof Asset)[];
+
+/**
+ * Does this result carry a URL that will expire? (PT-4g3, D215.)
+ *
+ * **"Absolute http(s)" is the whole test, because that is exactly what `s3` mints and
+ * `fs` does not.** Under `fs` the server serves `/api/pipeline/output/…` —
+ * `usableUrl`'s first branch, a same-origin path — and those never expire; under `s3`
+ * every one is a presigned GET that does (D204). So this is true precisely when some
+ * asset carries an absolute URL a tile or a download link would put in a `src` or an
+ * `href`, and false for every fs run, for a run the server could not sign a URL for,
+ * and for a report with no rows at all. `assets ?? []` because `fetchPersistedRun`
+ * accepts a report that carries a `log` and no `assets` (a halted, log-only run), so
+ * `assets` is not a field this may assume — the type says so, the untrusted JSON does
+ * not.
+ */
+export function holdsExpiringUrls(result: RunResult): boolean {
+  return (result.assets ?? []).some((a) =>
+    ASSET_URL_FIELDS.some((f) => {
+      const u = usableUrl(a[f]);
+      return u !== undefined && !u.startsWith("/");
+    }),
+  );
+}
+
+/**
+ * Are these two results the SAME report, once every `*Url` key is taken off every row?
+ * (PT-4g3, D215.)
+ *
+ * **This is the fork the refresh turns on, and both ways of getting it wrong are
+ * expensive.** Too strict — comparing anything but the URLs, or reordering keys — and a
+ * refresh that changed nothing but signatures reads as a new report: decisions are
+ * cleared, `assetVersion` bumps and the reviewer's grid filters reset to defaults, four
+ * times an hour, on a page nobody touched. Too loose and a run or re-roll another tab
+ * performed is folded into the URLs on screen and its creatives never appear.
+ *
+ * So the comparison is by VALUE with only the URL keys removed. Key order is safe to
+ * lean on here, and it is a server-side contract rather than a hope: `withAssetUrls`
+ * is additive and position-preserving (D204 — "every existing row key stays where it
+ * was"), so two reads of one stored report differ in nothing but the signatures, and
+ * anything else really is a different report.
+ */
+function sameReport(issued: RunResult, read: RunResult): boolean {
+  // `issued.assets` needs no `??`: this is only ever asked once the effect is armed, and
+  // arming requires `holdsExpiringUrls` — so the run on screen carries rows. The READ's
+  // `assets` does need it: `fetchPersistedRun` accepts a report with a `log` and no
+  // `assets` at all (a halted, log-only run), and that is a different report, not a
+  // crash.
+  const withoutUrls = (assets: readonly Asset[]): unknown =>
+    assets.map((a) => {
+      const row: Record<string, unknown> = { ...a };
+      for (const field of ASSET_URL_FIELDS) delete row[field];
+      return row;
+    });
+  return (
+    JSON.stringify({ ...issued, assets: withoutUrls(issued.assets) }) ===
+    JSON.stringify({ ...read, assets: withoutUrls(read.assets ?? []) })
+  );
+}
+
 /** Canvas raster + encode budget per frame (wave-4 perf spike), for the encode estimate. */
 export const ENCODE_MS_PER_FRAME = 7;
 
@@ -849,6 +956,13 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // on screen — a plain render-time assignment, the same pattern `decisionsRef` uses.
   const loadingRef = useRef(false);
   loadingRef.current = loading;
+  // Mirrors the committed run for the signed-URL refresh below, whose effect depends on
+  // the campaign id alone — deliberately, so a commit (including a previous refresh's
+  // own) does not re-arm it — and which must therefore read whatever is on screen at the
+  // instant a read is ISSUED rather than through its own stale closure. A plain
+  // render-time assignment, the same pattern `loadingRef` and `decisionsRef` use.
+  const runRef = useRef(run);
+  runRef.current = run;
 
   // Monotonic run token. Bumped when a run actually starts (beginRun, after the POST
   // answers with a job to poll) and when a brief switch invalidates any in-flight run;
@@ -1568,6 +1682,201 @@ export function RunProvider({ children }: { children: ReactNode }) {
     if (decisionsCampaign === null) return;
     enqueueDecisions(() => loadDecisions(decisionsCampaign, epoch));
   }, [decisionsCampaign, assetVersion, enqueueDecisions, loadDecisions]);
+
+  /**
+   * PT-4g3 (D214(e), D215) — the URLs on screen expire; this re-reads them before they
+   * do. Under `s3` every asset URL is a presigned GET signed in a 15-minute window with
+   * a 20-minute expiry (D204), and the grid and export keep the URLs of the result they
+   * last read — so a page left open past one window shows placeholders that no amount of
+   * reloading the browser can fix, because the report on disk still holds the same
+   * expired signatures.
+   *
+   * **Two triggers, and only two** (`URL_REFRESH_MS`): a self-rescheduling `setTimeout`
+   * counted from the LAST read, and `visibilitychange`. Never `setInterval`, so there is
+   * one handle to clear and one place a retry can be scheduled from. **No `<img>`/
+   * `<video>` `onError` re-read**: these two already keep a visible page inside the
+   * bound, and an error handler would put the grid and export pages in this lane.
+   *
+   * **The dependency is the campaign id, not the run.** That is what lets a refresh —
+   * and a job commit — leave the timer armed instead of restarting it, and it is why
+   * the run to read beside is taken from `runRef` at the moment the read is issued.
+   *
+   * **fs runs none of this**: with no run, or a run whose URLs are same-origin paths,
+   * `refreshCampaign` is `null` and the effect returns before it arms a timer, adds a
+   * listener or makes a request.
+   */
+  const refreshCampaign = run !== null && holdsExpiringUrls(run.result) ? run.target.id : null;
+  useEffect(() => {
+    if (refreshCampaign === null) return;
+    let cancelled = false;
+    let inFlight = false;
+    // When the URLs on screen were last READ, and when any read last SETTLED. The two
+    // differ on a failure: a failed read buys no freshness, so it must not move the
+    // first — but it must move the second, or the triggers would retry it at once.
+    let lastReadAt = Date.now();
+    let lastAttemptAt = lastReadAt;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    function stopTimer(): void {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+    }
+
+    /** One pending timeout at a time, always the latest answer to "when next". */
+    function arm(delayMs: number): void {
+      stopTimer();
+      // A cleanup that lands while a read is in flight has already answered "never
+      // again" for this arming; the one after it must not resurrect a timer.
+      if (cancelled) return;
+      timer = setTimeout(() => void refresh(), delayMs);
+    }
+
+    /** Has a read settled recently enough that another attempt is allowed? */
+    const mayAttempt = () => Date.now() - lastAttemptAt >= URL_REFRESH_MIN_GAP_MS;
+
+    async function refresh(): Promise<void> {
+      // A visibility change while a read is out is not a second read: one in flight, and
+      // the timer is re-armed when THAT one settles (below), not by this trigger.
+      if (inFlight) return;
+      if (!mayAttempt()) {
+        // Refused, but not forgotten: the next attempt is a full interval out, so the
+        // floor has long passed by the time it fires.
+        arm(URL_REFRESH_MS);
+        return;
+      }
+      /**
+       * The run on screen at the instant this read is issued, and the token it owns.
+       *
+       * `runRef.current` and never a closure capture — see the dependency note above.
+       * The non-null assertion is the arming invariant rather than a guard: this effect
+       * exists only while `refreshCampaign` names a campaign, which is derived from a
+       * non-null `run`, and a run that went away tears this arming down (its cleanup
+       * drops the read) rather than leaving it to read through a null.
+       */
+      const issued = runRef.current!;
+      // Captured, NEVER bumped: only `beginRun` and `clearRunState` move the run token,
+      // and a refresh is not a run.
+      const owned = runSeq.current;
+      inFlight = true;
+      let deniedMembership = false;
+      try {
+        // The same call and the same argument `adoptJob` commits a completed job from
+        // (D213) — `result.get` is the only route that signs, so it is also the only
+        // route a refresh can learn fresher signatures from.
+        const d = await fetchPersistedRun(issued.target.id).catch((err) => {
+          if (isNoMembershipError(err)) deniedMembership = true;
+          return null;
+        });
+        // Four answers, and a read that settles into any of the first three commits
+        // nothing: gone (no provider), superseded (this arming was cleaned up), owned by
+        // a run that started or a campaign that changed since the read went out, or
+        // outdated by a commit that landed while it was in flight — a job's own result is
+        // newer than anything this read can say, and committing over it would put the
+        // previous report back on the grid.
+        if (
+          !mountedRef.current ||
+          cancelled ||
+          runSeq.current !== owned ||
+          runRef.current !== issued
+        )
+          return;
+        if (deniedMembership) {
+          // The same read failing for the same reason as `adoptJob`'s re-read, so the
+          // same answer: show the denial, leave the grid exactly as it was.
+          setMembershipError(NO_ORGANISATION_YET_MESSAGE);
+          return;
+        }
+        // A 200 that named no run for this campaign, or a failure that is not a
+        // membership denial — F6, both of them, and two different facts. Keep the screen
+        // and claim nothing; the timer brings us back.
+        if (d === null) return;
+        if (sameReport(issued.result, d)) {
+          /**
+           * The same report: commit the URLs and NOTHING ELSE. The whole result, beside
+           * the target already recorded for it (R6 — a re-read never moves a run's
+           * `target`).
+           *
+           * **So: no `setAssetVersion`, and no `setDecisions`.** `assetVersion` is a
+           * dependency of the decisions effect above, so a bump would pause reviewing
+           * (`decidable` goes false in the grid), drop a verdict save already queued over
+           * it and re-fetch the campaign's decisions — and it is half of the grid's
+           * `filtersKey`, so a bump would also reset the reviewer's filters to their
+           * defaults. A refresh changes signatures, so neither may move.
+           *
+           * Allowed while a job runs: the grid keeps rendering the previous assets while
+           * `loading` is a per-cell overlay, and the report on disk is still the one on
+           * screen until the job writes its own (`generate.post.ts` writes the report,
+           * THEN completes the job).
+           *
+           * A plain object commit, beside `issued`'s own target — which IS the recorded
+           * one (R6), and the same object `prev.target` would name.
+           *
+           * **NOT a functional `setRun` re-testing `prev` against `issued`.** That test
+           * has no actor: `runRef.current` is assigned at RENDER time, so it is by
+           * construction the very state value an updater is applied to, and the guard
+           * above has already proved it is `issued`. Two checks of one fact, one of them
+           * unreachable — so this keeps the one that is both load-bearing and testable: a
+           * job commits after its own `beginRun`, so the run token does NOT move there,
+           * and the identity term is the only thing that catches that read.
+           */
+          setRun({ result: d, target: issued.target });
+          // A successful read is proof of membership, as in `adoptJob`'s re-read (F6).
+          setMembershipError(null);
+          lastReadAt = Date.now();
+          return;
+        }
+        /**
+         * A DIFFERENT report: another tab ran or re-rolled this campaign. While a job is
+         * in flight the job's own D213 re-read commits it, so this commits nothing —
+         * but the branch cannot simply be dropped, or a page left open would hold
+         * expiring URLs for a report nobody is showing any more, forever.
+         */
+        if (loadingRef.current) return;
+        // Committed exactly as `adoptJob`'s full-run branch does, because it IS one.
+        setDecisions({});
+        setRun({ result: d, target: issued.target });
+        setAssetVersion((v) => v + 1);
+        setError(null);
+        setMembershipError(null);
+        lastReadAt = Date.now();
+      } finally {
+        inFlight = false;
+        lastAttemptAt = Date.now();
+        // The next attempt is a full interval from the moment this read SETTLED, never
+        // from when it started and never immediately — so a read that takes longer than
+        // the interval cannot make the tick period shorter than itself, and a failing
+        // API is never polled in a tight loop.
+        arm(URL_REFRESH_MS);
+      }
+    }
+
+    function onVisibilityChange(): void {
+      // Nothing on screen to keep fresh, and a hidden tab's timer would fire a request
+      // nobody is waiting for into a background that may not be online.
+      if (document.visibilityState === "hidden") {
+        stopTimer();
+        return;
+      }
+      // Visible again: refresh only if what is on screen has actually aged, and
+      // otherwise schedule the REMAINDER of the interval. A fresh interval from now
+      // would let the URLs reach 4 + 4 minutes, which is past the floor `URL_REFRESH_MS`
+      // is sized on, and this trigger is the whole reason that floor has to hold.
+      const age = Date.now() - lastReadAt;
+      if (age >= URL_REFRESH_MS) {
+        void refresh();
+        return;
+      }
+      arm(URL_REFRESH_MS - age);
+    }
+
+    arm(URL_REFRESH_MS);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      stopTimer();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [refreshCampaign]);
 
   // Shared POST to the generate endpoint. The body is either a bare brief (full run)
   // or a `{ brief, regenerateOnly }` envelope (selective re-roll). Resolves with the
