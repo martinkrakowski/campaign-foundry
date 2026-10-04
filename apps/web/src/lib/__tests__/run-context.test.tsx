@@ -6664,6 +6664,37 @@ describe("RunProvider — signed URL refresh (PT-4g3)", () => {
     expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
   });
 
+  test("a healed membership clears on a CHANGED report that arrives unsigned, though the report is held", async () => {
+    // The different-report branch holds an unsigned changed report back (item 2), and the
+    // heal must not be held back with it: the 200 still proves membership.
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    const ranElsewhere = row({ productId: "p2", outputPath: "p2/1x1.png" });
+    let mode: "ok" | "denied" | "changedUnsigned" = "ok";
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        if (mode === "denied") return json({ code: "no_membership" }, 403);
+        if (mode === "changedUnsigned") return onDisk("seed", [ranElsewhere]);
+        return onDisk("seed", [signed(first, "rev-1")]);
+      },
+    });
+    const { result } = setup();
+    await settle();
+
+    mode = "denied";
+    await advance(URL_REFRESH_MS);
+    expect(result.current.membershipError).toBe(NO_ORGANISATION_YET_MESSAGE);
+    mode = "changedUnsigned";
+    await advance(URL_REFRESH_MS);
+    expect(result.current.membershipError).toBeNull();
+    // Held, not committed: the old report and its links are still on screen.
+    expect(result.current.assets.map((a) => a.productId)).toEqual(["p1"]);
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+  });
+
   test("a changed report arriving unsigned is held, and the next signed tick commits it", async () => {
     // Item 2. The different-report branch had no outage check, and an unsigned `d` is
     // worse there than on the same-report branch: committing it hands the grid a report

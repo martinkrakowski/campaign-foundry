@@ -123,9 +123,9 @@
     },
     {
       "file": "apps/web/src/lib/run-context.tsx",
-      "before": "          setMembershipError(null);\n          const merged = renewAssetUrls(issued.result, d);",
-      "after": "          const merged = renewAssetUrls(issued.result, d);",
-      "because": "Fix round 2, item 1's second half. A successful read is proof of membership on ANY 200 — signed or not — so the heal cannot sit behind a check on whether the URLs were renewed. Behind it, a reviewer whose organisation came back stays under 'This account belongs to no organisation' for as long as the bucket is unhappy, which is a denial the UI is asserting on evidence it does not have. The failing test is 'a healed membership clears on any 200, signed or not': a 403 sets the denial, and the next tick answers 200 with no signatures at all, so the heal has to run on a read that renewed nothing. The mutation only moves one statement past another, so the merge, the `renewed === 0` guard and the whole branch still read as they do.",
+      "before": "        // or held. So it comes before every early return below.\n        setMembershipError(null);\n        if (sameReport(issued.result, d)) {",
+      "after": "        // or held. So it comes before every early return below.\n        if (sameReport(issued.result, d)) {",
+      "because": "the one membership heal on a 200 is removed. It now sits straight after the null check, before every early return (same report renewing nothing, a changed report held during a signing outage), so with it gone a 403-then-200 sequence leaves the no-organisation banner up. The pinned test drives a denial, then an unsigned 200 of the same report, and reads membershipError as still set.",
       "command": [
         "yarn",
         "vitest",
@@ -186,6 +186,23 @@
         "apps/web/src/app/(shell)/export/__tests__/export.test.tsx",
         "-t",
         "one refresh, zero package reads — and a draft run still re-lists them"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/run-context.tsx",
+      "before": "        // or held. So it comes before every early return below.\n        setMembershipError(null);\n        if (sameReport(issued.result, d)) {",
+      "after": "        // or held. So it comes before every early return below.\n        if (sameReport(issued.result, d)) {",
+      "because": "the same removal, pinned to the CHANGED-report case: the different-report branch holds an unsigned changed report back with an early return, and before this fix the heal sat below that return. With the heal gone, the 403-then-changed-unsigned-200 sequence leaves the banner up.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/run-context.test.tsx",
+        "-t",
+        "clears on a CHANGED report"
       ],
       "verdict": "caught"
     }

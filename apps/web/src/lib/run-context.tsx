@@ -199,7 +199,7 @@ const URL_REFRESH_MIN_GAP_MS = 30_000;
  * no test could reach. Composing it also gives the timer a handle to clear, so a read
  * that answers promptly leaves nothing pending.
  *
- * It is longer than {@link URL_REFRESH_MIN_GAP_MS} and far shorter than the 20 minutes a
+ * It equals {@link URL_REFRESH_MIN_GAP_MS} and is far shorter than the 20 minutes a
  * signed URL lives: a give-up costs one wasted read and the next tick, while an
  * unanswered one costs every URL on screen.
  */
@@ -731,10 +731,13 @@ interface RenewedUrls {
  */
 function renewAssetUrls(issued: RunResult, read: RunResult): RenewedUrls {
   let renewed = 0;
-  const assets = (issued.assets ?? []).map((a, index) => {
+  // `issued.assets` needs no `??`, for the reason `sameReport` gives: the effect arms only
+  // on a run that holdsExpiringUrls, so the run on screen carries rows.
+  const assets = issued.assets.map((a, index) => {
     const fresh = read.assets?.[index];
     // A shorter read cannot pair up. `sameReport` says it cannot happen; an untrusted
     // report says better than a type does, so the row is kept whole rather than guessed at.
+    /* istanbul ignore if -- sameReport compared the URL-stripped rows, so the lengths match */
     if (fresh === undefined) return a;
     // Built only if something moved, so an unchanged read commits no new object at all.
     let row: Asset | undefined;
@@ -1895,6 +1898,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
         // membership denial — F6, both of them, and two different facts. Keep the screen
         // and claim nothing; the timer brings us back.
         if (d === null) return;
+        // A successful read is proof of membership, as in `adoptJob`'s re-read (F6), and it
+        // is proof on ANY 200: signed or not, the same report or a changed one, committed
+        // or held. So it comes before every early return below.
+        setMembershipError(null);
         if (sameReport(issued.result, d)) {
           /**
            * The same report: commit the URLs and NOTHING ELSE. The whole result, beside
@@ -1925,10 +1932,6 @@ export function RunProvider({ children }: { children: ReactNode }) {
            * and no later tick would ever come. A bucket outage would blank the grid
            * permanently on the strength of one 200.
            */
-          // A successful read is proof of membership, as in `adoptJob`'s re-read (F6) —
-          // and it is proof on ANY 200, signed or not, so this comes BEFORE the checks
-          // below: a healed membership must not wait on the URLs having been renewed.
-          setMembershipError(null);
           const merged = renewAssetUrls(issued.result, d);
           // Nothing was renewed: wholly unsigned, or the read landed inside the same
           // signing window and returned the bytes already on screen. Keep the screen and
@@ -1988,7 +1991,6 @@ export function RunProvider({ children }: { children: ReactNode }) {
         setRun({ result: d, target: issued.target });
         setAssetVersion((v) => v + 1);
         setError(null);
-        setMembershipError(null);
         lastReadAt = Date.now();
       } finally {
         // Before anything else, so no path through this `finally` can leave a 30-second

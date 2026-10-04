@@ -552,8 +552,8 @@ describe("ExportPage — motion", () => {
     });
     renderWithRun(
       <>
-        <SwitchToOther />
         <ExportPage />
+        <SwitchToOther />
       </>,
     );
     await user.click(await screen.findByRole("button", { name: "instagram-reel" }));
