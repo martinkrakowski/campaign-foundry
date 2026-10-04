@@ -3588,6 +3588,166 @@ describe("BriefPage — the editor is one scrolling column (SG1 / SG-D2)", () =>
     });
 
     /**
+     * THE LISTING BELONGS TO A CAMPAIGN, and the editor is reused across campaigns.
+     *
+     * A route change is a new `briefId` on the same instance, so anything the
+     * editor holds from the last campaign is still in its hands. The listing is
+     * exactly that kind of thing, and it is read by name: so a 409 into the new
+     * campaign can answer with the OLD campaign's asset id — a ref that names a
+     * row in another campaign entirely, which the server will 404 on next read.
+     *
+     * Both campaigns deliberately list an entry with the SAME name, because that is
+     * what makes the bug possible rather than merely untidy: a name is the only
+     * thing the 409 branch has to match on, and names are per-campaign.
+     */
+    describe("the listing is scoped to its campaign", () => {
+      const A_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+      const B_ID = "9c5b94b1-35ad-49bb-b118-8e8fc24af80e";
+      // What the upload actually asks for: `assetFileName("logo.png", "alpha")`,
+      // product id included. The entry both campaigns list is named after THAT, or
+      // there is nothing for the name-only 409 branch to match and no bug to find.
+      const NAME = "alpha-logo.png";
+      const entry = (id: string) => ({
+        id,
+        name: NAME,
+        type: "image/png",
+        size: 1,
+        thumbnailUrl: "",
+      });
+      const withLogo = (id: string, logoPath: string) => ({
+        ...brief(id),
+        products: [{ ...brief(id).products[0], logoPath }],
+      });
+      // Three campaigns, three ids, so the listing holds no duplicate and the
+      // route-match cannot pick the wrong one.
+      const a = withLogo("a", A_ID);
+      const bPath = withLogo("b", "assets/inputs/b/alpha.png");
+      const bWithId = withLogo("c", B_ID);
+      const listingOf = (...bs: Record<string, unknown>[]) =>
+        json({ briefs: bs.map((b) => ({ file: `${b.id}.yaml`, brief: b, revision: "r1" })) });
+
+      const mountAt = (id: string, view: { rerender: (ui: React.ReactElement) => void }) => {
+        view.rerender(
+          <ShellProviders>
+            <CreateCampaignProvider>
+              <Editor id={id} />
+              <CreateCampaignDialog />
+            </CreateCampaignProvider>
+          </ShellProviders>,
+        );
+      };
+      const at = async (name: string) =>
+        waitFor(() =>
+          expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe(name),
+        );
+
+      test("a 409 in the second campaign stores its path, never the first campaign's id", async () => {
+        const user = userEvent.setup();
+        vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+          const u = String(url);
+          const method = (init?.method ?? "GET").toUpperCase();
+          if (method === "POST" && u.endsWith("/campaigns/assets")) {
+            return Promise.resolve(json({ error: "exists" }, 409));
+          }
+          if (u.includes("/campaigns/assets?briefId=a")) {
+            return Promise.resolve(json({ assets: [entry(A_ID)] }));
+          }
+          if (u.includes("/campaigns/assets?briefId=b")) {
+            return Promise.resolve(json({ assets: [entry(B_ID)] }));
+          }
+          if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+            return Promise.resolve(json({ motion: true }));
+          }
+          if (method === "GET" && u === `${API}/campaigns/briefs`) {
+            return Promise.resolve(listingOf(a, bPath));
+          }
+          return Promise.resolve(json({}, 404));
+        });
+        const view = renderWithRun(<Editor id="a" />);
+        await at("a");
+        // A's listing has landed — the premise of the whole sequence.
+        expect(await screen.findByText(NAME)).toBeTruthy();
+
+        mountAt("b", view);
+        await at("b");
+
+        await user.upload(
+          screen.getAllByLabelText("Upload product logo")[0] as HTMLInputElement,
+          new File(["x"], "logo.png", { type: "image/png" }),
+        );
+
+        // B's own path. A1 would name a row in campaign A — the server 404s on it.
+        await waitFor(() => expect(logoMirror()?.value).toBe(`assets/inputs/b/${NAME}`));
+        expect(logoMirror()?.value).not.toBe(A_ID);
+      });
+
+      test("no commit after the switch ever shows unavailable", async () => {
+        // The window is ONE COMMIT, so sampling after an await cannot see it: the
+        // in-flight flag is set in an effect, and an effect runs after the first
+        // commit has already reached the DOM. A `Profiler` reads the DOM at every
+        // commit, which is the only place a one-frame wrong label exists — and a
+        // browser may paint between a passive effect and the commit after it.
+        let unavailableCommits = 0;
+        const sample = () => {
+          const text = document.getElementById("products")?.textContent ?? "";
+          if (text.includes(messages.assetUnavailable)) unavailableCommits += 1;
+        };
+        let settleB: (assets: unknown[]) => void = () => {};
+        vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+          const u = String(url);
+          const method = (init?.method ?? "GET").toUpperCase();
+          if (u.includes("/campaigns/assets?briefId=a")) {
+            return Promise.resolve(json({ assets: [entry(A_ID)] }));
+          }
+          if (u.includes("/campaigns/assets?briefId=c")) {
+            // The second campaign's OWN listing is HELD, so the window between
+            // arriving and its data landing is observable.
+            return new Promise((resolve) => {
+              settleB = (assets) => resolve(json({ assets }, 200) as unknown as Response);
+            });
+          }
+          if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+            return Promise.resolve(json({ motion: true }));
+          }
+          if (method === "GET" && u === `${API}/campaigns/briefs`) {
+            return Promise.resolve(listingOf(a, bWithId));
+          }
+          return Promise.resolve(json({}, 404));
+        });
+        const tree = (id: string) => (
+          <Profiler id="editor" onRender={sample}>
+            <Editor id={id} />
+          </Profiler>
+        );
+        const view = renderWithRun(tree("a"));
+        await at("a");
+        expect(await screen.findByText(NAME)).toBeTruthy();
+
+        view.rerender(
+          <ShellProviders>
+            <CreateCampaignProvider>
+              {tree("c")}
+              <CreateCampaignDialog />
+            </CreateCampaignProvider>
+          </ShellProviders>,
+        );
+        await at("c");
+        await waitFor(() => expect(logoMirror()?.value).toBe(B_ID));
+
+        // A's listing was in hand and holds no B_ID. Reporting "unavailable" from it
+        // is a settled verdict about the wrong campaign's data, on however many
+        // commits it took to say so.
+        expect(unavailableCommits).toBe(0);
+
+        await act(async () => {
+          settleB([entry(B_ID)]);
+        });
+        expect(await screen.findByText(NAME)).toBeTruthy();
+        expect(unavailableCommits).toBe(0);
+      });
+    });
+
+    /**
      * A refetch in flight is not a settled "unavailable".
      *
      * The listing is never re-read from scratch — a new id joins a listing that is
