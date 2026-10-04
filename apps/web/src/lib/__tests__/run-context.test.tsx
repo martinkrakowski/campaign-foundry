@@ -6582,6 +6582,178 @@ describe("RunProvider — signed URL refresh (PT-4g3)", () => {
     expect(result.current.assets[0].outputUrl).not.toBe(s3Urls(first, "rev-1").outputUrl);
   });
 
+  test("a PARTIAL signing failure renews what it can and keeps the field it could not", async () => {
+    // Item 1. `urlFields` in `signed-urls.ts` signs each of the seven fields on its own
+    // and omits only the ones it could not, so one stalled row answers 200 with that ONE
+    // `*Url` missing. Committing that answer whole takes the working creative off the
+    // screen — a poster rendered as a placeholder, a download link gone — until the next
+    // tick, which is the failure this merge removes. The merge is per row AND per field,
+    // so asset 1 takes the new signature and asset 2 keeps the one that still works.
+    vi.useFakeTimers();
+    const one = row({ productId: "p1", outputPath: "p1/1x1.png" });
+    const two = row({ productId: "p2", outputPath: "p2/1x1.png" });
+    const seeded = seedPersistedRun([one, two]);
+    const oldOne = signed(one, "rev-1");
+    const oldTwo = signed(two, "rev-1");
+    // The outage: asset 1 signs at the new window, asset 2's `outputUrl` is absent while
+    // its other fields are present — a per-field failure, not a per-row one.
+    const partialOne = { ...one, ...s3Urls(one, "rev-2") };
+    const partialTwo = { ...two, ...fsUrls(two) };
+    delete (partialTwo as Partial<Asset>).outputUrl;
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        read += 1;
+        if (read === 1) return onDisk("seed", [oldOne, oldTwo]);
+        return onDisk("seed", [partialOne, partialTwo]);
+      },
+    });
+    const { result } = setup();
+    await settle();
+    expect(result.current.assets.map((a) => a.outputUrl)).toEqual([
+      s3Urls(one, "rev-1").outputUrl,
+      s3Urls(two, "rev-1").outputUrl,
+    ]);
+    const baseline = readsFor("seed");
+
+    await advance(URL_REFRESH_MS);
+
+    expect(readsFor("seed")).toBe(baseline + 1);
+    // Asset 1 was renewed; asset 2's `outputUrl` — the field the store would not sign —
+    // is the one ALREADY on screen, not a placeholder.
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(one, "rev-2").outputUrl);
+    expect(result.current.assets[1].outputUrl).toBe(s3Urls(two, "rev-1").outputUrl);
+    expect(result.current.assets[1].outputUrl).toBeDefined();
+    // A field the outage answer DID carry is still taken, so a partly healthy bucket
+    // replaces everything it can rather than only the first row.
+    expect(result.current.assets[1].outputDownloadUrl).toBe(fsUrls(two).outputDownloadUrl);
+  });
+
+  test("a healed membership clears on any 200, signed or not", async () => {
+    // Item 1. `setMembershipError(null)` proves membership on ANY successful read, so it
+    // cannot sit behind a check on whether the URLs were renewed: a 200 whose URLs the
+    // store would not sign is still a 200, and a reviewer whose organisation came back
+    // must not be left under a stale denial because the bucket is also unhappy.
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    let mode: "ok" | "denied" | "unsigned" = "ok";
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        if (mode === "denied") return json({ code: "no_membership" }, 403);
+        if (mode === "unsigned") return onDisk("seed", [first]);
+        return onDisk("seed", [signed(first, "rev-1")]);
+      },
+    });
+    const { result } = setup();
+    await settle();
+    expect(result.current.membershipError).toBeNull();
+
+    // The denial, then a 200 that carries no signatures at all.
+    mode = "denied";
+    await advance(URL_REFRESH_MS);
+    expect(result.current.membershipError).toBe(NO_ORGANISATION_YET_MESSAGE);
+    mode = "unsigned";
+    await advance(URL_REFRESH_MS);
+    expect(result.current.membershipError).toBeNull();
+    // And the screen survived the unsigned read, as item 1 requires.
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+  });
+
+  test("a changed report arriving unsigned is held, and the next signed tick commits it", async () => {
+    // Item 2. The different-report branch had no outage check, and an unsigned `d` is
+    // worse there than on the same-report branch: committing it hands the grid a report
+    // with no links at all AND stands the refresh down permanently, because
+    // `holdsExpiringUrls` is then false of the committed run, so no tick ever follows.
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    const ranElsewhere = row({ productId: "p2", outputPath: "p2/1x1.png" });
+    const newRow = signed(ranElsewhere, "rev-3");
+    let mode: "same" | "changedUnsigned" | "changedSigned" = "same";
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        // The changed report, unsigned: the paths arrived, the signatures did not.
+        if (mode === "changedUnsigned") return onDisk("seed", [ranElsewhere]);
+        if (mode === "changedSigned") return onDisk("seed", [newRow]);
+        return onDisk("seed", [signed(first, "rev-1")]);
+      },
+    });
+    const { result } = setup();
+    await settle();
+    const version = result.current.assetVersion;
+
+    mode = "changedUnsigned";
+    await advance(URL_REFRESH_MS);
+    // The OLD report is still on screen: not the changed one without its links, and not
+    // an empty grid.
+    expect(result.current.assets.map((a) => a.productId)).toEqual(["p1"]);
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+    expect(result.current.assetVersion).toBe(version);
+
+    // The next tick is signed, and the changed report lands whole — it is still the
+    // right report, only unsigned a moment ago.
+    mode = "changedSigned";
+    await advance(URL_REFRESH_MS);
+    expect(result.current.assets.map((a) => a.productId)).toEqual(["p2"]);
+    expect(result.current.assets[0].outputUrl).toBe(newRow.outputUrl);
+    expect(result.current.assetVersion).toBe(version + 1);
+  });
+
+  test("a read that never settles is given up on, and the next tick is issued", async () => {
+    // Item 3. `fetchPersistedRun` had no timeout, so a request that never answered held
+    // `inFlight` for ever: the `finally` never ran, no timer was armed, and the URLs on
+    // screen simply aged out — twenty minutes later there was nothing left to refresh.
+    // The handler below honours the signal exactly as a real `fetch` does, which is the
+    // one thing the test needs and the reason the mock's `result` handler is handed the
+    // request init at all.
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    let read = 0;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url, init) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        read += 1;
+        if (read === 1) return onDisk("seed", [signed(first, "rev-1")]);
+        if (read === 2) {
+          // Never resolves on its own; the abort is the only thing that settles it.
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("The operation was aborted.", "AbortError")),
+            );
+          });
+        }
+        return onDisk("seed", [signed(first, `rev-${read}`)]);
+      },
+    });
+    const { result } = setup();
+    await settle();
+    const baseline = readsFor("seed");
+
+    // The tick fires; the read hangs.
+    await advance(URL_REFRESH_MS);
+    expect(readsFor("seed")).toBe(baseline + 1);
+
+    // Past the give-up the read is refused, and nothing on screen changed — a timed-out
+    // read is a FAILED read, not an absence and not a report.
+    await advance(30_000);
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+    expect(result.current.assets).toHaveLength(1);
+
+    // And the next tick is really issued, which is the whole point: the URLs still renew.
+    await advance(URL_REFRESH_MS);
+    expect(readsFor("seed")).toBe(baseline + 2);
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-3").outputUrl);
+  });
+
   test("a 403 no_membership on the re-read shows the membership error and changes nothing", async () => {
     vi.useFakeTimers();
     const first = row();
