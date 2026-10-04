@@ -346,11 +346,12 @@ describe("the packages routes under OBJECT_STORE=s3 (PT-4h2)", () => {
     await commitPackage(CAMPAIGN, "local", PLATFORM, ["alpha/1x1.png"], EARLY, "a");
     const spy = vi.spyOn(store, "get");
 
-    // D204: output is addressed by id and served through a presigned URL, so
-    // there is no output-root-relative path a browser can ask this store for — and
-    // a render path and a package path are BOTH `missing` rather than one of them
-    // `invalid`. That is what keeps this route's answers unchanged from what the
-    // web has seen since PT-4e: 404 either way.
+    // D204, PT-4i: output is addressed by id and served through a presigned URL,
+    // so under `s3` there is no output-root-relative path a browser can ask for,
+    // and `GET /output/**` answers 404 off `objectStore()` alone — before it
+    // resolves a campaign, asks about a visibility or names a key here. A render
+    // path and a package path are therefore ONE answer, which is what keeps this
+    // route's answers unchanged from what the web has seen since PT-4e.
     for (const path of [
       "alpha/1x1.png",
       `${SLUG}/alpha/1x1.png`,
@@ -358,16 +359,18 @@ describe("the packages routes under OBJECT_STORE=s3 (PT-4h2)", () => {
       // A traversal that survives URL normalisation — `../x` never reaches a
       // handler, because `new Request` collapses it in the URL. Under fs this name
       // is a directory that does not exist, so both backends answer 404 here; what
-      // changes is that under s3 even a MALFORMED path is `missing`, never
-      // `invalid`, so no path at all can turn into a 400 from this store.
+      // the s3 guard adds is that a MALFORMED path answers 404 too — and for the
+      // same reason as every other shape above rather than as this store's
+      // `missing`, since the route can no longer tell a traversal from a render.
       "%2e%2e%2fsecret",
     ]) {
       const res = await outputCall(LOCAL, path);
       expect(res.status, path).toBe(404);
       expect(await res.json()).toEqual({ error: "Not found" });
     }
-    // And nothing was read to decide any of that — the answer is a constant, so
-    // this route cannot leak a prefix, a slug or a uuid into a 404.
+    // And nothing was read to decide any of that — the answer is a mode check
+    // and a literal, so this route cannot leak a prefix, a slug or a uuid into a
+    // 404.
     expect(spy).not.toHaveBeenCalled();
   });
 });
