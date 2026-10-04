@@ -1,7 +1,13 @@
 import { describe, test, expect, afterEach } from "vitest";
 import type { Migration } from "../migrate.js";
 import { main as pgClean } from "./pg-clean.js";
-import { processAlive, probeServer, templateName, testDatabaseBackend } from "./test-database.js";
+import {
+  dropDatabase,
+  processAlive,
+  probeServer,
+  templateName,
+  testDatabaseBackend,
+} from "./test-database.js";
 
 /**
  * The server-free half of the test-database harness (D186). Everything here
@@ -93,6 +99,127 @@ describe("processAlive", () => {
     // 2^22 is above Linux's default pid_max and above any macOS pid this host
     // has issued, so `kill(pid, 0)` reports ESRCH rather than EPERM.
     expect(processAlive(4_194_304)).toBe(false);
+  });
+});
+
+describe("dropDatabase", () => {
+  /**
+   * A `run` that records the statements it was handed and then answers with
+   * whatever `refuse` says about the one it is looking at.
+   *
+   * Injected, because this is the one part of the harness that a server cannot be
+   * asked to produce on demand: the 42501 the fallback exists for comes from an
+   * autovacuum worker inside a fresh clone, and provoking one takes superuser
+   * rights this role does not have. What is under test is which statement a given
+   * failure earns, and that is a question about the code, not about the server.
+   */
+  const recorder = (
+    refuse: (statement: string) => unknown = () => undefined,
+  ): { statements: string[]; run: (text: string) => Promise<unknown> } => {
+    const statements: string[] = [];
+    return {
+      statements,
+      run: async (text: string) => {
+        statements.push(text);
+        const outcome = refuse(text);
+        if (outcome instanceof Error) throw outcome;
+        return outcome;
+      },
+    };
+  };
+
+  /** A `pg` error as the wire delivers it: the message, and the code beside it. */
+  const pgError = (message: string, code: string): Error =>
+    Object.assign(new Error(message), { code });
+
+  /**
+   * What a call did, without deciding yet: `{ rejected: false }`, or the error it
+   * rejected with. For the case where a retry could either add a statement or
+   * swallow the error the caller was handed, and the statement count has to be the
+   * assertion that fires first — a rejected promise cannot be inspected until it
+   * settles, and by then a swallowed error is already gone.
+   */
+  const outcome = (work: Promise<unknown>): Promise<{ rejected: boolean; error?: unknown }> =>
+    work.then(
+      () => ({ rejected: false }),
+      (error: unknown) => ({ rejected: true, error }),
+    );
+
+  const FORCE = 'drop database "cf_t_1_2_3" with (force)';
+  const PLAIN = 'drop database "cf_t_1_2_3"';
+  /** What a forced drop says when it may not signal a process in the target. */
+  const mayNotTerminate = (): Error => pgError("permission denied to terminate process", "42501");
+  /** And what a plain drop says when a session is still connected. */
+  const inUse = (): Error => pgError("database is being accessed by other users", "55006");
+
+  test("drops with FORCE alone when the forced drop is allowed", async () => {
+    const { statements, run } = recorder();
+
+    await dropDatabase(run, "cf_t_1_2_3");
+
+    // One statement, and it is the forced one: the common case must not pay for
+    // the fallback's existence.
+    expect(statements).toEqual([FORCE]);
+  });
+
+  test("falls back to exactly one plain drop when the forced drop is refused with 42501", async () => {
+    // The measured case: `cf_test` is not a superuser and is not in
+    // `pg_signal_backend`, so an autovacuum worker inside a 2-second-old clone
+    // makes the forced drop answer 42501 — and the plain drop behind it terminates
+    // that worker itself, with no permission check. The order is the whole claim:
+    // forced first, and plain only because of it.
+    const { statements, run } = recorder((statement) =>
+      statement === FORCE ? mayNotTerminate() : undefined,
+    );
+
+    await expect(dropDatabase(run, "cf_t_1_2_3")).resolves.toBeUndefined();
+
+    expect(statements).toEqual([FORCE, PLAIN]);
+  });
+
+  test("rethrows any other refusal, rather than trying a second statement", async () => {
+    // 55006 is the sweep's own neighbour, and the one a widened fallback would
+    // swallow into a second drop that fails for the same reason. The same object,
+    // not a like new one: a caller that cannot tell which database is still in use
+    // has lost the error it was given.
+    const held = inUse();
+    const { statements, run } = recorder(() => held);
+
+    await expect(dropDatabase(run, "cf_t_1_2_3")).rejects.toBe(held);
+
+    expect(statements).toHaveLength(1);
+  });
+
+  test("reports a plain drop that fails too, and does not try a third statement", async () => {
+    // A 42501 that the plain drop cannot fix — a session inside the clone that may
+    // not be signalled — answers 55006 from `CountOtherDBBackends` after its own 5 s
+    // wait. That is the honest failure, and it is the plain drop's error rather than
+    // the forced one, because it is the statement that actually ran last.
+    const refused = mayNotTerminate();
+    const held = inUse();
+    const { statements, run } = recorder((statement) => (statement === FORCE ? refused : held));
+
+    const result = await outcome(dropDatabase(run, "cf_t_1_2_3"));
+
+    // The count first, because that is the claim: two statements, never three. A
+    // retry after a failed plain drop would be a loop, and a loop here is the
+    // defect this guards rather than the error the caller is handed.
+    expect(statements).toHaveLength(2);
+    // And the error is the plain drop's own, by identity rather than by message:
+    // `isGoneOrGoing` reads the code beside the message, so a re-wrapped error is a
+    // different answer to a sweep deciding whether to forgive a row.
+    expect(result.rejected).toBe(true);
+    expect(result.error).toBe(held);
+  });
+
+  test("refuses a name it will not interpolate, before any statement runs", async () => {
+    const { statements, run } = recorder();
+
+    await expect(dropDatabase(run, "bad-name")).rejects.toThrow(/refusing an unsafe database name/);
+
+    // Nothing reached the server: a name this harness would not put in a DROP is
+    // refused by the same rule whether or not a fallback follows it.
+    expect(statements).toEqual([]);
   });
 });
 
