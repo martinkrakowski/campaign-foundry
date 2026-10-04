@@ -1,11 +1,13 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { screen, waitFor, within, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect } from "react";
 import {
   renderWithRun,
   seedPersistedRun,
   makeAsset,
   makeMotionAsset,
+  jobOk,
   json,
   mockPipelineApi,
   seedDecisions,
@@ -550,8 +552,8 @@ describe("ExportPage — motion", () => {
     });
     renderWithRun(
       <>
-        <ExportPage />
         <SwitchToOther />
+        <ExportPage />
       </>,
     );
     await user.click(await screen.findByRole("button", { name: "instagram-reel" }));
@@ -772,6 +774,24 @@ describe("ExportPage — a signed-URL refresh does not refetch packages (PT-4g3 
     delete (document as unknown as Record<string, unknown>).visibilityState;
   });
 
+  /**
+   * The two ids whose disagreement is the whole point: the campaign the SHELL holds
+   * (`brief.id`) and the campaign the RUN on screen was written under (`ranCampaignId`).
+   * A "Run this draft" run is the only way they differ, and it is the only way a
+   * `[brief.id]` keying could satisfy the no-refetch assertion below while dropping the
+   * package manifests for the campaign actually on screen.
+   */
+  let ids: { briefId: string; ranCampaignId: string | null } = { briefId: "", ranCampaignId: null };
+  function ObserveIds() {
+    const { brief, ranCampaignId } = useRun();
+    // In an EFFECT, not in the render body: this must record what React COMMITTED, and a
+    // render-phase assignment can leave a value from a pass that was thrown away.
+    useEffect(() => {
+      ids = { briefId: brief.id, ranCampaignId };
+    }, [brief.id, ranCampaignId]);
+    return null;
+  }
+
   const advance = async (ms: number) => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(ms);
@@ -780,25 +800,48 @@ describe("ExportPage — a signed-URL refresh does not refetch packages (PT-4g3 
   const settle = async () => {
     for (let i = 0; i < 8; i += 1) await advance(0);
   };
+  const packageReadsFor = (campaignId: string) =>
+    vi
+      .mocked(globalThis.fetch)
+      .mock.calls.filter(([u]) =>
+        String(u).includes(`/campaigns/packages/${encodeURIComponent(campaignId)}`),
+      ).length;
   const packageReads = () =>
     vi
       .mocked(globalThis.fetch)
       .mock.calls.filter(([u]) => String(u).includes("/campaigns/packages")).length;
 
-  test("one refresh, zero package reads — and a different campaign still loads them", async () => {
+  test("one refresh, zero package reads — and a draft run still re-lists them", async () => {
     vi.useFakeTimers();
     const row = makeAsset({ productId: "alpha", outputPath: "alpha/1x1.png" });
     const seeded = seedPersistedRun([row]);
     let read = 0;
     mockPipelineApi({
       opened: seeded,
-      packages: () =>
+      packages: (url) =>
         json({
-          platforms: [{ platformId: "instagram-feed", items: [{ path: "x.png" }] }],
+          platforms: [
+            {
+              platformId: `p${url.includes("on-screen-draft") ? "draft" : "seed"}`,
+              items: [item()],
+            },
+          ],
+        }),
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [row],
+          log: { entries: [], campaignId: "on-screen-draft" },
         }),
       result: (url) => {
-        if (url.includes("campaignId=other")) {
-          return json({ halted: false, assets: [], log: { entries: [], campaignId: "other" } });
+        // The draft run's own re-read, keyed on the campaign the POST actually ran.
+        if (url.includes("campaignId=on-screen-draft")) {
+          return json({
+            halted: false,
+            assets: [{ ...row, ...s3Urls(row, "rev-draft") }],
+            log: { entries: [], campaignId: "on-screen-draft" },
+          });
         }
         if (!url.includes("/campaigns/result")) return json({ halted: false, assets: [] });
         read += 1;
@@ -811,14 +854,20 @@ describe("ExportPage — a signed-URL refresh does not refetch packages (PT-4g3 
     });
     renderWithRun(
       <>
-        <SwitchToOther />
+        <RunDraft />
+        <ObserveIds />
         <ExportPage />
       </>,
     );
     await settle();
     // The page hydrated once, which is the read this test measures everything else against.
     const baseline = packageReads();
-    expect(baseline).toBeGreaterThan(0);
+    // Counted per campaign, because the mount also asks once with no run on screen at
+    // all (`run?.target.id ?? brief.id`, and there is neither yet) — so the TOTAL is not a
+    // per-campaign figure, and "no new reads for the shell's campaign" has to be said
+    // about that campaign alone.
+    const seedBaseline = packageReadsFor("seed");
+    expect(baseline).toBeGreaterThan(seedBaseline);
 
     // Three refresh ticks: a new callback identity each time under the old keying.
     await advance(URL_REFRESH_MS);
@@ -827,12 +876,23 @@ describe("ExportPage — a signed-URL refresh does not refetch packages (PT-4g3 
     expect(read).toBeGreaterThan(1);
     expect(packageReads()).toBe(baseline);
 
-    // **And a campaign that actually moves still loads.** `run?.target.id` is what the
-    // callback reads, so a different campaign is a different read — not a suppressed one.
+    // **And the case `run?.target.id` exists for.** "Run this draft" commits a run whose
+    // target is the DRAFT's campaign while `brief.id` stays `seed` — the only way the two
+    // ids can disagree, and the only way a `[brief.id]` keying could pass the assertions
+    // above while dropping the package manifests for the campaign actually on screen.
+    expect(ids.briefId).toBe("seed");
     await act(async () => {
-      screen.getByText("switch run").click();
+      screen.getByText("run draft").click();
     });
     await settle();
+    expect(ids.briefId).toBe("seed");
+    expect(ids.ranCampaignId).toBe("on-screen-draft");
+    // The manifests come back FOR THE DRAFT'S CAMPAIGN — stated first, because it is the
+    // assertion that distinguishes `run?.target.id` from `brief.id`, and a `[brief.id]`
+    // keying makes no request at all rather than a differently-targeted one. Then the
+    // total, and the shell's own campaign, which `brief.id` never moved away from.
+    expect(packageReadsFor("on-screen-draft")).toBeGreaterThan(0);
     expect(packageReads()).toBeGreaterThan(baseline);
+    expect(packageReadsFor("seed")).toBe(seedBaseline);
   });
 });

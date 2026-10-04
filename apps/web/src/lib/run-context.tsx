@@ -188,6 +188,23 @@ export const URL_REFRESH_MS = 4 * 60 * 1000;
  */
 const URL_REFRESH_MIN_GAP_MS = 30_000;
 
+/**
+ * How long the refresh waits on ONE read before giving up on it (PT-4g3).
+ *
+ * **Composed from `setTimeout`, not `AbortSignal.timeout`.** The native form exists and
+ * would read better here, but it is not drivable by a fake clock: under vitest's fake
+ * timers it does not fire however far the clock is advanced (verified — 60 s of fake time
+ * leaves `signal.aborted` false), so the one test that has to prove a stalled read is
+ * given up on could not drive it, and the timeout would be the one thing in this effect
+ * no test could reach. Composing it also gives the timer a handle to clear, so a read
+ * that answers promptly leaves nothing pending.
+ *
+ * It is longer than {@link URL_REFRESH_MIN_GAP_MS} and far shorter than the 20 minutes a
+ * signed URL lives: a give-up costs one wasted read and the next tick, while an
+ * unanswered one costs every URL on screen.
+ */
+const URL_REFRESH_TIMEOUT_MS = 30_000;
+
 const LOST_JOB_MESSAGE =
   "Run was interrupted (the pipeline API restarted before it finished). Showing the last saved result; run again to regenerate.";
 
@@ -349,8 +366,16 @@ export function normalizeRunResult(result: RunResult): RunResult {
 export async function fetchPersistedRun(
   campaignId: string,
   slug?: string,
+  signal?: AbortSignal,
 ): Promise<RunResult | null> {
-  const res = await fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(campaignId)}`);
+  const res = await fetch(`${API}/campaigns/result?campaignId=${encodeURIComponent(campaignId)}`, {
+    // Omitted entirely when there is no signal, so every existing caller sends exactly
+    // the init it sent before. Only the signed-URL refresh passes one (PT-4g3): a
+    // request that never settles would hold `inFlight` for ever, and a read that never
+    // finishes is a read whose URLs never get renewed — the grid would sit on expiring
+    // signatures with no tick left to replace them.
+    ...(signal === undefined ? {} : { signal }),
+  });
   if (res.status === 404) return null;
   if (!res.ok) {
     const raw = await res.text();
@@ -668,6 +693,61 @@ function sameReport(issued: RunResult, read: RunResult): boolean {
     JSON.stringify({ ...issued, assets: withoutUrls(issued.assets) }) ===
     JSON.stringify({ ...read, assets: withoutUrls(read.assets ?? []) })
   );
+}
+
+/**
+ * The URLs a re-read DID renew, kept beside the report it would produce (PT-4g3).
+ *
+ * `renewed` is the count of fields that actually moved, and it is what separates "this
+ * read gave me fresher signatures" from "this read told me nothing new" — which includes
+ * both a wholly unsigned answer and one that repeated the URLs already on screen because
+ * both reads landed inside the same signing window (D204). Only the first is a read.
+ */
+interface RenewedUrls {
+  readonly result: RunResult;
+  readonly renewed: number;
+}
+
+/**
+ * Take a re-read's URLs ROW BY ROW and FIELD BY FIELD, keeping the ones it does not
+ * carry (PT-4g3).
+ *
+ * **Per field, not per report, because signing fails per field.** `urlFields` in
+ * `signed-urls.ts` signs each of the seven fields on its own and omits only the ones it
+ * could not (a refused path, a store that would not sign) — so a single stalled row, a
+ * single refused path, answers 200 with that ONE `*Url` missing. Committing `d` whole
+ * would take that creative's poster, and its download link, off the screen and leave them
+ * there until the next tick, which is exactly the failure a row-by-row merge removes.
+ * Every other field still comes from `d`, so a healed bucket replaces everything at once.
+ *
+ * **Row pairing is by index, and index pairing is SOUND here because this is only ever
+ * called after {@link sameReport} returned true.** That is a whole-report comparison with
+ * the URL keys removed, so the two `assets` arrays have the same length and the same
+ * non-URL content in the same positions — there is nothing to match on but the position.
+ *
+ * A field the read omits, or repeats byte for byte, is left alone: `renewed` counts only
+ * what moved, so a read inside one signing window renews nothing and the caller keeps the
+ * screen and its `lastReadAt` exactly as they were.
+ */
+function renewAssetUrls(issued: RunResult, read: RunResult): RenewedUrls {
+  let renewed = 0;
+  const assets = (issued.assets ?? []).map((a, index) => {
+    const fresh = read.assets?.[index];
+    // A shorter read cannot pair up. `sameReport` says it cannot happen; an untrusted
+    // report says better than a type does, so the row is kept whole rather than guessed at.
+    if (fresh === undefined) return a;
+    // Built only if something moved, so an unchanged read commits no new object at all.
+    let row: Asset | undefined;
+    for (const field of ASSET_URL_FIELDS) {
+      const value = fresh[field];
+      if (typeof value !== "string" || value === "" || value === a[field]) continue;
+      row ??= { ...a };
+      row[field] = value;
+      renewed += 1;
+    }
+    return row ?? a;
+  });
+  return { result: { ...issued, assets }, renewed };
 }
 
 /** Canvas raster + encode budget per frame (wave-4 perf spike), for the encode estimate. */
@@ -1768,14 +1848,30 @@ export function RunProvider({ children }: { children: ReactNode }) {
       const owned = runSeq.current;
       inFlight = true;
       let deniedMembership = false;
+      /**
+       * A read that never settles is a read whose URLs never get renewed, so this one is
+       * given up on after {@link URL_REFRESH_TIMEOUT_MS}. The abort REJECTS the fetch
+       * (which is how a real `fetch` behaves), the `.catch` below reads it as any other
+       * non-membership failure, and the `finally` re-arms — so a stalled request costs one
+       * tick, not the remaining life of every signature on screen.
+       *
+       * Composed rather than `AbortSignal.timeout` because that one is not drivable by a
+       * fake clock, which would leave this the only line in the effect no test could
+       * reach; the trade is a timer to clear, and the `finally` clears it on every path.
+       */
+      const giveUp = new AbortController();
+      const giveUpTimer = setTimeout(() => giveUp.abort(), URL_REFRESH_TIMEOUT_MS);
       try {
         // The same call and the same argument `adoptJob` commits a completed job from
         // (D213) — `result.get` is the only route that signs, so it is also the only
-        // route a refresh can learn fresher signatures from.
-        const d = await fetchPersistedRun(issued.target.id).catch((err) => {
-          if (isNoMembershipError(err)) deniedMembership = true;
-          return null;
-        });
+        // route a refresh can learn fresher signatures from. The slug is left undefined:
+        // this names the campaign by the id its own target recorded (R6).
+        const d = await fetchPersistedRun(issued.target.id, undefined, giveUp.signal).catch(
+          (err) => {
+            if (isNoMembershipError(err)) deniedMembership = true;
+            return null;
+          },
+        );
         // Four answers, and a read that settles into any of the first three commits
         // nothing: gone (no provider), superseded (this arming was cleaned up), owned by
         // a run that started or a campaign that changed since the read went out, or
@@ -1817,17 +1913,28 @@ export function RunProvider({ children }: { children: ReactNode }) {
            * is still the one on screen until the job writes its own (`generate.post.ts`
            * writes the report, THEN completes the job).
            *
-           * A signing OUTAGE — not a change of report. The server answers 200 with every
-           * `*Url` omitted when it cannot sign (`signed-urls.ts`'s `signingFailure`), and
-           * stripping URLs is exactly what `sameReport` does, so that answer arrives here
-           * as "the same report with no URLs". Committing it would take every `src` and
-           * `href` off the screen AND stand the refresh down for good: `holdsExpiringUrls`
-           * would turn false, the effect would return before arming, and no later tick
-           * would ever come. A bucket outage would blank the grid permanently on the
-           * strength of one 200. So the read is kept and nothing is claimed — the
-           // `finally` re-arms, and the next tick either heals or says so again.
+           * A signing OUTAGE — not a change of report. The server answers 200 with a
+           * `*Url` omitted for any field it could not sign (`signed-urls.ts` signs per
+           * field), and stripping URLs is exactly what `sameReport` does, so such an answer
+           * arrives here as "the same report with fewer URLs". `renewAssetUrls` therefore
+           * merges ROW BY ROW and FIELD BY FIELD: a wholly unsigned answer keeps every
+           * old URL, a partly signed one keeps the ones the store would not re-sign and
+           * takes the rest. Committing `d` whole would take working rows off the screen
+           * and — for a whole-report outage — stand the refresh down for good, because
+           * `holdsExpiringUrls` would turn false, the effect would return before arming,
+           * and no later tick would ever come. A bucket outage would blank the grid
+           * permanently on the strength of one 200.
            */
-          if (!holdsExpiringUrls(d)) return;
+          // A successful read is proof of membership, as in `adoptJob`'s re-read (F6) —
+          // and it is proof on ANY 200, signed or not, so this comes BEFORE the checks
+          // below: a healed membership must not wait on the URLs having been renewed.
+          setMembershipError(null);
+          const merged = renewAssetUrls(issued.result, d);
+          // Nothing was renewed: wholly unsigned, or the read landed inside the same
+          // signing window and returned the bytes already on screen. Keep the screen and
+          // `lastReadAt` — this was not a read — and let the `finally` re-arm, so the
+          // next tick either renews something or says so again.
+          if (merged.renewed === 0) return;
           /**
            * The functional form is the load-bearing half of the identity check, and the
            * `runRef.current` guard above is only its short-circuit.
@@ -1842,9 +1949,9 @@ export function RunProvider({ children }: { children: ReactNode }) {
            * grid. The updater re-tests against the state it is actually applied to, which
            * is the state that decides what the reviewer sees.
            */
-          setRun((prev) => (prev === issued ? { result: d, target: issued.target } : prev));
-          // A successful read is proof of membership, as in `adoptJob`'s re-read (F6).
-          setMembershipError(null);
+          setRun((prev) =>
+            prev === issued ? { result: merged.result, target: issued.target } : prev,
+          );
           lastReadAt = Date.now();
           return;
         }
@@ -1855,6 +1962,27 @@ export function RunProvider({ children }: { children: ReactNode }) {
          * expiring URLs for a report nobody is showing any more, forever.
          */
         if (loadingRef.current) return;
+        // A signing OUTAGE arriving WITH a changed report — the same defect the
+        // same-report branch guards, and the same consequence. `d` still carries ROWS but
+        // no expiring URL among them while the report on screen has them, so committing
+        // it hands the grid creatives with no links at all AND stands this effect down for
+        // good: `holdsExpiringUrls` would be false of the committed run, so nothing would
+        // ever re-read, and only a reload would bring the links back. Keep the screen, let
+        // the `finally` re-arm, and let the next signed read commit the changed report —
+        // which is still the right report.
+        //
+        // **The row count is what separates that from a report that genuinely has no
+        // creatives.** A halted, log-only run (`fetchPersistedRun` accepts one, with no
+        // `assets` key at all) is a real change of report and nothing to sign, so it IS
+        // committed — and standing down afterwards is right, because an empty grid has no
+        // URLs left to refresh. "No URL" and "no row" are different facts, and only the
+        // second one means there is nothing to sign.
+        if (
+          (d.assets?.length ?? 0) > 0 &&
+          holdsExpiringUrls(issued.result) &&
+          !holdsExpiringUrls(d)
+        )
+          return;
         // Committed exactly as `adoptJob`'s full-run branch does, because it IS one.
         setDecisions({});
         setRun({ result: d, target: issued.target });
@@ -1863,6 +1991,9 @@ export function RunProvider({ children }: { children: ReactNode }) {
         setMembershipError(null);
         lastReadAt = Date.now();
       } finally {
+        // Before anything else, so no path through this `finally` can leave a 30-second
+        // timer pending over a read that has already answered.
+        clearTimeout(giveUpTimer);
         inFlight = false;
         lastAttemptAt = Date.now();
         // The next attempt is a full interval from the moment this read SETTLED, never
