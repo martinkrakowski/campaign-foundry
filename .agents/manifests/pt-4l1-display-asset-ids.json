@@ -91,7 +91,7 @@
       "file": "apps/web/src/components/campaign/sections/ProductsSection.tsx",
       "before": "  const entry = listing?.find((candidate) => candidate.name === name);",
       "after": "  const entry = (undefined as readonly AssetEntry[] | undefined)?.find(\n    (candidate) => candidate.name === name,\n  );",
-      "because": "PT-4l1 fix round 1, item 1: the 409 path stops reading the loaded listing, so it can only answer with today's path. A literal \"fetch it again\" edit is NOT expressible as one mutation here and the difference is worth stating: reintroducing the request needs the `listAssets` import back AND the call site awaiting, and those are two edit sites while this tool replaces one contiguous block - while the one-site version that awaits does not compile (a Promise<string> assigned to `logoPath`). So the compilable single-edit form of the same regression is anchored here, and it is caught by the test whose subject is the answer the no-request rule depends on. FAILS ON: expect(dispatch).toHaveBeenCalledWith({ ... patch: { logoPath: id } ... }) — apps/web/src/components/campaign/__tests__/sections.test.tsx, receiving today's path instead of the id.",
+      "because": "PT-4l1 fix round 1, item 1: the 409 path stops reading the loaded listing, so it can only answer with today's path - the input the no-request rule depends on. An earlier version of this entry claimed a refetch could not be expressed as one mutation here; that was wrong. Fable was right that the dispatch block sits inside the async `onLogoFile`, so a dynamic `await import` reintroduces the request without touching the import line - mutation 9 does exactly that. This one keeps the compilable single-site form, which is a different defect and is caught by a different test. FAILS ON: expect(dispatch).toHaveBeenCalledWith({ ... patch: { logoPath: id } ... }) - apps/web/src/components/campaign/__tests__/sections.test.tsx, receiving today's path instead of the id.",
       "command": [
         "yarn",
         "vitest",
@@ -108,7 +108,7 @@
       "file": "apps/web/src/lib/asset-refs.ts",
       "before": "  if (entry === undefined) {\n    return refetching\n      ? { label: messages.assetPending, state: \"pending\" }\n      : { label: messages.assetUnavailable, state: \"unavailable\" };\n  }",
       "after": "  if (entry === undefined) return { label: messages.assetUnavailable, state: \"unavailable\" };",
-      "because": "PT-4l1 fix round 1, item 2: the pending check ignores the fetch in flight, so an id picked mid-session reads \"Unavailable asset\" for the length of a round trip - a settled verdict the data has not delivered. FAILS ON: expect(screen.getByText(messages.assetPending)).toBeTruthy(); — apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx, Unable to find an element with the text: Loading asset…. The same assertion, restated at the helper, is in apps/web/src/lib/__tests__/asset-refs.test.ts.",
+      "because": "PT-4l1 fix round 1, item 2: the pending check ignores the fetch in flight, so an id picked mid-session reads \"Unavailable asset\" for the length of a round trip - a settled verdict the data has not delivered. FAILS ON: expect(screen.getByText(messages.assetPending)).toBeTruthy(); - apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx, Unable to find an element with the text: Loading asset…. The same claim restated at the helper now really does exist: `a refetch in flight reads pending; only a settled listing may say unavailable` in apps/web/src/lib/__tests__/asset-refs.test.ts, added in fix round 2 because this entry had asserted it and it did not.",
       "command": [
         "yarn",
         "vitest",
@@ -123,8 +123,8 @@
     },
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
-      "before": "      .then((res) => {\n        if (!cancelled) {\n          setCampaignAssets(res.assets);\n          setAssetsRefetching(false);\n        }\n      })",
-      "after": "      .then((res) => {\n        setCampaignAssets(res.assets);\n        setAssetsRefetching(false);\n      })",
+      "before": "      .then((res) => {\n        if (!cancelled) {\n          setStoredAssets({ briefId: state.briefId, assets: res.assets });\n          setAssetsRefetching(false);\n        }\n      })",
+      "after": "      .then((res) => {\n        setStoredAssets({ briefId: state.briefId, assets: res.assets });\n        setAssetsRefetching(false);\n      })",
       "because": "PT-4l1 fix round 1, item 4: the `cancelled` guard on the resolve side, which used to be asserted only as an aborted signal. A listing that answers after the editor has left the campaign would install itself over the new campaign's, and every id in it would read \"Unavailable asset\" for good - until the gate noticed the missing entry and re-asked, which REPAIRS the label and so hides the wrong write behind a good one. The test holds that repair fetch open so the wrong write is visible rather than self-healing. FAILS ON: expect(screen.getByText(\"next-logo.png\")).toBeTruthy(); - apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx, TestingLibraryElementError: Unable to find an element with the text: next-logo.png.",
       "command": [
         "yarn",
@@ -135,6 +135,40 @@
         "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
         "-t",
         "a listing that lands after a campaign switch does not overwrite the new one"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/sections/ProductsSection.tsx",
+      "before": "        dispatch({\n          type: \"setProduct\",\n          key,\n          patch: { logoPath: refForExistingAsset(state.briefId, name, assets) },\n        });",
+      "after": "        const { assets: fresh } = await (await import(\"@/lib/briefs-api\")).listAssets(\n          state.briefId,\n        );\n        dispatch({\n          type: \"setProduct\",\n          key,\n          patch: { logoPath: refForExistingAsset(state.briefId, name, fresh) },\n        });",
+      "because": "PT-4l1 fix round 2, item 2: the 409 branch fetches the listing AGAIN. The dynamic import is what makes this one mutation rather than two - it reintroduces the request without editing the import line, and `onLogoFile` is already async so nothing else has to change. On the filesystem backend this is a request the host never made before this lane, for an answer that cannot contain an id. FAILS ON: expect(vi.mocked(globalThis.fetch).mock.calls.map((c) => String(c[0]))).toEqual([\n        `${API}/campaigns/assets`,\n      ]) - apps/web/src/components/campaign/__tests__/sections.test.tsx, AssertionError: expected [ ...(2) ] to deeply equal [ '/api/pipeline/campaigns/assets' ]. The two URLs are the POST that was refused and the GET that re-asks for an answer it did not need..",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/sections.test.tsx",
+        "-t",
+        "a 409 on fs makes no request beyond the refused POST"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "  const campaignAssets = storedAssets?.briefId === state.briefId ? storedAssets.assets : undefined;",
+      "after": "  const campaignAssets = storedAssets?.assets;",
+      "because": "PT-4l1 fix round 2, item 1: the listing is no longer checked against the campaign on screen, so a route change leaves the previous campaign's listing in the editor's hands and it is read as the new one's. The 409 branch matches by NAME, so it can then store the previous campaign's asset id - a ref naming a row in another campaign, which the server 404s on the next read. FAILS ON: await waitFor(() => expect(logoMirror()?.value).toBe(`assets/inputs/b/${NAME}`)); - apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx, AssertionError: expected '3f2504e0-4f89-41d3-9a0c-0305e82c3301' to be 'assets/inputs/b/alpha-logo.png'. That uuid is campaign A's asset, stored into campaign B's logoPath; the server 404s on it at the next read..",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a 409 in the second campaign stores its path, never the first campaign's id"
       ],
       "verdict": "caught"
     }

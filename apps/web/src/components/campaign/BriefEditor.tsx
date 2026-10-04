@@ -641,7 +641,20 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    * a path-only brief asks nothing and every fs request sequence in the suite is
    * unchanged — see the gate below.
    */
-  const [campaignAssets, setCampaignAssets] = useState<AssetEntry[] | undefined>(undefined);
+  const [storedAssets, setStoredAssets] = useState<
+    { briefId: string; assets: AssetEntry[] } | undefined
+  >(undefined);
+  // The listing, but ONLY while it belongs to the campaign on screen. A route
+  // change is a new `briefId` on the SAME instance, so an unscoped listing would
+  // survive the switch and be read as this campaign's: the 409 branch matches by
+  // NAME, so it would answer with the previous campaign's asset id and store a ref
+  // naming a row in another campaign — which the server 404s on the next read. And
+  // a first render after the switch would judge this campaign's ids against another
+  // campaign's listing and commit "unavailable" for a frame.
+  //
+  // So the check is here, once, rather than at each of the four readers: everything
+  // downstream takes the derived value and cannot forget to ask whose it is.
+  const campaignAssets = storedAssets?.briefId === state.briefId ? storedAssets.assets : undefined;
   // The draft's asset-id refs, sorted, minus those the listing already resolves.
   // Both halves are primitives, deliberately, and the effect below depends on the
   // JOINED STRING rather than on `state` — see the comment on the effect.
@@ -668,7 +681,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     listAssets(state.briefId, controller.signal)
       .then((res) => {
         if (!cancelled) {
-          setCampaignAssets(res.assets);
+          setStoredAssets({ briefId: state.briefId, assets: res.assets });
           setAssetsRefetching(false);
         }
       })
@@ -676,7 +689,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         // An unreadable listing is an empty one, not an absent one: the display
         // has to leave "Loading…" and the `[]` is what makes it do so.
         if (!cancelled) {
-          setCampaignAssets([]);
+          setStoredAssets({ briefId: state.briefId, assets: [] });
           setAssetsRefetching(false);
         }
       });

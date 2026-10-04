@@ -1,6 +1,7 @@
 import { describe, test, expect } from "vitest";
 import type { AssetEntry } from "@/lib/briefs-api";
 import { assetRefFor, describeAssetRef, isAssetId, refMatchesAsset } from "../asset-refs";
+import * as messages from "@/components/campaign/messages";
 // The same cross-app import `ceiling-parity.test.ts` and `validate.test.ts` make: a
 // mirror tested without the thing it mirrors is exactly the drift these tests exist
 // to catch. `isAssetId` is copied from the API's asset-store port, and if the two
@@ -165,6 +166,31 @@ describe("describeAssetRef", () => {
     // is a field stuck on a promise that already resolved.
     expect(describeAssetRef(ID, undefined).state).toBe("pending");
     expect(describeAssetRef(ID, []).state).toBe("unavailable");
+  });
+
+  // The `refetching` claim at the helper, which the pending label's whole reason
+  // for existing rests on. `listing === undefined` and `refetching` are different
+  // claims — nobody has asked, versus the ask is in flight — and only the second one
+  // is temporary, so only the second one may say "Loading".
+  test("a refetch in flight reads pending; only a settled listing may say unavailable", () => {
+    // Only listings that do NOT hold the id: a listing that holds it has already
+    // resolved it, and no fetch in flight makes that unresolved.
+    for (const listing of [undefined, [], [fsEntry]] as const) {
+      const inFlight = describeAssetRef(ID, listing, true);
+      expect(inFlight.state, JSON.stringify(listing)).toBe("pending");
+      expect(inFlight.label).toBe(messages.assetPending);
+      expect(inFlight.label).not.toContain(ID);
+    }
+    // And with nothing in flight, the same absent ids are a verdict.
+    expect(describeAssetRef(ID, [], false).state).toBe("unavailable");
+    expect(describeAssetRef(ID, [fsEntry], false).state).toBe("unavailable");
+    // A listing that never arrived is pending whatever else is true, because nobody
+    // has asked yet — `refetching` cannot un-ask.
+    expect(describeAssetRef(ID, undefined, false).state).toBe("pending");
+    // A resolved ref is a name either way; the fetch does not change that.
+    expect(describeAssetRef(ID, [s3Entry], true).state).toBe("found");
+    // A path resolves itself, so it is never pending whatever is in flight.
+    expect(describeAssetRef("assets/inputs/camp/x.png", undefined, true).state).toBe("path");
   });
 
   test("two ids resolve independently from one listing", () => {
