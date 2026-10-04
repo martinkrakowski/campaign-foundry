@@ -33,6 +33,15 @@ import { fileURLToPath } from "node:url";
  * named in `STUB_REFUSE_PR` — which is how a refusal lands in the MIDDLE of a
  * run and nowhere else.
  *
+ * `STUB_CHECK_RUNS` replaces that one successful `Build` run with a whole
+ * check-run list, as the JSON the script's own `--jq` projection would have
+ * produced. It is how the verdict tests below put a name beside a cancelled
+ * run, a failure or a skip: the projection keeps only the name, status,
+ * conclusion, completed_at and id, so a fixture written in that shape is read
+ * by the script exactly as the forge's data is. Every fixture must say
+ * `"s":"completed"` — a run that is not completed is counted as pending, and the
+ * poll then sleeps 15s a time until `runMergePrs`'s own 60s timeout.
+ *
  * `TMPDIR` is the harness's own root, and that is load-bearing rather than
  * tidy: the run lock is a directory at `${TMPDIR}/cf-merge-prs.lock`, so a
  * test that inherited the ambient TMPDIR would take the lock real runs on this
@@ -306,9 +315,19 @@ function makeHarness(): Harness {
     '      if [ "$1" = "--jq" ]; then jq="${2:-}"; break; fi',
     "      shift",
     "    done",
+    "    # The count is answered before STUB_CHECK_RUNS is looked at, so the",
+    "    # registration poll settles in one pass whatever the run list says — a",
+    "    # verdict test is about the CONCLUSION read, and making it wait out the",
+    "    # registration poll too would only cost 15s per test.",
     '    case "$jq" in',
     "      *length*) printf '1\\n' ;;",
-    '      *) printf \'[{"n":"Build","s":"completed","c":"success"}]\\n\' ;;',
+    "      # STUB_CHECK_RUNS is the run list itself, verbatim: one JSON array,",
+    "      # or SEVERAL, which is what `gh api --paginate` prints and what the",
+    "      # script's `jq -s` reads join. Written as an `if` on an expansion that",
+    "      # is EMPTY when unset, never as a default INSIDE the expansion: a `}`",
+    "      # inside such a default ends it, and the stub would print half a",
+    "      # fixture instead of a run list.",
+    '      *) if [ -n "${STUB_CHECK_RUNS:-}" ]; then printf \'%s\\n\' "$STUB_CHECK_RUNS"; else printf \'[{"n":"Build","s":"completed","c":"success"}]\\n\'; fi ;;',
     "    esac",
     "    ;;",
     "  *)",
@@ -1811,6 +1830,249 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       // is made removable again — guarded, because the run may have removed it.
       if (existsSync(runTmp)) chmodSync(runTmp, 0o755);
       harness.cleanup();
+    }
+  });
+});
+
+/**
+ * One check NAME has a verdict; a run does not.
+ *
+ * A concurrency group cancels the duplicate of a run, and the cancelled run
+ * stays in the check-runs list beside the run that superseded it — each workflow
+ * run is its own check suite, so the endpoint's default `filter=latest` hides
+ * nothing here. On #661 (head b5cb2cbf) that left a green PR refused twice with
+ * `CHECKS FAILED for #101: Build, Typecheck, Lint & Test`, and the only way out
+ * was `gh run rerun` on a run that had never failed. So the conclusion read
+ * judges a name by its NEWEST non-cancelled run, and a name whose runs are all
+ * cancelled still refuses: cancelling forgives a duplicate, never a workflow
+ * that did not run on this head.
+ */
+describe.skipIf(!hasZsh())("merge-prs.sh — check-run verdicts per name", () => {
+  /** One completed run, in the shape the script's own `--jq` projection keeps. */
+  function run(name: string, conclusion: string, completedAt: string, id: number) {
+    return { n: name, s: "completed", c: conclusion, t: completedAt, id };
+  }
+
+  const BUILD = "Build, Typecheck, Lint & Test";
+  const GOLDENS = "record-goldens";
+  const PR_AGENT = "PR-Agent architecture review";
+
+  /** #661's head b5cb2cbf, run for run: the seven real rows, real ids and times. */
+  const PR_661 = [
+    run(BUILD, "cancelled", "2026-10-03T18:21:22Z", 111262809464),
+    run(BUILD, "success", "2026-10-03T18:45:11Z", 111262813381),
+    run(BUILD, "success", "2026-10-03T18:34:56Z", 111262823658),
+    run(GOLDENS, "skipped", "2026-10-03T18:16:20Z", 111262810366),
+    run(GOLDENS, "skipped", "2026-10-03T18:16:21Z", 111262814031),
+    run(GOLDENS, "skipped", "2026-10-03T18:16:35Z", 111262853347),
+    run(PR_AGENT, "success", "2026-10-03T18:17:37Z", 111262822854),
+  ];
+
+  test("#661: a cancelled run beside two successes of the same check does not refuse the merge", () => {
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_CHECK_RUNS: JSON.stringify(PR_661),
+      });
+
+      // The real row, the real refusal it caused. Before this lane this printed
+      // `CHECKS FAILED for #101: Build, Typecheck, Lint & Test` and exited 1,
+      // on a head whose newest build run had succeeded at 18:45:11Z.
+      expect(result.stdout).toContain("checks green on");
+      expect(result.stdout).not.toContain("CHECKS FAILED");
+      expect(result.status).toBe(0);
+      expect(mergedByStub(harness)).toContain("101");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("a cancelled run that completed AFTER a success of the same check is superseded, not the verdict", () => {
+    // The ordering the sort has to get right, and the one id alone gets wrong:
+    // the cancelled duplicate finished last, so by completed_at it IS the newest
+    // run of the name — and cancelling is a duplicate being superseded, not the
+    // name failing.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_CHECK_RUNS: JSON.stringify([
+          run(BUILD, "success", "2026-10-03T18:34:56Z", 2),
+          run(BUILD, "cancelled", "2026-10-03T18:40:00Z", 1),
+        ]),
+      });
+
+      expect(result.status).toBe(0);
+      expect(mergedByStub(harness)).toContain("101");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("a failure newer than a success of the same check refuses", () => {
+    // Newest decides, which is what "any success" would get wrong. An older
+    // success on the same SHA is not evidence about a later failure.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_CHECK_RUNS: JSON.stringify([
+          run(BUILD, "success", "2026-10-03T18:00:00Z", 1),
+          run(BUILD, "failure", "2026-10-03T18:10:00Z", 2),
+        ]),
+      });
+
+      expect(result.status).toBe(1);
+      expect(mergedByStub(harness)).toBe("");
+      expect(result.stdout).toContain(`CHECKS FAILED for #${PR_ONE.pr}: ${BUILD}`);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("an older failure superseded by a newer success merges", () => {
+    // The same two runs as the refusal above with the conclusions swapped: this
+    // is a flake rerun, and the rerun workflow working is the point of it.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_CHECK_RUNS: JSON.stringify([
+          run(BUILD, "failure", "2026-10-03T18:00:00Z", 1),
+          run(BUILD, "success", "2026-10-03T18:10:00Z", 2),
+        ]),
+      });
+
+      expect(result.status).toBe(0);
+      expect(mergedByStub(harness)).toContain("101");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("a required check whose only runs were cancelled refuses", () => {
+    // Nothing ran on this head: a name whose every run was cancelled has no
+    // verdict but `cancelled`, and the required check is the one name that must
+    // have succeeded. Its recovery is `gh run rerun`, not a merge.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_CHECK_RUNS: JSON.stringify([
+          run(BUILD, "cancelled", "2026-10-03T18:21:22Z", 111262809464),
+          run(BUILD, "cancelled", "2026-10-03T18:40:00Z", 111262823658),
+        ]),
+      });
+
+      expect(result.status).toBe(1);
+      expect(mergedByStub(harness)).toBe("");
+      expect(result.stdout).toContain(`CHECKS FAILED for #${PR_ONE.pr}: ${BUILD}`);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("a non-required check whose only run was cancelled still refuses", () => {
+    // The forgivable case is a cancelled run WITH a sibling, and a bot workflow
+    // cancelled with no replacement is exactly that: it did not run on this
+    // head, and merging on a review that never happened is the same mistake in
+    // a different name.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_CHECK_RUNS: JSON.stringify([
+          run(BUILD, "success", "2026-10-03T18:34:56Z", 2),
+          run(PR_AGENT, "cancelled", "2026-10-03T18:40:00Z", 1),
+        ]),
+      });
+
+      expect(result.status).toBe(1);
+      expect(mergedByStub(harness)).toBe("");
+      // The refusal names the bot and NOT the build. Not asserted as
+      // `not.toContain("Build")`: this path also prints `gh pr checks`, whose
+      // stub output mentions Build on a line of its own.
+      expect(result.stdout).toContain(`CHECKS FAILED for #${PR_ONE.pr}: ${PR_AGENT}`);
+      expect(result.stdout).not.toContain(`CHECKS FAILED for #${PR_ONE.pr}: ${BUILD}`);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("a required check with no success verdict refuses", () => {
+    // Stricter than "not a failure", and it cannot refuse a real merge: the
+    // `ci` job carries no `if:`, so it is never skipped. What it catches is a
+    // build that was skipped or neutralised, which the old read accepted.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_CHECK_RUNS: JSON.stringify([run(BUILD, "skipped", "2026-10-03T18:16:20Z", 1)]),
+      });
+
+      expect(result.status).toBe(1);
+      expect(mergedByStub(harness)).toBe("");
+      expect(result.stdout).toContain(
+        "REQUIRED CHECK (^Build) HAS NO SUCCESSFUL RUN for #101 — not merging",
+      );
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("an all-success set across several names still merges, as before", () => {
+    // The verdict is computed per name, so the ordinary shape has to be
+    // unchanged by it: one run each, one of them skipped, one of them neutral.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_CHECK_RUNS: JSON.stringify([
+          run(BUILD, "success", "2026-10-03T18:34:56Z", 1),
+          run(GOLDENS, "skipped", "2026-10-03T18:16:20Z", 2),
+          run(PR_AGENT, "neutral", "2026-10-03T18:17:37Z", 3),
+        ]),
+      });
+
+      expect(result.stdout).toContain("checks green on");
+      expect(result.status).toBe(0);
+      expect(mergedByStub(harness)).toContain("101");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("the reads join every page's array: a failure on a later page still refuses", () => {
+    // `gh api --paginate` prints ONE JSON array PER PAGE, and the stub prints
+    // STUB_CHECK_RUNS verbatim — so two arrays here are two pages. The failure is
+    // on the second, and nothing on the first mentions it: read one page, this
+    // merges. The stub answers `--paginate` as if the whole list came back at
+    // once, so this proves the reads join, not that gh fetched page 2.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_CHECK_RUNS: [
+          JSON.stringify([run(BUILD, "success", "2026-10-03T18:00:00Z", 1)]),
+          JSON.stringify([run(BUILD, "failure", "2026-10-03T18:10:00Z", 2)]),
+        ].join("\n"),
+      });
+
+      expect(result.status).toBe(1);
+      expect(mergedByStub(harness)).toBe("");
+      expect(result.stdout).toContain(`CHECKS FAILED for #${PR_ONE.pr}: ${BUILD}`);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("an empty run list reads as nothing pending, on the '[]' fallback and on empty input alike", () => {
+    // The `|| echo '[]'` fallback and a page that carried no runs both have to
+    // read as zero pending runs, not as a shell error — an unreadable list must
+    // not read as pending, and must not read as a list either. Asserted on the
+    // program's own output rather than through a run, because through a run the
+    // two are the same number as "no required check registered" and the poll
+    // would sit out its 30 minutes: the shape of a run that tests this is a
+    // timeout, not a verdict. The program is the one scripts/merge-prs.sh runs,
+    // copied rather than imported, so this asserts the read and not a fiction.
+    const pendingProgram = 'add // [] | [.[] | select(.s != "completed")] | length';
+    for (const input of ["[]", ""]) {
+      const read = spawnSync("jq", ["-s", pendingProgram], { input, encoding: "utf8" });
+      expect(read.status, `jq could not read ${JSON.stringify(input)}`).toBe(0);
+      expect(read.stderr).toBe("");
+      expect(read.stdout.trim()).toBe("0");
     }
   });
 });

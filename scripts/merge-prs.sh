@@ -188,6 +188,17 @@ fi
 perl -MPOSIX -e 1 >/dev/null 2>&1 \
   || die "merge-prs: perl with the POSIX module is required — each PR body is launched through 'perl -MPOSIX -e setsid' so a signal can reach the whole process group, and this perl cannot load POSIX"
 
+# jq computes the check-run verdict, and the reads are written so that a jq that
+# is absent is WORSE than a slow refusal: the pending read falls back to
+# `${pending:-1}`, so the conclusion poll would keep waiting — up to 30 minutes —
+# before refusing, and the bad/required_ok reads would only then refuse on their
+# own defaults. Checked here, before the lock is taken, because a missing
+# tool must cost a second, not half an hour of somebody's merge window. jq
+# ships on macOS (1.7.1) and on ubuntu-latest (1.7), and sort_by with two keys
+# and IN() both need >= 1.6, which those are.
+command -v jq >/dev/null 2>&1 \
+  || die "merge-prs: jq is required — the check-run verdict is computed with it"
+
 # ONE RUN AT A TIME. The lock is a directory at ${TMPDIR:-/tmp}/cf-merge-prs.lock
 # holding one file, `pid`, and it is taken by a CANDIDATE DIRECTORY renamed onto
 # that name — the metadata is written first and the rename is the only moment
@@ -416,6 +427,44 @@ release_lock() {
 # The check whose conclusion gates a merge (regex over check-run names). A run that
 # registers instantly — a review bot — must never satisfy the wait on its own.
 REQUIRED_CHECK=${REQUIRED_CHECK:-'^Build'}
+
+# THE CHECK-RUN VERDICT, as one jq program: in, the projected run list; out, one
+# {n: name, c: verdict} per check NAME. It exists because a check NAME is the
+# thing that has a verdict and a RUN is not.
+#
+# Why per name. Observed on #661 (head b5cb2cbf): three runs of the same
+# `Build, Typecheck, Lint & Test` check — 111262809464 `cancelled` (the
+# concurrency group cancelling a duplicate push run, .github/workflows/ci.yml
+# `cancel-in-progress: true`), 111262813381 `success`, 111262823658 `success`.
+# The old read named every run outside success/neutral/skipped, so the cancelled
+# one refused a green PR. `?filter=all` does not help: the endpoint's default
+# `filter=latest` dedupes reruns only WITHIN ONE check suite, and each workflow
+# run is its own suite, so all three stay in the response.
+#
+# Why NEWEST, not "any success". A failure on the same SHA that completes after
+# a success must refuse, and "any success" would merge it. So a name is judged
+# by its newest completed run, ordered by completed_at (ISO-8601 UTC with a Z, so
+# it sorts lexically) with id as the tiebreak — id alone is wrong because
+# completion order does not follow id order (on #661, 111262813381 completed
+# AFTER 111262823658).
+#
+# Why cancelled is skipped. Cancelling is what the concurrency group does to the
+# DUPLICATE of a run, so a cancelled run is superseded by definition: the next
+# newest decides. A name whose runs are ALL cancelled has no run that actually
+# executed on this head, so its verdict is `cancelled` and it refuses — a bot
+# workflow cancelled with no replacement did not run, and its recovery is still
+# `gh run rerun`. The fix forgives a cancelled run only when it has a sibling.
+#
+# `// ""` and `// 0` are defaults, not reality: every row reaching the verdict is
+# completed (the pending gate above guarantees it), so `t` is non-null with
+# GitHub's own data. They exist so the stub fixture in
+# tools/merge-prs/__tests__/merge-prs.test.ts, which carries no t/id, still reads.
+# A newer skipped/neutral run on a NON-required name supersedes an older failure:
+# that is the approved rule. The required check is held to a stricter one — it
+# must end in success, or the run refuses (see REQUIRED CHECK below).
+#
+# sort_by with two keys, and IN(), are jq >= 1.5/1.6.
+CHECK_VERDICTS_JQ='group_by(.n) | map({n: .[0].n, c: ((map(select(.c != "cancelled")) | sort_by(.t // "", .id // 0) | last | .c) // "cancelled")})'
 # How long the review bots get to post on the refreshed head before the merge
 # condition is asked about. Bounded: a bot that has not run yet is invisible to
 # a check-run read, so this waits, but a wave must not be able to stall here.
@@ -583,21 +632,44 @@ pr_body() {
   # had registered at all, and the script declared green beside a `pending` line. The
   # question is never "has everything so far finished" — it is "has the check that gates
   # this repo finished".
+  # What the runs are judged by is per check NAME, not per run: see CHECK_VERDICTS_JQ
+  # above for the case (a concurrency-cancelled duplicate beside a success) that made the
+  # difference, and for why the newest run of a name decides rather than any of them.
   echo "waiting for checks on $head_sha …"
   concluded=0
   for _ in $(seq 1 120); do          # up to ~30 minutes at 15s
-    runs=$(gh api "repos/{owner}/{repo}/commits/$head_sha/check-runs" \
-      --jq '[.check_runs[] | {n:.name, s:.status, c:.conclusion}]' 2>/dev/null || echo '[]')
-    pending=$(printf '%s' "$runs" | python3 -c 'import json,sys;r=json.load(sys.stdin);print(sum(1 for x in r if x["s"]!="completed"))')
-    required=$(printf '%s' "$runs" | python3 -c 'import json,sys,re;r=json.load(sys.stdin);print(sum(1 for x in r if re.search(sys.argv[1],x["n"])))' "$REQUIRED_CHECK")
+    # ONE read serves the poll and the verdict. `per_page=100` is IN THE URL on
+    # purpose: `-f per_page=100` turns the request into a POST, which
+    # `--paginate` refuses, and the `|| echo '[]'` below would then read that
+    # failure as "no runs at all". No `--slurp`: --paginate prints ONE JSON array
+    # PER PAGE, so every consumer below joins the pages with `jq -s` and `add`.
+    runs=$(gh api --paginate "repos/{owner}/{repo}/commits/$head_sha/check-runs?per_page=100" \
+      --jq '[.check_runs[] | {n:.name, s:.status, c:.conclusion, t:.completed_at, id:.id}]' 2>/dev/null || echo '[]')
+    pending=$(printf '%s' "$runs" | jq -s 'add // [] | [.[] | select(.s != "completed")] | length')
+    required=$(printf '%s' "$runs" | jq -s --arg re "$REQUIRED_CHECK" 'add // [] | [.[] | select(.n | test($re))] | length')
     if [ "${pending:-1}" -eq 0 ] && [ "${required:-0}" -gt 0 ]; then
       concluded=1; break
     fi
     sleep 15
   done
   [ "$concluded" -eq 1 ] || { echo "CHECKS STILL PENDING for #$pr after ~30m — not merging"; exit 1 }
-  bad=$(printf '%s' "$runs" | python3 -c 'import json,sys;r=json.load(sys.stdin);print(",".join(x["n"] for x in r if x["c"] not in ("success","neutral","skipped")))')
+  # `add // []` because a slurp of zero pages is null, and null has no length.
+  # Each of these two is CHECKED, and that is the point: pipefail is on, so the
+  # assignment carries jq's status, and jq exits 5 on input it cannot parse. An
+  # unreadable run list is not a green one — the old python3 read raised, `bad`
+  # came back empty and the guard below MERGED. A refusal is the only safe
+  # answer to a list this script could not read.
+  bad=$(printf '%s' "$runs" | jq -rs 'add // [] | '"$CHECK_VERDICTS_JQ"' | map(select(.c | IN("success","neutral","skipped") | not) | .n) | join(",")') \
+    || { echo "CHECKS COULD NOT BE JUDGED for #$pr — not merging"; exit 1 }
   [ -z "$bad" ] || { echo "CHECKS FAILED for #$pr: $bad"; gh pr checks "$pr"; exit 1 }
+  # Stricter than "not a failure": the required check must have ended in SUCCESS.
+  # A skipped required check is not evidence that this head was built, and the
+  # `ci` job has no `if:` so a skip here means something else went wrong. This
+  # cannot change a real merge; it can only refuse one that the list above let
+  # through.
+  required_ok=$(printf '%s' "$runs" | jq -s --arg re "$REQUIRED_CHECK" 'add // [] | '"$CHECK_VERDICTS_JQ"' | map(select((.n | test($re)) and .c == "success")) | length') \
+    || { echo "CHECKS COULD NOT BE JUDGED for #$pr — not merging"; exit 1 }
+  [ "${required_ok:-0}" -gt 0 ] || { echo "REQUIRED CHECK ($REQUIRED_CHECK) HAS NO SUCCESSFUL RUN for #$pr — not merging"; gh pr checks "$pr"; exit 1 }
   echo "checks green on $head_sha"; gh pr checks "$pr" 2>&1 | tail -3
 
   # Give the review bots a bounded window to post on THIS head. A check-run
@@ -1010,10 +1082,11 @@ for spec in "$@"; do
       refused)
         refused_count=$((refused_count + 1))
         # The last non-blank line this PR wrote to stderr is its reason. The
-        # three refusals that report on stdout rather than stderr (no checks
-        # registered, checks still pending, checks failed) have already said
-        # theirs above, so the summary falls back to the exit code rather than
-        # printing a blank where the reason should be.
+        # refusals that report on stdout rather than stderr (no checks
+        # registered, checks still pending, checks failed, checks that could not
+        # be judged, and a required check with no successful run) have already
+        # said theirs above, so the summary falls back to the exit code rather
+        # than printing a blank where the reason should be.
         reason=$(grep -v '^[[:space:]]*$' "$ERR_FILE" | tail -1)
         [[ -n "$reason" ]] || reason="exited $pr_status after saying nothing on stderr"
         RESULTS+=("#$pr ($branch): REFUSED — $reason")
