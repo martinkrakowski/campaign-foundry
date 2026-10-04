@@ -455,16 +455,18 @@ REQUIRED_CHECK=${REQUIRED_CHECK:-'^Build'}
 # workflow cancelled with no replacement did not run, and its recovery is still
 # `gh run rerun`. The fix forgives a cancelled run only when it has a sibling.
 #
-# `// ""` and `// 0` are defaults, not reality: every row reaching the verdict is
-# completed (the pending gate above guarantees it), so `t` is non-null with
-# GitHub's own data. They exist so the stub fixture in
-# tools/merge-prs/__tests__/merge-prs.test.ts, which carries no t/id, still reads.
+# A completed run with no completed_at cannot be ordered, so when a name has
+# more than one run the verdict REFUSES rather than guess: jq errors, and the
+# read below answers "could not be judged". Sorting a null first would let an
+# older success outrank a newer failure, and sorting it last is the mirror hole.
+# GitHub Actions always sets completed_at; a third-party check run POSTed as
+# completed need not. A lone run needs no order, so it is judged as it stands.
 # A newer skipped/neutral run on a NON-required name supersedes an older failure:
 # that is the approved rule. The required check is held to a stricter one — it
 # must end in success, or the run refuses (see REQUIRED CHECK below).
 #
 # sort_by with two keys, and IN(), are jq >= 1.5/1.6.
-CHECK_VERDICTS_JQ='group_by(.n) | map({n: .[0].n, c: ((map(select(.c != "cancelled")) | sort_by(.t // "", .id // 0) | last | .c) // "cancelled")})'
+CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != "cancelled")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error("a run of \(.[0].n) has no completed_at, so which is newest is unknown") else (($r | sort_by(.t, .id // 0) | last | .c) // "cancelled") end)})'
 # The conclusion poll's own bounds, as two variables so a test can ask what
 # happens when the read NEVER succeeds without sitting out half an hour: one
 # attempt, no sleep. The defaults are the real ones — 120 polls at 15s — and the

@@ -2152,6 +2152,27 @@ describe.skipIf(!hasZsh())("merge-prs.sh — check-run verdicts per name", () =>
     }
   });
 
+  test("a completed run with no completed_at, beside another of its name, refuses instead of being ranked oldest", () => {
+    // Defaulting a null completed_at to "" ranks that run OLDEST, so here the
+    // newer failure would be superseded by the older success and the PR would
+    // merge. Neither placement of a null is safe, so the verdict read refuses.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_CHECK_RUNS: JSON.stringify([
+          run(BUILD, "success", "2026-10-03T18:00:00Z", 1),
+          { n: BUILD, s: "completed", c: "failure", t: null, id: 2 },
+        ]),
+      });
+
+      expect(result.status).toBe(1);
+      expect(mergedByStub(harness)).toBe("");
+      expect(result.stdout).toContain(`CHECKS COULD NOT BE JUDGED for #${PR_ONE.pr}`);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
   test("an empty run list reads as nothing pending, on the '[]' fallback and on empty input alike", () => {
     // The `|| echo '[]'` fallback and a page that carried no runs both have to
     // read as zero pending runs, not as a shell error — an unreadable list must

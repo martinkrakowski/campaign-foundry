@@ -4,7 +4,7 @@
   "mutations": [
     {
       "file": "scripts/merge-prs.sh",
-      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map({n: .[0].n, c: ((map(select(.c != \"cancelled\")) | sort_by(.t // \"\", .id // 0) | last | .c) // \"cancelled\")})'",
+      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
       "after": "CHECK_VERDICTS_JQ='map({n: .n, c: .c})'",
       "because": "per-name judging removed, which is the defect the row is about, reduced to one expression: every RUN is its own verdict again, so a run's conclusion is read without asking whether the same check NAME has another run. On #661's head b5cb2cbf that is exactly the read that shipped — the cancelled duplicate of the build check (111262809464, cancelled at 18:21:22Z by its concurrency group) sits beside two successes of the SAME check and the mutant prints `Build, Typecheck, Lint & Test`, so :600 refuses a PR whose newest build run succeeded at 18:45:11Z. The `?filter=all` workaround does not save it: the endpoint dedupes reruns only within one check suite and each workflow run is its own suite, so all three rows are in the response — which is why the test fixture is those three real runs with their real ids and completed_at values rather than an invented shape. Only the #661 test can see this: it is the only fixture with two runs of one name, so a mutant here agrees with every other verdict test by accident — the failure-after-success test refuses either way, and the all-cancelled required check refuses either way",
       "command": [
@@ -21,8 +21,8 @@
     },
     {
       "file": "scripts/merge-prs.sh",
-      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map({n: .[0].n, c: ((map(select(.c != \"cancelled\")) | sort_by(.t // \"\", .id // 0) | last | .c) // \"cancelled\")})'",
-      "after": "CHECK_VERDICTS_JQ='group_by(.n) | map({n: .[0].n, c: (if any(.[]; .c == \"success\") then \"success\" else ((map(select(.c != \"cancelled\")) | sort_by(.t // \"\", .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "after": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if any(.[]; .c == \"success\") then \"success\" elif ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
       "because": "newest replaced by ANY success, which is the second half of the row's original wording (\"taking that name's newest run (or any success)\") and the half the owner ruled out in review: a name with a success at 18:00:00Z and a FAILURE at 18:10:00Z on the same SHA must refuse, and `any(.[]; .c == \"success\")` says success for it. The mutation therefore loses a refusal the script is supposed to make — `bad` comes back empty, the guard passes and the run merges a head whose build failed after it had once passed. Nothing else in the file sees it: the #661 test merges either way, the older-failure-then-newer-success test merges either way (both versions pick the success), and the two all-cancelled tests refuse either way because neither has a success to find. So the failure-newer-than-success test exists for this and is the only place the two programs differ on a merge decision",
       "command": [
         "yarn",
@@ -38,8 +38,8 @@
     },
     {
       "file": "scripts/merge-prs.sh",
-      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map({n: .[0].n, c: ((map(select(.c != \"cancelled\")) | sort_by(.t // \"\", .id // 0) | last | .c) // \"cancelled\")})'",
-      "after": "CHECK_VERDICTS_JQ='group_by(.n) | map({n: .[0].n, c: ((map(select(true)) | sort_by(.t // \"\", .id // 0) | last | .c) // \"cancelled\")})'",
+      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "after": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(true)) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
       "because": "cancelled runs no longer skipped, so a concurrency-cancelled duplicate is treated as the name's verdict whenever it happens to be the newest completion — which is the common shape, because cancelling is what the duplicate-triggering push does AFTER the run it supersedes (on #661 the cancelled row's own workflow run, 37143560251 attempt 1, was superseded by the attempt that succeeded at 18:45:11Z). With `select(true)` the mutant takes that cancelled row, `bad` becomes `Build, Typecheck, Lint & Test` and the green PR is refused again — the exact regression the fix removes. The fixture is built to make the ordering the deciding fact rather than a coincidence of ids: the success is id 2 at 18:34:56Z and the cancelled duplicate is id 1 at 18:40:00Z, so id order and completed_at order disagree and only the sort can get it right. The other verdict tests cannot see this mutation: the #661 test's newest run is a success, and both all-cancelled fixtures refuse under either version",
       "command": [
         "yarn",
@@ -72,8 +72,8 @@
     },
     {
       "file": "scripts/merge-prs.sh",
-      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map({n: .[0].n, c: ((map(select(.c != \"cancelled\")) | sort_by(.t // \"\", .id // 0) | last | .c) // \"cancelled\")})'",
-      "after": "CHECK_VERDICTS_JQ='group_by(.n) | map({n: .[0].n, c: ((map(select(.c != \"cancelled\")) | sort_by(.id // 0) | last | .c) // \"cancelled\")})'",
+      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "after": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.id // 0) | last | .c) // \"cancelled\") end)})'",
       "because": "the verdict sorted by id alone, dropping completed_at as the primary key. It is the wrong order rather than a coarser one: a check suite's ids are handed out when a run is CREATED, not when it finishes, so a run created later can finish earlier — on #661, run 111262813381 (success) completed at 18:45:11Z while the LOWER-numbered 111262823658 completed at 18:34:56Z. The test is the only fixture in the file where the two orders disagree, because every other fixture has ids that agree with completion order and so cannot tell the two keys apart; there the newer failure carries the LOWER id, which id-order reads as the older run and merges. completed_at stays the tiebreak in the honest program because a genuine tie (same second) is decided by the id, which is monotonic",
       "command": [
         "yarn",
@@ -101,6 +101,23 @@
         "tools/merge-prs",
         "-t",
         "fails after printing one page"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "after": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if false then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t // \"\", .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "because": "the guard is disabled and a null completed_at falls back to \"\", the pre-fix default. That ranks the null run OLDEST, so the test's newer failure (t null, id 2) is superseded by the older success, bad comes back empty, and the PR merges; the test's first assertion, expect(result.status).toBe(1), reads 0.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "no completed_at, beside another"
       ],
       "verdict": "caught"
     }
