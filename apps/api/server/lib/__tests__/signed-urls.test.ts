@@ -75,7 +75,7 @@ const PROOF = `${SLUG}/proofs/p1.pdf`;
 /** Distinct bytes per field, so a URL naming another field's key is unmistakable. */
 const bytesFor = (name: string): Uint8Array => new Uint8Array(Buffer.from(name, "utf8"));
 
-/** One row carrying every path the five URL fields are built from. */
+/** One row carrying every path the seven URL fields are built from. */
 const fullRow = (): Record<string, unknown> => ({
   productId: "p1",
   aspectRatio: "1:1",
@@ -246,7 +246,87 @@ describe("signed-urls (PT-4f, D204/D209)", () => {
       expect(row["htmlFallbackUrl"]).toBe(`/api/pipeline/output/${FALLBACK}?v=${revision}`);
       expect(row["htmlBundleUrl"]).toBe(`/api/pipeline/output/${BUNDLE}?v=${revision}`);
       expect(row["proofUrl"]).toBe(`/api/pipeline/output/${PROOF}?v=${revision}`);
+      // D212: the download fields are the same string as their display siblings
+      // here — the full equality is its own named test below, and this only says
+      // the two new keys ride the same route and the same revision.
+      expect(row["outputDownloadUrl"]).toBe(row["outputUrl"]);
+      expect(row["videoDownloadUrl"]).toBe(row["videoUrl"]);
       // fs mints no URL for the store to have signed, so it was never asked.
+      expect(presign).not.toHaveBeenCalled();
+    });
+
+    /**
+     * D212: on fs the download fields ARE the display fields, byte for byte.
+     *
+     * **The asymmetry with s3 is the whole reason this is a test and not a
+     * comment.** Under `s3` a cross-origin `<a download>` is ignored, so a
+     * download needs a second, disposition-signed signature. On fs the URL is
+     * same-origin, `download` works, and there is no store to sign a second
+     * signature with — so a second field that differed here would be a URL the
+     * server can only answer correctly by accident (a `?disposition=` the output
+     * route ignores today). Stated `toBe`, with and without a stored revision,
+     * because a revision is the only query either string can carry.
+     */
+    test("on fs the download fields are byte-for-byte outputUrl/videoUrl", async () => {
+      delete process.env.OBJECT_STORE;
+      const presign = vi.spyOn(store, "presignGet");
+
+      // WITH a stored revision: both carry it once, and each download field is
+      // `toBe` its display sibling rather than merely equivalent.
+      await writeReport(LOCAL_TENANT, resultWith(SLUG, fullRow()));
+      const revision = (await reportRevision(LOCAL_TENANT, SLUG))!;
+      const withRevision = (await withAssetUrls(
+        LOCAL_TENANT,
+        await storedReportOf(SLUG),
+        target,
+      )) as Answered;
+      const row = withRevision.assets[0]!;
+      expect(row["outputDownloadUrl"]).toBe(row["outputUrl"]);
+      expect(row["videoDownloadUrl"]).toBe(row["videoUrl"]);
+      // Not "equal enough": one query, on the display field, and it is the revision.
+      expect(row["outputUrl"]).toBe(`/api/pipeline/output/${OUTPUT}?v=${revision}`);
+      expect(row["outputDownloadUrl"]).toBe(`/api/pipeline/output/${OUTPUT}?v=${revision}`);
+      // The disposition never reaches an fs URL: there is no header to put it in.
+      for (const field of ["outputDownloadUrl", "videoDownloadUrl", "proofUrl"]) {
+        expect(row[field], field).not.toContain("disposition");
+      }
+
+      // WITHOUT a stored revision: no query on either, and the equality holds.
+      const withoutRevision = (await withAssetUrls(
+        LOCAL_TENANT,
+        resultWith("no-such-report", fullRow()),
+        { slug: "no-such-report", campaignId: undefined },
+      )) as Answered;
+      const bare = withoutRevision.assets[0]!;
+      expect(bare["outputUrl"]).toBe(`/api/pipeline/output/${OUTPUT}`);
+      expect(bare["outputDownloadUrl"]).toBe(bare["outputUrl"]);
+      expect(bare["videoDownloadUrl"]).toBe(bare["videoUrl"]);
+
+      // A static row has no mp4, so it has no video download either — the field
+      // comes from `videoPath`, and there is nothing to name.
+      const staticRow = (await withAssetUrls(
+        LOCAL_TENANT,
+        {
+          assets: [
+            {
+              productId: "p1",
+              outputPath: OUTPUT,
+              videoPath: undefined,
+              htmlFallbackPath: undefined,
+              htmlBundlePath: undefined,
+              proofPath: undefined,
+            },
+          ],
+        },
+        { slug: SLUG, campaignId: undefined },
+      )) as Answered;
+      expect(staticRow.assets[0]!["outputDownloadUrl"]).toBe(staticRow.assets[0]!["outputUrl"]);
+      expect(staticRow.assets[0]!["videoDownloadUrl"]).toBeUndefined();
+      expect(Object.keys(staticRow.assets[0]!).filter((key) => key.endsWith("Url"))).toStrictEqual([
+        "outputUrl",
+        "outputDownloadUrl",
+      ]);
+      // Nothing anywhere in this test asked the store to sign anything.
       expect(presign).not.toHaveBeenCalled();
     });
 
@@ -370,9 +450,18 @@ describe("signed-urls (PT-4f, D204/D209)", () => {
     ): Promise<string> {
       // Every field is read off whichever raw row key names `path`, so this is the
       // row shape a report really carries — the `*Url` key beside it is what the
-      // field table looks its path up by.
+      // field table looks its path up by. D212's two download fields read off the
+      // SAME paths as their display siblings, which the field-name rule cannot
+      // express on its own (`outputDownloadPath` is not a key any row carries), so
+      // those pairings are named here rather than derived.
       const row: Record<string, unknown> = { productId: "p1" };
-      row[field === "outputUrl" ? "outputPath" : `${field.replace(/Url$/, "")}Path`] = path;
+      row[
+        field === "outputUrl" || field === "outputDownloadUrl"
+          ? "outputPath"
+          : field === "videoDownloadUrl"
+            ? "videoPath"
+            : `${field.replace(/Url$/, "")}Path`
+      ] = path;
       const out = (await withAssetUrls(LOCAL_TENANT, { assets: [row] }, target)) as Answered;
       const url = out.assets[0]![field]!;
 
@@ -428,6 +517,191 @@ describe("signed-urls (PT-4f, D204/D209)", () => {
       expect(new URL(url).searchParams.get("response-content-disposition")).toBe(
         'attachment; filename="index.html"',
       );
+    });
+
+    /**
+     * D212: the two download fields, under `s3`.
+     *
+     * **A download and a display are two intents against one object, so they get
+     * two names and two signatures.** `<a download>` is ignored for a
+     * cross-origin target and a presigned URL is on the store's origin by
+     * definition, so the browser's own attribute cannot survive the trip — the
+     * disposition in the signature is the store's own answer, and it is the ONLY
+     * thing making the button a download. Everything else here (the same window,
+     * the same expiry, the same signed `v`) is what keeps the second signature
+     * from becoming a second browser cache entry per report revision.
+     */
+    describe("the D212 download fields", () => {
+      test("outputDownloadUrl: attachment under the path's own last segment (D212)", async () => {
+        const keys = await exportedKeys();
+        const url = await fieldUnder("outputDownloadUrl", OUTPUT, keys);
+        const parsed = new URL(url);
+        // The path is `<slug>/p1/1x1.png`, so the filename is the PNG's own name and
+        // not the campaign's or the product's — which is what a user saving two
+        // creatives from one campaign ends up with on disk.
+        expect(parsed.searchParams.get("response-content-disposition")).toBe(
+          'attachment; filename="1x1.png"',
+        );
+        // Same window, same expiry, same version as the display field beside it, so
+        // the two are one cache entry's worth of signing rather than two clocks.
+        expect(parsed.searchParams.get("X-Amz-Expires")).toBe("1200");
+        expect(parsed.pathname).toContain(`/${BUCKET}/${RENDERS}`);
+        // And it is NOT the display URL: a client that reused `outputUrl` here
+        // would pass every assertion above and still open the PNG in a new tab.
+        expect(url).not.toBe(await fieldUnder("outputUrl", OUTPUT, keys));
+      });
+
+      test("videoDownloadUrl: attachment under the mp4's own last segment (D212)", async () => {
+        const keys = await exportedKeys();
+        const url = await fieldUnder("videoDownloadUrl", VIDEO, keys);
+        expect(new URL(url).searchParams.get("response-content-disposition")).toBe(
+          'attachment; filename="1x1.mp4"',
+        );
+        expect(url).not.toBe(await fieldUnder("videoUrl", VIDEO, keys));
+      });
+
+      test("both carry the same signed `v` as outputUrl — one revision, not two", async () => {
+        await writeReport(LOCAL_TENANT, resultWith(SLUG, fullRow()));
+        const revision = (await reportRevision(LOCAL_TENANT, SLUG))!;
+        const row = (
+          (await withAssetUrls(LOCAL_TENANT, await storedReportOf(SLUG), target)) as Answered
+        ).assets[0]!;
+
+        const v = new URL(row["outputUrl"]!).searchParams.get("v");
+        expect(v).toBe(revision);
+        expect(new URL(row["outputDownloadUrl"]!).searchParams.get("v")).toBe(v);
+        expect(new URL(row["videoDownloadUrl"]!).searchParams.get("v")).toBe(v);
+        // Same expiry too: a download that outlived its display sibling by a
+        // different amount would be a link that works on the poster and 403s when
+        // clicked.
+        expect(new URL(row["outputDownloadUrl"]!).searchParams.get("X-Amz-Expires")).toBe(
+          new URL(row["outputUrl"]!).searchParams.get("X-Amz-Expires"),
+        );
+      });
+
+      test("each is identical within one window and different in the next (the window rule)", async () => {
+        vi.setSystemTime(WINDOW_START + MINUTE);
+        const first = (await withAssetUrls(
+          LOCAL_TENANT,
+          { assets: [fullRow()] },
+          target,
+        )) as Answered;
+        vi.setSystemTime(WINDOW_START + 14 * MINUTE);
+        const second = (await withAssetUrls(
+          LOCAL_TENANT,
+          { assets: [fullRow()] },
+          target,
+        )) as Answered;
+        // `toBe`-IDENTICAL within the window: the grid polling every tick must not
+        // mint a new signature for a download link it already handed out.
+        for (const field of ["outputDownloadUrl", "videoDownloadUrl"]) {
+          expect(second.assets[0]![field], field).toBe(first.assets[0]![field]);
+        }
+        // Across the boundary the window moved, so the signature did too — the same
+        // rule `outputUrl` follows, and the reason these fields are appended to
+        // `FIELDS` rather than signed by a second, unwindowed path.
+        vi.setSystemTime(WINDOW_START + SIGNING_WINDOW_MS + 1);
+        const third = (await withAssetUrls(
+          LOCAL_TENANT,
+          { assets: [fullRow()] },
+          target,
+        )) as Answered;
+        for (const field of ["outputDownloadUrl", "videoDownloadUrl"]) {
+          expect(third.assets[0]![field], field).not.toBe(first.assets[0]![field]);
+        }
+      });
+
+      test("both are absent with no campaign uuid, and for a refused path — quietly", async () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        // No uuid: there is no key a download could name, so the field is absent
+        // rather than present and dangling — the same rule every other field follows.
+        const noUuid = (await withAssetUrls(
+          LOCAL_TENANT,
+          { assets: [fullRow()] },
+          {
+            slug: SLUG,
+            campaignId: undefined,
+          },
+        )) as Answered;
+        expect(Object.keys(noUuid.assets[0]!).filter((key) => key.endsWith("Url"))).toStrictEqual(
+          [],
+        );
+
+        // A refused path costs each field and nothing else, silently: three of
+        // `renderObjectKey`'s refusals, and a sibling that still answers both.
+        const refused = (await withAssetUrls(
+          LOCAL_TENANT,
+          {
+            assets: [
+              // No campaign segment.
+              { productId: "p1", outputPath: "p1/1x1.png" },
+              // Another campaign's path, which the segment check refuses.
+              { productId: "p2", videoPath: `${OTHER_SLUG}/p2/1x1.mp4` },
+              // A traversal out of `renders/`.
+              { productId: "p3", outputPath: `${SLUG}/../x.png` },
+              // A sibling that must still answer every field.
+              { productId: "p6", outputPath: OUTPUT, videoPath: VIDEO },
+            ],
+          },
+          target,
+        )) as Answered;
+        for (const row of refused.assets.slice(0, 3)) {
+          expect(row["outputDownloadUrl"]).toBeUndefined();
+          expect(row["videoDownloadUrl"]).toBeUndefined();
+          // The display siblings follow their OWN rule, which is the same refusal —
+          // stated here so "absent" is read as the path's, not as a download
+          // specific gap.
+          expect(row["outputUrl"]).toBeUndefined();
+          expect(row["videoUrl"]).toBeUndefined();
+        }
+        expect(
+          new URL(refused.assets[3]!["outputDownloadUrl"]!).searchParams.get(
+            "response-content-disposition",
+          ),
+        ).toBe('attachment; filename="1x1.png"');
+        expect(
+          new URL(refused.assets[3]!["videoDownloadUrl"]!).searchParams.get(
+            "response-content-disposition",
+          ),
+        ).toBe('attachment; filename="1x1.mp4"');
+        // A refused path is expected, so it is silent — two more fields per row
+        // must not turn that into log noise.
+        expect(resultWarnings(warn)).toStrictEqual([]);
+        warn.mockRestore();
+      });
+
+      test("a static row carries no videoDownloadUrl, and an outage omits both silently", async () => {
+        // No `videoPath`: a static creative has no mp4, so there is nothing to name.
+        const staticRow = (await withAssetUrls(
+          LOCAL_TENANT,
+          { assets: [{ productId: "p1", outputPath: OUTPUT }] },
+          target,
+        )) as Answered;
+        expect(staticRow.assets[0]!["videoDownloadUrl"]).toBeUndefined();
+        expect(staticRow.assets[0]!["outputDownloadUrl"]).toEqual(expect.any(String));
+
+        // A store that CANNOT sign is an outage, not a refusal: the fields are
+        // omitted, the report still answers, and `withAssetUrls` warns once for the
+        // request whatever number of fields hit it.
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        vi.spyOn(store, "presignGet").mockRejectedValue(
+          new Error("The object store could not be reached for presignGet."),
+        );
+        const out = (await withAssetUrls(
+          LOCAL_TENANT,
+          { assets: [fullRow()] },
+          target,
+        )) as Answered;
+        for (const field of ["outputUrl", "videoUrl", "outputDownloadUrl", "videoDownloadUrl"]) {
+          expect(out.assets[0]![field], field).toBeUndefined();
+        }
+        // The row is still the row the caller asked for.
+        expect(out.assets[0]!["outputPath"]).toBe(OUTPUT);
+        expect(resultWarnings(warn)).toStrictEqual([
+          `[result] could not sign asset URLs for ${SLUG}: The object store could not be reached for presignGet.`,
+        ]);
+        warn.mockRestore();
+      });
     });
 
     test("every URL is under THIS caller's org and THIS campaign", async () => {
@@ -623,8 +897,12 @@ describe("signed-urls (PT-4f, D204/D209)", () => {
       )) as Answered;
 
       // Nothing was signed, so nothing could fail, and nothing is logged: a report
-      // with one stale path is not an incident.
-      expect(presign).toHaveBeenCalledTimes(1);
+      // with one stale path is not an incident. TWO calls, not one: the one
+      // surviving row has an output path, and that path is signed twice under s3 —
+      // once to display it (`outputUrl`) and once to download it
+      // (`outputDownloadUrl`). A count of one here would be an assertion about the
+      // field table rather than about silence.
+      expect(presign).toHaveBeenCalledTimes(2);
       expect(resultWarnings(warn)).toStrictEqual([]);
       expect(out.assets.map((row) => row["outputUrl"])).toEqual([
         undefined,
@@ -684,6 +962,8 @@ describe("signed-urls (PT-4f, D204/D209)", () => {
         "htmlFallbackUrl",
         "proofUrl",
         "htmlBundleUrl",
+        "outputDownloadUrl",
+        "videoDownloadUrl",
       ]);
     });
 

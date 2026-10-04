@@ -62,6 +62,27 @@ export interface Asset {
   /** Clip length in seconds — motion assets only. */
   durationSec?: number;
   proofPath?: string;
+  /**
+   * The server's own URL for the PNG, minted by `GET /campaigns/result` (D204).
+   * Absent when the route could not sign one — and never replaced by a
+   * client-built path, which 404s under `s3` (D212/D213).
+   */
+  outputUrl?: string;
+  /** The server's own URL for the mp4 — motion assets only, absent otherwise. */
+  videoUrl?: string;
+  /** The server's own download URL for the PDF, signed `attachment` under `s3`. */
+  proofUrl?: string;
+  /** The server's own download URL for the HTML bundle, signed `attachment`. */
+  htmlBundleUrl?: string;
+  /** The server's own URL for the raster fallback rendition — html assets only. */
+  htmlFallbackUrl?: string;
+  /**
+   * The server's own URL for the PNG as a DOWNLOAD (D212): a separate signature
+   * carrying `attachment`, because `<a download>` is ignored cross-origin.
+   */
+  outputDownloadUrl?: string;
+  /** The server's own URL for the mp4 as a download (D212) — motion assets only. */
+  videoDownloadUrl?: string;
   complianceScore: number;
   passedCompliance: boolean;
   logoApplied: boolean;
@@ -829,124 +850,125 @@ export function RunProvider({ children }: { children: ReactNode }) {
    * brief switches or newer runs. Shared between execute (postGenerate 202/409) and
    * restore (mount effect and setBrief discovering an in-flight run).
    *
-   * `adopted` marks a job this tab never posted (discovered via `fetchRunningJob`,
-   * not started by `execute`'s own POST): this tab does not know whether it was a
-   * full run or a selective re-roll, and a re-roll's own completed payload carries
+   * **Every completed job is committed from a re-read of `GET /campaigns/result`,
+   * never from the job's own payload (D213), and `adoptJob` no longer knows or cares
+   * which caller found the job.** Two reasons, and they are the same reason. The jobs
+   * route returns the job exactly as stored and mints NO `*Url` fields, so a payload
+   * committed from it gives the grid paths and nothing else — every creative on
+   * screen would have to be told where its bytes are by the client, which answers 404
+   * under `s3`. And a re-roll's completed payload (`outcome.result.assets`) carries
    * only the regenerated cells — the server has already merged them into the full
    * persisted report by the time it answers "completed" (`generate.post.ts` writes
-   * the report, then completes the job). Committing the job's payload directly would
-   * replace the whole grid with that partial result, dropping every untouched
-   * creative (greptile "Re-roll adoption drops creatives"). `execute` knows exactly
-   * what it started, so its own call is left unmarked and keeps the old behaviour.
+   * the report, then completes the job) — so committing it directly would replace the
+   * whole grid with that partial result, dropping every untouched creative (greptile
+   * "Re-roll adoption drops creatives"). `result.get` is the one place that signs,
+   * and it signs AFTER its own ownership check, which is why the re-read is the
+   * commit and not a repair on top of one.
    */
-  const adoptJob = useCallback(
-    async (target: CampaignBrief, jobId: string, opts: { adopted?: boolean } = {}) => {
-      setLoading(true);
-      setProgress(null);
-      setError(null);
-      const started = beginRun();
-      const owned = started.seq;
-      try {
-        const outcome = await pollJob(jobId, started.signal, setProgress);
-        if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
-        if (outcome.kind === "lost") {
-          // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
-          // it without pretending it is new: no cache-bust, review decisions kept. It
-          // shares the target's campaign id, so the target is recorded unchanged.
-          // F6: a failed re-read is not "nothing was saved" either — and the
-          // interruption notice below already names the fact and the remedy, so a
-          // failed read keeps that notice instead of being conflated with absence.
-          //
-          // A 403 no_membership on this re-read is the same fact `setBrief` and the
-          // mount restore already name in `membershipError`, never a nameless failed
-          // read — folding it into `null` (as this used to) hid a real membership
-          // denial behind LOST_JOB_MESSAGE (greptile "membership denial is hidden").
-          let deniedMembership = false;
-          const persisted = await fetchPersistedRun(target.id).catch((err) => {
-            if (isNoMembershipError(err)) deniedMembership = true;
-            return null;
-          });
-          if (runSeq.current !== owned) return;
-          if (deniedMembership) {
-            setMembershipError(NO_ORGANISATION_YET_MESSAGE);
-            return;
-          }
-          if (persisted) setRun({ result: persisted, target });
-          setError(LOST_JOB_MESSAGE);
+  const adoptJob = useCallback(async (target: CampaignBrief, jobId: string) => {
+    setLoading(true);
+    setProgress(null);
+    setError(null);
+    const started = beginRun();
+    const owned = started.seq;
+    try {
+      const outcome = await pollJob(jobId, started.signal, setProgress);
+      if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
+      if (outcome.kind === "lost") {
+        // The job vanished mid-run. Whatever is on disk is the *previous* run, so show
+        // it without pretending it is new: no cache-bust, review decisions kept. It
+        // shares the target's campaign id, so the target is recorded unchanged.
+        // F6: a failed re-read is not "nothing was saved" either — and the
+        // interruption notice below already names the fact and the remedy, so a
+        // failed read keeps that notice instead of being conflated with absence.
+        //
+        // A 403 no_membership on this re-read is the same fact `setBrief` and the
+        // mount restore already name in `membershipError`, never a nameless failed
+        // read — folding it into `null` (as this used to) hid a real membership
+        // denial behind LOST_JOB_MESSAGE (greptile "membership denial is hidden").
+        let deniedMembership = false;
+        const persisted = await fetchPersistedRun(target.id).catch((err) => {
+          if (isNoMembershipError(err)) deniedMembership = true;
+          return null;
+        });
+        if (runSeq.current !== owned) return;
+        if (deniedMembership) {
+          setMembershipError(NO_ORGANISATION_YET_MESSAGE);
           return;
         }
-        if (opts.adopted) {
-          // A 403 no_membership on this re-read must read as exactly that, never as
-          // "no run on disk" — folding it into `null` (as this used to) would commit
-          // the job's own (possibly partial, for a re-roll) payload and heal the
-          // notice below, both dishonest when the read that would justify either one
-          // just failed with a membership denial (greptile "membership denial is
-          // hidden").
-          let deniedMembership = false;
-          const persisted = await fetchPersistedRun(target.id).catch((err) => {
-            if (isNoMembershipError(err)) deniedMembership = true;
-            return null;
-          });
-          if (runSeq.current !== owned) return;
-          if (deniedMembership) {
-            // Show the denial, commit nothing, leave the grid exactly as it was.
-            setMembershipError(NO_ORGANISATION_YET_MESSAGE);
-            return;
-          }
-          if (persisted) {
-            // A re-roll's own completed payload (`outcome.result.assets`) carries only
-            // the regenerated cells — strictly fewer than the full persisted report it
-            // was merged into — so the decisions on screen for every untouched cell are
-            // still correct and are kept until the reload below lands (R6). Anything
-            // else (a full run, or a re-roll that happened to touch every visible cell)
-            // means nothing on screen survived, so — exactly like execute()'s own
-            // full-run path further down — decisions are cleared here rather than left
-            // showing old verdicts on new creatives that happen to share their identity
-            // keys if that reload then fails (greptile "Old verdicts remain visible").
-            // `?.length ?? 0` on both sides: `fetchPersistedRun` accepts a report with a
-            // `log` and no `assets` array, and `outcome.result` is an untrusted cast of
-            // the job payload — either missing `assets` would otherwise throw here and
-            // leave a completed run uncommitted (coderabbit).
-            if ((outcome.result.assets?.length ?? 0) >= (persisted.assets?.length ?? 0)) {
-              setDecisions({});
-            }
-            setRun({ result: persisted, target });
-            setAssetVersion((v) => v + 1);
-            setError(null);
-            // A completed, adopted run is proof of membership for this brief (a
-            // 401/403 would have thrown out of pollJob/fetchPersistedRun instead), so
-            // it heals a stale membership error the same way a successful
-            // fetchPersistedRun restore does (F6).
-            setMembershipError(null);
-            return;
-          }
-          // The job just answered "completed", so a failed or empty read here is
-          // F6's "could not ask", never "nothing was saved" — fall through and show
-          // the job's own result rather than leave the grid on whatever it had
-          // before.
-        }
-        // Commit the result beside the brief it actually ran — the draft handed in when
-        // there was one, so every result-scoped action can key off it (R6).
-        setRun({ result: outcome.result, target });
-        setAssetVersion((v) => v + 1);
-        setDecisions({});
-        setError(null); // the result replaces any stale complaint about this run
-        // A completed run is proof of membership (a 401/403 would have thrown out of
-        // postGenerate/pollJob instead), so it heals a stale membership error the same
-        // way a successful fetchPersistedRun does (F6).
-        setMembershipError(null);
-      } catch (e) {
-        if (runSeq.current !== owned) return;
-        setError(e instanceof Error ? e.message : "Generation failed");
-      } finally {
-        if (runSeq.current === owned) {
-          setLoading(false);
-          setProgress(null);
-        }
+        if (persisted) setRun({ result: persisted, target });
+        setError(LOST_JOB_MESSAGE);
+        return;
       }
-    },
-    [],
-  );
+      // A 403 no_membership on this re-read must read as exactly that, never as
+      // "no run on disk" — folding it into `null` would commit the job's own
+      // (possibly partial, for a re-roll) payload and heal the notice below, both
+      // dishonest when the read that would justify either one just failed with a
+      // membership denial (greptile "membership denial is hidden").
+      let deniedMembership = false;
+      const persisted = await fetchPersistedRun(target.id).catch((err) => {
+        if (isNoMembershipError(err)) deniedMembership = true;
+        return null;
+      });
+      if (runSeq.current !== owned) return;
+      if (deniedMembership) {
+        // Show the denial, commit nothing, leave the grid exactly as it was.
+        setMembershipError(NO_ORGANISATION_YET_MESSAGE);
+        return;
+      }
+      if (persisted) {
+        // A re-roll's own completed payload (`outcome.result.assets`) carries only
+        // the regenerated cells — strictly fewer than the full persisted report it
+        // was merged into — so the decisions on screen for every untouched cell are
+        // still correct and are kept until the reload below lands (R6). Anything
+        // else (a full run, or a re-roll that happened to touch every visible cell)
+        // means nothing on screen survived, so — exactly like execute()'s own
+        // full-run path further down — decisions are cleared here rather than left
+        // showing old verdicts on new creatives that happen to share their identity
+        // keys if that reload then fails (greptile "Old verdicts remain visible").
+        // `?.length ?? 0` on both sides: `fetchPersistedRun` accepts a report with a
+        // `log` and no `assets` array, and `outcome.result` is an untrusted cast of
+        // the job payload — either missing `assets` would otherwise throw here and
+        // leave a completed run uncommitted (coderabbit).
+        if ((outcome.result.assets?.length ?? 0) >= (persisted.assets?.length ?? 0)) {
+          setDecisions({});
+        }
+        setRun({ result: persisted, target });
+        setAssetVersion((v) => v + 1);
+        setError(null);
+        // A completed run is proof of membership for this brief (a 401/403 would
+        // have thrown out of pollJob/fetchPersistedRun instead), so it heals a
+        // stale membership error the same way a successful fetchPersistedRun
+        // restore does (F6).
+        setMembershipError(null);
+        return;
+      }
+      // The job just answered "completed", so a failed or empty read here is F6's
+      // "could not ask", never "nothing was saved" — fall through and commit the
+      // job's own result rather than leave the grid on whatever it had before. That
+      // payload carries paths and no `*Url` (the jobs route signs nothing), so what
+      // it renders is the honest degraded state: placeholders, never a client-built
+      // URL (D213).
+      // Commit the result beside the brief it actually ran — the draft handed in when
+      // there was one, so every result-scoped action can key off it (R6).
+      setRun({ result: outcome.result, target });
+      setAssetVersion((v) => v + 1);
+      setDecisions({});
+      setError(null); // the result replaces any stale complaint about this run
+      // A completed run is proof of membership (a 401/403 would have thrown out of
+      // postGenerate/pollJob instead), so it heals a stale membership error the same
+      // way a successful fetchPersistedRun does (F6).
+      setMembershipError(null);
+    } catch (e) {
+      if (runSeq.current !== owned) return;
+      setError(e instanceof Error ? e.message : "Generation failed");
+    } finally {
+      if (runSeq.current === owned) {
+        setLoading(false);
+        setProgress(null);
+      }
+    }
+  }, []);
 
   /**
    * Everything a switch to a different campaign throws away, shared by `setBrief`
@@ -1077,7 +1099,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
               !jobId
             )
               return;
-            void adoptJob(next, jobId, { adopted: true });
+            void adoptJob(next, jobId);
           });
         }
         return;
@@ -1100,7 +1122,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
         if (!mountedRef.current || briefIdRef.current !== next.id || runSeq.current !== owned)
           return; // superseded, or unmounted
         if (jobId) {
-          void adoptJob(next, jobId, { adopted: true });
+          void adoptJob(next, jobId);
           return;
         }
         void fetchPersistedRun(page ? page.fetchId : next.id, page?.slug)
@@ -1338,7 +1360,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // newer run").
       if (superseded()) return;
       if (jobId) {
-        void adoptJob(startBrief, jobId, { adopted: true });
+        void adoptJob(startBrief, jobId);
         return;
       }
       void fetchPersistedRun(startBrief.id)
@@ -1653,33 +1675,65 @@ export function RunProvider({ children }: { children: ReactNode }) {
         return;
       }
       const data = outcome.result;
-      // The response carries only the regenerated cells — overlay them onto the
-      // existing set by identity so approved/pending creatives are preserved. The
-      // recorded target is unchanged: the re-roll ran under exactly that brief.
-      setRun((prev) => {
-        /* istanbul ignore next -- regenerate runs only with an existing run, so prev is non-null */
-        if (prev === null) return prev;
-        const byKey = new Map(prev.result.assets.map((a) => [assetKey(a), a] as const));
-        for (const a of data.assets) byKey.set(assetKey(a), a);
-        return {
-          result: {
-            halted: data.halted,
-            assets: [...byKey.values()],
-            log: data.log,
-            policyHash: data.policyHash ?? prev.result.policyHash,
-            seed: data.seed ?? prev.result.seed,
-          },
-          target: prev.target,
-        };
+      // D213: the same re-read `adoptJob` commits from, and for the same reason —
+      // the jobs route returns the job as stored and mints no `*Url`, so a re-roll
+      // committed from this payload would leave every re-rolled creative with a path
+      // and no URL, which under `s3` is a 404 rather than a poster. The server has
+      // already merged these cells into the full report by the time the job answers
+      // "completed", so the re-read IS the whole merged result.
+      //
+      // **The overlay below is the `else` branch, never what follows the re-read.**
+      // Run after it, `setRun`'s functional updater would still be applied to the
+      // state the re-read committed and would put the URL-less payload back on top of
+      // it — the re-read would pass every assertion on state and be gone from the
+      // screen (Gemini brief review r2).
+      let deniedMembership = false;
+      const persisted = await fetchPersistedRun(target.id).catch((err) => {
+        if (isNoMembershipError(err)) deniedMembership = true;
+        return null;
       });
+      if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
+      if (deniedMembership) {
+        // Show the denial, commit nothing, leave the grid exactly as it was — exactly
+        // as in `adoptJob`, because it is the same read failing for the same reason.
+        setMembershipError(NO_ORGANISATION_YET_MESSAGE);
+        return;
+      }
+      if (persisted) {
+        // The whole server-merged report, beside the recorded target — which is
+        // unchanged: the re-roll ran under exactly that brief, and this is the same
+        // commit `adoptJob`'s re-read makes.
+        setRun({ result: persisted, target });
+      } else {
+        // The re-read could not be asked, or there was nothing on disk (F6: never the
+        // same answer). Overlay the regenerated cells onto the existing set by
+        // identity so approved/pending creatives are preserved — the honest degraded
+        // state, which renders placeholders rather than client-built URLs.
+        setRun((prev) => {
+          /* istanbul ignore next -- regenerate runs only with an existing run, so prev is non-null */
+          if (prev === null) return prev;
+          const byKey = new Map(prev.result.assets.map((a) => [assetKey(a), a] as const));
+          for (const a of data.assets) byKey.set(assetKey(a), a);
+          return {
+            result: {
+              halted: data.halted,
+              assets: [...byKey.values()],
+              log: data.log,
+              policyHash: data.policyHash ?? prev.result.policyHash,
+              seed: data.seed ?? prev.result.seed,
+            },
+            target: prev.target,
+          };
+        });
+      }
       setAssetVersion((v) => v + 1);
       setError(null); // the re-rolled grid replaces any stale complaint about this run
       setMembershipError(null); // a completed re-roll is proof of membership too (F6)
       // Regenerated creatives return to review: clear their (rejected) decisions. The
-      // server retired them at the report write and the reload below is authoritative;
-      // this is the optimistic mirror, so the tiles do not flash their old verdict.
-      // The identity key is unchanged on a variation re-roll (productId/v<index>),
-      // so the tile updates in place.
+      // server retired them at the report write and the re-read above is
+      // authoritative; this is the optimistic mirror, so the tiles do not flash their
+      // old verdict. The identity key is unchanged on a variation re-roll
+      // (productId/v<index>), so the tile updates in place.
       setDecisions((prev) => {
         const next = { ...prev };
         for (const key of targetKeys) delete next[key];

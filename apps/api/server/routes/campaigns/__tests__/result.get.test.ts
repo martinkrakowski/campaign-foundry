@@ -197,6 +197,11 @@ describe("GET /campaigns/result mints a URL per asset (PT-4f, D204/D209)", () =>
         ["htmlFallbackUrl", FALLBACK],
         ["htmlBundleUrl", BUNDLE],
         ["proofUrl", PROOF],
+        // D212: the two download fields name the SAME route and the same path as
+        // their display siblings. fs cannot sign a disposition (there is no store
+        // to sign one for), so the equality is the whole of the fs contract.
+        ["outputDownloadUrl", OUTPUT],
+        ["videoDownloadUrl", VIDEO],
       ] as const) {
         expect(row[field]).toBe(`/api/pipeline/output/${path}?v=${revision}`);
       }
@@ -212,6 +217,8 @@ describe("GET /campaigns/result mints a URL per asset (PT-4f, D204/D209)", () =>
         "htmlFallbackUrl",
         "proofUrl",
         "htmlBundleUrl",
+        "outputDownloadUrl",
+        "videoDownloadUrl",
       ]);
       expect(stored.campaignId).toMatch(CAMPAIGN_ID_PATTERN);
     });
@@ -254,18 +261,23 @@ describe("GET /campaigns/result mints a URL per asset (PT-4f, D204/D209)", () =>
       campaignId = stored.campaignId!;
     });
 
-    test("all five fields are signed under this campaign's own prefix", async () => {
+    test("all seven fields are signed under this campaign's own prefix", async () => {
       await writeReport(LOCAL_TENANT, resultWith(SLUG, fullRow()));
       const body = (await (await ask(LOCAL_TENANT, SLUG)).json()) as Answered;
       const row = body.assets[0]!;
       const prefix = renderPrefix(LOCAL_TENANT.orgId, campaignId);
 
-      expect(Object.keys(row).slice(-5)).toStrictEqual([
+      // `-7` and the two new keys appended: the `*Url` block is position-preserving
+      // (D204), so a download field that quietly took a display field's place — or
+      // an ordering change under a client that reads by index — shows up here.
+      expect(Object.keys(row).slice(-7)).toStrictEqual([
         "outputUrl",
         "videoUrl",
         "htmlFallbackUrl",
         "proofUrl",
         "htmlBundleUrl",
+        "outputDownloadUrl",
+        "videoDownloadUrl",
       ]);
       for (const field of [
         "outputUrl",
@@ -273,6 +285,8 @@ describe("GET /campaigns/result mints a URL per asset (PT-4f, D204/D209)", () =>
         "htmlFallbackUrl",
         "proofUrl",
         "htmlBundleUrl",
+        "outputDownloadUrl",
+        "videoDownloadUrl",
       ]) {
         const parsed = new URL(row[field]!);
         // /<bucket>/org/<orgId>/campaign/<uuid>/renders/<rest> — the key the run's
@@ -287,6 +301,24 @@ describe("GET /campaigns/result mints a URL per asset (PT-4f, D204/D209)", () =>
       expect(new URL(row["htmlBundleUrl"]!).searchParams.get("response-content-disposition")).toBe(
         'attachment; filename="index.html"',
       );
+      // D212: the two download fields attach, each under its own path's last
+      // segment, and they are DIFFERENT strings from the display URLs they were
+      // signed beside — which is what pins that a download button is reading them
+      // rather than reusing `outputUrl` (where `<a download>` is ignored).
+      expect(
+        new URL(row["outputDownloadUrl"]!).searchParams.get("response-content-disposition"),
+      ).toBe('attachment; filename="1x1.png"');
+      expect(
+        new URL(row["videoDownloadUrl"]!).searchParams.get("response-content-disposition"),
+      ).toBe('attachment; filename="1x1.mp4"');
+      expect(row["outputDownloadUrl"]).not.toBe(row["outputUrl"]);
+      expect(row["videoDownloadUrl"]).not.toBe(row["videoUrl"]);
+      // The display pair still carries NO disposition: an `<img src>` served as an
+      // attachment is a download dialog on a poster.
+      expect(
+        new URL(row["outputUrl"]!).searchParams.get("response-content-disposition"),
+      ).toBeNull();
+      expect(new URL(row["videoUrl"]!).searchParams.get("response-content-disposition")).toBeNull();
     });
 
     test("one window signs one URL and the next window signs another", async () => {
@@ -415,7 +447,10 @@ describe("GET /campaigns/result mints a URL per asset (PT-4f, D204/D209)", () =>
       await writeReport(LOCAL_TENANT, resultWith(SLUG, fullRow()));
       const body = (await (await ask(LOCAL_TENANT, SLUG)).json()) as Answered;
       const signed = Object.entries(body.assets[0]!).filter(([key]) => key.endsWith("Url"));
-      expect(signed.length).toBe(5);
+      // Seven, exactly: five display fields and D212's two attachment fields. A
+      // count rather than a list, so a field that stopped being signed shows up
+      // here even though every key it did sign is under the caller's own org.
+      expect(signed.length).toBe(7);
       for (const [field, url] of signed) {
         expect(new URL(url).pathname, field).toContain(`/org/${LOCAL_TENANT.orgId}/`);
       }
