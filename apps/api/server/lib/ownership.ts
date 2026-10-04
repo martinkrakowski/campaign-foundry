@@ -82,6 +82,17 @@ export async function resolveCampaignRef(scope: StorageScope, ref: string): Prom
  * same as for a typo, and this must let it through unchanged. What it must
  * catch is a request naming another team's real, existing campaign as an
  * asset source to exfiltrate its files into the caller's own campaign.
+ *
+ * **Now the OFF-`s3` branch of `resolveBriefAssetRefs`' `save` mode and nothing
+ * else** (PT-4k2b2, D210 a/d). No route calls it: all four write routes resolve
+ * their refs through that helper, which under `s3` team-checks every ref itself
+ * (an id ref included, which no path-matching could see) and off `s3` calls
+ * this. Both answers have to stay exactly as they were — a plain
+ * `CampaignNotFoundError` naming the SLUG the ref read out, so `duplicate.post`
+ * and `index.post` keep answering `Brief "<slug>" not found.` on fs and pg+fs —
+ * which is why the helper's off-`s3` branch uses THIS and not its own stricter
+ * `assertVisible`. A ref that names no campaign at all is not this function's
+ * business: it has no campaign to be outside of.
  */
 export async function assertSourceVisible(scope: StorageScope, campaignId: string): Promise<void> {
   const briefStore = getBriefStore(scope);
