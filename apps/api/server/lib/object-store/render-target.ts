@@ -59,6 +59,15 @@ export interface RenderTarget {
  * gives: the team rules belong to the routes that gate visibility, and a second
  * copy here would fail a claimed job whose team changed between enqueue and run.
  *
+ * Both branches DO filter a TOMBSTONED campaign (D231's `campaign.deleted_at`):
+ * a deleted campaign is answered `undefined`, exactly as an absent one is, so
+ * nothing keyed under a uuid belonging to one can be written or read. Unlike
+ * team scope this is not a visibility rule that could go stale between enqueue
+ * and run — the campaign is gone by design. The uuid branch still falls THROUGH
+ * that filter rather than returning, for the reason above: a uuid-shaped ref may
+ * be nobody's id and somebody's slug, so a tombstoned id does not rule out the
+ * ref being a live slug.
+ *
  * Under `fs` it answers `undefined` WITHOUT opening the database. Not for speed:
  * a file-backed deployment with no Postgres at all must keep working, and
  * `database()` would open a pool it has no settings for. The `undefined` means
@@ -78,7 +87,7 @@ export async function renderTarget(
   if (objectStore() === "fs") return undefined;
   if (UUID_PATTERN.test(slug)) {
     const { rows } = await database().query<{ id: string }>(
-      `select id, slug from campaign where org_id = $1 and id = $2`,
+      `select id, slug from campaign where org_id = $1 and id = $2 and deleted_at is null`,
       [env.tenant.orgId, slug.toLowerCase()],
     );
     const byId = rows[0];
@@ -87,7 +96,7 @@ export async function renderTarget(
     if (byId !== undefined) return { campaignId: byId.id, slug };
   }
   const { rows } = await database().query<{ id: string }>(
-    `select id, slug from campaign where org_id = $1 and slug = $2`,
+    `select id, slug from campaign where org_id = $1 and slug = $2 and deleted_at is null`,
     [env.tenant.orgId, slug],
   );
   const bySlug = rows[0];

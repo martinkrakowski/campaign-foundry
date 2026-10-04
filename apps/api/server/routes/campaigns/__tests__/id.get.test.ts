@@ -222,7 +222,89 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
       }
     });
 
+    // PT-9a1, D231/D233. Two cases, not one, because `campaignMeta`'s uuid branch and
+    // its slug branch are two queries with two filters, and a single case would pass
+    // on either one alone. The mutation manifest anchors on the by-slug case for
+    // exactly that reason.
     if (backend === "postgres") {
+      test("a tombstoned campaign answers 404 by uuid, indistinguishable from unknown", async () => {
+        const harness = await setup();
+        const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+        try {
+          const created = await mount().create({ name: "Gone", type: "social-post" });
+          const { slug, campaignId } = (await created.json()) as {
+            slug: string;
+            campaignId: string;
+          };
+          expect((await mount().save(sampleBrief(slug))).status).toBe(201);
+          // Served before the tombstone, so the 404 below cannot be an absent row.
+          expect((await mount().get(`/campaigns/${campaignId}`)).status).toBe(200);
+
+          await pgHarness.db.query(
+            `update campaign set deleted_at = now() where org_id = $1 and id = $2`,
+            ["local", campaignId],
+          );
+          const res = await mount().get(`/campaigns/${campaignId}`);
+          expect(res.status).toBe(404);
+          const body = (await res.json()) as { error: string };
+          expect(body.error).toMatch(/gone|not found/i);
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
+      test("a tombstoned campaign answers 404 by slug", async () => {
+        const harness = await setup();
+        const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+        try {
+          const created = await mount().create({ name: "Gone", type: "social-post" });
+          const { slug } = (await created.json()) as { slug: string };
+          expect((await mount().save(sampleBrief(slug))).status).toBe(201);
+          expect((await mount().get(`/campaigns/${slug}`)).status).toBe(200);
+
+          await pgHarness.db.query(
+            `update campaign set deleted_at = now() where org_id = $1 and slug = $2`,
+            ["local", slug],
+          );
+          const res = await mount().get(`/campaigns/${slug}`);
+          expect(res.status).toBe(404);
+          // The same body an unknown ref answers, so a deleted campaign cannot be
+          // told from one that never existed.
+          const body = (await res.json()) as { error: string };
+          expect(body.error).toMatch(/gone/);
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
+      test("a live campaign is served by uuid and by slug after a sibling is tombstoned", async () => {
+        // The unchanged-behaviour control. Both ref shapes, and a live row beside
+        // a tombstoned one in the same org, so a filter that over-reaches (or that
+        // matched on something other than this row) fails here rather than passing
+        // on the 404s above.
+        const harness = await setup();
+        const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+        try {
+          const doomed = await mount().create({ name: "Gone", type: "social-post" });
+          const { slug: gone } = (await doomed.json()) as { slug: string };
+          expect((await mount().save(sampleBrief(gone))).status).toBe(201);
+          await pgHarness.db.query(
+            `update campaign set deleted_at = now() where org_id = $1 and slug = $2`,
+            ["local", gone],
+          );
+          const live = await mount().create({ name: "Live", type: "social-post" });
+          const liveBody = (await live.json()) as { slug: string; campaignId: string };
+          expect((await mount().save(sampleBrief(liveBody.slug))).status).toBe(201);
+
+          expect((await mount().get(`/campaigns/${liveBody.slug}`)).status).toBe(200);
+          const byUuid = await mount().get(`/campaigns/${liveBody.campaignId}`);
+          expect(byUuid.status).toBe(200);
+          expect(((await byUuid.json()) as { slug: string }).slug).toBe(liveBody.slug);
+        } finally {
+          await harness.cleanup();
+        }
+      });
+
       test("a campaign hidden from the caller by team answers 404, indistinguishable from unknown", async () => {
         const harness = await setup();
         const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;

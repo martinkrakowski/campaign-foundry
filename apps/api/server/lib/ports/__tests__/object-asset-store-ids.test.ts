@@ -194,6 +194,26 @@ describe("ObjectAssetStore by id (PT-4k1, D208c)", () => {
       expect(watched.queries()).toBe(0);
     });
 
+    test("an asset of a tombstoned campaign answers no owner (PT-9a1, D231)", async () => {
+      const campaignId = await seedCampaign(db, ORG, SLUG);
+      const written = await assets.writeAsset(SLUG, NAME, PNG);
+      // Live first, so the later answer cannot be an absent row or a lost object:
+      // the ONLY thing that changes is `campaign.deleted_at`, and both the row
+      // and the bytes survive it (D232 step 3 is what sweeps them).
+      expect(await assets.assetOwner(written.id!)).toMatchObject({ campaignId, slug: SLUG });
+      await db.query(`update campaign set deleted_at = now() where org_id = $1 and id = $2`, [
+        ORG,
+        campaignId,
+      ]);
+      expect(await assets.assetOwner(written.id!)).toBeUndefined();
+      // The row is still there — this is absence by policy, not by deletion.
+      const { rows } = await db.query<{ n: number }>(
+        `select count(*)::int as n from asset where org_id = $1 and id = $2`,
+        [ORG, written.id],
+      );
+      expect(rows[0]!.n).toBe(1);
+    });
+
     test("an id no row holds answers undefined", async () => {
       await seedCampaign(db, ORG, SLUG);
       expect(await assets.assetOwner(UNKNOWN_ID)).toBeUndefined();

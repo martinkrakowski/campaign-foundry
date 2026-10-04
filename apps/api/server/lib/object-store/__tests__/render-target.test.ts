@@ -151,7 +151,31 @@ describe("renderTarget", () => {
     await seedCampaign(db, ACME, SLUG, CAMPAIGN);
     const statements = recordStatements(db);
     expect(await renderTarget(envFor(ACME), SLUG)).toEqual({ campaignId: CAMPAIGN, slug: SLUG });
-    expect(statements).toEqual(["select id, slug from campaign where org_id = $1 and slug = $2"]);
+    expect(statements).toEqual([
+      "select id, slug from campaign where org_id = $1 and slug = $2 and deleted_at is null",
+    ]);
+  });
+
+  test("a tombstoned campaign resolves to nothing, by uuid and by slug alike", async () => {
+    // A deleted campaign is ABSENT here, exactly as one that was never created:
+    // `renderTarget` answers "nothing to key by", and a uuid nobody resolves is
+    // the one thing that must not produce a prefix to write renders into. Both
+    // branches are asserted because both carry the filter — the uuid branch
+    // alone would still hand back the row for a slug-addressed run.
+    await seedCampaign(db, ACME, SLUG, CAMPAIGN);
+    await db.query(`update campaign set deleted_at = now() where org_id = $1 and id = $2`, [
+      ACME,
+      CAMPAIGN,
+    ]);
+    expect(await renderTarget(envFor(ACME), CAMPAIGN)).toBeUndefined();
+    expect(await renderTarget(envFor(ACME), SLUG)).toBeUndefined();
+    // The filter is on the ROW, not the slug: GLOBEX holds the same slug in its
+    // own org, and a tombstone in ACME must not reach across and hide it.
+    await seedCampaign(db, GLOBEX, SLUG, OTHER_CAMPAIGN);
+    expect(await renderTarget(envFor(GLOBEX), SLUG)).toEqual({
+      campaignId: OTHER_CAMPAIGN,
+      slug: SLUG,
+    });
   });
 
   test("a uuid matching no row falls back to the slug branch, within this org only (fix 1)", async () => {
@@ -183,8 +207,8 @@ describe("renderTarget", () => {
     // branch runs too. An org id anywhere but $1 would scope nothing at all.
     expect(await renderTarget(envFor(GLOBEX), CAMPAIGN)).toBeUndefined();
     expect(statements).toEqual([
-      "select id, slug from campaign where org_id = $1 and id = $2",
-      "select id, slug from campaign where org_id = $1 and slug = $2",
+      "select id, slug from campaign where org_id = $1 and id = $2 and deleted_at is null",
+      "select id, slug from campaign where org_id = $1 and slug = $2 and deleted_at is null",
     ]);
     // And its own: one statement, the uuid branch, because the slug branch is
     // only reached when the first misses.
@@ -193,7 +217,9 @@ describe("renderTarget", () => {
       campaignId: CAMPAIGN,
       slug: CAMPAIGN,
     });
-    expect(statements).toEqual(["select id, slug from campaign where org_id = $1 and id = $2"]);
+    expect(statements).toEqual([
+      "select id, slug from campaign where org_id = $1 and id = $2 and deleted_at is null",
+    ]);
   });
 
   test("a bare `{ tenant }` is enough — `package.post.ts` has no run environment (PT-4h1)", async () => {

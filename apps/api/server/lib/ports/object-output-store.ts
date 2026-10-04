@@ -300,10 +300,17 @@ export class ObjectOutputStore implements OutputStorePort {
    * does not have and a second kind of answer would leak that it exists.
    *
    * NOT team-filtered, deliberately — see the class docstring.
+   *
+   * A TOMBSTONED campaign (D231) IS filtered, for the reason
+   * `ObjectAssetStore.resolveCampaignId` gives: not a visibility rule that could
+   * go stale under a held ref, but the campaign being gone for good. Both
+   * callers share this one query — `listPackageManifests` and the package-file
+   * reader — so a deleted campaign's packages are listed by nobody, until D232
+   * step 3 empties the prefix.
    */
   private async resolveCampaignId(slug: string): Promise<string | undefined> {
     const { rows } = await this.db.query<{ id: string }>(
-      `select id from campaign where org_id = $1 and slug = $2`,
+      `select id from campaign where org_id = $1 and slug = $2 and deleted_at is null`,
       [this.orgId, slug],
     );
     return rows[0]?.id;

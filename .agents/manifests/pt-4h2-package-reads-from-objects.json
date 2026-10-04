@@ -4,8 +4,8 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/ports/object-output-store.ts",
-      "before": "      `select id from campaign where org_id = $1 and slug = $2`,\n      [this.orgId, slug],",
-      "after": "      `select id from campaign where slug = $1`,\n      [slug],",
+      "before": "      `select id from campaign where org_id = $1 and slug = $2 and deleted_at is null`,\n      [this.orgId, slug],",
+      "after": "      `select id from campaign where slug = $1 and deleted_at is null`,\n      [slug],",
       "because": "the query drops `org_id` AND its binding, so a slug resolves against the whole table and this store reads whichever campaign row comes first — another tenant's when the caller is not the tenant that owns the slug. The constraint is `unique (org_id, slug)`, NOT a global unique, so two orgs legitimately hold the same slug and this query cannot tell them apart; dropping the filter while leaving `$1` bound would not parse at all (`could not determine data type of parameter $1`), which is why the binding goes with it and the catch is a failed assertion rather than a SQL error. What the defect costs is not 'another org's bytes' — the KEY still carries `orgId`, so the wrong uuid simply lists nothing — but the silent half of the tenant check: the route's own `campaignVisibility` guard passed on the CALLER's slug, so the visibility half and the read half stop describing the same campaign, and the answer becomes an empty listing for a package that exists. No exception, no log line, and nothing self-inconsistent. The cross-org test is the only question asked anywhere that puts the same slug in two orgs and asks both of them for it.",
       "command": [
         "yarn",
