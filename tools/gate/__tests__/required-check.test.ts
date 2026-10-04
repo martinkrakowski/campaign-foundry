@@ -62,8 +62,10 @@ describe("the required check (scripts/merge-prs.sh ↔ .github/workflows/ci.yml)
   test("the default pattern matches the ci job's name", () => {
     const pattern = requiredCheckDefault();
     const name = ciJobName();
-    // Search semantics, the same ones merge-prs.sh gets from `re.search` and
-    // `gh --jq test()`: the pattern is a substring rule, not a full match.
+    // Search semantics, the same ones merge-prs.sh gets from jq's `test()`:
+    // the pattern is a substring rule, not a full match. (It used to be
+    // python3's `re.search` here and in the script; the conclusion read is jq
+    // now, and both languages search rather than match.)
     expect(new RegExp(pattern).test(name)).toBe(true);
   });
 

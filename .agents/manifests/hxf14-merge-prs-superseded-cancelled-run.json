@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "lane": "HXF14-merge-prs-superseded-cancelled-run",
+  "mutations": [
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "after": "CHECK_VERDICTS_JQ='map({n: .n, c: .c})'",
+      "because": "per-name judging removed, which is the defect the row is about, reduced to one expression: every RUN is its own verdict again, so a run's conclusion is read without asking whether the same check NAME has another run. On #661's head b5cb2cbf that is exactly the read that shipped — the cancelled duplicate of the build check (111262809464, cancelled at 18:21:22Z by its concurrency group) sits beside two successes of the SAME check and the mutant prints `Build, Typecheck, Lint & Test`, so :600 refuses a PR whose newest build run succeeded at 18:45:11Z. The `?filter=all` workaround does not save it: the endpoint dedupes reruns only within one check suite and each workflow run is its own suite, so all three rows are in the response — which is why the test fixture is those three real runs with their real ids and completed_at values rather than an invented shape. Only the #661 test can see this: it is the only fixture with two runs of one name, so a mutant here agrees with every other verdict test by accident — the failure-after-success test refuses either way, and the all-cancelled required check refuses either way",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "cancelled run beside two successes"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "after": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if any(.[]; .c == \"success\") then \"success\" elif ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "because": "newest replaced by ANY success, which is the second half of the row's original wording (\"taking that name's newest run (or any success)\") and the half the owner ruled out in review: a name with a success at 18:00:00Z and a FAILURE at 18:10:00Z on the same SHA must refuse, and `any(.[]; .c == \"success\")` says success for it. The mutation therefore loses a refusal the script is supposed to make — `bad` comes back empty, the guard passes and the run merges a head whose build failed after it had once passed. Nothing else in the file sees it: the #661 test merges either way, the older-failure-then-newer-success test merges either way (both versions pick the success), and the two all-cancelled tests refuse either way because neither has a success to find. So the failure-newer-than-success test exists for this and is the only place the two programs differ on a merge decision",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "a failure newer than a success of the same check refuses"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "after": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(true)) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "because": "cancelled runs no longer skipped, so a concurrency-cancelled duplicate is treated as the name's verdict whenever it happens to be the newest completion — which is the common shape, because cancelling is what the duplicate-triggering push does AFTER the run it supersedes (on #661 the cancelled row's own workflow run, 37143560251 attempt 1, was superseded by the attempt that succeeded at 18:45:11Z). With `select(true)` the mutant takes that cancelled row, `bad` becomes `Build, Typecheck, Lint & Test` and the green PR is refused again — the exact regression the fix removes. The fixture is built to make the ordering the deciding fact rather than a coincidence of ids: the success is id 2 at 18:34:56Z and the cancelled duplicate is id 1 at 18:40:00Z, so id order and completed_at order disagree and only the sort can get it right. The other verdict tests cannot see this mutation: the #661 test's newest run is a success, and both all-cancelled fixtures refuse under either version",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "completed AFTER a success of the same check"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "gh api --paginate \"repos/{owner}/{repo}/commits/$head_sha/check-runs?per_page=100\"",
+      "after": "gh api \"repos/{owner}/{repo}/commits/$head_sha/check-runs?per_page=100\"",
+      "because": "Dropping --paginate from the one read that serves both the poll and the verdict, so the script asks for the first page and judges it as if it were every page. GitHub answers a bare check-runs read with 30 runs by default, so on a busy head the runs past 30 are simply not in the answer — and a failure among them is invisible while the first page is green. The stub is what makes this bite: STUB_CHECK_RUNS emits the second and later lines ONLY when the call carried the flag, so a read that stopped asking for pages stops getting them, which is the difference between a stub that proves the flag and one that proves only the join. The test it catches puts the failing run of the required check on page 2 and nothing about it on page 1: with the flag the mutant merges, so the refusal assertion fails. The single-page fixtures are invisible to it, because one page is all they ever had",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "reads join every page"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "after": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.id // 0) | last | .c) // \"cancelled\") end)})'",
+      "because": "the verdict sorted by id alone, dropping completed_at as the primary key. It is the wrong order rather than a coarser one: a check suite's ids are handed out when a run is CREATED, not when it finishes, so a run created later can finish earlier — on #661, run 111262813381 (success) completed at 18:45:11Z while the LOWER-numbered 111262823658 completed at 18:34:56Z. The test is the only fixture in the file where the two orders disagree, because every other fixture has ids that agree with completion order and so cannot tell the two keys apart; there the newer failure carries the LOWER id, which id-order reads as the older run and merges. completed_at stays the tiebreak in the honest program because a genuine tie (same second) is decided by the id, which is monotonic",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "a newer failure whose id is LOWER"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "    rc=$?\n    if [ \"$rc\" -ne 0 ]; then\n      # Dropped, not trimmed: a partial list must never reach a verdict read.\n      runs=''\n      unreadable=1\n    else\n      unreadable=0\n    fi",
+      "after": "    unreadable=0",
+      "because": "the read's exit status ignored, which is the hole the fix closed. --paginate STREAMS: page 1 is written to stdout before page 2 is requested, so a page that errors part way leaves the first one on stdout and then exits non-zero. Nothing drops that page — the `runs=$(gh api ...)` capture keeps whatever the command wrote before it failed — so the pages that did arrive are judged as though they were the whole answer, and a failing or pending check on the missing page cannot be seen. The fixture is that shape: page 1 is a green Build, the read then exits 1, and with the status ignored the mutant concludes on page 1 alone and MERGES. Nothing else in the file can see it, because every other fixture's read succeeds, and a succeeded read is the only case where the pages that arrived are also every page",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "fails after printing one page"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "after": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if false then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t // \"\", .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "because": "the guard is disabled and a null completed_at falls back to \"\", the pre-fix default. That ranks the null run OLDEST, so the test's newer failure (t null, id 2) is superseded by the older success, bad comes back empty, and the PR merges; the test's first assertion, expect(result.status).toBe(1), reads 0.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "no completed_at, beside another"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t, .id // 0) | last | .c) // \"cancelled\") end)})'",
+      "after": "CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != \"cancelled\")) as $r | {n: .[0].n, c: (if ($r | length) > 1 and any($r[]; .t == null) then error(\"a run of \\(.[0].n) has no completed_at, so which is newest is unknown\") else (($r | sort_by(.t) | last | .c) // \"cancelled\") end)})'",
+      "because": "the id tiebreak is dropped, so two runs of one name that completed in the same second keep their input order (jq's sort is stable). The test lists the newer, higher-id failure first, so the older success ends last, bad comes back empty and the PR merges; expect(result.status).toBe(1) reads 0.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "completed in the same second"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
