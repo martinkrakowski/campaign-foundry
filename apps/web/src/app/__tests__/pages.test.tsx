@@ -8,7 +8,9 @@ import {
   seedDecisions,
   nextMock,
   mockPipelineApi,
+  jobOk,
   json,
+  s3Urls,
   EMPTY_REPORT,
 } from "@/__tests__/helpers";
 import { API, useRun } from "@/lib/run-context";
@@ -159,6 +161,101 @@ describe("ExportPage", () => {
     ]);
     renderWithRun(<ExportPage />);
     expect(await screen.findByText("alpha @ 1:1 · v4 · headline-top-bold")).toBeTruthy();
+  });
+});
+
+/**
+ * D213 + D212, on both consumer pages at once: when the run the shell commits is the
+ * JOB payload, the grid shows the placeholder and the export rows say Unavailable.
+ *
+ * **This is the degraded state the whole change is about.** `withAssetUrls` runs on
+ * `result.get` alone, so a payload from the jobs route has no URL to render and none to
+ * link — that route answers the stored report exactly as it is. The one thing neither
+ * page may do is answer for the server: a client-built output path 404s under `s3` and
+ * retires in PT-4i.
+ *
+ * The fixture is the REAL degradation and not a hand-stripped one. The mount restore
+ * reads `result.get` and gets signed URLs, so the pages first render real images; then
+ * Generate goes out, its re-read FAILS — the branch D213 defines as "commit the job
+ * payload" — and `jobOk` applies the jobs route's own `stripAssetUrls` to what the
+ * shell then commits. So the placeholder appears because the server said nothing, not
+ * because a fixture was written to be empty.
+ */
+describe("GridPage + ExportPage — a run committed from a job payload", () => {
+  function Generate() {
+    const { execute } = useRun();
+    return (
+      <button type="button" onClick={() => void execute()}>
+        generate
+      </button>
+    );
+  }
+
+  /** The job payload's row: paths only, because `jobOk` strips every `*Url` from it. */
+  const base = makeAsset();
+  const signed = { ...base, ...s3Urls(base) };
+  // A seeded run whose re-read fails once the generate POST has gone out. The mount
+  // restore's own read still answers, so the pages first render the signed URLs.
+  const seedRunWhoseRereadFails = () => {
+    const seeded = seedPersistedRun([signed]);
+    let posted = false;
+    mockPipelineApi({
+      opened: seeded,
+      report: { halted: false, assets: [signed], log: { entries: [], campaignId: "seed" } },
+      post: () => {
+        posted = true;
+        return json({ jobId: "job-1" }, 202);
+      },
+      job: () => jobOk({ halted: false, assets: [base], log: { entries: [], campaignId: "seed" } }),
+      result: () =>
+        posted
+          ? json({ error: "boom" }, 500)
+          : json({ halted: false, assets: [signed], log: { entries: [], campaignId: "seed" } }),
+    });
+  };
+  seedRunWhoseRereadFails();
+
+  test("the grid shows the placeholder and the export rows say Unavailable", async () => {
+    const user = userEvent.setup();
+    seedRunWhoseRereadFails();
+    const { container } = renderWithRun(
+      <>
+        <Generate />
+        <GridPage />
+        <ExportPage />
+      </>,
+    );
+
+    // Before the run the persisted report's signed URLs are what both pages render…
+    expect(
+      (await screen.findByRole("img", { name: "alpha @ 1:1 · default" })).getAttribute("src"),
+    ).toContain("https://objects.example/");
+    expect(screen.getByRole("link", { name: "Download .PNG" }).getAttribute("href")).toContain(
+      "https://objects.example/",
+    );
+
+    // …and after it, the committed job payload carries none.
+    await user.click(screen.getByText("generate"));
+    expect(await screen.findByTestId("asset-unavailable")).toBeTruthy();
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("video")).toBeNull();
+    // The grid has no download link at all — not one that would navigate to nothing.
+    expect(screen.queryByRole("link", { name: "Download .PNG" })).toBeNull();
+    for (const el of container.querySelectorAll("*")) {
+      for (const attr of Array.from(el.attributes)) expect(attr.value).not.toContain("/output/");
+    }
+
+    // The reviewer can still review it: the cell renders, with its placeholder, so the
+    // creative can be approved — and THAT is how an approved row arrives at the export
+    // page with no URL to link.
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(screen.getAllByTestId("download-unavailable")).toHaveLength(2));
+    // The rows keep their label and path: the creative IS approved and the path is
+    // real — what is missing is a way to fetch it.
+    expect(screen.getByText("alpha/1x1.png")).toBeTruthy();
+    expect(screen.getByText("proofs/alpha.pdf")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Download .PDF" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Download .PNG" })).toBeNull();
   });
 });
 

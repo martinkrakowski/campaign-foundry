@@ -5808,3 +5808,31 @@ describe("RunProvider — the page's ?campaign= (PT-5c3, D180)", () => {
     window.history.replaceState(null, "", "/grid");
   });
 });
+
+describe("usableUrl — only the URL shapes the server mints", () => {
+  test("a same-origin path and an absolute http(s) URL are usable", async () => {
+    const { usableUrl } = await import("@/lib/run-context");
+    expect(usableUrl("/api/pipeline/output/a/1x1.png?v=abc")).toBe(
+      "/api/pipeline/output/a/1x1.png?v=abc",
+    );
+    expect(usableUrl("https://objects.example/bucket/k?X-Amz-Signature=s")).toBe(
+      "https://objects.example/bucket/k?X-Amz-Signature=s",
+    );
+    expect(usableUrl("http://localhost:8333/bucket/k")).toBe("http://localhost:8333/bucket/k");
+  });
+
+  test.each([
+    ["javascript:", "javascript:alert(1)"],
+    ["data:", "data:text/html,<script>alert(1)</script>"],
+    ["protocol-relative", "//evil.example/x.png"],
+    ["slash-backslash", "/\\evil.example/x.png"],
+    ["an unparseable host", "//["],
+    ["slash-backslash-backslash", "/\\\\evil.example/x.png"],
+    ["a bare word", "not a url"],
+    ["empty", ""],
+    ["non-string", 42],
+  ])("%s is NOT usable — it renders the placeholder, never an href", async (_label, value) => {
+    const { usableUrl } = await import("@/lib/run-context");
+    expect(usableUrl(value)).toBeUndefined();
+  });
+});

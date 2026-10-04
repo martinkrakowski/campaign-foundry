@@ -6,6 +6,7 @@ import {
   assetCanvas,
   assetKey,
   assetLabel,
+  usableUrl,
   usePageCampaignParam,
   useRun,
 } from "@/lib/run-context";
@@ -112,9 +113,21 @@ export default function ExportPage() {
   const activePlatform = platforms.includes(platform) ? platform : null;
 
   // One proof PDF per product that has at least one approved creative; dedupe by path.
+  // The KEY is still the path — it is what makes two approved rows one download — and the
+  // value now carries the server's own `proofUrl` (D204/D212), never a path this page
+  // builds. The label keeps the last approved row's productId, exactly as before; the
+  // URL is the FIRST usable one, because two rows sharing a path are the same PDF and
+  // either signature fetches the same bytes.
   const proofs = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const a of approved) if (a.proofPath) map.set(a.proofPath, a.productId);
+    const map = new Map<string, { productId: string; proofUrl: string | undefined }>();
+    for (const a of approved) {
+      if (!a.proofPath) continue;
+      const seen = map.get(a.proofPath);
+      map.set(a.proofPath, {
+        productId: a.productId,
+        proofUrl: seen?.proofUrl ?? usableUrl(a.proofUrl),
+      });
+    }
     return [...map.entries()];
   }, [approved]);
 
@@ -163,14 +176,8 @@ export default function ExportPage() {
               Proof PDFs ({proofs.length})
             </h3>
             <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
-              {proofs.map(([path, productId]) => (
-                <Row
-                  key={path}
-                  label={productId}
-                  sub={path}
-                  href={`${API}/output/${path}`}
-                  cta="Download .PDF"
-                />
+              {proofs.map(([path, { productId, proofUrl }]) => (
+                <Row key={path} label={productId} sub={path} href={proofUrl} cta="Download .PDF" />
               ))}
             </div>
           </section>
@@ -186,7 +193,10 @@ export default function ExportPage() {
                     key={assetKey(asset)}
                     label={`${assetLabel(asset)}${asset.durationSec !== undefined ? ` · ${formatDuration(asset.durationSec)}` : ""}`}
                     sub={`${asset.videoPath} · poster ${asset.outputPath}`}
-                    href={`${API}/output/${asset.videoPath}`}
+                    // The D212 download field, not the clip's display `videoUrl`:
+                    // `<a download>` is ignored cross-origin, and the store's signed
+                    // disposition is what actually saves the file.
+                    href={usableUrl(asset.videoDownloadUrl)}
                     cta="Download .MP4"
                   />
                 ) : (
@@ -194,7 +204,7 @@ export default function ExportPage() {
                     key={assetKey(asset)}
                     label={assetLabel(asset)}
                     sub={asset.outputPath}
-                    href={`${API}/output/${asset.outputPath}`}
+                    href={usableUrl(asset.outputDownloadUrl)}
                     cta="Download .PNG"
                   />
                 ),
@@ -324,20 +334,49 @@ function CheckBadge({ label, verdict }: { label: string; verdict: "pass" | "fail
   );
 }
 
-function Row({ label, sub, href, cta }: { label: string; sub: string; href: string; cta: string }) {
+/**
+ * One export row.
+ *
+ * `href` is `undefined` when the server signed no download URL for the file (D212) —
+ * most often because this run was committed from a job payload, which the jobs route
+ * answers with paths and no URLs at all (D213). Then the row says "Unavailable" and
+ * keeps its label and path, because the creative IS approved and its path is real: what
+ * is missing is a way to fetch it, and an `<a>` without an `href` would be a control
+ * that navigates the page instead of naming that.
+ */
+function Row({
+  label,
+  sub,
+  href,
+  cta,
+}: {
+  label: string;
+  sub: string;
+  href: string | undefined;
+  cta: string;
+}) {
   return (
     <div className="flex items-center justify-between gap-4 p-4">
       <div className="min-w-0">
         <div className="truncate text-[13px] text-text-primary">{label}</div>
         <div className="truncate font-mono text-[11px] text-text-muted">{sub}</div>
       </div>
-      <a
-        href={href}
-        download
-        className="shrink-0 rounded-full border border-border bg-surface-2 px-4 py-1.5 text-xs text-text-emphasis transition-colors hover:bg-border-hover"
-      >
-        {cta}
-      </a>
+      {href === undefined ? (
+        <span
+          data-testid="download-unavailable"
+          className="shrink-0 rounded-full border border-border-control px-4 py-1.5 text-xs text-text-muted"
+        >
+          {messages.downloadUnavailable}
+        </span>
+      ) : (
+        <a
+          href={href}
+          download
+          className="shrink-0 rounded-full border border-border bg-surface-2 px-4 py-1.5 text-xs text-text-emphasis transition-colors hover:bg-border-hover"
+        >
+          {cta}
+        </a>
+      )}
     </div>
   );
 }
