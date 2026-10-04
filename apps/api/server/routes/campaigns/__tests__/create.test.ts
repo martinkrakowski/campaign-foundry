@@ -1344,7 +1344,7 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
             ).toBe(201);
             await pgHarness.db.query(
               `update campaign set deleted_at = now() where org_id = $1 and slug = $2`,
-              ["local", gone],
+              [LOCAL_TENANT.orgId, gone],
             );
 
             // The control: a LIVE campaign already holding another taken slug, in

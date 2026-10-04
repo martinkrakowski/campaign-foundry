@@ -367,6 +367,17 @@ describe("store-zip", () => {
  * output store already does.
  */
 describe("GET /campaigns/packages/:campaignId and a tombstone (PT-9a2, D233 r2)", () => {
+  // fs, explicitly: these tests plant filesystem fixtures, and an inherited
+  // OBJECT_STORE=s3 would point the route at unseeded object storage (Qodo on #682).
+  const SAVED_OBJECT_STORE = process.env.OBJECT_STORE;
+  beforeEach(() => {
+    delete process.env.OBJECT_STORE;
+  });
+  afterEach(() => {
+    if (SAVED_OBJECT_STORE === undefined) delete process.env.OBJECT_STORE;
+    else process.env.OBJECT_STORE = SAVED_OBJECT_STORE;
+  });
+
   const sampleBrief = (id: string): CampaignBrief => ({
     schemaVersion: BRIEF_SCHEMA_VERSION,
     template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),

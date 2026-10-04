@@ -347,6 +347,17 @@ describe("GET /campaigns/assets mints no signed URL on fs (PT-4f, D209b)", () =>
  * patches the database on the registry this file's own imports came from.
  */
 describe("GET /campaigns/assets and a tombstone (PT-9a2, D233 r2)", () => {
+  // fs, explicitly: these tests plant filesystem fixtures, and an inherited
+  // OBJECT_STORE=s3 would point the route at unseeded object storage (Qodo on #682).
+  const SAVED_OBJECT_STORE = process.env.OBJECT_STORE;
+  beforeEach(() => {
+    delete process.env.OBJECT_STORE;
+  });
+  afterEach(() => {
+    if (SAVED_OBJECT_STORE === undefined) delete process.env.OBJECT_STORE;
+    else process.env.OBJECT_STORE = SAVED_OBJECT_STORE;
+  });
+
   const listCall = (briefId: string) =>
     mountTenantRoute(staticAssetsGet, { path: "/campaigns/assets", tenant: LOCAL_TENANT })(
       new Request(`http://x/campaigns/assets?briefId=${briefId}`),
