@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "lane": "PT-4g2-web-renders-server-urls",
+  "mutations": [
+    {
+      "file": "apps/web/src/app/(shell)/grid/page.tsx",
+      "before": "  const pngUrl = usableUrl(asset.outputUrl);\n  const clipUrl = isMotion(asset) ? usableUrl(asset.videoUrl) : undefined;\n  const pngDownload = usableUrl(asset.outputDownloadUrl);",
+      "after": "  const pngUrl = usableUrl(asset.outputUrl) ?? \"/api/pipeline/output/\" + asset.outputPath;\n  const clipUrl = isMotion(asset) ? usableUrl(asset.videoUrl) : undefined;\n  const pngDownload = usableUrl(asset.outputDownloadUrl);",
+      "because": "D212/D213: an absent URL is absent, never a path this page builds. The pipeline's output route answers 404 under `s3` and retires in PT-4i, so a client-built fallback is not a degraded rendering but a broken one — the browser requests a URL the store never had. This is the smallest form of that defect and the easiest to write by accident: a `??` on the read, which looks like resilience and reads as 'use the old way when the server said nothing'. It compiles, so nothing but an assertion can catch it, which is why the failing test states the PROPERTY before it states the shape: it walks every attribute in the rendered container and fails if any value contains the output path, so the fallback is caught wherever it lands — an `<img src>`, a `poster`, or a download `href` — and it is caught even on a tile that renders the placeholder anyway. The prefix is spelled out rather than reusing the `API` constant because this page no longer imports it, which is itself the point: the constant went away with the last client-built URL, so a mutation that wants it back has to inline it. THE ANCHOR SPANS THREE READS on purpose — `Artboard` and `PreviewModal` both open with the `pngUrl`/`clipUrl` pair, so a two-line anchor is ambiguous and Rule 2 refuses it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "grid/__tests__/grid.test.tsx",
+        "-t",
+        "absent and the paths present"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/app/(shell)/grid/page.tsx",
+      "before": "  const pngDownload = usableUrl(asset.outputDownloadUrl);",
+      "after": "  const pngDownload = usableUrl(asset.outputUrl);",
+      "because": "D212 is the whole reason there are two fields. `<a download>` is IGNORED cross-origin, and a presigned URL is on the store's origin by definition, so a download button pointed at the DISPLAY url opens the PNG in a new tab instead of saving it — exactly the failure D209(d) left open and D212 closes. The mutation compiles, renders a perfectly plausible link to the right file, and is INVISIBLE on `fs`, where the two fields are the same string by design; only the `s3`-shaped half of the failing test can see it. That is why the fixture's pair differs by exactly one query parameter and why the assertion is `toBe` against `outputDownloadUrl` rather than `toContain` on a path: the mutated value names the correct file, so any weaker assertion passes. The test also scopes each href to its OWN tile, because both tiles carry a Print Proof link and both carry a PNG — an unscoped query would read whichever came first in the document and could pass against the wrong cell.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "grid/__tests__/grid.test.tsx",
+        "-t",
+        "the download links use the attachment fields"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/app/(shell)/export/page.tsx",
+      "before": "                <Row key={path} label={productId} sub={path} href={proofUrl} cta=\"Download .PDF\" />",
+      "after": "                <Row\n                  key={path}\n                  label={productId}\n                  sub={path}\n                  href={`${API}/output/${path}`}\n                  cta=\"Download .PDF\"\n                />",
+      "because": "The proof link is the one href on this page whose value looks identical either way: both spell a proof path, so a client-built link survives every visual check and every loose assertion. Under `s3` it 404s — the store never had that route — and under `fs` it silently drops the signed revision the server put there, so a re-run's proof could be served from cache. The mutation compiles, so only an assertion can see it, and the assertion must be equality against the fixture's `proofUrl` rather than `toContain` on the path, because the mutated value names the right file. `API` is still imported on this page for the packages zip — PT-4h owns that one and it must NOT become a signed URL — so this is precisely a mutation the compiler cannot help with. The row is built from the dedupe map's VALUE rather than the path it is keyed on for the same reason: keying the href on the path is this mutation, and the map now carries `proofUrl` so the path is used only as a key and as the row's visible sub-line. The dedupe key stays `proofPath` deliberately — two approved rows sharing a path are one PDF, and either signature fetches the same bytes.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "export/__tests__/export.test.tsx",
+        "-t",
+        "the proof, MP4 and PNG rows link proofUrl"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

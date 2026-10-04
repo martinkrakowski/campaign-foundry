@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "PT-4i-retire-output-on-s3",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/output/[...path].get.ts",
+      "before": "  if (objectStore() === \"s3\") {",
+      "after": "  if (false && objectStore() === \"s3\") {",
+      "because": "D204: under s3 the route does not exist, so GET /output/** answers one 404 for every input class. The guard is what makes a MALFORMED path answer 404 rather than the 400 the traversal check gives it, because that check runs first in the source and refuses a `..` or an absolute path before any store is asked. Disabling the guard reinstates the whole handler: a traversal is 400 again, which is the answer that tells a prober this path was examined at all, and every other shape goes back to paying a database round trip to reach the same 404 ObjectOutputStore already answers. `false &&` rather than a deleted block so the mutation still COMPILES and `objectStore` stays used - a mutation that does not compile tests nothing. Caught on the traversal test: 400 where the retirement requires 404.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/output.s3.test.ts",
+        "-t",
+        "a traversal raw param is 404"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/output/[...path].get.ts",
+      "before": "  if (objectStore() === \"s3\") {\n    setResponseStatus(event, 404);\n    return { error: \"Not found\" };\n  }\n\n  const rawPath = getRouterParam(event, \"path\") ?? \"\";\n  const normalized = posix.normalize(rawPath);\n  if (normalized === \"..\" || normalized.startsWith(\"../\") || posix.isAbsolute(normalized)) {\n    setResponseStatus(event, 400);\n    return { error: \"Invalid path\" };\n  }\n\n  const segments = normalized.split(\"/\").filter((s) => Boolean(s) && s !== \".\");\n  const candidateIds: string[] = [];\n  if (segments[0]) {\n    candidateIds.push(segments[0]);\n    if (segments[0] === \"packages\" && segments[1]) {\n      candidateIds.push(segments[1]);\n    }\n  }\n\n  const scope = requestTenant(event);\n  const briefs = getBriefStore(scope);\n  const campaignSegmentIndex = segments[0] === \"packages\" ? 1 : 0;\n  const campaignSegment = segments[campaignSegmentIndex];\n\n  // Resolve every id-shaped segment exactly once, and reuse that single\n  // resolution for both the served path and the visibility check below.\n  // Checking visibility against the RAW segment (the old code's separate,\n  // unresolved candidateIds loop) let a uuid whose literal text collides with\n  // a different campaign's slug hide a visible campaign's own output (its\n  // uuid happens to equal a team-hidden campaign's slug) — campaignVisibility\n  // always matches by slug, never by id. On fs the id IS the slug (D179) and\n  // `supportsTeams` is false, so no lookup runs there at all, same guard\n  // every other route in this PR uses.\n  const resolvedSlugs = new Map<string, string>();\n  if (briefs.supportsTeams) {\n    for (const candidateId of candidateIds) {\n      const resolved = await briefs.resolveCampaign(candidateId);\n      if (resolved) resolvedSlugs.set(candidateId, resolved.slug);\n    }\n  }",
+      "after": "\n  const rawPath = getRouterParam(event, \"path\") ?? \"\";\n  const normalized = posix.normalize(rawPath);\n  if (normalized === \"..\" || normalized.startsWith(\"../\") || posix.isAbsolute(normalized)) {\n    setResponseStatus(event, 400);\n    return { error: \"Invalid path\" };\n  }\n\n  const segments = normalized.split(\"/\").filter((s) => Boolean(s) && s !== \".\");\n  const candidateIds: string[] = [];\n  if (segments[0]) {\n    candidateIds.push(segments[0]);\n    if (segments[0] === \"packages\" && segments[1]) {\n      candidateIds.push(segments[1]);\n    }\n  }\n\n  const scope = requestTenant(event);\n  const briefs = getBriefStore(scope);\n  const campaignSegmentIndex = segments[0] === \"packages\" ? 1 : 0;\n  const campaignSegment = segments[campaignSegmentIndex];\n\n  // Resolve every id-shaped segment exactly once, and reuse that single\n  // resolution for both the served path and the visibility check below.\n  // Checking visibility against the RAW segment (the old code's separate,\n  // unresolved candidateIds loop) let a uuid whose literal text collides with\n  // a different campaign's slug hide a visible campaign's own output (its\n  // uuid happens to equal a team-hidden campaign's slug) — campaignVisibility\n  // always matches by slug, never by id. On fs the id IS the slug (D179) and\n  // `supportsTeams` is false, so no lookup runs there at all, same guard\n  // every other route in this PR uses.\n  const resolvedSlugs = new Map<string, string>();\n  if (briefs.supportsTeams) {\n    for (const candidateId of candidateIds) {\n      const resolved = await briefs.resolveCampaign(candidateId);\n      if (resolved) resolvedSlugs.set(candidateId, resolved.slug);\n    }\n  }\n\n  if (objectStore() === \"s3\") {\n    setResponseStatus(event, 404);\n    return { error: \"Not found\" };\n  }",
+      "because": "The guard is the handler FIRST statement, and the order is the claim rather than a style preference: under s3 `supportsTeams` is true (config.ts allows s3 only with STORE_BACKEND=postgres), so a guard below the resolution loop runs `briefs.resolveCampaign` - a Postgres round trip - on every request before answering the 404 it was going to answer anyway, and a slow or unreachable database turns a retired route into a 500. Moving it is also what lets an input class tell itself apart by TIME, which is why the spy is the assertion and not the status: the status stays 404 either way, so only a count of resolveCampaign calls distinguishes the two orderings. One contiguous replacement, from the guard through the closing brace of the supportsTeams block, because a manifest holds a single before/after pair and a two-edit move is not expressible as one.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/output.s3.test.ts",
+        "-t",
+        "a valid render path by slug is 404"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/output/[...path].get.ts",
+      "before": "  if (objectStore() === \"s3\") {",
+      "after": "  if (objectStore() === \"fs\") {",
+      "because": "The branch is on the mode and on nothing else: assets.get.ts:77-83 says why it cannot be `the store answered missing`, and this is that rule inverted. Comparing against `fs` retires the route on the ONE backend that still has an output root and leaves it serving on the one that has none - so every fs caller, and pg with OBJECT_STORE=fs (staging today), gets a 404 for bytes that are on disk, while an s3 deployment keeps paying the database round trip and can still be answered 500 by a missing S3_* setting. The pg+fs control test is where it shows: the seeded file is real and the mode is fs, so the route answers 404 where the contract is 200 and the bytes.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/__tests__/output.s3.test.ts",
+        "-t",
+        "streams the same file by slug and by uuid"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/signed-urls.ts",
+      "before": "      return { ...withoutStoredUrls(row), ...answer.fields };",
+      "after": "      return { ...row, ...answer.fields };",
+      "because": "D214(f): the report is parsed JSON out of the database, so a row can carry a *Url key this server never signed - a legacy report, a hand-edited row, a build that minted its own URLs. Spreading the row keeps it, so a response field that no campaign key, no window and no expiry has anything to say about reaches the web: `outputUrl: javascript:x` on a row whose path is refused, where nothing is minted to shadow it. Dropping the strip is what makes the field-table claim true - a *Url key in an answer was minted by THIS request - and the test states it over the whole key list on both backends, because a strip applied after the append, or one scoped to the keys being minted, would still pass an outputUrl check on a mintable row.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/signed-urls.test.ts",
+        "-t",
+        "dropped on both backends"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

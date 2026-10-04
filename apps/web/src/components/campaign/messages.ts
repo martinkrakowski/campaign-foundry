@@ -1842,3 +1842,14 @@ export const tapeLaneAudio = "Music bed";
 export function tapeAudioSpan(briefSec: number, encodedSec: number): string {
   return `Music bed spans the clip — brief ${briefSec.toFixed(2)}s, encoded ${encodedSec.toFixed(2)}s`;
 }
+
+/** A grid tile or preview whose asset URL the server did not supply (PT-4g2). */
+export const assetPreviewUnavailable = "Preview unavailable";
+
+/** The accessible name of that placeholder, naming the asset. */
+export function assetPreviewUnavailableLabel(assetLabel: string): string {
+  return `${assetLabel} — preview unavailable`;
+}
+
+/** An export row whose download URL the server did not supply (PT-4g2). */
+export const downloadUnavailable = "Unavailable";

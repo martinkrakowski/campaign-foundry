@@ -53,10 +53,12 @@ export function signingInstant(now: number): number {
  * (`routes/output/[...path].get.ts`) behind the traversal and team checks.
  *
  * It is this literal and not `render-target.ts`'s or a constant read from the
- * Nitro config because the web builds the same string today from its own `API`
- * prefix (`grid/page.tsx`, `export/page.tsx`), and a URL the server signs must be
- * byte-for-byte the one the client would have built — otherwise PT-4g's switch is
- * a change in behaviour on fs, which is the one backend that must not change.
+ * Nitro config because it must be the route's OWN URL, byte for byte: the web
+ * does not build this string, it reads it from this module through `result.get`
+ * (PT-4g2), so a URL signed here that named a different prefix than the one the
+ * route answers would 404 for every asset on the one backend that must not
+ * change. Under `s3` this prefix is dead — the route answers 404 there (PT-4i) —
+ * and no URL below is built from it.
  */
 const OUTPUT_ROUTE_PREFIX = "/api/pipeline/output/";
 
@@ -295,6 +297,42 @@ function outputRouteUrl(path: string, revision: string | undefined): string {
 }
 
 /**
+ * The `*Url` keys this module mints, from the ONE field table above — so a field
+ * added there is stripped here without a second list to remember to extend.
+ */
+const URL_FIELDS = new Set(FIELDS.map((field) => field.field));
+
+/**
+ * The row with every STORED `*Url` key removed (PT-4i, D214(f)).
+ *
+ * **A stored `*Url` key is not a URL this server signed, and this is the only
+ * place that can say so.** The report is parsed JSON out of the database, so a row
+ * may carry whatever `outputUrl` it likes: a report persisted by a build that
+ * signed its own URLs, a hand-edited row, a legacy report written before this
+ * module existed. A spread would leave that string in the response beside the
+ * keys minted here — so a `*Url` field in an answer could be an attacker's
+ * `javascript:` URL that this request never touched, and the field table's whole
+ * claim (every URL in a report was signed here, under this campaign's key, in this
+ * window) would be false for exactly the rows a client could be trusted least
+ * about. Stripping is the rule that makes it true: **a `*Url` key that is in the
+ * response was minted by THIS request, or it is not there at all** — which is why
+ * this runs on both backends rather than only where the threat seemed worse, and
+ * why it runs BEFORE the minted fields are appended rather than filtering after.
+ *
+ * **A COPY, built by skipping, never a `delete` on the row**: the row is the
+ * caller's own object (`readReport` handed it over and the caller may hold it),
+ * and rebuilding also keeps the position-preserving contract — a stripped key
+ * takes its neighbours' places with it, and the minted ones still go on the END.
+ */
+function withoutStoredUrls(row: Record<string, unknown>): Record<string, unknown> {
+  const stripped: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (!URL_FIELDS.has(key)) stripped[key] = value;
+  }
+  return stripped;
+}
+
+/**
  * A report with a URL per asset appended to every row (D204).
  *
  * **It is additive and position-preserving, which is the whole contract.** Every
@@ -304,6 +342,9 @@ function outputRouteUrl(path: string, revision: string | undefined): string {
  * `PersistedAsset` type gains nothing it has to understand today. The `*Url`
  * fields are deliberately NOT on `PersistedAsset` (`report.ts`): that type
  * describes a persisted ROW, and a URL is minted per response by this module.
+ * **The one exception is a stored `*Url` key, which is stripped rather than kept**
+ * — see {@link withoutStoredUrls}, and D214(f): a URL in an answer is one this
+ * request signed.
  *
  * **The fields are read off the RAW row, not off `PersistedAsset`.** The report
  * `writeReport` persists is a `GeneratedAsset` spread, so it carries `proofPath`
@@ -347,7 +388,10 @@ export async function withAssetUrls(
       if (!isRecord(row)) return row;
       const answer = await urlFields(scope, row, target, revision);
       signingFailure ??= answer.signingFailure;
-      return { ...row, ...answer.fields };
+      // Strip BEFORE the append: the strip is what makes a `*Url` key in the
+      // answer mean "minted here", and appending first would let a minted field
+      // mask a stored one instead of replacing it.
+      return { ...withoutStoredUrls(row), ...answer.fields };
     }),
   );
   // ONCE for the whole request, not once per field and not once per row: a report

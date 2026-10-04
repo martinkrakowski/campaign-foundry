@@ -14,16 +14,36 @@ import {
   json,
   storedTemplate,
   seedDecisions,
+  fsUrls,
+  s3Urls,
 } from "@/__tests__/helpers";
 import {
   DECISIONS_CONFLICT_MESSAGE,
   DECISIONS_UNREADABLE_MESSAGE,
   useRun,
   API,
+  type Asset,
 } from "@/lib/run-context";
 import GridPage from "../page";
 import { typeDisplayName } from "@/components/campaign/display-names";
 import * as messages from "@/components/campaign/messages";
+
+/**
+ * One asset as `GET /campaigns/result` sends it for review: paths AND the `*Url`
+ * fields the route mints (D204).
+ *
+ * **A test about the ELEMENT needs this.** Since D212 a tile renders its `<img>`,
+ * `<video>` or download `<a>` from these fields and from nothing else — a fixture with
+ * only paths renders the placeholder, so a test written about hover, the play control
+ * or the modal would be measuring the placeholder instead of what it names. `urls`
+ * picks the backend: `s3Urls` (default) is the cross-origin shape where the download
+ * and display fields genuinely differ, `fsUrls` the same-origin one where D212 says
+ * they are the same string.
+ */
+const served = (asset: Asset, urls: (a: Asset) => Partial<Asset> = s3Urls): Asset => ({
+  ...asset,
+  ...urls(asset),
+});
 
 /** A tiny harness exposing execute/regenerate so loading states can be driven. */
 function Harness() {
@@ -542,7 +562,7 @@ describe("GridPage", () => {
 
   test("opens and closes the full-size preview", async () => {
     const user = userEvent.setup();
-    seedPersistedRun([makeAsset()]);
+    seedPersistedRun([served(makeAsset())]);
     renderWithRun(<GridPage />);
     await user.click((await screen.findAllByText("Preview"))[0]);
     const modal = await screen.findByRole("dialog");
@@ -740,22 +760,31 @@ describe("GridPage — motion cells", () => {
   const LABEL = "alpha @ 9:16 · v1 · headline-top-bold";
 
   test("renders a muted metadata-preloaded <video> with the poster, the motion chip, and mp4 + poster downloads", async () => {
-    seedPersistedRun([makeMotionAsset(), makeAsset()]);
+    const motion = served(makeMotionAsset());
+    const still = served(makeAsset());
+    seedPersistedRun([motion, still]);
     renderWithRun(<GridPage />);
     const video = (await screen.findByLabelText(LABEL)) as HTMLVideoElement;
     expect(video.tagName).toBe("VIDEO");
     expect(video.muted).toBe(true);
     expect(video.getAttribute("preload")).toBe("metadata");
-    expect(video.getAttribute("poster")).toContain("/output/alpha/9x16/v1.png?v=");
-    expect(video.getAttribute("src")).toContain("/output/alpha/9x16/v1.mp4?v=");
+    // The server's own fields, exactly (D204/D212) — not a path this page builds.
+    expect(video.getAttribute("poster")).toBe(motion.outputUrl);
+    expect(video.getAttribute("src")).toBe(motion.videoUrl);
     expect(screen.getByText("ken-burns-in · 6s")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Download .MP4" }).getAttribute("href")).toContain(
-      "alpha/9x16/v1.mp4",
+    expect(screen.getByRole("link", { name: "Download .MP4" }).getAttribute("href")).toBe(
+      motion.videoDownloadUrl,
     );
-    expect(screen.getByRole("link", { name: "Download poster .PNG" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Download poster .PNG" }).getAttribute("href")).toBe(
+      motion.outputDownloadUrl,
+    );
     // The static tile keeps its plain image + download label.
-    expect(screen.getByRole("img", { name: "alpha @ 1:1 · default" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Download .PNG" })).toBeTruthy();
+    expect(
+      (await screen.findByRole("img", { name: "alpha @ 1:1 · default" })).getAttribute("src"),
+    ).toBe(still.outputUrl);
+    expect(screen.getByRole("link", { name: "Download .PNG" }).getAttribute("href")).toBe(
+      still.outputDownloadUrl,
+    );
   });
 
   test("hover plays and leaving rewinds; the play control toggles for keyboard users", async () => {
@@ -764,7 +793,7 @@ describe("GridPage — motion cells", () => {
       .mockImplementation(() => Promise.resolve());
     const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
     const user = userEvent.setup();
-    seedPersistedRun([makeMotionAsset()]);
+    seedPersistedRun([served(makeMotionAsset())]);
     renderWithRun(<GridPage />);
     const video = (await screen.findByLabelText(LABEL)) as HTMLVideoElement;
     const tile = video.parentElement as HTMLElement;
@@ -802,16 +831,18 @@ describe("GridPage — motion cells", () => {
     play.mockImplementationOnce(() => Promise.resolve());
     const user = userEvent.setup();
     seedPersistedRun([
-      makeMotionAsset({
-        durationSec: undefined,
-        descriptor: {
-          layout: "headline-top",
-          tone: "bold",
-          backgroundSource: "procedural",
-          paletteShift: 0,
-          motion: "headline-rise",
-        },
-      }),
+      served(
+        makeMotionAsset({
+          durationSec: undefined,
+          descriptor: {
+            layout: "headline-top",
+            tone: "bold",
+            backgroundSource: "procedural",
+            paletteShift: 0,
+            motion: "headline-rise",
+          },
+        }),
+      ),
     ]);
     renderWithRun(<GridPage />);
     const button = await screen.findByRole("button", { name: `Play ${LABEL}` });
@@ -854,7 +885,7 @@ describe("GridPage — motion cells", () => {
 
   test("the preview modal plays the clip with controls", async () => {
     const user = userEvent.setup();
-    seedPersistedRun([makeMotionAsset()]);
+    seedPersistedRun([served(makeMotionAsset())]);
     renderWithRun(<GridPage />);
     await screen.findByLabelText(LABEL);
     await user.click(screen.getByRole("button", { name: "Preview" }));
@@ -869,7 +900,7 @@ describe("GridPage — motion cells", () => {
 
   test("the format filter separates motion from static cells", async () => {
     const user = userEvent.setup();
-    seedPersistedRun([makeMotionAsset(), makeAsset()]);
+    seedPersistedRun([served(makeMotionAsset()), served(makeAsset())]);
     renderWithRun(<GridPage />);
     await screen.findByLabelText(LABEL);
     await user.selectOptions(screen.getByLabelText("Format"), "motion");
@@ -882,12 +913,14 @@ describe("GridPage — motion cells", () => {
 
   test("re-rolling a rejected motion variant sends its identity with attempt + 1 and swaps the tile in place", async () => {
     const user = userEvent.setup();
-    const original = makeMotionAsset();
-    const rerolled = makeMotionAsset({
-      attempt: 1,
-      complianceScore: 0.9,
-      descriptor: { ...original.descriptor!, motion: "accent-wipe" },
-    });
+    const original = served(makeMotionAsset());
+    const rerolled = served(
+      makeMotionAsset({
+        attempt: 1,
+        complianceScore: 0.9,
+        descriptor: { ...makeMotionAsset().descriptor!, motion: "accent-wipe" },
+      }),
+    );
     const seeded = seedPersistedRun([original]);
     let body: unknown;
     // D213: as above — the merged report is written before the job completes, so the
@@ -921,6 +954,253 @@ describe("GridPage — motion cells", () => {
     ]);
     expect(screen.getAllByLabelText(LABEL)).toHaveLength(1);
     expect(screen.getByText(/90\.0%/)).toBeTruthy();
+  });
+});
+
+/**
+ * D204/D212: the tile's every URL is the server's own field, read exactly.
+ *
+ * **Both backends, every case.** `s3Urls` is cross-origin, so its download fields
+ * differ from its display ones by the signed disposition — a consumer that reached
+ * for `outputUrl` where `outputDownloadUrl` belongs fails a `toBe` there. `fsUrls` is
+ * the same-origin shape where D212 says the two are the SAME string, so a test that
+ * only ran the `s3` fixture would never learn whether the code reads the field at all
+ * or merely built something plausible. Exact attribute equality in both, never
+ * `toContain`: a URL that merely *mentions* the path is the old defect wearing the
+ * new signature.
+ */
+describe("GridPage — every tile URL is the server's field (D204/D212)", () => {
+  const BACKENDS = [
+    ["s3", s3Urls],
+    ["fs", fsUrls],
+  ] as const;
+
+  test("the still tile renders outputUrl as its img src", async () => {
+    for (const [backend, urls] of BACKENDS) {
+      const still = served(makeAsset(), urls);
+      seedPersistedRun([still]);
+      const { unmount } = renderWithRun(<GridPage />);
+      const img = await screen.findByRole("img", { name: "alpha @ 1:1 · default" });
+      expect(img.getAttribute("src"), backend).toBe(still.outputUrl);
+      unmount();
+    }
+  });
+
+  test("the motion tile renders videoUrl as its src and outputUrl as its poster", async () => {
+    for (const [backend, urls] of BACKENDS) {
+      const motion = served(makeMotionAsset(), urls);
+      seedPersistedRun([motion]);
+      const { unmount } = renderWithRun(<GridPage />);
+      const video = await screen.findByLabelText("alpha @ 9:16 · v1 · headline-top-bold");
+      expect(video.getAttribute("src"), backend).toBe(motion.videoUrl);
+      expect(video.getAttribute("poster"), backend).toBe(motion.outputUrl);
+      unmount();
+    }
+  });
+
+  test("the download links use the attachment fields, never the display ones", async () => {
+    const MOTION_LABEL = "alpha @ 9:16 · v1 · headline-top-bold";
+    const STILL_LABEL = "alpha @ 1:1 · default";
+    for (const [backend, urls] of BACKENDS) {
+      const motion = served(makeMotionAsset({ proofPath: "proofs/motion.pdf" }), urls);
+      const still = served(makeAsset(), urls);
+      seedPersistedRun([motion, still]);
+      const { unmount } = renderWithRun(<GridPage />);
+      await screen.findByRole("img", { name: STILL_LABEL });
+      // Scoped to the tile, so each link is the one the CELL holds — both tiles carry a
+      // "Print Proof (.PDF)" and both carry a PNG, and an unscoped query would be
+      // asserting on whichever came first in the document.
+      const tile = (label: string) => screen.getByText(label).closest("figure") as HTMLElement;
+      const href = (label: string, name: string) =>
+        within(tile(label)).getByRole("link", { name }).getAttribute("href");
+      expect(href(MOTION_LABEL, "Download .MP4"), backend).toBe(motion.videoDownloadUrl);
+      expect(href(MOTION_LABEL, "Download poster .PNG"), backend).toBe(motion.outputDownloadUrl);
+      expect(href(STILL_LABEL, "Download .PNG"), backend).toBe(still.outputDownloadUrl);
+      expect(href(MOTION_LABEL, "Print Proof (.PDF)"), backend).toBe(motion.proofUrl);
+      expect(href(STILL_LABEL, "Print Proof (.PDF)"), backend).toBe(still.proofUrl);
+      // Every link keeps `download`: same-origin on `fs` it is what saves the file, and
+      // cross-origin under `s3` it is inert while the signed disposition decides.
+      for (const [label, name] of [
+        [MOTION_LABEL, "Download .MP4"],
+        [STILL_LABEL, "Download .PNG"],
+        [STILL_LABEL, "Print Proof (.PDF)"],
+      ] as const) {
+        expect(
+          within(tile(label)).getByRole("link", { name }).hasAttribute("download"),
+          backend,
+        ).toBe(true);
+      }
+      // Under `s3` the display and download URLs genuinely differ, so pinning the
+      // distinction is a real assertion rather than a coincidence of the fixture: a
+      // consumer that reached for the DISPLAY url where the download belongs fails here.
+      if (backend === "s3") {
+        expect(motion.videoDownloadUrl).not.toBe(motion.videoUrl);
+        expect(motion.outputDownloadUrl).not.toBe(motion.outputUrl);
+        expect(href(MOTION_LABEL, "Download .MP4")).not.toBe(motion.videoUrl);
+        expect(href(MOTION_LABEL, "Download poster .PNG")).not.toBe(motion.outputUrl);
+        expect(href(STILL_LABEL, "Download .PNG")).not.toBe(still.outputUrl);
+      }
+      unmount();
+    }
+  });
+
+  test("the preview modal renders the still's outputUrl and the motion clip's own fields", async () => {
+    const user = userEvent.setup();
+    const still = served(makeAsset());
+    const motion = served(makeMotionAsset());
+    seedPersistedRun([still, motion]);
+    renderWithRun(<GridPage />);
+    await screen.findByRole("img", { name: "alpha @ 1:1 · default" });
+
+    await user.click(screen.getAllByRole("button", { name: "Preview" })[0]!);
+    const stillModal = await screen.findByRole("dialog");
+    expect(within(stillModal).getByRole("img").getAttribute("src")).toBe(still.outputUrl);
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getAllByRole("button", { name: "Preview" })[1]!);
+    const motionModal = await screen.findByRole("dialog");
+    const preview = within(motionModal).getByLabelText("alpha @ 9:16 · v1 · headline-top-bold");
+    expect(preview.getAttribute("src")).toBe(motion.videoUrl);
+    expect(preview.getAttribute("poster")).toBe(motion.outputUrl);
+  });
+});
+
+describe("GridPage — no server URL means the placeholder, never a client-built one (D212/D213)", () => {
+  const STILL_LABEL = "alpha @ 1:1 · default";
+  const MOTION_LABEL = "alpha @ 9:16 · v1 · headline-top-bold";
+
+  test("with every *Url absent and the paths present, the still tile renders the placeholder", async () => {
+    // `makeAsset` carries paths and NO `*Url` — which is exactly what a run committed
+    // from a job payload looks like, since the jobs route signs nothing (D213).
+    seedPersistedRun([makeAsset()]);
+    const { container } = renderWithRun(<GridPage />);
+    await screen.findByText(/Showing 1 of 1/);
+
+    // The property FIRST, before any assertion about what the tile rendered: not one
+    // attribute anywhere in the container names the output route. A single `src` built
+    // by this page would 404 under `s3`, and it is the one failure no later assertion
+    // here would make visible — a placeholder with a client-built href still renders.
+    for (const el of container.querySelectorAll("*")) {
+      for (const attr of Array.from(el.attributes)) {
+        expect(attr.value).not.toContain("/output/");
+      }
+    }
+
+    const placeholder = await screen.findByTestId("asset-unavailable");
+    expect(placeholder.getAttribute("role")).toBe("img");
+    expect(placeholder.getAttribute("aria-label")).toBe(`${STILL_LABEL} — preview unavailable`);
+    expect(placeholder.textContent).toBe("Preview unavailable");
+
+    // No element renders a source at all: not an `<img>` with no `src`, not a
+    // `<video>` with no `src`, and no download link whose href is missing.
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("video")).toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
+    // The overlay is still reachable: the reviewer previews and decides as usual.
+    expect(screen.getByRole("button", { name: "Preview" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+  });
+
+  test("the motion tile and the modal both render the placeholder when no videoUrl arrived", async () => {
+    const user = userEvent.setup();
+    seedPersistedRun([makeMotionAsset()]);
+    const { container } = renderWithRun(<GridPage />);
+    expect(await screen.findByTestId("asset-unavailable")).toBeTruthy();
+    // Never a `<video>` with no `src`: the cell IS the clip, so without one it is the
+    // placeholder — even though `outputPath` is present and would make a poster.
+    expect(container.querySelector("video")).toBeNull();
+    expect(screen.queryByLabelText(MOTION_LABEL)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    const modal = await screen.findByRole("dialog");
+    expect(within(modal).getByTestId("asset-unavailable")).toBeTruthy();
+    expect(within(modal).queryByRole("img", { name: MOTION_LABEL })).toBeNull();
+  });
+
+  test("a poster without a clip takes the placeholder; a clip without a poster omits the attribute", async () => {
+    const user = userEvent.setup();
+    const motion = makeMotionAsset();
+    // `outputUrl` present, `videoUrl` absent: the cell is the clip, so it cannot render.
+    seedPersistedRun([{ ...motion, ...fsUrls(motion), videoUrl: undefined }]);
+    const { unmount } = renderWithRun(<GridPage />);
+    expect(await screen.findByTestId("asset-unavailable")).toBeTruthy();
+    unmount();
+
+    // `videoUrl` present, `outputUrl` absent: the clip renders and the poster attribute
+    // is OMITTED, rather than pointing at nothing.
+    seedPersistedRun([{ ...motion, ...fsUrls(motion), outputUrl: undefined }]);
+    renderWithRun(<GridPage />);
+    const video = await screen.findByLabelText(MOTION_LABEL);
+    expect(video.getAttribute("src")).toBe(fsUrls(motion).videoUrl);
+    expect(video.hasAttribute("poster")).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    const modal = await screen.findByRole("dialog");
+    expect(within(modal).getByLabelText(MOTION_LABEL).hasAttribute("poster")).toBe(false);
+  });
+
+  test("an empty or non-string URL field is no URL, not an href to nowhere", async () => {
+    // The three ways a persisted report can fail to name a file, one at a time. All of
+    // them must land on the placeholder: `""` resolves to the page itself, and a
+    // non-string is the untrusted-JSON case the type's optionality cannot rule out.
+    for (const [name, value] of [
+      ["empty", ""],
+      ["number", 42],
+      ["null", null],
+    ] as const) {
+      seedPersistedRun([makeAsset({ outputUrl: value as unknown as string })]);
+      const { unmount } = renderWithRun(<GridPage />);
+      expect(await screen.findByTestId("asset-unavailable"), name).toBeTruthy();
+      expect(screen.queryByRole("link"), name).toBeNull();
+      unmount();
+    }
+  });
+
+  test("a re-run's new revision moves the tile's src; the same revision leaves it alone", async () => {
+    // Cache busting is the REPORT REVISION's job now (D209a/c), not a client counter:
+    // every run writes a new report, so the URL over the same path must change — or the
+    // bytes behind it stay cached and the grid shows the previous creative. The row's
+    // `outputPath` never moves, so a changed `src` can only be the revision.
+    const user = userEvent.setup();
+    const row = makeAsset();
+    let revision = "rev-1";
+    let reads = 0;
+    const seeded = seedPersistedRun([row]);
+    mockPipelineApi({
+      opened: seeded,
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () => jobOk({ halted: false, assets: [row], log: { entries: [], campaignId: "seed" } }),
+      result: () => {
+        reads += 1;
+        return json({
+          halted: false,
+          assets: [{ ...row, ...s3Urls(row, revision) }],
+          log: { entries: [], campaignId: "seed" },
+        });
+      },
+    });
+    renderWithRun(<Harness />);
+    await screen.findByRole("img", { name: STILL_LABEL });
+    const tileSrc = () =>
+      screen.queryByRole("img", { name: STILL_LABEL })?.getAttribute("src") ?? null;
+
+    await user.click(screen.getByText("exec"));
+    await waitFor(() => expect(tileSrc()).toBe(s3Urls(row, "rev-1").outputUrl));
+    const first = tileSrc();
+
+    // The same revision: the same report, so the same URL. A re-read that invented a
+    // fresh query here would defeat the browser cache D204 is built on. The read
+    // counter is what makes this wait for the commit instead of racing it.
+    const beforeSecond = reads;
+    await user.click(screen.getByText("exec"));
+    await waitFor(() => expect(reads).toBeGreaterThan(beforeSecond));
+    expect(tileSrc()).toBe(first);
+
+    // A new revision: a new URL over the same path — exactly the signed `v` that differs.
+    revision = "rev-2";
+    await user.click(screen.getByText("exec"));
+    await waitFor(() => expect(tileSrc()).toBe(s3Urls(row, "rev-2").outputUrl));
+    expect(tileSrc()).not.toBe(first);
+    expect(tileSrc()).toContain("v=rev-2");
   });
 });
 
