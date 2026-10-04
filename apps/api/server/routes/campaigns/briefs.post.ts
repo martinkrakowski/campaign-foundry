@@ -1,10 +1,14 @@
 import { isReservedCampaignId, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
-import { extractSourceAssetBriefIds, rewriteAssetPaths } from "../../lib/asset-files.js";
+import {
+  assertRefsCopied,
+  copyBriefRefs,
+  resolveBriefAssetRefs,
+} from "../../lib/brief-asset-refs.js";
 import { isExistsError, isErrno, SYMLINK_WRITE_ERROR } from "../../lib/brief-files.js";
 import { parseBrief } from "../../lib/load-brief.js";
-import { getAssetStore, getBriefStore, TeamsNotSupportedError } from "../../lib/ports/index.js";
-import { assertSourceVisible, CampaignNotFoundError, canAssignTeam } from "../../lib/ownership.js";
+import { getBriefStore, TeamsNotSupportedError } from "../../lib/ports/index.js";
+import { CampaignNotFoundError, canAssignTeam } from "../../lib/ownership.js";
 
 import { requestTenant } from "../../lib/tenant.js";
 
@@ -24,9 +28,12 @@ import { requestTenant } from "../../lib/tenant.js";
  * same file in its own format. Creates use exclusive `wx` writes under
  * `projectRoot()/briefs/`.
  *
- * Save as… copies any brief-scoped assets from source brief IDs (`assets/inputs/<from>/*`)
- * into `assets/inputs/<brief.id>/*` and rewrites both logoPath and inputAsset paths,
- * while leaving root-level shared assets (`assets/inputs/*.png`) untouched (L5.5).
+ * Save as… copies the brief-scoped assets of every campaign a ref names into the target
+ * and remaps the refs onto the copies (PT-4k2b, D210 a/b). Off s3 that is the
+ * path-derived copy this route has always made, leaving root-level shared assets
+ * (`assets/inputs/*.png`) untouched (L5.5); under s3 it covers a ref that is already an
+ * asset id, which no path-matching ever could, and every ref is stored as the id of a
+ * row this caller can see (D208 D).
  *
  * `teamId` (D166, PT-2c item 3) is an optional sibling of the brief fields in
  * the same JSON body, never part of `CampaignBrief` itself — it names a
@@ -39,12 +46,14 @@ import { requestTenant } from "../../lib/tenant.js";
  * backend, which has no team column (item 5), the store itself throws
  * `TeamsNotSupportedError`, mapped below to 400.
  *
- * D166 item 2: a "Save as…" `logoPath`/`inputAsset` may name ANY campaign id
- * as its asset source — `extractSourceAssetBriefIds` reads it straight off
- * the request body, not off anything this caller is known to own. Each
- * source id is checked with `assertSourceVisible` before any `copyAssets`
- * runs, so naming a campaign hidden by team 404s instead of exfiltrating its
- * assets into the new one.
+ * D166 item 2, closed under s3 by `resolveBriefAssetRefs` (PT-4k2b, D210 a/c): a
+ * "Save as…" ref in ANY of the four fields may name any campaign the caller does not
+ * own, and the body is read straight off the request rather than off anything this
+ * caller is known to hold. The resolve refuses a hidden campaign, another org's, an
+ * absent row and a ref naming no campaign at all with this route's ONE 404 — which
+ * happens BEFORE the copy, so naming another team's real campaign cannot exfiltrate its
+ * assets into the new one — and it is what makes an id ref a copy source rather than a
+ * shared reference that stops resolving the day its owner is deleted.
  *
  * D166 item 3 / PT-5c2: the target id's own state is checked with
  * `campaignMeta`, before any copy or write, rather than relying on
@@ -138,17 +147,22 @@ export default defineEventHandler(async (event) => {
         throw existErr;
       }
 
-      // Copy any brief-scoped assets and rewrite paths only after validation succeeds (Save as…)
-      const sourceBriefIds = extractSourceAssetBriefIds(brief, brief.id);
-      if (sourceBriefIds.length > 0) {
-        // D166 item 2: each source id must not be hidden from THIS caller by
-        // team before its assets are copied — a request can name any campaign
-        // id in a logoPath/inputAsset, including another team's real
-        // campaign. Checked before the copy loop, and before the revision
-        // guard below, so a hidden source 404s without copying anything.
-        for (const fromId of sourceBriefIds) {
-          await assertSourceVisible(scope, fromId);
-        }
+      // Resolve every ref the body carries BEFORE anything is copied or written
+      // (PT-4k2b, D208 D, D210 a/c). Off s3 this is the path-derived check and copy-source
+      // list the route has always used, unchanged; under s3 it is where a ref becomes the
+      // id of a row this caller can SEE, a foreign asset is named as a copy source, and a
+      // ref naming a hidden campaign, another org's, an absent row or no campaign at all
+      // is refused with this route's one 404 — no ref is copied or written for any of them.
+      const resolved = await resolveBriefAssetRefs(scope, brief, {
+        target: brief.id,
+        mode: "save",
+      });
+      brief = resolved.brief;
+      if (resolved.copyFrom.length > 0) {
+        // D166 item 2 / PT-4k2b: between the resolve and the copy, never after it. A
+        // request whose revision is stale must not leave a foreign campaign's assets
+        // copied into the target for a write that is about to 409 — the same ordering
+        // `copyAssets`' own compensation note depends on.
         if (replace && expectedRevision !== undefined) {
           const currentRev = await store.getRevision(brief.id);
           if (currentRev !== expectedRevision) {
@@ -158,10 +172,9 @@ export default defineEventHandler(async (event) => {
             throw conflictErr;
           }
         }
-        for (const fromId of sourceBriefIds) {
-          const pathMap = await getAssetStore(scope).copyAssets(fromId, brief.id);
-          brief = rewriteAssetPaths(brief, fromId, brief.id, pathMap);
-        }
+        brief = await copyBriefRefs(scope, brief, resolved.copyFrom, brief.id);
+        // The row could have gone between the resolve and the copy; see `assertRefsCopied`.
+        assertRefsCopied(brief, resolved.foreignIds, brief.id);
       }
 
       if (replace) {
