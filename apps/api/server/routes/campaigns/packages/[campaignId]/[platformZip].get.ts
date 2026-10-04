@@ -65,6 +65,12 @@ export default defineEventHandler(async (event) => {
 
   let files: FileEntry[];
   try {
+    // The slug again, not a uuid (PT-4h2): `ObjectOutputStore` resolves it against
+    // this org's `campaign` row and 404s a slug that is not this org's, so the
+    // cross-tenant refusal stays a 404 from a store rather than a rule duplicated
+    // here. `isRewriteError` above is what carries that store's ENOENT into the
+    // 409 below — under s3 it is the generation swept between this listing and the
+    // measure pass, and the two are the same race the fs adapter's rm + rename is.
     const entries = await getOutputStore(scope).listPackageFiles(slug, platformId);
     if (entries === undefined) {
       setResponseStatus(event, 404);
