@@ -465,6 +465,12 @@ REQUIRED_CHECK=${REQUIRED_CHECK:-'^Build'}
 #
 # sort_by with two keys, and IN(), are jq >= 1.5/1.6.
 CHECK_VERDICTS_JQ='group_by(.n) | map({n: .[0].n, c: ((map(select(.c != "cancelled")) | sort_by(.t // "", .id // 0) | last | .c) // "cancelled")})'
+# The conclusion poll's own bounds, as two variables so a test can ask what
+# happens when the read NEVER succeeds without sitting out half an hour: one
+# attempt, no sleep. The defaults are the real ones — 120 polls at 15s — and the
+# refusal text below names that bound, which is the bound a real run has.
+CHECK_POLL_ATTEMPTS=${CHECK_POLL_ATTEMPTS:-120}
+CHECK_POLL_SECONDS=${CHECK_POLL_SECONDS:-15}
 # How long the review bots get to post on the refreshed head before the merge
 # condition is asked about. Bounded: a bot that has not run yet is invisible to
 # a check-run read, so this waits, but a wave must not be able to stall here.
@@ -637,22 +643,43 @@ pr_body() {
   # difference, and for why the newest run of a name decides rather than any of them.
   echo "waiting for checks on $head_sha …"
   concluded=0
-  for _ in $(seq 1 120); do          # up to ~30 minutes at 15s
-    # ONE read serves the poll and the verdict. `per_page=100` is IN THE URL on
-    # purpose: `-f per_page=100` turns the request into a POST, which
-    # `--paginate` refuses, and the `|| echo '[]'` below would then read that
-    # failure as "no runs at all". No `--slurp`: --paginate prints ONE JSON array
-    # PER PAGE, so every consumer below joins the pages with `jq -s` and `add`.
+  unreadable=0
+  for _ in $(seq 1 $CHECK_POLL_ATTEMPTS); do
+    # gh's OWN exit status is the read's verdict on itself, and it is the only
+    # thing that knows how much of the answer arrived. `--paginate` prints one
+    # array PER PAGE, so a page that fails part way leaves the EARLIER pages on
+    # stdout and then exits non-zero — and `|| echo '[]'` does not discard them,
+    # it APPENDS `[]` to them, so the pages that did arrive go on to be judged as
+    # if they were all of them. A failing check on the missing page is then
+    # invisible and a green page 1 is enough to merge. So the status is captured
+    # and a non-zero one means NOT CONCLUDED — the poll waits and says nothing —
+    # rather than a verdict.
     runs=$(gh api --paginate "repos/{owner}/{repo}/commits/$head_sha/check-runs?per_page=100" \
-      --jq '[.check_runs[] | {n:.name, s:.status, c:.conclusion, t:.completed_at, id:.id}]' 2>/dev/null || echo '[]')
+      --jq '[.check_runs[] | {n:.name, s:.status, c:.conclusion, t:.completed_at, id:.id}]' 2>/dev/null)
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      # Dropped, not trimmed: a partial list must never reach a verdict read.
+      runs=''
+      unreadable=1
+    else
+      unreadable=0
+    fi
     pending=$(printf '%s' "$runs" | jq -s 'add // [] | [.[] | select(.s != "completed")] | length')
     required=$(printf '%s' "$runs" | jq -s --arg re "$REQUIRED_CHECK" 'add // [] | [.[] | select(.n | test($re))] | length')
-    if [ "${pending:-1}" -eq 0 ] && [ "${required:-0}" -gt 0 ]; then
+    if [ "$unreadable" -eq 0 ] && [ "${pending:-1}" -eq 0 ] && [ "${required:-0}" -gt 0 ]; then
       concluded=1; break
     fi
-    sleep 15
+    sleep $CHECK_POLL_SECONDS
   done
-  [ "$concluded" -eq 1 ] || { echo "CHECKS STILL PENDING for #$pr after ~30m — not merging"; exit 1 }
+  if [ "$concluded" -ne 1 ]; then
+    # Two reasons, and they are not interchangeable: the list was read and
+    # something had not finished, or the list was NEVER read in full. The second
+    # is not "pending" — nothing at all is known about what is pending, and
+    # saying otherwise sends the reader after a slow check that may not exist.
+    [ "$unreadable" -eq 0 ] \
+      || { echo "CHECKS COULD NOT BE READ for #$pr after ~30m — not merging"; exit 1 }
+    echo "CHECKS STILL PENDING for #$pr after ~30m — not merging"; exit 1
+  fi
   # `add // []` because a slurp of zero pages is null, and null has no length.
   # Each of these two is CHECKED, and that is the point: pipefail is on, so the
   # assignment carries jq's status, and jq exits 5 on input it cannot parse. An
