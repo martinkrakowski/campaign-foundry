@@ -259,13 +259,20 @@ export class ObjectAssetStore implements AssetStorePort {
    * moment a second kind lands, so the id stays the only selector and the check
    * stays the only gate. A row that is absent, another org's, or not an id answers
    * `undefined`, the same three as above.
+   *
+   * The join is also what filters a TOMBSTONED campaign (D231): an asset row
+   * outlives its campaign until D232 step 3 sweeps it, and this must not hand
+   * back a name and a slug for a campaign whose every other reader has already
+   * stopped answering. `readAssetById` is deliberately NOT filtered — it never
+   * joins `campaign` at all, and an id-addressed byte read stays one until the
+   * purge deletes the rows (see the class docstring).
    */
   async assetOwner(id: string): Promise<AssetOwner | undefined> {
     if (!isAssetId(id)) return undefined;
     const { rows } = await this.db.query<{ campaign_id: string; slug: string; name: string }>(
       `select a.campaign_id, c.slug, a.name from asset a
          join campaign c on c.id = a.campaign_id
-         where a.org_id = $1 and a.id = $2`,
+         where a.org_id = $1 and a.id = $2 and c.deleted_at is null`,
       [this.orgId, id],
     );
     const row = rows[0];
@@ -493,10 +500,25 @@ export class ObjectAssetStore implements AssetStorePort {
    * NOT team-filtered, and deliberately: `PgBriefStore.resolveCampaign` owns
    * team visibility and the routes call it before they get here. Re-implementing
    * it in the store would be a second copy of one rule, free to disagree.
+   *
+   * A TOMBSTONED campaign (D231) IS filtered, and that is not the same rule: a
+   * team assignment can change while a caller holds a ref, but a tombstone means
+   * the campaign is gone for good, so one filter here covers all six callers
+   * (`writeAsset`, `readAsset`, `assetObjectKey`, `listAssets`, and both halves
+   * of `copyAssets`) in a single query — `writeAsset` refuses with the same
+   * "does not resolve in this org" error an absent campaign gets, and
+   * `listAssets` answers `[]`, which is what makes `campaignKnown`'s
+   * `assetKnown` fallback safe for a slug it could not resolve.
+   *
+   * `deleteAssets`' UUID branch does NOT come through here — it short-circuits a
+   * uuid-shaped ref straight to `campaignId = briefId`, so it still acts on a
+   * tombstoned campaign's uuid while `deleteAssets(slug)` is now a no-op. A
+   * purge must therefore free a deleted campaign's inputs by PREFIX or by the
+   * raw uuid, never by trusting `deleteAssets(slug)` to act.
    */
   private async resolveCampaignId(slug: string): Promise<string | undefined> {
     const { rows } = await this.db.query<{ id: string }>(
-      `select id from campaign where org_id = $1 and slug = $2`,
+      `select id from campaign where org_id = $1 and slug = $2 and deleted_at is null`,
       [this.orgId, slug],
     );
     return rows[0]?.id;

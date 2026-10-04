@@ -214,12 +214,24 @@ export interface BriefStorePort {
 
   /**
    * Whether a campaign is unknown ("absent"), visible to the caller
-   * ("visible"), or exists but is hidden from the caller by team (D166 item
-   * 4) — "hidden" only ever from `PgBriefStore`, since the filesystem store
-   * has no team column (item 5) and never distinguishes hidden from absent.
-   * Used by `lib/ownership.ts` (fail closed on a storage failure — see D166
-   * item 1) and by the brief write routes to answer 404/409 on a hidden or
-   * existing target before any write or asset copy runs.
+   * ("visible"), or exists but is hidden from the caller by team or tombstone
+   * (D166, D233) — "hidden" only ever from `PgBriefStore`, since the
+   * filesystem store has no team column (item 5) and never distinguishes
+   * hidden from absent. Used by `lib/ownership.ts` (fail closed on a storage
+   * failure — see D166 item 1) and by the brief write routes to answer 404/409
+   * on a hidden or existing target before any write or asset copy runs.
+   *
+   * A tombstoned campaign (D231's `campaign.deleted_at`) is "hidden", never
+   * "absent": `campaignKnown` reads "absent" as "never created" and falls
+   * through to its slug-keyed `report`/`asset`/`pool`/`job` fallback, and those
+   * rows are keyed by whichever ref the caller used (D246) — so "absent" would
+   * keep serving a deleted, ever-generated campaign's report.
+   *
+   * A ref that is a CANONICAL UUID naming a row that is tombstoned or hidden by
+   * team is retried as a slug, as `resolveCampaign` does (`id` and `slug` share
+   * one text space). A visible, live slug match then answers "visible"; a slug
+   * miss answers "hidden", never "absent", because the hidden id is the only
+   * match. A uuid matching neither an id nor a slug is "absent".
    */
   campaignVisibility(id: string): Promise<"absent" | "visible" | "hidden">;
 

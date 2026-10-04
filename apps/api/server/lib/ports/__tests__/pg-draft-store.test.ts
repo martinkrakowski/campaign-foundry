@@ -244,5 +244,49 @@ describe("PgDraftStore (PT-5d, D173, D177)", () => {
       expect(outcome).toEqual({ ok: false, currentRevision: saved.revision });
       await expect(store.readDraft(campaignId, "u1")).resolves.toBeUndefined();
     });
+
+    // PT-9a1, D231. Called DIRECTLY, bypassing every route gate, because that is
+    // the only way to reach the race this check closes: `draft.put.ts` reads
+    // `campaignMeta` (itself filtered) and only then calls this, so in production
+    // a tombstone has to commit in the gap between those two statements. Here it
+    // has already committed, and the id is already in hand — the worst case.
+    test("a campaign tombstoned after the id was in hand refuses the write, and writes no draft", async () => {
+      const campaignId = await mintCampaign(db, "local", "camp");
+      const briefs = new PgBriefStore(db, "local", "local");
+      const saved = await briefs.createBrief(sampleBrief("camp"));
+      const store = new PgDraftStore(db, "local");
+      // The caller's own check would have passed a moment ago — this is a stale
+      // `baseRevision`, not an invalid one, so the `ok: false` path below is not
+      // what makes this test go red.
+      expect(await briefs.getRevision("camp")).toBe(saved.revision);
+      await db.query(`update campaign set deleted_at = now() where org_id = $1 and id = $2`, [
+        "local",
+        campaignId,
+      ]);
+
+      await expect(
+        store.writeDraftIfCurrent(campaignId, "u1", { edited: true }, saved.revision),
+      ).rejects.toThrow();
+      // Not merely refused: the insert below the lock never ran, so a silent
+      // no-op and a throw would not look the same from the next reader.
+      await expect(store.readDraft(campaignId, "u1")).resolves.toBeUndefined();
+    });
+
+    // The other half of the same claim, pinned because `readDraft` is
+    // deliberately NOT filtered (it is not in this lane's list): every route that
+    // reaches the store gates on `campaignMeta` first, so a draft already written
+    // stays readable, and D232 step 3 is what removes it.
+    test("readDraft on a tombstoned campaign is unaffected — the gate is the route's, not this store's", async () => {
+      const campaignId = await mintCampaign(db, "local", "camp");
+      const store = new PgDraftStore(db, "local");
+      await store.writeDraft(campaignId, "u1", { name: "Mine" }, null);
+      await db.query(`update campaign set deleted_at = now() where org_id = $1 and id = $2`, [
+        "local",
+        campaignId,
+      ]);
+      await expect(store.readDraft(campaignId, "u1")).resolves.toMatchObject({
+        state: { name: "Mine" },
+      });
+    });
   });
 });

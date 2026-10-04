@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "lane": "PT-9a1-tombstone-and-readers",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "from campaign c where c.org_id = $1 and c.slug = $2 and c.deleted_at is null`,\n      [this.orgId, ref],",
+      "after": "from campaign c where c.org_id = $1 and c.slug = $2`,\n      [this.orgId, ref],",
+      "because": "the tombstone filter comes off `campaignMeta`'s SLUG branch, and `[id].get.ts` gates on exactly that query. The witness is a tombstoned campaign addressed BY ITS SLUG, which is how every user reaches one: the row still exists, still has its name, type and `has_version` subquery, and the store answers the full meta it always did, so the route answers 200 with a deleted campaign's body. `campaignMeta`'s uuid branch is untouched by this mutant, which is exactly why the verify command below runs the by-slug case ALONE — included by its by-uuid twin, that sibling would pass while the mutant lived, and a file-wide reading of the run would report the mutant caught when nothing had caught it. The two branches are separate filters, so each needs its own witness, and a mutant on either one is invisible to the other's case.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.get.test.ts",
+        "-t",
+        "a tombstoned campaign answers 404 by slug"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "  async campaignVisibility(id: string): Promise<\"absent\" | \"visible\" | \"hidden\"> {\n    let idHidden = false;\n    if (CANONICAL_UUID_PATTERN.test(id)) {\n      const { rows } = await this.db.query<{ team_id: string | null; deleted_at: string | null }>(\n        `select team_id, deleted_at from campaign where org_id = $1 and id = $2`,\n        [this.orgId, id.toLowerCase()],\n      );\n      const byId = rows[0];\n      if (byId && byId.deleted_at === null && this.visible(byId.team_id)) return \"visible\";\n      // An id match the caller may NOT see (team-hidden or tombstoned) falls through\n      // to the slug lookup, exactly as in `resolveCampaign`: a VISIBLE campaign whose\n      // slug happens to be that uuid text must still answer \"visible\", or every route\n      // that re-checks the slug `resolveCampaign` returned would 404 it. Only when the\n      // slug lookup finds nothing visible does the hidden id decide.\n      idHidden = byId !== undefined;\n    }\n    const { rows } = await this.db.query<{ team_id: string | null; deleted_at: string | null }>(\n      `select team_id, deleted_at from campaign where org_id = $1 and slug = $2`,\n      [this.orgId, id],\n    );\n    const row = rows[0];\n    // \"hidden\", never \"absent\", when the only match is an id the caller may not see:\n    // \"absent\" would reopen `campaignKnown`'s report fallback for that campaign.\n    if (!row) return idHidden ? \"hidden\" : \"absent\";\n    if (row.deleted_at !== null) return \"hidden\";\n    return this.visible(row.team_id) ? \"visible\" : \"hidden\";\n  }",
+      "after": "  async campaignVisibility(id: string): Promise<\"absent\" | \"visible\" | \"hidden\"> {\n    const { rows } = await this.db.query<{ team_id: string | null }>(\n      `select team_id from campaign where org_id = $1 and slug = $2`,\n      [this.orgId, id],\n    );\n    const row = rows[0];\n    if (!row) return \"absent\";\n    return this.visible(row.team_id) ? \"visible\" : \"hidden\";\n  }",
+      "because": "the whole `campaignVisibility` rewrite is undone at once — the uuid branch AND the tombstone check — because they are one piece of new code answering one question, and the interesting failure is what the OLD body did rather than which of the two halves is gone. The witness is a tombstoned campaign that already GENERATED: its `report` rows survive the tombstone (D232 step 3 is what deletes them), keyed by the slug and by the uuid as text (D246). `campaignKnown` (`ownership.ts:157`) reads a bare \"absent\" as \"never created\" and falls through to `reportKnown`, which finds the planted row and returns — so the route answers 200 with the report instead of 404. The uuid case is the sharper half and the reason this lane exists: `resolveCampaign` is itself filtered, so `result.get.ts:40`'s `resolved?.slug ?? campaignId` hands the RAW UUID TEXT to this method, and the old slug-only query finds no row for that text at all — so a uuid-addressed deleted campaign was reachable even with a tombstone check present on the slug branch. Both cases fail on `expect(res.status).toBe(404)` with the planted report served.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/result.get.test.ts",
+        "-t",
+        "tombstoned campaign's existing report answers 404"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "        if (row.deleted_at !== null) {\n          const err = new Error(`Brief \"${brief.id}\" already exists.`);\n          (err as { code?: string }).code = \"EEXIST\";\n          throw err;\n        }\n        campaignId = row.id;",
+      "after": "        campaignId = row.id;",
+      "because": "the tombstone EEXIST is deleted outright, and the witness is the race backstop: a blank `POST /campaigns` mint (`id, slug`, no `brief_version`) that a delete outran, then a direct `createBrief` onto its slug. With the throw gone the version-count read finds no versions, takes the versionless branch, and the write goes on to `insert into brief_version … version 1` — so the assertion that catches this is `expect(count).toBe(0)`, on `brief_version`, and NOT the EEXIST expectation beside it, which the mutant still satisfies. `count` is the whole claim: an EEXIST thrown AFTER the version-count read would refuse the same call while leaving the order wrong, and this lane's ordering is only observable as a version row that must not exist. The deliberate non-mutant variant here is that move, which survives today's assertion shape and so cannot distinguish it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-brief-store.test.ts",
+        "-t",
+        "a first-ever Save against a tombstoned blank mint"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/pg-draft-store.ts",
+      "before": "      if (campaigns.length === 0) {\n        throw new Error(`Campaign \"${campaignId}\" is deleted.`);\n      }\n      const { rows: versions } = await tx.query<{ revision: string }>(",
+      "after": "      const { rows: versions } = await tx.query<{ revision: string }>(",
+      "because": "the `rows.length === 0` throw goes, and the FILTERED `select` stays — which is what makes this a distinct mutant from dropping the filter, and why it needs its own: with the query still filtered, this transaction locks no row, reads no versions, and falls straight through to the `insert into draft`, so a draft is written against a deleted campaign with no error of any kind. A test asserting only that the call rejects cannot tell a throw from a rejected transaction, so the assertion is `rejects.toThrow()` on a call that would otherwise RESOLVE — the silent no-op this lane exists to prevent. It has to be called directly rather than through a route: `draft.put.ts` gates on the now-filtered `campaignMeta` first, so the throw fires only for a tombstone committing between that gate's read and this write's commit, and no route test can hold the database in that gap.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-draft-store.test.ts",
+        "-t",
+        "a campaign tombstoned after the id was in hand refuses the write"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "      if (byId && byId.deleted_at === null && this.visible(byId.team_id)) return \"visible\";",
+      "after": "      if (byId) return byId.deleted_at === null && this.visible(byId.team_id) ? \"visible\" : \"hidden\";",
+      "because": "a hidden or tombstoned id match answers hidden at once instead of falling through to the slug lookup, the pre-fix shape Qodo flagged on #680. A visible campaign whose slug equals that uuid then reads hidden, and `expect(await owner.campaignVisibility(uuid)).toBe(\"visible\")` gets \"hidden\".",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-brief-store.test.ts",
+        "-t",
+        "whose slug is a tombstoned campaign's uuid"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "        where org_id = $1 and slug = $2 and deleted_at is null\n          and not exists",
+      "after": "        where org_id = $1 and slug = $2\n          and not exists",
+      "because": "releaseCampaign deletes a tombstoned versionless row again, freeing its slug while its deletion row is queued. `expect(await owner.releaseCampaign(\"blank\")).toBe(false)` gets true.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-brief-store.test.ts",
+        "-t",
+        "releaseCampaign leaves a tombstoned versionless row"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

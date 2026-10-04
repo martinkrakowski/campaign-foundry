@@ -293,6 +293,19 @@ describe("ObjectOutputStore (PT-4h2)", () => {
       expect(spy).not.toHaveBeenCalled();
     });
 
+    test("a tombstoned campaign lists no packages (PT-9a1, D231)", async () => {
+      // The keys are written by the REAL writer before the tombstone, so `[]` here
+      // is the reader declining to resolve the campaign, not an empty bucket: a
+      // manifest sitting under the prefix is what a stale reader would serve.
+      await commitPackage(campaignId, PLATFORM, "alpha/1x1.png", EARLY, "a");
+      expect(await outputs.listPackageManifests(SLUG)).toHaveLength(1);
+      await db.query(`update campaign set deleted_at = now() where org_id = $1 and id = $2`, [
+        ORG,
+        campaignId,
+      ]);
+      expect(await outputs.listPackageManifests(SLUG)).toEqual([]);
+    });
+
     test("a store that REFUSES propagates rather than looking like an empty campaign", async () => {
       await commitPackage(campaignId, PLATFORM, "alpha/1x1.png", EARLY, "a");
       vi.spyOn(store, "list").mockRejectedValue(new Error("The object store answered 503."));
