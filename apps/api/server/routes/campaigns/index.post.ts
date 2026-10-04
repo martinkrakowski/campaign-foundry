@@ -5,7 +5,14 @@ import {
   type CampaignBrief,
 } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
-import { extractSourceAssetBriefIds, rewriteAssetPaths } from "../../lib/asset-files.js";
+import { rewriteAssetPaths } from "../../lib/asset-files.js";
+import {
+  assertRefsCopied,
+  BriefRefNotFoundError,
+  copyBriefRefs,
+  resolveBriefAssetRefs,
+  type ResolvedBriefRefs,
+} from "../../lib/brief-asset-refs.js";
 import { isErrno, isExistsError, SYMLINK_WRITE_ERROR } from "../../lib/brief-files.js";
 import { parseBrief } from "../../lib/load-brief.js";
 import {
@@ -20,7 +27,6 @@ import { getAssetStore, getBriefStore, TeamsNotSupportedError } from "../../lib/
 import type { ResolvedCampaign, StoredBrief } from "../../lib/ports/brief-store.port.js";
 import {
   assertOwnedCampaign,
-  assertSourceVisible,
   canAssignTeam,
   CampaignNotFoundError,
   resolveCampaignRef,
@@ -102,14 +108,23 @@ async function withDerivedSlug<T>(name: string, attempt: (slug: string) => Promi
  * fix-round item 1, security); an explicit value (including `null`, clearing
  * to org-wide) goes through `canAssignTeam` exactly like `createBrief`'s.
  *
- * PT-5b2 fix-round items 2/3: `readPool` and the additional-source visibility
- * check run once, before any slug is ever reserved — a malformed pool or a
- * hidden reference answers 422/404 without minting anything. Once a
- * candidate IS reserved (`createCampaign`), a later failure (asset copy, the
- * first-version `createBrief`, the pool write) frees the copied assets and then
- * releases that reservation (`deleteAssets`, `releaseCampaign` — in THAT order,
- * PT-4b, because the slug both frees by has to be resolved before the row goes)
- * and propagates as-is — never retried
+ * D166 item 2, closed under `s3` by `resolveBriefAssetRefs` (PT-4k2b2, D210 a/c): a
+ * sourced create's own brief may name ANY campaign as an asset source — a THIRD
+ * campaign's asset id included, which no path-matching ever saw. The resolve refuses a
+ * hidden campaign, another org's, an absent row and a ref naming no campaign at all with
+ * THIS route's own one 404, before any slug is ever reserved and before anything is
+ * copied; the copy then brings the source's and every third campaign's assets over and
+ * remaps every ref onto the copies (carry item 2), so what is written names the NEW
+ * campaign's own rows only. Off `s3` this is the path-derived check and copy the route
+ * has always made, unchanged.
+ *
+ * PT-5b2 fix-round items 2/3: `readPool` and that ref resolve run once, before any
+ * slug is ever reserved — a malformed pool or a hidden reference answers 422/404
+ * without minting anything. Once a candidate IS reserved (`createCampaign`), a later
+ * failure (asset copy, the first-version `createBrief`, the pool write) frees the
+ * copied assets and then releases that reservation (`deleteAssets`,
+ * `releaseCampaign` — in THAT order, PT-4b, because the slug both frees by has to be
+ * resolved before the row goes) and propagates as-is — never retried
  * onto a different suffix, even when the failure is itself EEXIST-shaped
  * (a concurrent writer's own Save racing this exact slug).
  *
@@ -310,11 +325,11 @@ export default defineEventHandler(async (event) => {
   }
 
   // PT-5b2 fix-round item 2 (coderabbit PRRT_kwDOSzP1zc6mgBvA): resolve the
-  // source pool and check every additional source id's visibility BEFORE any
-  // slug is ever reserved — these depend only on `sourceSlug`/`template`, not
-  // on which candidate eventually wins, so a malformed pool or a hidden
-  // reference 422s/404s without minting (and then having to release) a
-  // versionless row or directory for nothing.
+  // source pool and every ref the source's own body carries BEFORE any slug is
+  // ever reserved — these depend only on `sourceSlug`/`template`, not on which
+  // candidate eventually wins, so a malformed pool or a hidden reference
+  // 422s/404s without minting (and then having to release) a versionless row or
+  // directory for nothing.
   let sourcePool;
   try {
     sourcePool = await readPool(scope, sourceSlug);
@@ -323,14 +338,29 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 422);
     return { error: error.message };
   }
-  const additionalSourceIds = extractSourceAssetBriefIds(template, sourceSlug).filter(
-    (fromId) => fromId !== sourceSlug,
-  );
+  // Resolve the source's refs ONCE, here, against `sourceSlug` as the target (the
+  // campaign the caller proved they own) — so every ref is checked, every copy source
+  // named, and `template`'s refs normalised to ids under `s3` BEFORE this route reserves
+  // a slug or copies a byte (PT-4k2b2, D210 a/c). The `copyFrom` this answers excludes
+  // `sourceSlug` itself, which is why the `!== sourceSlug` filter the path-derived check
+  // needed is gone: that check could only see PATHS, so an id ref naming a third campaign
+  // named no copy source at all and the copy went on to share it (carry item 2).
+  let resolved: ResolvedBriefRefs;
   try {
-    for (const fromId of additionalSourceIds) {
-      await assertSourceVisible(scope, fromId);
-    }
+    resolved = await resolveBriefAssetRefs(scope, template, { target: sourceSlug, mode: "save" });
   } catch (error) {
+    // `BriefRefNotFoundError` FIRST, and it is a SUBCLASS of `CampaignNotFoundError`
+    // (D210 c): its own body is this route's hidden-source 404, never the ref's owner
+    // slug — under `s3` a hidden campaign and an absent one must be indistinguishable, or
+    // a guessable slug read out of a ref is a probe.
+    if (error instanceof BriefRefNotFoundError) {
+      setResponseStatus(event, 404);
+      return { error: `Brief "${source}" not found.` };
+    }
+    // The plain `CampaignNotFoundError` is the OFF-`s3` branch, and its body keeps naming
+    // the slug the ref named — the answer fs and pg+fs have always given, which D208(D)
+    // leaves unchanged. Under `s3` no route reaches it, so the residual difference is
+    // confined to the backends that have no ids to resolve at all.
     if (error instanceof CampaignNotFoundError) {
       setResponseStatus(event, 404);
       return { error: `Brief "${error.campaignId}" not found.` };
@@ -379,13 +409,23 @@ export default defineEventHandler(async (event) => {
         throw error;
       }
       try {
-        let brief: CampaignBrief = { ...template, id: targetSlug };
+        // `resolved.brief` and not `template`: under `s3` every ref the source carried is
+        // already the id of a row the caller can see, and `template` still carries the
+        // paths (or the source's own ids) the copy below would then have nothing to map.
+        let brief: CampaignBrief = { ...resolved.brief, id: targetSlug };
         const sourceMap = await getAssetStore(scope).copyAssets(sourceSlug, targetSlug);
         brief = rewriteAssetPaths(brief, sourceSlug, targetSlug, sourceMap);
-        for (const fromId of additionalSourceIds) {
-          const addMap = await getAssetStore(scope).copyAssets(fromId, targetSlug);
-          brief = rewriteAssetPaths(brief, fromId, targetSlug, addMap);
-        }
+        // Every OTHER campaign the source named, in the order the resolve found them.
+        // Under `s3` this is what carries a THIRD campaign's id over (carry item 2); off
+        // it is the loop this line replaces, remapping paths prefix for prefix.
+        brief = await copyBriefRefs(scope, brief, resolved.copyFrom, targetSlug);
+        // **The source's own ids are in this set too.** From the fresh target's point of
+        // view the SOURCE's assets are foreign as well, and every one of them had to come
+        // back from `sourceMap` — so a source id that survived it (a row deleted between
+        // the resolve and the copy, say) is refused here rather than stored still naming
+        // another campaign's absent asset. Thrown INSIDE this try, so the rollback below
+        // frees what was copied and releases the slug.
+        assertRefsCopied(brief, new Set([...resolved.foreignIds, ...resolved.ownIds]), sourceSlug);
 
         // The pool first and version 1 last, both under the pool lock: a pool
         // failure then leaves nothing versioned, so the reservation below is
@@ -481,6 +521,15 @@ export default defineEventHandler(async (event) => {
     if (isErrno(error, "EFORBIDDEN")) {
       setResponseStatus(event, 403);
       return { error: errorMessage(error) };
+    }
+    // The post-copy refusal above, and the same one every other refusal here gives. It
+    // arrives through the OUTER catch because it is thrown inside `attempt`, and without
+    // this branch it would surface with h3's own body shape rather than this route's
+    // `{ error }` — its `statusCode` is 404, so only the body was wrong. The body names
+    // the `source` the CALLER sent, never a ref and never an owner slug read out of one.
+    if (error instanceof BriefRefNotFoundError) {
+      setResponseStatus(event, 404);
+      return { error: `Brief "${source}" not found.` };
     }
     if (!(error instanceof InvalidCopyPoolError)) throw error;
     setResponseStatus(event, 422);

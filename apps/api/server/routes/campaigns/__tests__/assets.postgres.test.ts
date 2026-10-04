@@ -48,14 +48,22 @@ const PNG = Buffer.from(
   "base64",
 );
 
-const brief = (id: string): CampaignBrief => ({
+/**
+ * `logoPath` is a parameter because under `s3` it is no longer inert (PT-4k2b2): a ref
+ * naming no campaign is refused on save, so the `s3` block below has to store a ref that
+ * names `source-camp` — the campaign whose assets the copy is about — or duplicate/index
+ * answer 404 before minting anything and the rollback never runs. `"logo.png"` still names
+ * no campaign, which is what the `OBJECT_STORE=fs` block wants and what a brief used to
+ * be able to say.
+ */
+const brief = (id: string, logoPath = "logo.png"): CampaignBrief => ({
   schemaVersion: BRIEF_SCHEMA_VERSION,
   template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
   id,
   targetRegion: "US",
   targetAudience: "developers",
   campaignMessage: "Build faster",
-  products: [{ id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: "logo.png" }],
+  products: [{ id: "p1", name: "P1", primaryColor: "#1473E6", logoPath }],
   treatments: [{ id: "bold", layout: "headline-bottom", tone: "bold" }],
 });
 
@@ -490,7 +498,7 @@ describe("the create rollback frees the copied assets (PT-4b)", () => {
     const tenant: TenantContext = { orgId: "local", userId: "u", roles: [], teamIds: [] };
     const briefs = new PgBriefStore(harness.db, "local", "u", [], []);
     await briefs.createCampaign("source-camp");
-    await briefs.createBrief(brief("source-camp"));
+    await briefs.createBrief(brief("source-camp", "assets/inputs/source-camp/logo.png"));
     // The source holds an asset, so `copyAssets` really copies one.
     await getAssetStore(tenant).writeAsset("source-camp", "logo.png", PNG);
 
@@ -545,7 +553,7 @@ describe("the create rollback frees the copied assets (PT-4b)", () => {
     const tenant: TenantContext = { orgId: "local", userId: "u", roles: [], teamIds: [] };
     const briefs = new PgBriefStore(harness.db, "local", "u", [], []);
     await briefs.createCampaign("source-camp");
-    await briefs.createBrief(brief("source-camp"));
+    await briefs.createBrief(brief("source-camp", "assets/inputs/source-camp/logo.png"));
     await getAssetStore(tenant).writeAsset("source-camp", "logo.png", PNG);
 
     const failing = vi
@@ -592,7 +600,7 @@ describe("the create rollback frees the copied assets (PT-4b)", () => {
     const tenant: TenantContext = { orgId: "local", userId: "u", roles: [], teamIds: [] };
     const briefs = new PgBriefStore(harness.db, "local", "u", [], []);
     await briefs.createCampaign("source-camp");
-    await briefs.createBrief(brief("source-camp"));
+    await briefs.createBrief(brief("source-camp", "assets/inputs/source-camp/logo.png"));
     await getAssetStore(tenant).writeAsset("source-camp", "logo.png", PNG);
 
     const real = Object.assign(new Error("the real failure"), { code: "EEXIST" });
@@ -635,7 +643,7 @@ describe("the create rollback frees the copied assets (PT-4b)", () => {
     beforeEach(async () => {
       const briefs = new PgBriefStore(harness.db, "local", "u", [], []);
       await briefs.createCampaign("source-camp");
-      await briefs.createBrief(brief("source-camp"));
+      await briefs.createBrief(brief("source-camp", "assets/inputs/source-camp/logo.png"));
       await getAssetStore(tenant).writeAsset("source-camp", "logo.png", PNG);
     });
 

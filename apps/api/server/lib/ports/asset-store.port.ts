@@ -24,7 +24,8 @@ const ASSET_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
  * Whether a brief's stored ref is an ASSET ID rather than a path (PT-4k1, D203).
  *
  * Pure and import-free by design: it is the shape rule every layer asks (the
- * route's write-side checks in PT-4k2, `ObjectInputAssets`'s id branch, and the
+ * `resolveBriefAssetRefs` write-side checks in PT-4k2a/b,
+ * `ObjectInputAssets`'s id branch, and the
  * adapters that must refuse a non-uuid before it reaches a query), and a second
  * copy of it is how an id and a path end up told apart two different ways.
  */
@@ -49,8 +50,9 @@ export interface AssetEntry {
 }
 
 /**
- * The campaign an asset belongs to, as the write-side checks need it (PT-4k2
- * reads it through `assetOwner`; nothing above this line learns the query).
+ * The campaign an asset belongs to, as the write-side checks need it
+ * (`resolveBriefAssetRefs` reads it through `assetOwner`, PT-4k2a/b; nothing above
+ * this line learns the query).
  *
  * `slug` and `name` together are what a brief written BEFORE ids carried as a
  * path — `assets/inputs/<slug>/<name>` — which is exactly what the copy map's
@@ -100,9 +102,9 @@ export interface AssetStorePort {
 
   /**
    * The campaign and name behind an asset id, org-scoped, or `undefined`
-   * (PT-4k1, D208c). The read half of what PT-4k2's save-time checks need, and
-   * the reason an id ref can be turned back into the path a brief wrote before
-   * ids existed.
+   * (PT-4k1, D208c). The read half of what `resolveBriefAssetRefs`' save-time
+   * checks need (PT-4k2a/b), and the reason an id ref can be turned back into the
+   * path a brief wrote before ids existed.
    */
   assetOwner(id: string): Promise<AssetOwner | undefined>;
 
@@ -148,7 +150,7 @@ export interface AssetStorePort {
    * Delete every asset stored under a brief (PT-5b2 fix-round item 2: undoing
    * a `copyAssets` this same request made into a slug whose `createCampaign`
    * reservation is about to be released, because a later step — the
-   * additional-source visibility check, or the first-version `createBrief` —
+   * `assertRefsCopied` post-copy check, or the first-version `createBrief` —
    * failed). A no-op when the brief has no assets.
    */
   deleteAssets(briefId: string): Promise<void>;
