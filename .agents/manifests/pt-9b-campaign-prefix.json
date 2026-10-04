@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "PT-9b-campaign-prefix",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/object-store/object-keys.ts",
+      "before": "export function campaignPrefix(orgId: string, campaignId: string): ObjectKey {\n  const prefix = [\n    \"org\",\n    segment(\"the org id\", orgId, ORG_ID_PATTERN),\n    \"campaign\",\n    segment(\"the campaign id\", campaignId, UUID_PATTERN),\n    \"\",\n  ].join(\"/\");\n  assertObjectKey(prefix);\n  return prefix;\n}\n",
+      "after": "export function campaignPrefix(orgId: string, campaignId: string): ObjectKey {\n  const prefix = [\n    \"org\",\n    segment(\"the org id\", orgId, ORG_ID_PATTERN),\n    \"campaign\",\n    segment(\"the campaign id\", campaignId, UUID_PATTERN),\n  ].join(\"/\");\n  assertObjectKey(prefix);\n  return prefix;\n}\n",
+      "because": "the trailing `/` goes, and this is the ONE widening in the file, so the separator is the only thing between a purge and a campaign nobody named. `org/<org>/campaign/<uuid>` is a prefix of `org/<org>/campaign/<uuid>x/inputs/a` — a sibling campaign whose uuid merely BEGINS with this one — and the two callers D243 allows are a purge (PT-9g) and a reconciler (PT-9h), for which \"is a prefix of\" means \"is deleted\". `assertObjectKey` cannot catch it: a key with no trailing separator is still a legal key, so the mutant passes every check the builder makes and only the neighbour test sees it. That test asserts both halves on purpose — the sibling key does not start with the prefix, AND it does start with the prefix minus its last character — so the mutant cannot pass by having become a prefix of nothing.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/object-keys.test.ts",
+        "-t",
+        "SIBLING campaign"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/object-keys.ts",
+      "before": "export function campaignPrefix(orgId: string, campaignId: string): ObjectKey {\n  const prefix = [\n    \"org\",\n    segment(\"the org id\", orgId, ORG_ID_PATTERN),\n    \"campaign\",\n    segment(\"the campaign id\", campaignId, UUID_PATTERN),\n    \"\",\n  ].join(\"/\");\n  assertObjectKey(prefix);\n  return prefix;\n}\n",
+      "after": "export function campaignPrefix(orgId: string, campaignId: string): ObjectKey {\n  const prefix = [\n    \"org\",\n    segment(\"the org id\", orgId, ORG_ID_PATTERN),\n    \"campaign\",\n    campaignId,\n    \"\",\n  ].join(\"/\");\n  assertObjectKey(prefix);\n  return prefix;\n}\n",
+      "because": "the campaign id stops going through `segment`, so nothing checks it before it joins a namespace a purge will empty whole. The witness is a SLUG: `summer-sale` is alphabet-legal, so `assertObjectKey` accepts `org/local/campaign/summer-sale/` and the refusal never happens — the builder returns a well-formed key into a namespace no write will ever populate, which is DoD 3 failing silently (nothing a user can rename may sit in the store's namespace, and a slug is renameable by definition). `..` is the wrong witness here precisely because `assertObjectKey` WOULD have refused it: the second validator exists to catch the one shape the port's own rule admits, and only a slug-shaped id demonstrates that this builder's own check was load-bearing rather than decorative.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/object-keys.test.ts",
+        "-t",
+        "summer-sale"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

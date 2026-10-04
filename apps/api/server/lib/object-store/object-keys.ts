@@ -188,6 +188,47 @@ export function packagePrefix(orgId: string, campaignId: string): ObjectKey {
 }
 
 /**
+ * Where ONE campaign's whole object tree lives: `org/<orgId>/campaign/<campaignId>/`
+ * (PT-9b, D243).
+ *
+ * It is a deliberate WIDENING in this file, and it contains `inputs/`,
+ * `renders/` and `packages/` rather than naming one of them — where the three
+ * prefixes above each answer for one namespace, this answers "everything this
+ * campaign owns". A widening that reaches three namespaces at once is a
+ * `deletePrefix` away from deleting all three, so what makes it safe is that it
+ * has exactly two callers, both of PT-9 and both of which mean it: the purge
+ * engine (PT-9g) and the orphan reconciler (PT-9h). **No request-path code may
+ * call it** (D243). A handler that wanted it would be asking to empty a whole
+ * campaign over one request, and the per-namespace prefixes above are what a
+ * handler is for.
+ *
+ * The trailing `/` is load-bearing for the widest reason in the file: with the
+ * separator gone this would prefix a sibling campaign whose id merely BEGINS
+ * with this one, and a purge keyed by campaign uuid would empty a neighbour it
+ * was never asked about. It is not `inputPrefix(...).slice(0, -"inputs/".length)`
+ * for the same reason `inputPrefix` is not a slice: a prefix that is computed
+ * from another prefix is a prefix whose correctness is one refactor away from
+ * being wrong.
+ *
+ * Both ids go through the SAME `segment` checks as the prefixes above, against
+ * their OWN patterns — never a second validator and never concatenation of an
+ * unchecked value, because the value that matters most here is the one the purge
+ * will trust: a campaign id that arrived as a slug would name a namespace no
+ * write ever populated.
+ */
+export function campaignPrefix(orgId: string, campaignId: string): ObjectKey {
+  const prefix = [
+    "org",
+    segment("the org id", orgId, ORG_ID_PATTERN),
+    "campaign",
+    segment("the campaign id", campaignId, UUID_PATTERN),
+    "",
+  ].join("/");
+  assertObjectKey(prefix);
+  return prefix;
+}
+
+/**
  * Where one org's background cache lives (PT-4e, D203): `org/<orgId>/cache/`.
  *
  * It is deliberately OUTSIDE C7's campaign shape and deliberately still
