@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "lane": "PT-4h2-package-reads-from-objects",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/object-output-store.ts",
+      "before": "      `select id from campaign where org_id = $1 and slug = $2`,\n      [this.orgId, slug],",
+      "after": "      `select id from campaign where slug = $1`,\n      [slug],",
+      "because": "the query drops `org_id` AND its binding, so a slug resolves against the whole table and this store reads whichever campaign row comes first — another tenant's when the caller is not the tenant that owns the slug. The constraint is `unique (org_id, slug)`, NOT a global unique, so two orgs legitimately hold the same slug and this query cannot tell them apart; dropping the filter while leaving `$1` bound would not parse at all (`could not determine data type of parameter $1`), which is why the binding goes with it and the catch is a failed assertion rather than a SQL error. What the defect costs is not 'another org's bytes' — the KEY still carries `orgId`, so the wrong uuid simply lists nothing — but the silent half of the tenant check: the route's own `campaignVisibility` guard passed on the CALLER's slug, so the visibility half and the read half stop describing the same campaign, and the answer becomes an empty listing for a package that exists. No exception, no log line, and nothing self-inconsistent. The cross-org test is the only question asked anywhere that puts the same slug in two orgs and asks both of them for it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-output-store.test.ts",
+        "-t",
+        "the same slug in another org resolves to another campaign, and each reads only its own"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-output-store.ts",
+      "before": "      if (object === undefined) throw gone();",
+      "after": "      if (object === undefined) throw new Error(\"Package file is gone\");",
+      "because": "the refusal still throws, but it no longer carries `code: \"ENOENT\"`, and `[platformZip].get.ts` decides 409-vs-500 by reading `code` through `isRewriteError` — never the message. With no code it is rethrown, and the route answers 500 for what is the protocol working: a committed generation is immutable, so the only way the chosen object can be gone is a newer commit sweeping it between this store's `list` and the read. A client's retry becomes a server fault, and the fault is reported against the server, where the cause is a bucket doing exactly what it is supposed to do. The message is deliberately left intact by the mutation, because a reader could otherwise 'helpfully' match on it — that is the trap the port's shape exists to close: the route must not know which backend it is on, so it cannot know what a race looks like there. The swept-generation zip test is the only question asked anywhere that reaches this line: a listing that finds nothing answers `undefined` before `open` is ever called, so only the mid-flight sweep exercises the refusal.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/packages/__tests__/packages.s3.test.ts",
+        "-t",
+        "the generation swept between the listing and the measure pass is a 409, not a 500"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-output-store.ts",
+      "before": "      entries.push({ name: `${campaignId}/${rest}`, open: () => this.openFile(entry.key) });",
+      "after": "      entries.push({ name: entry.key, open: () => this.openFile(entry.key) });",
+      "because": "each entry is named by its OBJECT KEY instead of the path the customer is meant to see, so the zip of a package written under `s3` contains `org/local/campaign/<uuid>/packages/instagram-feed/<stamp>-<nonce>/files/winter-sale/alpha/1x1.png` where the fs zip of the same package contains `winter-sale/alpha/1x1.png`. The bytes are right and the archive is well-formed — `parseCentralDirectory` reads both — so nothing about the ZIP is broken; what is broken is the thing the download is FOR. A customer who unzips gets a directory tree named after the store's own namespace: a tenant's org id and a campaign uuid they were never meant to see, and a generation stamp that changes on every re-export, so the path in the archive is not a path the next download will have. It is also DoD 3 restated at the read boundary: a key is a store address and stops being one the moment a campaign is renamed or re-packaged. The zip-parity test is the only question asked anywhere that compares the two backends' central directories rather than each against its own fixtures.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/packages/__tests__/packages.s3.test.ts",
+        "-t",
+        "the zip over objects is the fs zip: same entry names, same sizes, same CRCs"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/index.ts",
+      "before": "  (t) => (objectStore() === \"s3\" ? PG + scopeTenant(t).orgId : scopeRoots(t).outputRoot),",
+      "after": "  (t) => scopeRoots(t).outputRoot,",
+      "because": "the slot ignores `objectStore()` and always builds an `FsOutputStore`, which is the state PT-4h1 left behind: s3 packaging writes objects the fs store cannot see. `listPackageManifests` then walks `<outputRoot>/packages/<slug>/`, finds nothing, and the listing route answers 404 `No packages found` for a campaign that has a complete package in the bucket — the exact symptom PT-4h1's own `package.s3.test.ts` documents as the reason this lane exists ('s3 packaging writes objects that nothing reads'), reproduced on the read side. The zip route agrees with it (404), and no error, no log line and no 5xx appears anywhere: a deployment whose exports succeed and whose downloads all 404 is the worst shape this bug can take, because every individual component is healthy. The mutation is also invisible to every fs suite in the repo — the fs branch is the only one they can reach — which is why the slot test has to set `OBJECT_STORE=s3` explicitly and assert the CLASS rather than the behaviour.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-output-store.test.ts",
+        "-t",
+        "under s3 it is an ObjectOutputStore, per org; under fs it is an FsOutputStore"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-output-store.ts",
+      "before": "    if (object === undefined) {\n      generation = latestCommittedGeneration(await this.store.list(platformPrefix), platformPrefix);\n      if (generation === undefined) return undefined;\n      object = await this.store.get(manifestKey(generation));\n      if (object === undefined) return undefined;\n    }",
+      "after": "    if (object === undefined) return undefined;",
+      "because": "a manifest that answers `undefined` after the listing named it is treated as an absent package and the platform is skipped, with no second look. That is a real race and it is not rare: a newer commit for the same platform mints a generation, writes its files, PUTs its manifest and sweeps every older one — and this store's `list` and its `get` are two round trips to a bucket that is not on this host, with a re-list nowhere in between. Any customer whose export is re-run while they open the download page is served a listing with a platform MISSING from it, and the zip route a 404, for a package that exists and that the next request will serve. No exception and no log line, and nothing is inconsistent: the reader answered truthfully about the state it saw. Re-listing once is what converts that into the current answer, and the `generation === undefined` check inside it is what keeps the retry from answering a sweep with a package that is not there.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-output-store.test.ts",
+        "-t",
+        "a manifest swept between the list and the get is re-listed once and the NEW generation is served"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

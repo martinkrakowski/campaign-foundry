@@ -15,6 +15,7 @@ import { PgJobStore } from "./pg-job-store.js";
 import { FsReportStore } from "./fs-report-store.js";
 import { PgReportStore } from "./pg-report-store.js";
 import { FsOutputStore } from "./fs-output-store.js";
+import { ObjectOutputStore } from "./object-output-store.js";
 import { FsDecisionStore } from "./fs-decision-store.js";
 import { PgDecisionStore } from "./pg-decision-store.js";
 import { FsDraftStore } from "./fs-draft-store.js";
@@ -63,6 +64,7 @@ export * from "./pg-job-store.js";
 export * from "./fs-report-store.js";
 export * from "./pg-report-store.js";
 export * from "./fs-output-store.js";
+export * from "./object-output-store.js";
 export * from "./fs-decision-store.js";
 export * from "./pg-decision-store.js";
 export * from "./fs-draft-store.js";
@@ -208,9 +210,20 @@ const reports = new Registry<ReportStorePort>(
       ? new PgReportStore(database(), key.slice(PG.length))
       : new FsReportStore(key),
 );
+// With OBJECT_STORE=s3 (PT-4h2, D203), the platform packages the two `packages/`
+// routes list and zip are objects rather than directories, so this slot follows the
+// assets slot above and is per ORG and not per output root: the adapter's own
+// query is org-scoped and its keys are `org/<orgId>/campaign/<uuid>/packages/`, so
+// a root that named a directory instead would hand one org a store that lists
+// another org's uuid. Under fs it is unchanged, down to the root it builds — the
+// route logic does not branch on which of the two it got, which is what let PT-4h2
+// leave both routes alone.
 const outputs = new Registry<OutputStorePort>(
-  (t) => scopeRoots(t).outputRoot,
-  (root) => new FsOutputStore(root),
+  (t) => (objectStore() === "s3" ? PG + scopeTenant(t).orgId : scopeRoots(t).outputRoot),
+  (key) =>
+    key.startsWith(PG)
+      ? new ObjectOutputStore(database(), objectStoreClient(), key.slice(PG.length))
+      : new FsOutputStore(key),
 );
 
 // With STORE_BACKEND=postgres (PT-3), one store per org over the process's

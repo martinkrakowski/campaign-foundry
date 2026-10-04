@@ -24,6 +24,11 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 404);
     return { error: "No packages found" };
   }
+  // The SLUG goes in, on both backends, and that is deliberate (PT-4h2): the route's
+  // contract is a slug and the fs store keys a directory by it, so a store that
+  // needed a uuid has to resolve one — org-scoped, inside `ObjectOutputStore`,
+  // where `packagePrefix` then keys the objects. Passing the slug here is what
+  // keeps this route free of any knowledge that a Postgres exists.
   const platforms = await getOutputStore(scope).listPackageManifests(slug);
   if (platforms.length === 0) {
     setResponseStatus(event, 404);
