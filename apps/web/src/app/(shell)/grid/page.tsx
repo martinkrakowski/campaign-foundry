@@ -39,10 +39,10 @@ function AssetUnavailable({ asset }: { asset: Asset }) {
     <div
       data-testid="asset-unavailable"
       role="img"
-      aria-label={`${assetLabel(asset)} — preview unavailable`}
+      aria-label={messages.assetPreviewUnavailableLabel(assetLabel(asset))}
       className="flex min-h-[9rem] w-full flex-1 items-center justify-center p-4 text-center font-mono text-[11px] text-text-muted"
     >
-      Preview unavailable
+      {messages.assetPreviewUnavailable}
     </div>
   );
 }

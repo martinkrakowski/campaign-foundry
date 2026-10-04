@@ -542,7 +542,19 @@ export const usableUrl = (value: unknown): string | undefined => {
   // or an absolute http(s) URL (s3: a presigned GET). Anything else — `javascript:`,
   // `data:`, a protocol-relative `//host` — lands in an `href` or `src`, and the
   // report is untrusted JSON, so it reads as absent and renders the placeholder.
-  if (value.startsWith("/")) return value.startsWith("//") ? undefined : value;
+  // A same-origin path must STAY same-origin once the browser parses it: `//host` and
+  // `/\host` (a backslash reads as a slash in http(s) URLs) both escape to another
+  // host, so the path is resolved against a fixed base and kept only if the host is
+  // unchanged.
+  if (value.startsWith("/")) {
+    try {
+      return new URL(value, "https://same-origin.invalid").host === "same-origin.invalid"
+        ? value
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
   try {
     const { protocol } = new URL(value);
     return protocol === "https:" || protocol === "http:" ? value : undefined;

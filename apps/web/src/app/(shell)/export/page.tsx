@@ -366,7 +366,7 @@ function Row({
           data-testid="download-unavailable"
           className="shrink-0 rounded-full border border-border-control px-4 py-1.5 text-xs text-text-muted"
         >
-          Unavailable
+          {messages.downloadUnavailable}
         </span>
       ) : (
         <a
