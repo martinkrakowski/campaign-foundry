@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-8a0-collect-refs-and-step-types",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/asset-files.ts",
+      "before": "  if (brief.audio !== undefined) refs.push(brief.audio.path);\n",
+      "after": "\n",
+      "because": "the moved `collectRefs` is the only walk that reads a brief's `audio.path`, so deleting the push is the one line whose loss no other test in the three files this lane runs can see: `brief-asset-refs.test.ts` reaches the 404 through `resolveBriefAssetRefs`, which iterates whatever `collectRefs` hands back, and with the push gone a brief's audio ref is simply not in that list. The command named is the case that asks — `a path ref to a team-HIDDEN campaign answers 404` runs over the four ref fields, and only its `audio.path` case flips: `withRef` builds a brief whose every OTHER ref is the root-level `assets/inputs/hydra-logo.png`, which names no campaign, so `assets/inputs/theirs/logo.png` is never put to the visibility check and the render RESOLVES where `BriefRefNotFoundError` is the whole rule (D210 d). The other three cases still pass on `products[].logoPath`, `products[].inputAsset` and `copy.timeline.beats[].background`, whose pushes this mutation does not touch, which is exactly why the `-t` pattern names this one test and not the file.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.test.ts",
+        "-t",
+        "a path ref to a team-HIDDEN campaign answers 404"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
