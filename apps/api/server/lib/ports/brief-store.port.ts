@@ -228,13 +228,10 @@ export interface BriefStorePort {
    * keep serving a deleted, ever-generated campaign's report.
    *
    * A ref that is a CANONICAL UUID naming a row that is tombstoned or hidden by
-   * team answers "hidden" WITHOUT being retried as a slug. It does not change
-   * what any caller receives (each already turns "hidden" into the same single
-   * 404 it turns a by-team "hidden" into), only which rows answer which of the
-   * two, so the port's contract states it: `id` and `slug` share one text space,
-   * so a uuid-shaped ref may be nobody's id and somebody's slug — but a ref that
-   * reached this method as a uuid found no row under it, which is the one case
-   * that IS genuinely absent.
+   * team is retried as a slug, as `resolveCampaign` does (`id` and `slug` share
+   * one text space). A visible, live slug match then answers "visible"; a slug
+   * miss answers "hidden", never "absent", because the hidden id is the only
+   * match. A uuid matching neither an id nor a slug is "absent".
    */
   campaignVisibility(id: string): Promise<"absent" | "visible" | "hidden">;
 

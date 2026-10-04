@@ -165,18 +165,17 @@ export class PgBriefStore implements BriefStorePort {
    * NOT resolve (`resolveCampaign` is itself filtered) reaches it as the raw
    * uuid text, and a slug-only query would find no row for that text at all.
    *
-   * **A uuid match that is tombstoned or team-hidden answers "hidden" and
-   * RETURNS** — it does not fall through to the slug branch, unlike
-   * `campaignMeta`'s and `resolveCampaign`'s uuid branches. Those fall through
-   * because `id` and `slug` share one text space, so a uuid-shaped ref may be
-   * nobody's id and somebody's slug. That is exactly why the fallthrough cannot
-   * happen here: it could only ever MISS, and would silently convert the "hidden"
-   * above into the "absent" this method exists to distinguish — reopening the
-   * `campaignKnown` report/asset fallback for a deleted, ever-generated
-   * campaign, whose `report`/`asset`/`pool`/`job` rows are slug-OR-uuid-text
-   * keyed (D246) and survive until D232 step 3 deletes them. Only a uuid that
-   * matches NO row at all falls through: genuinely never created, which is
-   * "absent", and which every `id` and `slug` share a text space with.
+   * **A uuid match the caller may not see (tombstoned or team-hidden) falls
+   * through to the slug lookup**, exactly as `resolveCampaign`'s uuid branch
+   * does: `id` and `slug` share one text space, so a VISIBLE campaign may have
+   * that uuid text as its slug, and `resolveCampaign` will have resolved it. A
+   * visible, live slug match therefore answers "visible". When the slug lookup
+   * finds no row, the hidden id decides, and the answer is "hidden", never
+   * "absent": "absent" would reopen the `campaignKnown` report/asset fallback
+   * for a deleted, ever-generated campaign, whose `report`/`asset`/`pool`/`job`
+   * rows are slug-OR-uuid-text keyed (D246) and survive until D232 step 3
+   * deletes them. A uuid that matches no row and no slug is "absent": never
+   * created.
    *
    * Neither branch FILTERS the tombstone out of its row set — both SELECT
    * `deleted_at` and answer "hidden" on the value, because that is the only way
