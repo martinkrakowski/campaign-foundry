@@ -216,7 +216,7 @@ describe("the package prefix (PT-4h1)", () => {
   });
 });
 
-// PT-9b, D243. The whole-campaign prefix is the one deliberate WIDENING in this
+// PT-9b, D243. The whole-campaign prefix is a deliberate WIDENING in this
 // file: it CONTAINS `inputs/`, `renders/` and `packages/` where each of those
 // names one namespace. So the two properties the others take for granted become
 // the load-bearing ones here — the trailing `/`, which keeps a sibling campaign

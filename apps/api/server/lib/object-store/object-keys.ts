@@ -191,7 +191,7 @@ export function packagePrefix(orgId: string, campaignId: string): ObjectKey {
  * Where ONE campaign's whole object tree lives: `org/<orgId>/campaign/<campaignId>/`
  * (PT-9b, D243).
  *
- * It is the one deliberate WIDENING in this file, and it contains `inputs/`,
+ * It is a deliberate WIDENING in this file, and it contains `inputs/`,
  * `renders/` and `packages/` rather than naming one of them — where the three
  * prefixes above each answer for one namespace, this answers "everything this
  * campaign owns". A widening that reaches three namespaces at once is a
@@ -214,7 +214,7 @@ export function packagePrefix(orgId: string, campaignId: string): ObjectKey {
  * their OWN patterns — never a second validator and never concatenation of an
  * unchecked value, because the value that matters most here is the one the purge
  * will trust: a campaign id that arrived as a slug would name a namespace no
- * write ever populated, and one that arrived as `..` would name one above it.
+ * write ever populated.
  */
 export function campaignPrefix(orgId: string, campaignId: string): ObjectKey {
   const prefix = [
