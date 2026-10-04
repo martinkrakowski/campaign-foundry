@@ -6,7 +6,7 @@
       "file": "apps/api/server/lib/auth/options.ts",
       "before": "        disableOrganizationDeletion: true,\n",
       "after": "        disableOrganizationDeletion: false,\n",
-      "because": "Turning the flag off re-opens Better Auth's POST /organization/delete to any org owner (C2): an empty org is deleted with a cascade that knows nothing about campaigns, assets or objects. The config test reads the flag off the built instance's organization plugin, so it fails with undefined.",
+      "because": "Turning the flag off re-opens Better Auth's POST /organization/delete to any org owner (C2): an empty org is deleted with a cascade that knows nothing about campaigns, assets or objects. The config test reads false from the built instance's organization plugin, so `.toBe(true)` fails.",
       "command": [
         "yarn",
         "vitest",
