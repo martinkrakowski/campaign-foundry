@@ -140,6 +140,13 @@ const briefs = new Registry<BriefStorePort>(
       tenant.userId,
       [...tenant.roles].sort(),
       [...tenant.teamIds].sort(),
+      // D236: s3-ness is part of the IDENTITY of this store, not of the build,
+      // exactly as it is for `assets` and `outputs` below. It has to be in the
+      // key and not read again in `build`, or a store minted while
+      // `OBJECT_STORE=fs` stays memoised and unserved-with-id-checks after a
+      // flip to `s3` (or the reverse) for every tuple already cached — a
+      // silent wrong answer rather than a rebuild.
+      objectStore() === "s3",
     ]);
   },
   (key) => {
@@ -147,14 +154,15 @@ const briefs = new Registry<BriefStorePort>(
     // The postgres key is JSON, not string concatenation, so no character an
     // org or user id contains (":" included) can make one pair alias another.
     if (!key.startsWith("[")) return new FsBriefStore(key);
-    const [, orgId, userId, roles, teamIds] = JSON.parse(key) as [
+    const [, orgId, userId, roles, teamIds, s3] = JSON.parse(key) as [
       string,
       string,
       string,
       string[],
       string[],
+      boolean,
     ];
-    return new PgBriefStore(database(), orgId, userId, roles, teamIds);
+    return new PgBriefStore(database(), orgId, userId, roles, teamIds, s3);
   },
 );
 // With OBJECT_STORE=s3 (PT-4b, D201), uploaded inputs become `asset` rows
