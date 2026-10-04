@@ -91,6 +91,24 @@ describe("FsAssetStore", () => {
       const [entry] = await store.listAssets("camp-1");
       expect(Object.keys(entry!)).toEqual(["name", "type", "size", "thumbnailUrl"]);
     });
+
+    // PT-4f, D209b. `undefined` is the WHOLE answer, for the same reason
+    // `readAssetById` is: an asset here is named by its path, and there is no
+    // bucket for a presigned URL to point into. `?name=` on fs streams its bytes,
+    // so the redirect branch is never reached here — and it is reached on
+    // `objectStore() === "s3"` alone, never on this answer, precisely because fs
+    // answers `undefined` for every asset it has.
+    test("assetObjectKey answers undefined for every ref, with a file present", async () => {
+      await store.writeAsset("camp-1", "logo.png", pngBytes);
+      expect(await store.assetObjectKey("camp-1", "logo.png")).toBeUndefined();
+      expect(await store.assetObjectKey("camp-1", "missing.png")).toBeUndefined();
+      expect(await store.assetObjectKey("no-such-brief", "logo.png")).toBeUndefined();
+      // Even a traversal, which `resolveConfined` would refuse anyway: there is
+      // nothing to confine TO.
+      expect(await store.assetObjectKey("../escape", "logo.png")).toBeUndefined();
+      // The file is untouched and still readable by the path it really has.
+      expect(await store.readAsset("camp-1", "logo.png")).toEqual(pngBytes);
+    });
   });
 
   test("listAssets returns empty array for non-existent brief directory or invalid briefId", async () => {

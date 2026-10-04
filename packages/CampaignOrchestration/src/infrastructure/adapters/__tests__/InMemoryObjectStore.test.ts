@@ -254,4 +254,52 @@ describe("InMemoryObjectStore.presignGet", () => {
       ).searchParams.get("X-Amz-Signature"),
     );
   });
+
+  // PT-4f, D209a. A real signature covers every parameter in the query, so a digest
+  // that did not would be the ONE adapter on which "change `v`, get a different
+  // URL" is false — and the conformance suite holds both adapters to exactly that.
+  test("a `version` rides as `v`, and the digest covers it", async () => {
+    const store = frozen();
+    const at = { expiresInSeconds: 1200, now: 1_700_000_000_000 };
+    const base = await store.presignGet("campaigns/c1/a.png", at);
+
+    const versioned = new URL(
+      await store.presignGet("campaigns/c1/a.png", { ...at, version: "r1" }),
+    );
+    expect(versioned.searchParams.get("v")).toBe("r1");
+    // Two revisions are two URLs, even for one key in one window: this is what
+    // makes a report's revision part of the signed URL rather than a cache-buster
+    // a client appends.
+    expect(
+      new URL(
+        await store.presignGet("campaigns/c1/a.png", { ...at, version: "r2" }),
+      ).searchParams.get("X-Amz-Signature"),
+    ).not.toBe(versioned.searchParams.get("X-Amz-Signature"));
+    // The same revision is the same URL.
+    expect(await store.presignGet("campaigns/c1/a.png", { ...at, version: "r1" })).toBe(
+      versioned.toString(),
+    );
+    // And no version at all is no `v` parameter.
+    expect(new URL(base).searchParams.has("v")).toBe(false);
+  });
+
+  test("the digest also covers the disposition and the content type", async () => {
+    const store = frozen();
+    const at = { expiresInSeconds: 1200, now: 1_700_000_000_000 };
+    const bare = new URL(await store.presignGet("campaigns/c1/a.png", at));
+    // Both are signed query parameters in a real store, so a digest covering only
+    // the key and the window would hand one signature to two URLs it treats as
+    // different objects-in-time.
+    for (const option of [
+      { responseContentDisposition: 'attachment; filename="a.pdf"' },
+      { responseContentType: "application/pdf" },
+    ]) {
+      const withOption = new URL(
+        await store.presignGet("campaigns/c1/a.png", { ...at, ...option }),
+      );
+      expect(withOption.searchParams.get("X-Amz-Signature")).not.toBe(
+        bare.searchParams.get("X-Amz-Signature"),
+      );
+    }
+  });
 });

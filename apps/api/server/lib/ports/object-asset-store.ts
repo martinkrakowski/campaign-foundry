@@ -275,6 +275,27 @@ export class ObjectAssetStore implements AssetStorePort {
   }
 
   /**
+   * See `AssetStorePort.assetObjectKey`. The key is the one {@link
+   * ObjectAssetStore.writeAsset} built — `inputKey(this.orgId, campaignId,
+   * row.id)` — so the `?name=` redirect hands a browser the very key the upload
+   * wrote, and it goes through the same org-scoped `resolveCampaignId` and the
+   * same `assetRow` every read above uses rather than a lookup of its own.
+   *
+   * The three `undefined`s are decided in that order, and two of them cost
+   * nothing: a reference this org has no campaign for, then a name no row of that
+   * campaign carries. **There is no third `get`** — the key is decided by rows,
+   * and an object gone from under a row that exists is the store's 404 after the
+   * redirect.
+   */
+  async assetObjectKey(briefId: string, name: string): Promise<ObjectKey | undefined> {
+    const campaignId = await this.resolveCampaignId(briefId);
+    if (campaignId === undefined) return undefined;
+    const row = await this.assetRow(campaignId, name);
+    if (row === undefined) return undefined;
+    return inputKey(this.orgId, campaignId, row.id);
+  }
+
+  /**
    * See `AssetStorePort.listAssets`. Answered from ROWS, not from a listing of
    * the prefix: `name`, `type` and `size` are all columns, and reading a
    * remote store's metadata per asset would make one listing cost one round
@@ -286,6 +307,17 @@ export class ObjectAssetStore implements AssetStorePort {
    * carrying it costs one column on a query that already runs rather than a
    * lookup per entry, and it is what a caller needs to store a ref. fs leaves
    * the field absent, which is why the port declares it optional.
+   *
+   * `thumbnailUrl` is the route URL and is FINAL as of PT-4f (D209b) — not
+   * "until PT-4f makes this a presigned URL", which is what this comment said
+   * while that lane was planned. Two reasons it is the route URL and not a
+   * presigned one, and both are load-bearing rather than tidiness: it never
+   * expires (the grid holds these across a poll cycle, and a URL that died at the
+   * next window would blank every thumbnail), and it costs no presign PER LISTED
+   * ASSET, which a listing of a campaign with forty inputs would pay on every
+   * tick. Under `s3` that same URL answers a 302 to a freshly presigned
+   * location, so the browser still never sees a bucket path (D170) and the
+   * listing stays one query.
    */
   async listAssets(briefId: string): Promise<readonly AssetEntry[]> {
     const campaignId = await this.resolveCampaignId(briefId);
@@ -301,10 +333,9 @@ export class ObjectAssetStore implements AssetStorePort {
         name: row.name,
         type: assetContentType(row.name),
         size: Number(row.size),
-        // EXACTLY the fs store's string, slug-based and all, until PT-4f makes
-        // this a presigned URL: the route hands this back to a browser, and a
-        // listing that pointed somewhere the GET route does not serve would be
-        // a 404 on an asset that is right there.
+        // EXACTLY the fs store's string, slug-based and all, byte for byte —
+        // a listing that spelled this differently on one backend would make the
+        // two disagree about an asset that is the same file.
         thumbnailUrl: `/api/pipeline/campaigns/assets?briefId=${encodeURIComponent(briefId)}&name=${encodeURIComponent(row.name)}`,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));

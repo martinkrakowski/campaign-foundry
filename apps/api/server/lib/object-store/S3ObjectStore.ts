@@ -242,6 +242,14 @@ export class S3ObjectStore implements ObjectStorePort {
     // defaults X-Amz-Expires to 86400 when it is absent, so a caller's own
     // expiry would be ignored rather than honoured.
     url.searchParams.set("X-Amz-Expires", String(options.expiresInSeconds));
+    if (options.version !== undefined) {
+      // BEFORE `sign`, and that is the whole of it: aws4fetch signs the query as
+      // it stands, so a parameter added afterwards rides the URL unsigned and a
+      // caller could change it to anything and still have a store answer 200.
+      // `v` rather than `version` because it is the shortest name that is not an
+      // `X-Amz-*` or a `response-*` one, and both families are the store's.
+      url.searchParams.set("v", options.version);
+    }
     if (options.responseContentDisposition !== undefined) {
       url.searchParams.set("response-content-disposition", options.responseContentDisposition);
     }

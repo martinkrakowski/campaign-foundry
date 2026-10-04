@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { basename, dirname, extname, resolve } from "node:path";
 import { resolveConfined } from "../confined-path.js";
 import { ASSET_NAME_PATTERN, assetContentType } from "../asset-files.js";
+import type { ObjectKey } from "@campaignfoundry/CampaignOrchestration";
 import type { AssetEntry, AssetOwner, AssetStorePort } from "./asset-store.port.js";
 
 /**
@@ -68,6 +69,23 @@ export class FsAssetStore implements AssetStorePort {
 
   /** See `AssetStorePort.assetOwner` — always `undefined`, as above. */
   async assetOwner(_id: string): Promise<AssetOwner | undefined> {
+    return undefined;
+  }
+
+  /**
+   * See `AssetStorePort.assetObjectKey`. Always `undefined`, for the same reason
+   * `readAssetById` is: a filesystem asset is NAMED by its path under
+   * `<baseDir>/<briefId>/<name>`, which is a path and not a key at all — there is
+   * no bucket for a presigned URL to point into, and inventing a key-shaped name
+   * here would be how a caller began signing URLs for files the object store
+   * never wrote.
+   *
+   * `?name=` on fs streams its bytes (`assets.get.ts`), which is what makes this
+   * `undefined` the whole answer rather than a gap: the redirect branch is taken
+   * on `objectStore() === "s3"` alone and never on this method's answer, so fs
+   * never asks.
+   */
+  async assetObjectKey(_briefId: string, _name: string): Promise<ObjectKey | undefined> {
     return undefined;
   }
 

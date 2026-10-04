@@ -1,6 +1,7 @@
 import { campaignKnown } from "../../lib/ownership.js";
 import { getBriefStore } from "../../lib/ports/index.js";
 import { readReport } from "../../lib/report.js";
+import { withAssetUrls } from "../../lib/signed-urls.js";
 import { requestTenant } from "../../lib/tenant.js";
 
 /** The empty "no run yet" result the UI treats as "never ran". */
@@ -14,6 +15,13 @@ const EMPTY = { halted: false, assets: [], log: null };
  * yields the empty result. There is no "latest run" answer any more (PT-0a): the
  * global pointer served whichever campaign ran last to any caller, which has no
  * meaning once runs belong to a tenant, and the web app always names its campaign.
+ *
+ * Every row carries a `*Url` per asset on top of the report it always read
+ * (PT-4f, D204) — a presigned GET under `s3`, today's output route on fs. **Not
+ * one of them is minted before `campaignKnown` has answered**, and that ordering
+ * is the whole tenancy of this route: the org and the campaign in every key are
+ * the caller's own tenant's and its own resolve's, so a caller who may not see
+ * this campaign never reaches the line that would ask the store to sign for it.
  */
 export default defineEventHandler(async (event) => {
   const campaignId = getQuery(event).campaignId;
@@ -33,5 +41,13 @@ export default defineEventHandler(async (event) => {
   const slug = resolved?.slug ?? campaignId;
   await campaignKnown(scope, slug, "report");
   const report = await readReport(scope, slug);
-  return report === undefined ? EMPTY : report;
+  // "Never ran" is answered before anything is signed: there are no rows to carry
+  // a URL, so the revision is not read either.
+  if (report === undefined) return EMPTY;
+  // `resolved`'s OWN fields, handed on rather than resolved again — the slug is
+  // what a render path starts with, and the uuid is what a key hangs under. Both
+  // absent (`campaignId` undefined) under `s3` for a ref that resolved to no row,
+  // and `withAssetUrls` then mints no `s3` URL at all rather than a key with
+  // nowhere to live.
+  return withAssetUrls(scope, report, { slug, campaignId: resolved?.campaignId });
 });
