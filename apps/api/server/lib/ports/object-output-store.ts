@@ -89,10 +89,15 @@ export class ObjectOutputStore implements OutputStorePort {
    * Always `missing` under `s3` (D204), and deliberately so rather than as an
    * unfinished adapter: the rendered output is addressed by id and served through
    * a presigned URL by the asset routes, so there is no output-root-relative path
-   * for a browser to ask this store for. Answering `missing` for everything is
-   * what makes a malformed `/output/` path a 404 instead of a 400 — a URL that
-   * cannot name an object cannot be a valid one either. PT-4i re-anchors the
-   * route; until then this is the same answer the web has seen since PT-4e.
+   * for a browser to ask this store for.
+   *
+   * Since PT-4i that is the ROUTE's answer and not this one's: `GET /output/**`
+   * reads `objectStore()` and answers 404 before it asks this store at all, so
+   * this `missing` is defence in depth for any caller that reaches the port
+   * without the route in front of it. It has never been what turned a malformed
+   * `/output/` path into a 404 rather than a 400 — the route refuses that at its
+   * own traversal guard, above this code — and on both backends it still cannot
+   * be what did.
    */
   async openOutput(_relativePath: string): Promise<OutputLookup> {
     return MISSING;
