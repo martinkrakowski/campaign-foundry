@@ -521,6 +521,24 @@ export const assetLabel = (
     ? `${a.productId} @ ${assetCanvas(a)} · v${a.variantIndex} · ${a.treatment}`
     : `${a.productId} @ ${assetCanvas(a)} · ${a.treatment}`;
 
+/**
+ * The one reader for an asset's `*Url` field: a non-empty string IS the URL, and
+ * anything else — absent, a non-string, `""` — is no URL (D212).
+ *
+ * **`unknown`, not `string | undefined`, on purpose.** These fields arrive from a
+ * persisted report as untrusted JSON, and the optionality the `Asset` type declares
+ * is a claim about TypeScript, not about what parsed. `""` is the case that matters
+ * most: a signature builder that produced nothing would hand the browser an href that
+ * resolves to the page itself, which is worse than saying so.
+ *
+ * **There is deliberately no client-built fallback here.** The pipeline's output
+ * route answers 404 under `s3` and retires in PT-4i, so a consumer that wants a URL
+ * it was not given renders the honest placeholder rather than inventing one
+ * (D212/D213).
+ */
+export const usableUrl = (value: unknown): string | undefined =>
+  typeof value === "string" && value !== "" ? value : undefined;
+
 /** Canvas raster + encode budget per frame (wave-4 perf spike), for the encode estimate. */
 export const ENCODE_MS_PER_FRAME = 7;
 

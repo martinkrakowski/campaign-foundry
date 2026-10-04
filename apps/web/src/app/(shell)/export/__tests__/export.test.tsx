@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   renderWithRun,
@@ -10,6 +10,8 @@ import {
   mockPipelineApi,
   seedDecisions,
   fakeDecisionsApi,
+  fsUrls,
+  s3Urls,
 } from "@/__tests__/helpers";
 import { API, useRun } from "@/lib/run-context";
 import * as messages from "@/components/campaign/messages";
@@ -463,7 +465,7 @@ describe("ExportPage — motion", () => {
         videoPath: "alpha/9x16/v2.mp4",
         durationSec: undefined,
       }),
-    ];
+    ].map((asset) => ({ ...asset, ...s3Urls(asset) }));
     seedPersistedRun(assets);
     mockPipelineApi({
       report: { halted: false, assets, log: { entries: [], campaignId: "seed" } },
@@ -502,7 +504,7 @@ describe("ExportPage — motion", () => {
     expect(screen.getByText("alpha @ 9:16 · v2 · headline-top-bold")).toBeTruthy();
     expect(screen.getByText("alpha/9x16/v1.mp4 · poster alpha/9x16/v1.png")).toBeTruthy();
     const links = screen.getAllByRole("link", { name: "Download .MP4" });
-    expect(links[0].getAttribute("href")).toBe(`${API}/output/alpha/9x16/v1.mp4`);
+    expect(links[0].getAttribute("href")).toBe(assets[0]!.videoDownloadUrl);
     expect(screen.queryByRole("link", { name: "Download .PNG" })).toBeNull();
 
     for (const id of ["instagram-story", "instagram-reel", "tiktok", "youtube-short"]) {
@@ -607,5 +609,149 @@ describe("ExportPage — control boundaries carry border-control", () => {
     const download = screen.getByRole("button", { name: "Download zip" });
     expect(classes(download)).toContain("border-border-control");
     expect(classes(download)).not.toContain("border-border");
+  });
+});
+
+/**
+ * D204/D212: every export row links the server's own field, read exactly.
+ *
+ * **Both backends, exact equality.** `s3Urls` is cross-origin, so its download fields
+ * differ from its display ones by the signed disposition — which is the only thing that
+ * makes the pair distinguishable at all. `fsUrls` is the same-origin shape where D212
+ * says the two are the SAME string, so it proves the code reads the FIELD rather than
+ * merely building something plausible. Never `toContain`: a URL that mentions the path
+ * is the old client-built defect wearing a new signature.
+ */
+describe("ExportPage — every row href is the server's field (D204/D212)", () => {
+  const BACKENDS = [
+    ["s3", s3Urls],
+    ["fs", fsUrls],
+  ] as const;
+
+  /** The row whose sub-line names `path` — the row this assertion is about. */
+  const rowFor = (path: string): HTMLElement =>
+    screen.getByText(path).parentElement?.parentElement as HTMLElement;
+
+  test("the proof, MP4 and PNG rows link proofUrl, videoDownloadUrl and outputDownloadUrl", async () => {
+    for (const [backend, urls] of BACKENDS) {
+      const still = makeAsset();
+      const motion = makeMotionAsset({ variantIndex: 2 });
+      seedDecisions({ "alpha/1:1/default": "approved", "alpha/v2": "approved" });
+      seedPersistedRun([
+        { ...still, ...urls(still) },
+        { ...motion, ...urls(motion) },
+      ]);
+      const { unmount } = renderWithRun(<ExportPage />);
+      await screen.findByText(/2 of 2 creatives approved/);
+      expect(rowFor("proofs/alpha.pdf").textContent, backend).toContain("alpha");
+      expect(
+        within(rowFor("proofs/alpha.pdf")).getByRole("link").getAttribute("href"),
+        backend,
+      ).toBe(urls(still).proofUrl);
+      expect(
+        within(rowFor("alpha/9x16/v1.mp4 · poster alpha/9x16/v1.png"))
+          .getByRole("link")
+          .getAttribute("href"),
+        backend,
+      ).toBe(urls(motion).videoDownloadUrl);
+      expect(within(rowFor("alpha/1x1.png")).getByRole("link").getAttribute("href"), backend).toBe(
+        urls(still).outputDownloadUrl,
+      );
+      unmount();
+    }
+  });
+
+  test("under s3 each download href is provably not the display URL it sits beside", async () => {
+    const base = makeAsset();
+    const still = { ...base, ...s3Urls(base) };
+    seedDecisions({ "alpha/1:1/default": "approved" });
+    seedPersistedRun([still]);
+    renderWithRun(<ExportPage />);
+    await screen.findByText(/1 of 1 creatives approved/);
+    const href = (row: HTMLElement) => within(row).getByRole("link").getAttribute("href");
+    const png = href(rowFor("alpha/1x1.png"));
+    const proof = href(rowFor("proofs/alpha.pdf"));
+    // The fixture's own pair differs by the disposition, so the distinction is real
+    // rather than a coincidence — a consumer that reached for `outputUrl` for the PNG
+    // download, or for a display URL for the proof, fails here on `toBe`.
+    expect(still.outputDownloadUrl).not.toBe(still.outputUrl);
+    expect(png).not.toBe(still.outputUrl);
+    expect(proof).not.toBe(still.outputUrl);
+    expect(png).toContain("response-content-disposition");
+  });
+
+  test("two approved rows sharing one proofPath are one row, linking the first usable proofUrl", async () => {
+    // The dedupe keys on `proofPath`, not on the URL: the two rows are the same PDF, so
+    // either signature fetches the same bytes and only one row belongs in the queue.
+    const first = makeAsset({ variantIndex: 0, treatment: "default" });
+    const second = makeAsset({
+      variantIndex: 1,
+      treatment: "other",
+      outputPath: "alpha/1x1/second.png",
+    });
+    seedDecisions({ "alpha/v0": "approved", "alpha/v1": "approved" });
+    seedPersistedRun([
+      { ...first, ...s3Urls(first) },
+      // The second row carries NO proofUrl: the row must keep the first usable one
+      // rather than fall back to a path or drop the link entirely.
+      { ...second, proofUrl: undefined },
+    ]);
+    renderWithRun(<ExportPage />);
+    await screen.findByText(/2 of 2 creatives approved/);
+    expect(screen.getByText("Proof PDFs (1)")).toBeTruthy();
+    const proof = within(rowFor("proofs/alpha.pdf")).getByRole("link");
+    expect(proof.getAttribute("href")).toBe(s3Urls(first).proofUrl);
+  });
+
+  test("the packages zip is the route URL, and stays it beside signed assets (PT-4h owns it)", async () => {
+    // Not this lane's field, and deliberately unchanged: the zip is served by the API's
+    // own route under every backend, so its href must not become a signed asset URL.
+    const user = userEvent.setup();
+    const base = makeAsset();
+    const still = { ...base, ...s3Urls(base) };
+    seedDecisions({ "alpha/1:1/default": "approved" });
+    const seeded = seedPersistedRun([still]);
+    mockPipelineApi({
+      opened: seeded,
+      report: { halted: false, assets: [still], log: { entries: [], campaignId: "seed" } },
+      packages: () => json({ platforms: [] }, 404),
+      packagePost: () => json({ platforms: [{ platformId: "instagram-feed", items: [item()] }] }),
+    });
+    renderWithRun(<ExportPage />);
+    await user.click(await screen.findByRole("button", { name: "Package" }));
+    const zip = await screen.findByRole("link", { name: "Download zip" });
+    expect(zip.getAttribute("href")).toBe(`${API}/campaigns/packages/seed/instagram-feed.zip`);
+    for (const url of Object.values(s3Urls(still))) {
+      expect(zip.getAttribute("href")).not.toBe(url);
+    }
+  });
+
+  test("with no *Url at all every row says Unavailable and keeps its label and path", async () => {
+    // `makeAsset` carries paths and no URLs: the shape of a run committed from a job
+    // payload, which the jobs route answers with paths and signs nothing (D213). The
+    // rows must say so — and must not link anything, because an `<a>` with no `href`
+    // navigates the page instead of naming what is missing.
+    const still = makeAsset();
+    const motion = makeMotionAsset();
+    seedDecisions({ "alpha/1:1/default": "approved", "alpha/v1": "approved" });
+    seedPersistedRun([still, motion]);
+    const { container } = renderWithRun(<ExportPage />);
+    await screen.findByText(/2 of 2 creatives approved/);
+    const unavailable = screen.getAllByTestId("download-unavailable");
+    // One per row: the proof, the MP4 and the PNG.
+    expect(unavailable).toHaveLength(3);
+    expect(unavailable.every((el) => el.textContent === "Unavailable")).toBe(true);
+    expect(screen.queryByRole("link", { name: "Download .PDF" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Download .MP4" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Download .PNG" })).toBeNull();
+    // The labels and paths survive: the creative IS approved and the path is real.
+    expect(screen.getByText("alpha/1x1.png")).toBeTruthy();
+    expect(screen.getByText("alpha/9x16/v1.mp4 · poster alpha/9x16/v1.png")).toBeTruthy();
+    expect(screen.getByText("proofs/alpha.pdf")).toBeTruthy();
+    for (const el of container.querySelectorAll("*")) {
+      for (const attr of Array.from(el.attributes)) {
+        expect(attr.value).not.toContain("/output/");
+      }
+    }
   });
 });

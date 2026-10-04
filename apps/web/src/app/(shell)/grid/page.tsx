@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  API,
   assetCanvas,
   assetKey,
   assetLabel,
+  usableUrl,
   usePageCampaignParam,
   useRun,
   type Asset,
@@ -24,13 +24,28 @@ const ratioRank = (r: string): number => {
   return i === -1 ? ASPECT_RATIOS.length : i;
 };
 
-/** Creative image URL, cache-busted per run (runs overwrite the same paths). */
-const assetSrc = (a: Asset, version: number): string =>
-  `${API}/output/${a.outputPath}?v=${version}`;
-
-/** Motion clip URL (same cache-buster); the PNG above is its poster. */
-const videoSrc = (a: Asset & { videoPath: string }, version: number): string =>
-  `${API}/output/${a.videoPath}?v=${version}`;
+/**
+ * What stands in for a creative whose URL the server could not sign (D212/D213).
+ *
+ * ONE element for every surface that would otherwise render an `<img>` or a
+ * `<video>` with no source: the still tile, the motion tile, and the modal. It is
+ * `role="img"` with the asset's own label, so the tile still reads as this creative
+ * to a screen reader instead of as a gap — and it is not an `<img>` with an empty
+ * `src`, which is the request-for-the-current-page that a silent `undefined` would
+ * have produced.
+ */
+function AssetUnavailable({ asset }: { asset: Asset }) {
+  return (
+    <div
+      data-testid="asset-unavailable"
+      role="img"
+      aria-label={`${assetLabel(asset)} — preview unavailable`}
+      className="flex min-h-[9rem] w-full flex-1 items-center justify-center p-4 text-center font-mono text-[11px] text-text-muted"
+    >
+      Preview unavailable
+    </div>
+  );
+}
 
 const isMotion = (a: Asset): a is Asset & { videoPath: string } => typeof a.videoPath === "string";
 
@@ -329,7 +344,6 @@ export default function GridPage() {
                       <Artboard
                         key={assetKey(asset)}
                         asset={asset}
-                        version={assetVersion}
                         loading={
                           loading &&
                           (regeneratingKeys === null || regeneratingKeys.has(assetKey(asset)))
@@ -363,9 +377,7 @@ export default function GridPage() {
         </button>
       )}
 
-      {previewAsset && (
-        <PreviewModal asset={previewAsset} version={assetVersion} onClose={closePreview} />
-      )}
+      {previewAsset && <PreviewModal asset={previewAsset} onClose={closePreview} />}
     </div>
   );
 }
@@ -475,7 +487,6 @@ function SourceBadge({ source }: { source: Asset["backgroundSource"] }) {
 
 function Artboard({
   asset,
-  version,
   loading,
   decision,
   decidable,
@@ -484,7 +495,6 @@ function Artboard({
   onPreview,
 }: {
   asset: Asset;
-  version: number;
   loading: boolean;
   decision?: "approved" | "rejected";
   /** False until the run's decisions load (D173) or while a run is in flight: a verdict
@@ -495,6 +505,16 @@ function Artboard({
   onDecide: (decision: "approved" | "rejected") => void;
   onPreview: () => void;
 }) {
+  // Every URL this tile renders comes from the server's own fields (D204), and each
+  // one is read through the one helper that decides whether it is usable (D212). The
+  // download fields are the `attachment`-signed pair, NOT the display URLs the tiles
+  // show: `<a download>` is ignored cross-origin, which is exactly the `s3` case.
+  const pngUrl = usableUrl(asset.outputUrl);
+  const clipUrl = isMotion(asset) ? usableUrl(asset.videoUrl) : undefined;
+  const pngDownload = usableUrl(asset.outputDownloadUrl);
+  const mp4Download = isMotion(asset) ? usableUrl(asset.videoDownloadUrl) : undefined;
+  const proofDownload = usableUrl(asset.proofUrl);
+
   // Hover actions + the in-flight indicator, shared by the still and motion tiles. The
   // motion tile keeps the scrim light so the clip stays visible while it plays.
   const overlay = (
@@ -517,25 +537,29 @@ function Artboard({
         >
           Preview
         </button>
-        {isMotion(asset) && (
+        {/* A download with no URL is no link at all — not an `<a>` without an `href`,
+            which would navigate to the current page. The reviewer can still preview. */}
+        {mp4Download !== undefined && (
           <a
-            href={videoSrc(asset, version)}
+            href={mp4Download}
             download
             className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-text-emphasis transition-colors hover:bg-border-hover"
           >
             Download .MP4
           </a>
         )}
-        <a
-          href={assetSrc(asset, version)}
-          download
-          className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-text-emphasis transition-colors hover:bg-border-hover"
-        >
-          {isMotion(asset) ? "Download poster .PNG" : "Download .PNG"}
-        </a>
-        {asset.proofPath && (
+        {pngDownload !== undefined && (
           <a
-            href={`${API}/output/${asset.proofPath}`}
+            href={pngDownload}
+            download
+            className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-text-emphasis transition-colors hover:bg-border-hover"
+          >
+            {isMotion(asset) ? "Download poster .PNG" : "Download .PNG"}
+          </a>
+        )}
+        {proofDownload !== undefined && (
+          <a
+            href={proofDownload}
             download
             className="w-full rounded-full border border-border bg-surface-2 py-2 text-center text-sm text-text-emphasis transition-colors hover:bg-border-hover"
           >
@@ -609,19 +633,26 @@ function Artboard({
         <ComplianceBadge asset={asset} />
       </div>
 
-      {isMotion(asset) ? (
-        <MotionCell asset={asset} version={version}>
+      {isMotion(asset) && clipUrl !== undefined ? (
+        <MotionCell asset={asset} clipUrl={clipUrl} posterUrl={pngUrl}>
           {overlay}
         </MotionCell>
       ) : (
         <div className={TILE_CLASS}>
           {/* Plain <img>: the pipeline serves arbitrarily-sized PNGs via the API proxy. */}
-          <img
-            src={assetSrc(asset, version)}
-            alt={assetLabel(asset)}
-            loading="lazy"
-            className="block h-auto w-full"
-          />
+          {pngUrl !== undefined && !isMotion(asset) ? (
+            <img
+              src={pngUrl}
+              alt={assetLabel(asset)}
+              loading="lazy"
+              className="block h-auto w-full"
+            />
+          ) : (
+            // No signed URL for the element this cell would render — and a motion cell
+            // whose CLIP is missing takes the placeholder even with a usable poster,
+            // because the cell is the clip. Never a path of our own (D212).
+            <AssetUnavailable asset={asset} />
+          )}
           {overlay}
         </div>
       )}
@@ -664,14 +695,20 @@ function Artboard({
  * Motion cell: the poster shows until the reviewer hovers (or presses the play
  * control, for keyboard users); leaving the tile rewinds. Muted and
  * `preload="metadata"` so a 100-cell grid does not pull 100 clips.
+ *
+ * The two sources arrive already read through the usable-URL helper, so
+ * `posterUrl === undefined` is a real state rather than a guard: the attribute is
+ * omitted, and the cell plays with no poster instead of pointing at nothing.
  */
 function MotionCell({
   asset,
-  version,
+  clipUrl,
+  posterUrl,
   children,
 }: {
   asset: Asset & { videoPath: string };
-  version: number;
+  clipUrl: string;
+  posterUrl: string | undefined;
   children: ReactNode;
 }) {
   // The element arrives through a callback ref, so the controls exist only once
@@ -703,8 +740,8 @@ function MotionCell({
     <div className={TILE_CLASS} onMouseEnter={controls?.play} onMouseLeave={controls?.stop}>
       <video
         ref={setVideo}
-        src={videoSrc(asset, version)}
-        poster={assetSrc(asset, version)}
+        src={clipUrl}
+        poster={posterUrl}
         muted
         loop
         playsInline
@@ -739,17 +776,13 @@ function MotionCell({
 }
 
 /** Full-size creative preview. Closes on backdrop click, the × button, or Escape. */
-function PreviewModal({
-  asset,
-  version,
-  onClose,
-}: {
-  asset: Asset;
-  version: number;
-  onClose: () => void;
-}) {
+function PreviewModal({ asset, onClose }: { asset: Asset; onClose: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  // Same reads as the tile, and the same placeholder for the same reason: the modal is
+  // the large version of the cell, so it is exactly as absent as the cell was.
+  const pngUrl = usableUrl(asset.outputUrl);
+  const clipUrl = isMotion(asset) ? usableUrl(asset.videoUrl) : undefined;
 
   // Modal focus management: move focus in on open, trap Tab inside, restore on close.
   useEffect(() => {
@@ -809,10 +842,10 @@ function PreviewModal({
         </svg>
       </button>
 
-      {isMotion(asset) ? (
+      {clipUrl !== undefined ? (
         <video
-          src={videoSrc(asset, version)}
-          poster={assetSrc(asset, version)}
+          src={clipUrl}
+          poster={pngUrl}
           controls
           autoPlay
           muted
@@ -822,13 +855,15 @@ function PreviewModal({
           onClick={(e) => e.stopPropagation()}
           className="max-h-[85vh] max-w-[90vw] rounded-lg border border-border object-contain shadow-2xl"
         />
-      ) : (
+      ) : pngUrl !== undefined && !isMotion(asset) ? (
         <img
-          src={assetSrc(asset, version)}
+          src={pngUrl}
           alt={assetLabel(asset)}
           onClick={(e) => e.stopPropagation()}
           className="max-h-[85vh] max-w-[90vw] rounded-lg border border-border object-contain shadow-2xl"
         />
+      ) : (
+        <AssetUnavailable asset={asset} />
       )}
 
       <div
