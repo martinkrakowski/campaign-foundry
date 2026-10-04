@@ -110,6 +110,41 @@ spec:
               value: certs/kafka/user.crt
             - name: KAFKA_CLIENT_KEY_PATH
               value: certs/kafka/user.key
+            # Object storage (PT-4j, D205): the api container writes to the
+            # SeaweedFS bucket, starting EMPTY — no data is migrated, so a stored
+            # path ref reads as ENOENT until PT-8 imports it (D208). The two
+            # endpoints are deliberately different: S3_ENDPOINT is the in-cluster
+            # Service every request is sent to, and S3_PUBLIC_ENDPOINT is only
+            # ever computed into a presigned URL (S3ObjectStore never opens a
+            # socket to it), so the Pod needs no CA for it and no DNS for
+            # s3.midnight.lan — only the browser does (README, step 4).
+            # S3_REGION must equal the region the bucket Job signs with
+            # (jobs/s3-bootstrap.yaml), and S3_BUCKET the bucket it creates —
+            # a wrong bucket passes the boot guard, which reads no socket.
+            # The key is the app identity scoped to that one bucket, never the
+            # store's admin identity, and mandatory rather than optional: weed
+            # reads the identities file once at startup, so a key the Secret
+            # does not carry would leave the app refusing every request.
+            - name: OBJECT_STORE
+              value: "s3"
+            - name: S3_ENDPOINT
+              value: http://seaweedfs-s3:8333
+            - name: S3_PUBLIC_ENDPOINT
+              value: https://s3.midnight.lan
+            - name: S3_REGION
+              value: us-east-1
+            - name: S3_BUCKET
+              value: campaign-foundry
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3
+                  key: app-access-key
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3
+                  key: app-secret-key
           volumeMounts:
             - name: data
               mountPath: /data

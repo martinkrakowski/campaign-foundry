@@ -11,10 +11,10 @@ Campaign Foundry's staging environment runs on the owner's k3s node `midnight`
 | Piece | How | Notes |
 |---|---|---|
 | Web + API | `app.yaml`: one Pod, two containers from one image | The web app proxies `/api/pipeline/*` to `127.0.0.1:3001`, fixed at build time; sharing the Pod keeps that right. |
-| Files | PVC `campaign-foundry-data` (local-path, 20Gi) at `/data` | Briefs, input assets, fonts and output. Seeded from the image's samples on first start. |
+| Files | PVC `campaign-foundry-data` (local-path, 20Gi) at `/data` | Fonts and the seed samples. The Kafka certificates are Secret mounts layered under `/data/certs`, not PVC data. Input assets and outputs written since PT-4j are in the object store's bucket instead; briefs are Postgres rows. Seeded from the image's samples on first start. |
 | PostgreSQL | CloudNativePG `Cluster` `cf-pg` | TLS; the app verifies against the operator's CA (`cf-pg-ca`). Migrated on every deploy. The app runs `STORE_BACKEND=postgres` and `AUTH_MODE=better-auth` (since 2026-09-26: staging is where the platform is proven), so it starts with empty tables until PT-8 imports the seeded file data. Separate from the Aiven database. |
 | Kafka | Strimzi `Kafka` `cf-kafka`, KRaft, one node | TLS listener with client-certificate auth, as on Aiven. `KafkaUser` `campaign-foundry`, with ACLs on topic `cf.run-requests` and group `cf-workers`. The API publishes queued runs there and consumes them itself (`KAFKA_CONSUME=true`, PT-6b2/PT-6b3); its client certificate and the cluster CA are mounted under `/data/certs`. |
-| Object store | `seaweedfs.yaml`: one SeaweedFS Pod (master, volume server, filer and S3 gateway), Service `seaweedfs-s3` on 8333 | In-cluster on `http://seaweedfs-s3:8333`, and from a browser on **https://s3.midnight.lan** (path-style, `midnight-ca`) so a presigned URL is the same URL on both sides. Bucket `campaign-foundry`, created by `jobs/s3-bootstrap.yaml` on every deploy. Nothing reaches it over the app yet — `S3_*` arrives with PT-4j. |
+| Object store | `seaweedfs.yaml`: one SeaweedFS Pod (master, volume server, filer and S3 gateway), Service `seaweedfs-s3` on 8333 | In-cluster on `http://seaweedfs-s3:8333`, and from a browser on **https://s3.midnight.lan** (path-style, `midnight-ca`) so a presigned URL is the same URL on both sides. Bucket `campaign-foundry`, created by `jobs/s3-bootstrap.yaml` on every deploy. The `api` container runs `OBJECT_STORE=s3` on that bucket (PT-4j), with the app key from the `seaweedfs-s3` Secret rather than the admin key; `deploy.sh` proves that key round-trips an object before it rolls the app out (`jobs/s3-app-probe.yaml`). |
 
 No image-provider keys are configured, so renders are procedural and spend no
 credits. To use real imagery, create a Secret with `GEMINI_API_KEY` or
@@ -170,8 +170,8 @@ beside it the master, the filer, the gRPC ports and the volume port, all
 unauthenticated HTTP. Hiding them from the Service and the Ingress is not enough,
 because any pod in the cluster can still dial the Pod IP directly and skip S3 auth.
 So `seaweedfs.yaml` carries a NetworkPolicy `seaweedfs` with **one** ingress rule:
-TCP 8333 only, from pods in this namespace (the app's `api` container and the
-`s3-bootstrap` Job) and from Traefik in `kube-system`. Egress is not restricted (the policy selects only the SeaweedFS pod). The Pod's own
+TCP 8333 only, from pods in this namespace (the app's `api` container, the
+`s3-bootstrap` Job and the `s3-app-probe` Job) and from Traefik in `kube-system`. Egress is not restricted (the policy selects only the SeaweedFS pod). The Pod's own
 components dial each other at the Pod's own IP, which stays inside the Pod's network
 namespace and never meets the policy, and the kubelet's readiness
 probe comes from the node, which k3s's kube-router always allows.
@@ -180,6 +180,45 @@ After a deploy the orchestrator verifies it from a throwaway pod **in `campaign-
 that is wrong in the permissive direction is silent: the `curl` on 8888 **must time
 out**, and the `curl` on 8333 must answer **200**. The first is the check that
 matters — if it answers anything at all, something is reaching past the signature.
+
+### Object storage switch (PT-4j, D205)
+
+Staging started on the file store and runs on the object store from PT-4j: the
+`api` container has `OBJECT_STORE=s3` and the six `S3_*` variables, so briefs'
+input assets, renders and outputs are objects in bucket `campaign-foundry`.
+
+**The owner runs nothing new.** Steps 1-4 of "Object store (once, owner)" above
+are prerequisites — the app's own key is `app-access-key` / `app-secret-key`
+from the `seaweedfs-s3` Secret, the ones the admin key is not. The switch is
+itself an ordinary deploy:
+
+```sh
+yarn deploy:staging
+```
+
+**It starts empty (D205).** Nothing is migrated (D208). The PVC's briefs, input
+assets and outputs are no longer read, and so is every Postgres campaign whose
+brief still stores a PATH ref rather than an id: those refs read as ENOENT, which
+is what a missing logo looks like. PT-8 imports them, normalizing the refs to
+ids; until then, work in campaigns created after the switch. Uploads and
+generated campaigns are written to the bucket from the first request.
+
+**How to verify it.** Sign in, create a campaign, upload a logo and generate.
+Then, in the browser's Network panel, the grid's images must load from
+`https://s3.midnight.lan/campaign-foundry/…?X-Amz-…` — a presigned URL signed
+for the public endpoint, not from the app's own origin — and
+`GET /api/pipeline/output/...` must answer **404**, because under s3 there is no
+`/output/` route to serve bytes from (D204). A grid full of broken images, or a
+run failing on a logo, is the ENOENT above: check the `s3-app-probe` Job from the
+deploy, then the app's boot log, which names the variable to fix.
+
+**To roll back to the file store:** delete the `OBJECT_STORE` entry from
+`app.yaml` (or set it to `fs`) and redeploy. The PVC's data becomes visible again
+on the next rollout. Everything written under s3 stays in the bucket and is
+unreachable from fs — an id ref reads as ENOENT through `FsAssetStore` — until
+the store is switched back or PT-8 imports it. **Never delete the bucket to roll
+back**: the objects in it are the only copy of every campaign created since the
+switch.
 
 ### Resend key (once, owner)
 
@@ -246,8 +285,11 @@ agent) it refuses unless given `--yes`, and any other argument is refused, so a 
 `--help` never deploys.
 
 It builds on the node, pushes, applies `deploy/staging`, waits for SeaweedFS and
-creates the bucket (`jobs/s3-bootstrap.yaml`), waits for Kafka and Postgres, runs
-the migrations (`jobs/migrate.yaml`), and restarts the app.
+creates the bucket (`jobs/s3-bootstrap.yaml`), proves the app key against the
+bucket (`jobs/s3-app-probe.yaml`) and stops the deploy there if it cannot write,
+read back and delete an object, waits for Kafka and Postgres, runs
+the migrations (`jobs/migrate.yaml`), and restarts the app — which reads the
+bucket from that rollout on.
 
 ## Known limits
 
