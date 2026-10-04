@@ -1,0 +1,122 @@
+# Prove the APP key against the bucket, before the app runs (PT-4j).
+#
+# `objectStoreSettings()` checks that the six S3_* variables are present and
+# shaped, and opens no socket — so a bucket name that is wrong, or a key that
+# does not match the identities file the SeaweedFS Pod wrote at startup, passes
+# the boot guard and then every read answers ENOENT: logos and scenes missing,
+# and runs failing on the ref rather than on the deployment. This Job closes
+# that gap with the SAME identity and the SAME bucket name the `api` container is
+# given, so a deploy that would have been quietly broken stops here and names
+# the cause. `jobs/s3-bootstrap.yaml` cannot: it runs as the admin key.
+#
+# The object is written under a `_probe/` key, read back byte for byte and
+# deleted, so a successful run leaves the bucket exactly as it found it. The
+# DELETE is part of what is proved: the app identity's actions
+# (`seaweedfs.yaml`) are Read/Write/List/Tagging scoped to the bucket, and a key
+# that could not delete could not delete a campaign's assets either.
+#
+# The credentials go in a curl config file on an emptyDir, never in argv, for
+# the reason `jobs/s3-bootstrap.yaml` gives: argv is world-readable through `ps`
+# for the life of the request. Nothing here prints a key or a secret — not the
+# key, not a presigned URL, not curl's own diagnostics, which is why each call
+# checks its status code instead of letting `-s` speak.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: s3-app-probe
+  namespace: campaign-foundry-staging
+spec:
+  # One try, and a failed probe is a failed deploy: deploy.sh waits for
+  # `complete` with `set -eu` and prints the log, so a retry would only spend the
+  # 2m timeout twice over on the same wrong value.
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+      containers:
+        - name: probe
+          image: registry.midnight.lan/library/seaweedfs:4.48
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              umask 077
+              mkdir -p /tmp/aws
+              printf 'user = "%s:%s"\n' "$APP_ACCESS_KEY" "$APP_SECRET_KEY" > /tmp/aws/curl.conf
+              printf 'campaign-foundry object-store probe\n' > /tmp/aws/put.body
+              : > /tmp/aws/get.body
+              # us-east-1 is the region the app signs with (S3_REGION in app.yaml)
+              # and the one the bucket Job signs with: the signature is computed
+              # over it, so all three must agree. --max-time bounds one call, so a
+              # store that accepts the connection and then stalls costs the Job's
+              # deadline rather than the deploy's.
+              key=_probe/app-probe
+              url=http://seaweedfs-s3:8333/campaign-foundry/$key
+
+              # A new Pod is not admitted by k3s's kube-router NetworkPolicy for its
+              # first few seconds, and until then every request answers 000. So the
+              # PUT retries ONLY on 000 (nothing answered), never on an HTTP status:
+              # a 403 from a wrong key still fails at once. The retrying is bounded
+              # by a 60 s DEADLINE, not a try count, because a connection that opens
+              # and then stalls also reads 000 after --max-time: no new try starts
+              # past 60 s, so the worst case (a last try started at 59 s, plus the
+              # GET and the DELETE) stays near 90 s, inside deploy.sh's 2-minute wait.
+              deadline=$(( $(date +%s) + 60 ))
+              while :; do
+                code=$(curl -K /tmp/aws/curl.conf --aws-sigv4 aws:amz:us-east-1:s3 \
+                  --connect-timeout 2 --max-time 10 -s -o /dev/null -w '%{http_code}' \
+                  -X PUT --data-binary @/tmp/aws/put.body "$url") || code=000
+                [ "$code" = 000 ] && [ "$(date +%s)" -lt "$deadline" ] || break
+                sleep 1
+              done
+              if [ "$code" != 200 ]; then
+                echo "s3-app-probe: the app key cannot write $key in bucket campaign-foundry (PUT answered $code); is the bucket the one s3-bootstrap created, and has the SeaweedFS Pod restarted since the Secret was last changed?" >&2
+                exit 1
+              fi
+
+              code=$(curl -K /tmp/aws/curl.conf --aws-sigv4 aws:amz:us-east-1:s3 \
+                --max-time 10 -s -o /tmp/aws/get.body -w '%{http_code}' \
+                "$url") || code=000
+              if [ "$code" != 200 ]; then
+                echo "s3-app-probe: the app key cannot read back $key (GET answered $code)" >&2
+                exit 1
+              fi
+              if ! cmp /tmp/aws/put.body /tmp/aws/get.body; then
+                echo "s3-app-probe: $key did not read back the bytes that were written ($(wc -c < /tmp/aws/put.body) out, $(wc -c < /tmp/aws/get.body) in)" >&2
+                exit 1
+              fi
+
+              code=$(curl -K /tmp/aws/curl.conf --aws-sigv4 aws:amz:us-east-1:s3 \
+                --max-time 10 -s -o /dev/null -w '%{http_code}' \
+                -X DELETE "$url") || code=000
+              if [ "$code" != 204 ]; then
+                echo "s3-app-probe: the app key cannot delete $key (DELETE answered $code); the probe object stays in the bucket until it is removed by hand" >&2
+                exit 1
+              fi
+              echo "s3-app-probe: the app key wrote, read back and deleted $key in bucket campaign-foundry"
+          env:
+            - name: APP_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3
+                  key: app-access-key
+            - name: APP_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3
+                  key: app-secret-key
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: aws-config
+              mountPath: /tmp/aws
+      volumes:
+        - name: aws-config
+          emptyDir: {}
