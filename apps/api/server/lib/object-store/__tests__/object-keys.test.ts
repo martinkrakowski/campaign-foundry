@@ -1,5 +1,12 @@
 import { describe, test, expect } from "vitest";
-import { cachePrefix, inputKey, inputPrefix, packagePrefix, renderPrefix } from "../object-keys.js";
+import {
+  cachePrefix,
+  campaignPrefix,
+  inputKey,
+  inputPrefix,
+  packagePrefix,
+  renderPrefix,
+} from "../object-keys.js";
 
 const ORG = "local";
 const CAMPAIGN = "3f1b7a52-0c4d-4a6e-9b21-5d8e7c6a5b4c";
@@ -205,6 +212,140 @@ describe("the package prefix (PT-4h1)", () => {
   test("an org id of the shapes Better Auth mints is accepted here too", () => {
     for (const orgId of ["local", "Acme", "acme_1", "a-b-C_9"]) {
       expect(packagePrefix(orgId, CAMPAIGN)).toBe(`org/${orgId}/campaign/${CAMPAIGN}/packages/`);
+    }
+  });
+});
+
+// PT-9b, D243. The whole-campaign prefix is the one deliberate WIDENING in this
+// file: it CONTAINS `inputs/`, `renders/` and `packages/` where each of those
+// names one namespace. So the two properties the others take for granted become
+// the load-bearing ones here — the trailing `/`, which keeps a sibling campaign
+// out, and the per-id checks, because the caller that trusts this most is a
+// purge that will empty whatever it is given.
+describe("the whole-campaign prefix (PT-9b, D243)", () => {
+  test("campaignPrefix is org/campaign/<uuid>/ and stops there", () => {
+    expect(campaignPrefix(ORG, CAMPAIGN)).toBe(`org/${ORG}/campaign/${CAMPAIGN}/`);
+  });
+
+  test("it CONTAINS all three sub-prefixes and every input key, which is the whole point of it", () => {
+    // This is what a purge and a reconciler ask: not "empty the inputs" but
+    // "empty this campaign". If any of these four were outside it, the widening
+    // would be a name rather than a namespace and a sweep would leave orphans
+    // behind — which is the failure PT-9h exists to find.
+    const prefix = campaignPrefix(ORG, CAMPAIGN);
+    expect(inputKey(ORG, CAMPAIGN, ASSET).startsWith(prefix)).toBe(true);
+    expect(inputPrefix(ORG, CAMPAIGN).startsWith(prefix)).toBe(true);
+    expect(renderPrefix(ORG, CAMPAIGN).startsWith(prefix)).toBe(true);
+    expect(packagePrefix(ORG, CAMPAIGN).startsWith(prefix)).toBe(true);
+  });
+
+  test("the trailing slash is load-bearing: a SIBLING campaign's namespace is outside it", () => {
+    const prefix = campaignPrefix(ORG, CAMPAIGN);
+    // A raw string on purpose, because no builder in this file can produce it:
+    // a key only reaches `…/<uuid>x/…` if something joined an id that was never
+    // checked, and the prefix must not be the thing that lets a purge find it.
+    const neighbour = `org/${ORG}/campaign/${CAMPAIGN}x/inputs/a`;
+    expect(neighbour.startsWith(prefix)).toBe(false);
+    // The defect the separator prevents, asserted rather than assumed: with the
+    // `/` gone this is a prefix of a campaign nobody named, and the caller that
+    // holds it is a purge, so "prefix of" means "deleted".
+    expect(neighbour.startsWith(prefix.slice(0, -1))).toBe(true);
+  });
+
+  test("another org's keys and another campaign's keys are all outside it", () => {
+    const other = "00000000-0000-4000-8000-000000000001";
+    const prefix = campaignPrefix(ORG, CAMPAIGN);
+    for (const key of [
+      inputKey("other", CAMPAIGN, ASSET),
+      inputPrefix("other", CAMPAIGN),
+      renderPrefix("other", CAMPAIGN),
+      packagePrefix("other", CAMPAIGN),
+      inputKey(ORG, other, ASSET),
+      inputPrefix(ORG, other),
+      renderPrefix(ORG, other),
+      packagePrefix(ORG, other),
+    ]) {
+      expect(key.startsWith(prefix)).toBe(false);
+    }
+    // And the widening stops at the campaign: the cache belongs to no campaign
+    // (D203), so a prefix that reached it would make every purge in the org a
+    // candidate for emptying the next org's warm cache too.
+    expect(cachePrefix(ORG).startsWith(prefix)).toBe(false);
+  });
+
+  describe("every id is checked against its OWN pattern here too", () => {
+    const MARKER = "MARKER-7f3a";
+    const refused: readonly (readonly [string, () => unknown])[] = [
+      ["a campaign prefix with no org id at all", () => campaignPrefix("", CAMPAIGN)],
+      [
+        "a campaign prefix with an org id holding a slash",
+        () => campaignPrefix(`acme/${MARKER}`, CAMPAIGN),
+      ],
+      [
+        "a campaign prefix with an org id holding `..`",
+        () => campaignPrefix(`..${MARKER}`, CAMPAIGN),
+      ],
+      [
+        "a campaign prefix with an org id holding a space",
+        () => campaignPrefix(`acme ${MARKER}`, CAMPAIGN),
+      ],
+      ["a campaign prefix with a slug for a campaign id", () => campaignPrefix(ORG, MARKER)],
+      [
+        "a campaign prefix with `summer-sale` for a campaign id",
+        () => campaignPrefix(ORG, "summer-sale"),
+      ],
+    ];
+
+    for (const [what, call] of refused) {
+      test(`${what} is refused, naming the parameter and not the value`, () => {
+        let thrown: unknown;
+        try {
+          call();
+        } catch (error) {
+          thrown = error;
+        }
+        expect(thrown).toBeInstanceOf(Error);
+        const message = (thrown as Error).message;
+        expect(message).toMatch(/^Refusing an object key: the (org|campaign) id/);
+        expect(message).not.toContain(MARKER);
+      });
+    }
+  });
+
+  test("a truncated uuid is refused with the SIBLINGS' exact message", () => {
+    // `UUID_PATTERN` is anchored, so one character short of the column's shape
+    // is not a campaign id — and it is the SAME error the three prefixes above
+    // throw, verbatim, because it is the same `segment` call and not a fourth
+    // validator that could have drifted.
+    let thrown: unknown;
+    try {
+      campaignPrefix(ORG, CAMPAIGN.slice(0, -1));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe(
+      "Refusing an object key: the campaign id is not a well-formed id.",
+    );
+  });
+
+  test("an UPPER-CASE uuid is accepted, because `UUID_PATTERN` carries the `i` flag", () => {
+    // Match their behaviour exactly, and say what was found rather than what was
+    // hoped: the shared pattern is case-INSENSITIVE, so `inputPrefix`,
+    // `renderPrefix` and `packagePrefix` all accept an upper-case uuid today. A
+    // fourth, stricter rule here would have been the one place in the file that
+    // refused an id its own siblings accepted.
+    const upper = CAMPAIGN.toUpperCase();
+    expect(campaignPrefix(ORG, upper)).toBe(`org/${ORG}/campaign/${upper}/`);
+    // And the two agree on WHICH namespace they are talking about, which is the
+    // part that matters to a purge: the same upper-case id through either
+    // builder lands under the same campaign segment.
+    expect(inputPrefix(ORG, upper).startsWith(campaignPrefix(ORG, upper))).toBe(true);
+  });
+
+  test("an org id of the shapes Better Auth mints is accepted here too", () => {
+    for (const orgId of ["local", "Acme", "acme_1", "a-b-C_9"]) {
+      expect(campaignPrefix(orgId, CAMPAIGN)).toBe(`org/${orgId}/campaign/${CAMPAIGN}/`);
     }
   });
 });
