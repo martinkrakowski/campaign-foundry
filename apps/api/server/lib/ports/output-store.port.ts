@@ -7,8 +7,10 @@ import type { Readable } from "node:stream";
  * (`ExportPort`, `PackageStorePort`); this port only reads, so the routes stop
  * walking the output tree themselves.
  *
- * `GET /output/**` retires when assets move to signed URLs (D170, PT-4); until
- * then it reads through here, so an object-store adapter can serve it too.
+ * `GET /output/**` is retired under `s3` (D204, PT-4i): the route answers 404
+ * before it asks any store, and the browser's bytes come from the presigned URLs
+ * `signed-urls.ts` mints. What this port is left with is the fs read path, which
+ * is why `openOutput` stays on it rather than becoming a package-only port.
  */
 
 /** One stored file, opened for reading. */

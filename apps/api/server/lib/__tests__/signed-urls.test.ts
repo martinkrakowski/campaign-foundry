@@ -1010,6 +1010,96 @@ describe("signed-urls (PT-4f, D204/D209)", () => {
       ]);
       expect(out.assets[1]!["outputUrl"]).toEqual(expect.any(String));
     });
+
+    /**
+     * D214(f), PT-4i: a STORED `*Url` key is stripped, on BOTH backends.
+     *
+     * **The report is parsed JSON, so a row can carry a `*Url` this server never
+     * signed** — a legacy report, a hand-edited row, a build that signed its own.
+     * A spread would leave it in the answer beside the keys minted here, and the
+     * field table's claim would be false for the rows a caller can be trusted
+     * least about: `outputUrl: "javascript:x"` is a URL in the response that no
+     * campaign key, no window and no expiry has anything to say about.
+     *
+     * **A refused path is where it shows under `s3`, and a path-less key is
+     * where it shows under `fs`.** `renderObjectKey` refuses the tampered row's
+     * only path (no campaign segment), so under `s3` nothing is minted at all and
+     * the stored keys would be the ONLY `*Url` values in the answer — exactly the
+     * case a strip added *after* the append, or one scoped to the keys being
+     * minted, would leave standing. On fs every path mints, so what the strip
+     * removes there is a stored key with no source path behind it.
+     */
+    describe("a stored *Url key (D214f)", () => {
+      const tampered = (): Record<string, unknown> => ({
+        productId: "p1",
+        outputPath: "p1/1x1.png",
+        outputUrl: "javascript:x",
+        videoUrl: "https://evil.test/p1/1x1.mp4",
+        proofUrl: "/api/pipeline/output/../etc/passwd",
+      });
+
+      test("a stored *Url with no path behind it is dropped on both backends", async () => {
+        // UNDER `s3`: the row's one path is REFUSED (`renderObjectKey`, no campaign
+        // segment), so no field is minted at all — and the answer is the stored row
+        // minus its three tampered keys. That is the case a strip added *after* the
+        // append, or one scoped to the keys being minted, would fail.
+        process.env.OBJECT_STORE = "s3";
+        const s3 = (await withAssetUrls(
+          LOCAL_TENANT,
+          { assets: [tampered()] },
+          target,
+        )) as Answered;
+        expect(Object.keys(s3.assets[0]!)).toStrictEqual(["productId", "outputPath"]);
+
+        // UNDER `fs`: every path mints (fs refuses nothing and needs no uuid), so
+        // `outputPath` yields its display and download pair — and the two stored
+        // keys with NO source path behind them are still gone. The strip, not the
+        // field table, is the only reason they are.
+        delete process.env.OBJECT_STORE;
+        const fs = (await withAssetUrls(
+          LOCAL_TENANT,
+          { assets: [tampered()] },
+          target,
+        )) as Answered;
+        expect(Object.keys(fs.assets[0]!)).toStrictEqual([
+          "productId",
+          "outputPath",
+          "outputUrl",
+          "outputDownloadUrl",
+        ]);
+
+        // And on neither backend is any value in the answer one of the strings that
+        // went in — the claim stated over the response, not over the key names.
+        for (const out of [s3, fs]) {
+          expect(Object.values(out.assets[0]!)).not.toContain("javascript:x");
+          expect(Object.values(out.assets[0]!)).not.toContain("https://evil.test/p1/1x1.mp4");
+          expect(Object.values(out.assets[0]!)).not.toContain("/api/pipeline/output/../etc/passwd");
+        }
+      });
+
+      test("is replaced by the one minted here on both backends, and the caller's row is not mutated", async () => {
+        const storedRow = { productId: "p1", outputPath: OUTPUT, outputUrl: "javascript:x" };
+
+        process.env.OBJECT_STORE = "s3";
+        const s3 = (await withAssetUrls(LOCAL_TENANT, { assets: [storedRow] }, target)) as Answered;
+        // Signed for this campaign, in this window — and the stored string is
+        // gone rather than shadowed by a key that happens to sort later.
+        expect(new URL(s3.assets[0]!["outputUrl"]!).host).toBe("objects.example");
+        expect(s3.assets[0]!["outputUrl"]).not.toBe("javascript:x");
+
+        delete process.env.OBJECT_STORE;
+        const fs = (await withAssetUrls(
+          LOCAL_TENANT,
+          { assets: [{ ...storedRow }] },
+          { slug: SLUG, campaignId: undefined },
+        )) as Answered;
+        expect(fs.assets[0]!["outputUrl"]).toBe(`/api/pipeline/output/${OUTPUT}`);
+
+        // A COPY: the caller still holds its own row, key and all. Mutating the
+        // argument here would change what a second read of the same report sees.
+        expect(storedRow.outputUrl).toBe("javascript:x");
+      });
+    });
   });
 
   describe("inputAssetUrl / inputAssetRedirect", () => {
