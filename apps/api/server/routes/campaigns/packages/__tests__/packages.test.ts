@@ -8,6 +8,9 @@ import listHandler from "../[campaignId].get.js";
 import zipHandler from "../[campaignId]/[platformZip].get.js";
 import { Readable } from "node:stream";
 import { measure, storeZipStream } from "../store-zip.js";
+// Lifted for `packages.s3.test.ts` (PT-4h2): both backends' zips are read by ONE
+// parser, so "the zip over objects is the fs zip" is checkable rather than assumed.
+import { parseCentralDirectory } from "./central-directory.js";
 
 // node:fs/promises is an ESM namespace (not spy-able); route the walk's readdir
 // through an overridable hook so a mid-walk ENOENT / EACCES can be simulated.
@@ -46,50 +49,6 @@ const zipCall = (campaignId: string, platformZip: string) =>
     "/campaigns/packages/:campaignId/:platformZip",
     zipHandler,
   )(new Request(`http://x/campaigns/packages/${campaignId}/${platformZip}`));
-
-const DOS_DATE_1980_01_01 = 0x0021;
-
-/**
- * Walk the central directory and, for each entry, check that its offset points at a
- * local header for the same file (signature, UTF-8 flag, store method, DOS date, CRC).
- */
-function parseCentralDirectory(buf: Buffer): Array<{ name: string; size: number; crc: number }> {
-  const eocd = buf.subarray(buf.length - 22);
-  expect(eocd.readUInt32LE(0)).toBe(0x06054b50);
-  const entries = eocd.readUInt16LE(10);
-  const cdSize = eocd.readUInt32LE(12);
-  const cdOffset = eocd.readUInt32LE(16);
-  const cd = buf.subarray(cdOffset, cdOffset + cdSize);
-  const files: Array<{ name: string; size: number; crc: number }> = [];
-  let p = 0;
-  for (let i = 0; i < entries; i++) {
-    expect(cd.readUInt32LE(p)).toBe(0x02014b50);
-    expect(cd.readUInt16LE(p + 8)).toBe(0x0800); // UTF-8 names
-    expect(cd.readUInt16LE(p + 10)).toBe(0); // store
-    expect(cd.readUInt16LE(p + 14)).toBe(DOS_DATE_1980_01_01);
-    const crc = cd.readUInt32LE(p + 16);
-    const size = cd.readUInt32LE(p + 24);
-    const nameLen = cd.readUInt16LE(p + 28);
-    const extraLen = cd.readUInt16LE(p + 30);
-    const commentLen = cd.readUInt16LE(p + 32);
-    const localOffset = cd.readUInt32LE(p + 42);
-    const name = cd.subarray(p + 46, p + 46 + nameLen).toString("utf8");
-    // The local header at the recorded offset must describe the same file.
-    expect(buf.readUInt32LE(localOffset)).toBe(0x04034b50);
-    expect(buf.readUInt16LE(localOffset + 6)).toBe(0x0800);
-    expect(buf.readUInt16LE(localOffset + 8)).toBe(0);
-    expect(buf.readUInt16LE(localOffset + 12)).toBe(DOS_DATE_1980_01_01);
-    expect(buf.readUInt32LE(localOffset + 14)).toBe(crc);
-    expect(buf.readUInt32LE(localOffset + 22)).toBe(size);
-    const localNameLen = buf.readUInt16LE(localOffset + 26);
-    expect(buf.subarray(localOffset + 30, localOffset + 30 + localNameLen).toString("utf8")).toBe(
-      name,
-    );
-    files.push({ name, size, crc });
-    p += 46 + nameLen + extraLen + commentLen;
-  }
-  return files;
-}
 
 let dir: string;
 const origOut = process.env.OUTPUT_DIR;
