@@ -2943,12 +2943,52 @@ describe("RunProvider — estimate and packaging", () => {
       asset({ productId: "p1", outputPath: "p1/1x1.png", complianceScore: 0.1, ...over });
 
     /**
-     * A report the shell mounts from, and one the shell may re-read after a run: the
-     * store's copy moves only when the generate POST goes out, which is how the real
-     * server behaves (`generate.post.ts` writes the report, THEN completes the job).
+     * A campaign of its own for the run under test, so no OTHER read can answer for it.
+     *
+     * **A report is keyed by campaign, and a shell under test has at least two
+     * campaigns in play.** On mount the provider asks for the last-opened pointer and,
+     * finding none, runs `restoreDefaultBrief`'s own discovery for `DEFAULT_BRIEF` —
+     * a job lookup and a persisted-run read that race `execute` and can commit their
+     * own row. Those reads target `DEFAULT_BRIEF`, so keying this test's report to
+     * {@link RUN_CAMPAIGN} means only `execute`'s own re-read can answer the
+     * assertions below. Without that, the mount restore commits the result's row
+     * first, every assertion passes, and removing D213's commit entirely still
+     * leaves the test green (Qodo's finding, one level deeper than it was reported:
+     * the job and the result agreeing is only half of it).
      */
-    const store = (before: unknown[], after: unknown[]) => {
+    const RUN_CAMPAIGN = "d213-campaign";
+    /** Move the shell onto {@link RUN_CAMPAIGN} so `execute` runs that campaign. */
+    const underTestCampaign = async (result: {
+      current: ReturnType<typeof useRun>;
+    }): Promise<void> => {
+      await act(async () => {
+        result.current.setBrief({ ...result.current.brief, id: RUN_CAMPAIGN } as never);
+      });
+    };
+    /** True for the `/campaigns/result` read that belongs to {@link RUN_CAMPAIGN}. */
+    const readsRunCampaign = (url: string): boolean =>
+      String(url).includes(`campaignId=${RUN_CAMPAIGN}`);
+
+    /**
+     * Three DIFFERENT bodies, because the two routes answer different things: the
+     * JOBS route returns the job as stored (paths only — `jobOk` strips every `*Url`,
+     * and the score here is `inJob`'s marker), and the RESULT route returns the
+     * server-merged report with the URLs it mints. The store's copy moves only when
+     * the generate POST goes out, which is how the real server behaves
+     * (`generate.post.ts` writes the report, THEN completes the job).
+     *
+     * **A test that hands both handlers the same assets asserts nothing about which
+     * one the commit came from** — the job payload would carry the URLs and the score
+     * and pass every line (Qodo). `job` is therefore a separate argument.
+     */
+    const store = (before: unknown[], inTheJob: unknown[], after: unknown[]) => {
       let current = before;
+      const report = (assets: unknown[]) =>
+        json({
+          halted: false,
+          assets,
+          log: { entries: [], campaignId: RUN_CAMPAIGN },
+        });
       return {
         post: () => {
           current = after;
@@ -2957,36 +2997,44 @@ describe("RunProvider — estimate and packaging", () => {
         job: () =>
           jobOk({
             halted: false,
-            assets: current,
-            log: { entries: [], campaignId: DEFAULT_BRIEF.id },
+            assets: inTheJob,
+            log: { entries: [], campaignId: RUN_CAMPAIGN },
           }),
-        result: () =>
-          json({
-            halted: false,
-            assets: current,
-            log: { entries: [], campaignId: DEFAULT_BRIEF.id },
-          }),
+        // Another campaign's read is answered "nothing on disk", which is what a real
+        // `/campaigns/result?campaignId=` says about a campaign it has no report for.
+        result: (url: string) => (readsRunCampaign(url) ? report(current) : json(EMPTY_REPORT)),
       };
     };
 
     test("after Generate the tile shows result.get's outputUrl, not the job's", async () => {
+      // The JOB's body: paths, and the marker score. The RESULT's: the merged row with
+      // `s3`-shaped URLs and the score under assertion. They differ on EVERY field the
+      // assertions below name, so a commit from either one is identifiable.
+      const inTheJob = inJob({ complianceScore: 0.1 });
       const merged = { ...inJob({ complianceScore: 0.9 }), ...s3Urls(inJob()) };
-      mockPipelineApi(store([inJob()], [merged]));
+      mockPipelineApi(store([inJob()], [inTheJob], [merged]));
 
       const { result } = setup();
+      await underTestCampaign(result);
       await act(async () => {
         await result.current.execute();
       });
 
-      // The committed row IS the result route's — its score and its signed URL, the two
-      // things the job payload differs on. A commit from the job snapshot leaves both
-      // at the job's values, which is the defect D213 exists to close.
-      expect(result.current.assets[0].complianceScore).toBe(0.9);
-      expect(result.current.assets[0].outputUrl).toBe(merged.outputUrl);
-      // And it is a `s3`-shaped URL on the store's own origin, not a client-built
-      // `/output/` path: the fixture's shape is the assertion, not just its presence.
-      expect(result.current.assets[0].outputUrl).toContain("https://objects.example/");
-      expect(result.current.assets[0].outputDownloadUrl).toBe(merged.outputDownloadUrl);
+      const committed = result.current.assets[0]!;
+      // The score is the RESULT route's, and provably not the job's own — so the
+      // committed row is not the job payload, whichever way the URLs below resolve.
+      expect(committed.complianceScore).toBe(0.9);
+      expect(committed.complianceScore).not.toBe(inTheJob.complianceScore);
+      // And the URL is the result's, which the jobs route cannot have signed at all.
+      expect(committed.outputUrl).toBe(merged.outputUrl);
+      expect(committed.outputUrl).toBeDefined();
+      // A `s3`-shaped URL on the store's own origin, not a client-built `/output/`
+      // path: the fixture's shape is the assertion, not just its presence.
+      expect(committed.outputUrl).toContain("https://objects.example/");
+      expect(committed.outputDownloadUrl).toBe(merged.outputDownloadUrl);
+      // The D212 pair really does differ here, so a commit that reached for the
+      // DISPLAY url where the download belongs would fail here and not pass quietly.
+      expect(committed.outputDownloadUrl).not.toBe(committed.outputUrl);
     });
 
     test("a re-roll commits the re-read too, and keeps decisions on untouched cells", async () => {
@@ -3028,12 +3076,15 @@ describe("RunProvider — estimate and packaging", () => {
       });
 
       const byId = new Map(result.current.assets.map((a) => [a.productId, a] as const));
-      // The re-rolled cell carries the NEW revision's URL — the job's payload carried
-      // none at all, so this is the re-read and nothing else.
+      // The re-rolled cell carries the NEW revision's URL. The job handler above is
+      // handed the same merged row, so `jobOk`'s strip is what makes this a re-read
+      // assertion rather than a tautology: the job payload that reached the shell held
+      // no `outputUrl` at all, so only the result read can have supplied this one.
       expect(byId.get("p1")?.outputUrl).toBe(merged[0]!.outputUrl);
       expect(byId.get("p1")?.outputUrl).toContain("v=rev-after-reroll");
       // The untouched cell is committed from the same read and still has its URL, and
       // the decisions on screen survive: p1 returns to review, p2 keeps its approval.
+      // p2 is in NO job payload at all, so a job overlay could not have produced it.
       expect(byId.get("p2")?.outputUrl).toBe(merged[1]!.outputUrl);
       expect(result.current.decisions["p1/1:1/default"]).toBeUndefined();
       expect(result.current.decisions["p2/1:1/default"]).toBe("approved");
@@ -3139,20 +3190,26 @@ describe("RunProvider — estimate and packaging", () => {
           return jobOk({
             halted: false,
             assets: [inJob()],
-            log: { entries: [], campaignId: DEFAULT_BRIEF.id },
+            log: { entries: [], campaignId: RUN_CAMPAIGN },
           });
         },
         result: (url) => {
           asked.push(String(url));
-          return json({
-            halted: false,
-            assets: [merged],
-            log: { entries: [], campaignId: DEFAULT_BRIEF.id },
-          });
+          // Keyed to the run's own campaign, so the mount restore's reads for
+          // `DEFAULT_BRIEF` commit nothing and the only commit under test is the one
+          // `execute`'s re-read makes.
+          return readsRunCampaign(url)
+            ? json({
+                halted: false,
+                assets: [merged],
+                log: { entries: [], campaignId: RUN_CAMPAIGN },
+              })
+            : json(EMPTY_REPORT);
         },
       });
 
       const { result } = setup();
+      await underTestCampaign(result);
       await act(async () => {
         await result.current.execute();
       });
@@ -3221,10 +3278,13 @@ describe("RunProvider — estimate and packaging", () => {
       expect(result.current.assets).toHaveLength(2);
       expect(byId.get("p1")?.complianceScore).toBe(0.9);
       expect(byId.get("p2")?.outputPath).toBe("p2/1x1.png");
-      // And the degraded state is honest about it: no URL was minted, because nothing
-      // signed one. A client-built `/output/` URL here is the 404 D213 forbids.
+      // And the degraded state is honest about it: the overlaid row came from the JOB
+      // payload, which `jobOk` has already stripped of every `*Url` because the jobs
+      // route signs none — so the absence here is the route's contract, not a gap in
+      // the fixture. A client-built `/output/` URL is the 404 D213 forbids.
       expect(byId.get("p1")?.outputUrl).toBeUndefined();
       expect(byId.get("p1")?.outputDownloadUrl).toBeUndefined();
+      expect(byId.get("p2")?.outputUrl).toBeUndefined();
       // A failed READ is not a complaint: the grid is committed and the error slot is
       // clear, exactly as in `adoptJob`'s own fallback.
       expect(result.current.error).toBeNull();
@@ -3327,17 +3387,23 @@ describe("RunProvider — estimate and packaging", () => {
           jobOk({
             halted: false,
             assets: [row],
-            log: { entries: [], campaignId: DEFAULT_BRIEF.id },
+            log: { entries: [], campaignId: RUN_CAMPAIGN },
           }),
-        result: () =>
-          json({
-            halted: false,
-            assets: [{ ...row, ...s3Urls(row, revision) }],
-            log: { entries: [], campaignId: DEFAULT_BRIEF.id },
-          }),
+        // Keyed to the run's own campaign, so the mount restore's reads for
+        // `DEFAULT_BRIEF` commit nothing and every URL observed below came from a
+        // re-read `execute` made.
+        result: (url) =>
+          readsRunCampaign(url)
+            ? json({
+                halted: false,
+                assets: [{ ...row, ...s3Urls(row, revision) }],
+                log: { entries: [], campaignId: RUN_CAMPAIGN },
+              })
+            : json(EMPTY_REPORT),
       });
 
       const { result } = setup();
+      await underTestCampaign(result);
       await act(async () => {
         await result.current.execute();
       });

@@ -119,9 +119,30 @@ export type MockReport = {
 
 export const EMPTY_REPORT: MockReport = { halted: false, assets: [], log: null };
 
+/**
+ * The completed job's snapshot, as `GET /campaigns/jobs/:id` answers it.
+ *
+ * **Every `*Url` key is stripped here, not only in {@link jobSnapshot}.** That
+ * route returns the job exactly as stored and mints no URLs (D204, D213):
+ * `withAssetUrls` runs on `result.get` alone, after its ownership check. Stripping
+ * in the one builder every test goes through means a test that passes its OWN `job`
+ * handler gets the real jobs-route shape too — otherwise a fixture's signed URLs
+ * would ride the job payload into the commit, and a test could pass on a URL the
+ * server never sends through that route (Qodo, CodeRabbit). It is what makes "the
+ * committed row came from the result read" an assertion rather than a hope.
+ */
 export const jobOk = (result: MockReport) => {
   const n = result.halted ? 0 : (result.assets?.length ?? 0);
-  return json({ status: "completed", done: n, total: n, log: result.log ?? null, result });
+  return json({
+    status: "completed",
+    done: n,
+    total: n,
+    log: result.log ?? null,
+    result: {
+      ...result,
+      ...(result.assets !== undefined ? { assets: result.assets.map(stripAssetUrls) } : {}),
+    },
+  });
 };
 
 type PostFn = (url: string, init: RequestInit) => Response | Promise<Response>;
@@ -223,21 +244,17 @@ export const fakeDecisionsApi = (verdicts: Verdicts = {}) => {
 };
 
 /**
- * The completed job's payload, as the jobs route answers it.
+ * The default completed-job payload: the seeded report with a `log`, and — as the
+ * jobs route answers it — **no `*Url` on any row**.
  *
- * **`*Url` keys are stripped off every row**, because that route returns the job
- * exactly as stored and mints no URLs (D204, D213): `withAssetUrls` runs on
- * `result.get` alone, after its ownership check. Without this, a fixture's `*Url`
- * fields would ride the JOB payload into the commit, and a test could pass on a URL
- * the real jobs route never sends — which is exactly the defect D213 exists to fix.
- * Mirroring the route's contract here is what makes every test say which of the two
- * answers its URL came from.
+ * The strip is the same one {@link jobOk} applies, and it is here as well so the
+ * default `job` handler and a test's own one cannot disagree about what a job
+ * payload is. A fixture's signed URLs must reach the shell through
+ * `GET /campaigns/result` and nowhere else (D204, D213).
  */
 const jobSnapshot = (report: MockReport): MockReport => ({
   ...report,
-  ...(report.assets !== undefined
-    ? { assets: report.assets.map((row) => stripAssetUrls(row)) }
-    : {}),
+  ...(report.assets !== undefined ? { assets: report.assets.map(stripAssetUrls) } : {}),
   log: report.log ?? { entries: [] },
 });
 
