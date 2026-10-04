@@ -13,6 +13,7 @@
     "db:ping": "tsx apps/api/bin/db.ts ping",
     "db:migrate": "tsx apps/api/bin/db.ts migrate",
     "auth:bootstrap": "tsx apps/api/bin/auth-cli.ts",
+    "import": "tsx apps/api/bin/import.ts",
     "deploy:staging": "sh deploy/staging/deploy.sh",
     "gate": "sh scripts/gate.sh",
     "wave:status": "tsx tools/wave-status/bin.ts",
