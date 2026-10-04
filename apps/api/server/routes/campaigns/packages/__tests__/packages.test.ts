@@ -1,13 +1,22 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { crc32 } from "node:zlib";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
+import {
+  BRIEF_SCHEMA_VERSION,
+  DEFAULT_CAMPAIGN_TYPE,
+  templateFromCanonical,
+  type CampaignBrief,
+} from "@campaignfoundry/CampaignOrchestration";
 import listHandler from "../[campaignId].get.js";
 import zipHandler from "../[campaignId]/[platformZip].get.js";
 import { Readable } from "node:stream";
 import { measure, storeZipStream } from "../store-zip.js";
+import { getBriefStore } from "../../../../lib/ports/index.js";
+import { LOCAL_TENANT } from "../../../../lib/tenant.js";
+import { setupPgHarness, type PgHarness } from "../../../__tests__/tenant-harness.js";
 // Lifted for `packages.s3.test.ts` (PT-4h2): both backends' zips are read by ONE
 // parser, so "the zip over objects is the fs zip" is checkable rather than assumed.
 import { parseCentralDirectory } from "./central-directory.js";
@@ -340,4 +349,68 @@ describe("store-zip", () => {
     expect(zip.length).toBe(22);
     expect(parseCentralDirectory(zip)).toEqual([]);
   });
+});
+
+/**
+ * PT-9a2, D233 r2 — the tombstone filter PT-9a1 shipped, through the packages
+ * listing's own `campaignVisibility` gate.
+ *
+ * **Postgres only, in THIS file rather than the sibling `packages.s3.test.ts`**:
+ * the tombstone lives on the `campaign` row, so it is the brief store's filter
+ * under test and the object store is beside the point. This file is fs-object
+ * store, which is what the gate runs in front of anyway — and the manifest is
+ * planted under the pg harness's own output root, so the listing is a real 200
+ * first and a 404 only after the tombstone.
+ *
+ * The file-wide `node:fs/promises` mock above does not touch this case: the
+ * mock only replaces `readdir`, and delegating to the real one is what the fs
+ * output store already does.
+ */
+describe("GET /campaigns/packages/:campaignId and a tombstone (PT-9a2, D233 r2)", () => {
+  const sampleBrief = (id: string): CampaignBrief => ({
+    schemaVersion: BRIEF_SCHEMA_VERSION,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+    id,
+    targetRegion: "US",
+    targetAudience: "developers",
+    campaignMessage: "Build faster",
+    products: [{ id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: "logo.png" }],
+  });
+
+  test("a tombstoned campaign's package listing answers 404", async () => {
+    const harness: PgHarness = await setupPgHarness();
+    try {
+      const store = getBriefStore(LOCAL_TENANT);
+      await store.createCampaign("gone-camp");
+      await store.createBrief(sampleBrief("gone-camp"));
+      const platform = join(harness.outputRoot, "packages", "gone-camp", "instagram-feed");
+      mkdirSync(platform, { recursive: true });
+      writeFileSync(
+        join(platform, "manifest.json"),
+        JSON.stringify({ ...manifest("instagram-feed"), campaignId: "gone-camp" }),
+      );
+
+      // Served before the tombstone: a 404 below must be the gate, not a
+      // campaign whose packages were never written.
+      const before = await listCall("gone-camp");
+      expect(before.status).toBe(200);
+      const listed = (await before.json()) as { platforms: { platformId: string }[] };
+      expect(listed.platforms.map((entry) => entry.platformId)).toEqual(["instagram-feed"]);
+
+      await harness.db.query(
+        `update campaign set deleted_at = now() where org_id = $1 and slug = $2`,
+        [LOCAL_TENANT.orgId, "gone-camp"],
+      );
+
+      const res = await listCall("gone-camp");
+      expect(res.status).toBe(404);
+      // The one body both a hidden and a package-less campaign answer, so the
+      // refusal leaks nothing about either.
+      expect(await res.json()).toEqual({ error: "No packages found" });
+      // Still on disk: hidden, not purged — this is PT-9g's job, not this gate's.
+      expect(existsSync(join(platform, "manifest.json"))).toBe(true);
+    } finally {
+      await harness.cleanup();
+    }
+  }, 15000);
 });

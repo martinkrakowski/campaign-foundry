@@ -1,18 +1,28 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
+import {
+  BRIEF_SCHEMA_VERSION,
+  DEFAULT_CAMPAIGN_TYPE,
+  templateFromCanonical,
+  type CampaignBrief,
+} from "@campaignfoundry/CampaignOrchestration";
 import { resetProjectRoot } from "@campaignfoundry/shared";
 
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
 import { resetObjectStoreClient, setObjectStoreClient } from "../../../lib/object-store/index.js";
-import { getAssetStore, resetAssetStore } from "../../../lib/ports/index.js";
+import { getAssetStore, getBriefStore, resetAssetStore } from "../../../lib/ports/index.js";
 // The STATIC handler, for the describe at the bottom — see its note on why it
 // cannot go through `web()`.
 import staticAssetsGet from "../assets.get.js";
-import { mountTenantRoute } from "../../__tests__/tenant-harness.js";
+import {
+  mountTenantRoute,
+  setupPgHarness,
+  type PgHarness,
+} from "../../__tests__/tenant-harness.js";
 const web = async (root: string) => {
   vi.resetModules();
   process.env.PROJECT_ROOT = root;
@@ -320,4 +330,76 @@ describe("GET /campaigns/assets mints no signed URL on fs (PT-4f, D209b)", () =>
     expect(key).not.toHaveBeenCalled();
     expect(presign).not.toHaveBeenCalled();
   });
+});
+
+/**
+ * PT-9a2, D233 r2 — the tombstone filter PT-9a1 shipped, through the LISTING
+ * branch of `assets.get.ts`.
+ *
+ * **Postgres only**: `fs` has no `campaign` row to carry `deleted_at`, so there
+ * is no tombstone to plant there and nothing to pair this with. This is the
+ * LISTING branch (`campaignKnown`, one branch of it) and not the `?name=` one
+ * beside it — both ask the same `campaignVisibility` for "hidden", and the
+ * packages listing below pins that answer on its own.
+ *
+ * Static handler import (`staticAssetsGet`), as the describe above explains:
+ * `web()` re-imports through a fresh module registry, and `setupPgHarness`
+ * patches the database on the registry this file's own imports came from.
+ */
+describe("GET /campaigns/assets and a tombstone (PT-9a2, D233 r2)", () => {
+  const listCall = (briefId: string) =>
+    mountTenantRoute(staticAssetsGet, { path: "/campaigns/assets", tenant: LOCAL_TENANT })(
+      new Request(`http://x/campaigns/assets?briefId=${briefId}`),
+    );
+
+  const sampleBrief = (id: string): CampaignBrief => ({
+    schemaVersion: BRIEF_SCHEMA_VERSION,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+    id,
+    targetRegion: "US",
+    targetAudience: "developers",
+    campaignMessage: "Build faster",
+    products: [{ id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: "logo.png" }],
+  });
+
+  test("a tombstoned campaign's asset listing answers 404", async () => {
+    const harness: PgHarness = await setupPgHarness();
+    try {
+      const store = getBriefStore(LOCAL_TENANT);
+      await store.createCampaign("gone-camp");
+      await store.createBrief(sampleBrief("gone-camp"));
+      const assets = join(harness.projectRoot, "assets", "inputs", "gone-camp");
+      mkdirSync(assets, { recursive: true });
+      writeFileSync(join(assets, "logo.png"), png);
+
+      // Served before the tombstone, so the 404 below cannot be an id that names
+      // no assets and no campaign at all.
+      const before = await listCall("gone-camp");
+      expect(before.status).toBe(200);
+      const listed = (await before.json()) as { assets: { name: string }[] };
+      expect(listed.assets.map((asset) => asset.name)).toEqual(["logo.png"]);
+
+      await harness.db.query(
+        `update campaign set deleted_at = now() where org_id = $1 and slug = $2`,
+        [LOCAL_TENANT.orgId, "gone-camp"],
+      );
+      const res = await listCall("gone-camp");
+      expect(res.status).toBe(404);
+      // `campaignKnown`'s `CampaignNotFoundError` is not caught by this route, so
+      // h3's own error body answers — never the `{ assets: [] }` listing shape a
+      // known-but-empty campaign gets.
+      expect(await res.json()).not.toHaveProperty("assets");
+
+      // The asset is still on disk and the row still carries the tombstone: this
+      // is a filter over a campaign that exists, not a missing file or a missing row.
+      expect(existsSync(join(assets, "logo.png"))).toBe(true);
+      const { rows } = await harness.db.query<{ deleted_at: string | null }>(
+        "select deleted_at from campaign where org_id = $1 and slug = $2",
+        [LOCAL_TENANT.orgId, "gone-camp"],
+      );
+      expect(rows[0]!.deleted_at).not.toBeNull();
+    } finally {
+      await harness.cleanup();
+    }
+  }, 15000);
 });
