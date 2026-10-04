@@ -1301,6 +1301,80 @@ describe.each([{ backend: "fs" as const }, { backend: "postgres" as const }])(
           await harness.cleanup();
         }
       });
+
+      // PT-9a2, D233 r2: a tombstoned slug is a TAKEN slug, not a hidden one, on
+      // this route. `createCampaign` conflicts on the same `(org_id, slug)` row a
+      // live campaign occupies — its insert's `on conflict … do nothing` asks no
+      // question about `deleted_at` — so `withDerivedSlug` retries `-2` exactly as
+      // it does for a live one. The pair below is the whole claim: same status,
+      // same suffix, from a row whose `deleted_at` is set and one whose is not.
+      //
+      // The explicit 15000 is `setupPgHarness`'s own cost under PGlite (a whole
+      // database migrated per case), over vitest's 5 s default; the suite's PGlite
+      // pass scopes to this case by name and has to run it there.
+      if (backend === "postgres") {
+        test("POST /campaigns sourced-create onto a tombstoned slug derives -2, the same as a live taken slug", async () => {
+          const harness = await setup();
+          const pgHarness = harness as Awaited<ReturnType<typeof setupPgHarness>>;
+          try {
+            const { create, createBrief } = mount();
+            // The SOURCE, live and saved: what a sourced create copies from.
+            await createBrief(
+              new Request("http://x/campaigns/briefs", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(sampleBrief("source-camp")),
+              }),
+            );
+
+            const doomed = await create(createReq({ name: "Gone Camp", type: "social-post" }));
+            expect(doomed.status).toBe(201);
+            const { slug: gone } = (await doomed.json()) as { slug: string };
+            expect(gone).toBe("gone-camp");
+            expect(
+              (
+                await createBrief(
+                  new Request("http://x/campaigns/briefs", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify(sampleBrief(gone)),
+                  }),
+                )
+              ).status,
+            ).toBe(201);
+            await pgHarness.db.query(
+              `update campaign set deleted_at = now() where org_id = $1 and slug = $2`,
+              [LOCAL_TENANT.orgId, gone],
+            );
+
+            // The control: a LIVE campaign already holding another taken slug, in
+            // the same org, so the two answers can only differ by the tombstone.
+            expect(
+              (await create(createReq({ name: "Taken Camp", type: "social-post" }))).status,
+            ).toBe(201);
+
+            const res = await create(createReq({ name: "Gone Camp", source: "source-camp" }));
+            expect(res.status).toBe(201);
+            const { slug } = (await res.json()) as { slug: string };
+            expect(slug).toBe("gone-camp-2");
+
+            const liveRes = await create(createReq({ name: "Taken Camp", source: "source-camp" }));
+            expect(liveRes.status).toBe(201);
+            expect(((await liveRes.json()) as { slug: string }).slug).toBe("taken-camp-2");
+
+            // The tombstoned row is untouched: the create skipped past it and left
+            // it deleted, rather than reviving or overwriting what PT-9g is queued
+            // to purge.
+            const { rows } = await pgHarness.db.query<{ n: number }>(
+              `select count(*)::int as n from campaign where org_id = $1 and slug = $2 and deleted_at is not null`,
+              ["local", gone],
+            );
+            expect(rows[0]!.n).toBe(1);
+          } finally {
+            await harness.cleanup();
+          }
+        }, 15000);
+      }
     });
 
     describe("a versionless campaign reads as no stored brief everywhere (D177, PT-5b2)", () => {

@@ -3,12 +3,23 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler } from "h3";
+import {
+  BRIEF_SCHEMA_VERSION,
+  DEFAULT_CAMPAIGN_TYPE,
+  templateFromCanonical,
+  type CampaignBrief,
+} from "@campaignfoundry/CampaignOrchestration";
 import { resetProjectRoot } from "@campaignfoundry/shared";
 import { getRunningJobId, resetJobs } from "../../../lib/jobs.js";
 import { setCapabilities } from "../../../lib/capabilities.js";
 import { getBriefStore } from "../../../lib/ports/index.js";
 import generateHandler from "../generate.post.js";
 import jobHandler from "../jobs/[id].get.js";
+import {
+  mountTenantRoute,
+  setupPgHarness,
+  type PgHarness,
+} from "../../__tests__/tenant-harness.js";
 
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
 /**
@@ -219,4 +230,80 @@ describe("POST /campaigns/generate — the report merge is a conditional write",
     // claim, the failure leaves no job behind at all.
     expect(await getRunningJobId(LOCAL_TENANT, "camp")).toBeUndefined();
   });
+});
+
+/**
+ * PT-9a2, D233 r2 — the tombstone filter PT-9a1 shipped, through the generate
+ * route's `campaignMeta` gate, on the real Postgres harness where the job claim
+ * is a row.
+ *
+ * **Its own describe rather than a case in the one above**: that one is an fs
+ * fixture (a `reports/camp.json` on disk) and pins the report merge, while this
+ * case is about what the route does BEFORE any run starts. The `lib/pipeline.js`
+ * mock is file-wide and this case never reaches it — the gate refuses first,
+ * which is the assertion.
+ */
+describe("POST /campaigns/generate onto a tombstone (PT-9a2, D233 r2)", () => {
+  const jsonReq = (body: unknown) =>
+    new Request("http://x/campaigns/generate?model=procedural", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  const generate = (body: unknown) =>
+    mountTenantRoute(generateHandler, {
+      method: "POST",
+      path: "/campaigns/generate",
+      tenant: LOCAL_TENANT,
+    })(jsonReq(body));
+
+  const savedBrief = (id: string): CampaignBrief => ({
+    schemaVersion: BRIEF_SCHEMA_VERSION,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+    id,
+    targetRegion: "DE",
+    targetAudience: "a",
+    campaignMessage: "Hi",
+    products: [{ id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: "logo.png" }],
+  });
+
+  beforeEach(() => {
+    // The route waits for the boot capability probe before it reads anything
+    // else, and answers 503 while it is unsettled — the same reason the
+    // describe above sets it.
+    setCapabilities({ motion: true });
+  });
+  afterEach(() => {
+    setCapabilities({ motion: false, reason: "not probed" });
+  });
+
+  test("POST /campaigns/generate onto a tombstoned campaign answers 404 before a job is enqueued", async () => {
+    const harness: PgHarness = await setupPgHarness();
+    try {
+      const store = getBriefStore(LOCAL_TENANT);
+      await store.createCampaign("gone-camp");
+      await store.createBrief(savedBrief("gone-camp"));
+
+      await harness.db.query(
+        `update campaign set deleted_at = now() where org_id = $1 and slug = $2`,
+        [LOCAL_TENANT.orgId, "gone-camp"],
+      );
+
+      const res = await generate({ brief: savedBrief("gone-camp") });
+      expect(res.status).toBe(404);
+      // The same body a missing campaign answers, so a deleted campaign cannot be
+      // told from one that was never created.
+      expect(await res.json()).toEqual({ error: 'Campaign "gone-camp" not found.' });
+
+      // The strong half: no `job` row at all, so the route answered before
+      // `acquireJob`/`enqueueJob` rather than refusing afterwards. A claim left
+      // behind would be a "running" job nothing could ever clear — the exact
+      // hazard the report-revision read above is ordered to avoid.
+      const { rows } = await harness.db.query<{ n: number }>("select count(*)::int as n from job");
+      expect(rows[0]!.n).toBe(0);
+    } finally {
+      await harness.cleanup();
+    }
+  }, 15000);
 });

@@ -4,6 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
+import {
+  BRIEF_SCHEMA_VERSION,
+  DEFAULT_CAMPAIGN_TYPE,
+  templateFromCanonical,
+  type CampaignBrief,
+} from "@campaignfoundry/CampaignOrchestration";
 import { resetDatabase, setDatabase } from "../../../lib/db/database.js";
 import { migratedDatabase } from "../../../lib/db/__tests__/pglite-client.js";
 import type { SqlClient } from "../../../lib/db/sql-client.js";
@@ -26,6 +32,7 @@ import route, {
   resetPreviewAdapters,
 } from "../preview-frame.post.js";
 import { getBriefStore } from "../../../lib/ports/index.js";
+import { setupPgHarness, type PgHarness } from "../../__tests__/tenant-harness.js";
 import { runEnvironment, type RunEnvironment } from "../../../lib/run-environment.js";
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
 
@@ -511,4 +518,69 @@ describe("POST /campaigns/preview-frame under OBJECT_STORE=s3 (PT-4d)", () => {
     // cache worth having.
     expect(previewAdapters(local)).toBe(previewAdapters(runEnvironment(LOCAL_TENANT)));
   });
+});
+
+/**
+ * PT-9a2, D233 r2 — the tombstone filter PT-9a1 shipped, through this route's own
+ * `campaignMeta` gate.
+ *
+ * **Postgres only**: `fs` has no `campaign` row to carry `deleted_at`, so there is
+ * no tombstone to plant there. The frame is rendered once BEFORE the tombstone —
+ * the gate and `resolveBriefAssetRefs` below it answer the identical body, so a
+ * 404 on its own cannot say which of the two refused, and a request that has
+ * already been seen rendering can.
+ *
+ * `resetPreviewAdapters()` on both sides of every case, as the `s3` describe
+ * above explains: the bundle is kept for the life of the process and holds a
+ * reader, so one left behind would answer the next test from it.
+ */
+describe("POST /campaigns/preview-frame onto a tombstone (PT-9a2, D233 r2)", () => {
+  const savedBrief = (id: string): CampaignBrief => ({
+    schemaVersion: BRIEF_SCHEMA_VERSION,
+    template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+    id,
+    targetRegion: "DE",
+    targetAudience: "a",
+    campaignMessage: "Hi",
+    products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "logo.png" }],
+  });
+
+  beforeEach(() => {
+    resetPreviewAdapters();
+  });
+  afterEach(() => {
+    resetPreviewAdapters();
+  });
+
+  test("POST /campaigns/preview-frame onto a tombstoned campaign answers 404", async () => {
+    const harness: PgHarness = await setupPgHarness();
+    try {
+      const store = getBriefStore(LOCAL_TENANT);
+      await store.createCampaign("gone-camp");
+      await store.createBrief(savedBrief("gone-camp"));
+      mkdirSync(join(harness.projectRoot, "assets", "inputs"), { recursive: true });
+      writeFileSync(join(harness.projectRoot, "assets", "inputs", "alpha-logo.png"), ONE_PX_PNG);
+
+      // Rendered before the tombstone: a 404 below must be the gate, not a cell
+      // the brief cannot render.
+      const before = await mount()(
+        jsonReq({ brief: { ...brief(), id: "gone-camp" }, cell: cell() }),
+      );
+      expect(before.status).toBe(200);
+      expect(before.headers.get("content-type")).toBe("image/png");
+
+      await harness.db.query(
+        `update campaign set deleted_at = now() where org_id = $1 and slug = $2`,
+        [LOCAL_TENANT.orgId, "gone-camp"],
+      );
+      resetPreviewAdapters();
+
+      const res = await mount()(jsonReq({ brief: { ...brief(), id: "gone-camp" }, cell: cell() }));
+      expect(res.status).toBe(404);
+      // The same body a missing campaign answers.
+      expect(await res.json()).toEqual({ error: 'Campaign "gone-camp" not found.' });
+    } finally {
+      await harness.cleanup();
+    }
+  }, 15000);
 });
