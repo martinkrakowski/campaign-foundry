@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "lane": "PT-4k2b1-write-refs-save-and-put",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "        noteOwner(owner.slug);\n        foreignIds.add(ref);",
+      "after": "        foreignIds.add(ref);",
+      "because": "Carry item 1: the link from a foreign id to a copy source. `foreignIds` is only ever read to decide what the post-copy check must still be able to refuse, so dropping `noteOwner` leaves that half working and removes the copy itself — `copyFrom` comes back empty, `briefs.post.ts`'s `if (resolved.copyFrom.length > 0)` is false, the loop and `assertRefsCopied` are skipped together, and the brief is written still naming campaign X's id. Nothing about the 404 machinery notices: the team check still runs, the ref is still legal, and the answer is still 201. The brief then reads fine right up until X is deleted, when its asset row goes and every ref to it ENOENTs. This is the exact defect PT-4k2b1 exists to close, and it is invisible to a status assertion — only the one that checks the STORED ref is a new id owned by the target can see it, which is why the carry-item-1 test asserts ownership rather than only 201.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/write-ref-checks.test.ts",
+        "-t",
+        "CARRY ITEM 1: a Save-as whose four fields carry another campaign's ids copies it in and still reads"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "        refToId[ref] = id;\n        if (stored.slug === opts.target) ownIds.add(id);",
+      "after": "        if (stored.slug === opts.target) ownIds.add(id);",
+      "because": "The remap a save exists to perform: under s3 what is STORED is an id (D208 D), and the only thing that turns a path ref into one is this entry in the raw-ref to id map the returned brief is rewritten through. Removing it keeps every check — the team check, the row lookup, `ownIds` — and returns a brief that still carries `assets/inputs/<slug>/<name>`. The write then succeeds with a 201 and stores a path, so the brief's ref is not the id of any row and nothing downstream can read it as one. The mutant is unusually well camouflaged because the path's id is still computed and still validated a line earlier: the difference is only whether it reaches the map. Only an assertion about the ref that comes back STORED can tell, which is why the test names the stored value and not the status.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/write-ref-checks.test.ts",
+        "-t",
+        "briefs.post stores a path ref to the target's OWN asset as its id, and copies nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id].put.ts",
+      "before": "          toSave = await copyBriefRefs(scope, resolved.brief, resolved.copyFrom, slug);",
+      "after": "          toSave = resolved.brief;",
+      "because": "D210(b) on the web's main save path. Replacing the copy with its own brief argument is the smallest possible edit that leaves PUT looking correct: the resolve has already refused the refs the caller may not use, the version guard has already run, and `toSave` is a real brief, so the write succeeds and answers 200. What is stored is campaign X's id verbatim — a reference shared with another campaign, whose `deleteAssets` this caller has no right to lean on and whose deletion silently ENOENTs this brief's logo, scene or music bed. This is the one write route with no `extractSourceAssetBriefIds` to lean on and no path in the body, so nothing else in the request would ever produce the copy: the test has to assert that the stored ref is TARGET-owned and still readable after the source campaign is deleted, because the status and the ref's shape are both unchanged by the mutation.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/write-ref-checks.test.ts",
+        "-t",
+        "briefs.put with a visible foreign id stores a TARGET-owned id that outlives its source"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "  if (stale.size === 0) return;\n  for (const ref of collectRefs(brief)) {\n    if (stale.has(ref)) throw new BriefRefNotFoundError(briefId);\n  }",
+      "after": "  if (stale.size === 0) return;\n  return;\n  for (const ref of collectRefs(brief)) {\n    if (stale.has(ref)) throw new BriefRefNotFoundError(briefId);\n  }",
+      "because": "The check that covers the window between the resolve and the copy. `copyAssets` copies the rows that exist WHEN it runs, so an asset deleted in between — a concurrent `deleteAssets`, a failed create's rollback — is simply missing from the map; `rewriteAssetPaths` leaves the id in place and no other check can see it, because the resolve already ran and was right at the time. The write then succeeds with 201 and stores a brief naming an asset that is in no campaign at all. Mutating the function into an unconditional early return keeps the whole call in place and still pays for `collectRefs`, so it reads like a guard that was merely relaxed; the empty-set early return that survives is the off-s3 no-op D208(D) depends on, so the mutant also stays correct on the backends that are meant to be unchanged. Only a test that races the copy — a `copyAssets` stubbed to answer `{}` for the one source — distinguishes them, and it has to count `brief_version` rows rather than read a status.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/write-ref-checks.test.ts",
+        "-t",
+        "RACE: a copy that maps nothing is refused, and no version is written"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "      if (owner === undefined) throw new BriefRefNotFoundError(brief.id);\n      await visible(owner.slug);",
+      "after": "      if (owner === undefined) throw new BriefRefNotFoundError(brief.id);\n      if (opts.mode === \"render\") await visible(owner.slug);",
+      "because": "The TEAM half of the check, on the write path. `assetOwner` is org-scoped only, by design (it joins `campaign` and filters on `org_id`), so it cannot tell a campaign in the caller's org from one on a team they are outside of — the `campaignVisibility` call is the only thing that closes D210(c) for an id ref, and this is where D208(D) asks for it on a save. Scoping it to `render` leaves every render test green and leaves the s3 write path answering 201 for a brief that names another team's asset id, which the pipeline then resolves through the same org-scoped adapter. The mutant is worth having because the line above it still refuses, the org half is untouched, and the deleted call is one statement inside a branch that looks like a pair of checks — a reviewer reads the pair and assumes both still run. The team check runs on every backend with teams, so this is not an s3-only concern either; what `save` changes is that the caller may now WRITE the ref.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.test.ts",
+        "-t",
+        "a team-HIDDEN id is refused, naming the caller's own brief"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id].put.ts",
+      "before": "          const current = await store.getRevision(slug);\n          if (current === undefined) {\n            const absentErr = new Error(`Brief \"${slug}\" not found.`);\n            (absentErr as { code?: string }).code = \"ENOENT\";\n            throw absentErr;\n          }\n          if (expectedRevision !== undefined && current !== expectedRevision) {\n            const conflictErr = new Error(\"Brief was modified by another user.\");\n            (conflictErr as { code?: string; revision?: string }).code = \"ECONFLICT\";\n            (conflictErr as { revision?: string }).revision = current;\n            throw conflictErr;\n          }\n          toSave = await copyBriefRefs(scope, resolved.brief, resolved.copyFrom, slug);",
+      "after": "          toSave = await copyBriefRefs(scope, resolved.brief, resolved.copyFrom, slug);\n          const current = await store.getRevision(slug);\n          if (current === undefined) {\n            const absentErr = new Error(`Brief \"${slug}\" not found.`);\n            (absentErr as { code?: string }).code = \"ENOENT\";\n            throw absentErr;\n          }\n          if (expectedRevision !== undefined && current !== expectedRevision) {\n            const conflictErr = new Error(\"Brief was modified by another user.\");\n            (conflictErr as { code?: string; revision?: string }).code = \"ECONFLICT\";\n            (conflictErr as { revision?: string }).revision = current;\n            throw conflictErr;\n          }",
+      "because": "The ORDER is the whole of D211(c) and this route's second guard, not the presence of either call. Move the `getRevision` guard below `copyBriefRefs` and both refusals still answer — the same 409 with the current revision, the same 404 for a versionless target — because the guard throws either way. What changes is what has already happened when it does: a request that was always going to be refused has copied another campaign's whole asset set into the target first, under a slug the caller owns, and nothing rolls it back on this path. That is a write to a real campaign made for a request that never lands, and it is invisible in the response. The test therefore asserts on the `copyAssets` spy rather than the status, because the status is the one thing this mutant gets exactly right.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/write-ref-checks.test.ts",
+        "-t",
+        "briefs.put with a stale revision answers 409 and copies nothing"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

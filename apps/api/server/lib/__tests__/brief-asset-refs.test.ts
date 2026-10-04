@@ -19,16 +19,26 @@ import { FsBriefStore } from "../ports/fs-brief-store.js";
 import { PgBriefStore } from "../ports/pg-brief-store.js";
 import { resetAssetStore, resetBriefStore } from "../ports/index.js";
 import { ObjectAssetStore } from "../ports/object-asset-store.js";
+import { extractSourceAssetBriefIds } from "../asset-files.js";
 import { CampaignNotFoundError } from "../ownership.js";
 import type { TenantContext } from "../tenant.js";
-import { BriefRefNotFoundError, resolveBriefAssetRefs } from "../brief-asset-refs.js";
+import {
+  assertRefsCopied,
+  BriefRefNotFoundError,
+  copyBriefRefs,
+  resolveBriefAssetRefs,
+} from "../brief-asset-refs.js";
 
 /**
- * `resolveBriefAssetRefs` in `render` mode (PT-4k2a, D208 B/D, D210 a/c/d).
+ * `resolveBriefAssetRefs` in `render` mode (PT-4k2a) and `save` mode (PT-4k2b; D208 B/D,
+ * D210 a/c/d).
  *
- * The one rule under test: **under s3, a ref that NAMES a campaign the caller cannot
- * see is the same 404 as a brief whose own campaign is hidden, and under pg + fs only
- * the team half of that is checked** (D210 d) while fs is untouched (D210 d, item 4).
+ * The one rule under test, in both modes: **under s3, a ref that NAMES a campaign the
+ * caller cannot see is the same 404 as a brief whose own campaign is hidden, and under
+ * pg + fs only the team half of that is checked** (D210 d) while fs is untouched (D210 d,
+ * item 4). `save` adds what a WRITE needs on top of that check — every ref as the id of
+ * a row the caller can see, the copy-source list, and the post-copy check — while off s3
+ * it stays the path-derived answer the four write routes have always given.
  *
  * Everything is offline and in-process: a real Postgres (or PGlite) database, an
  * `InMemoryObjectStore`, and the same `PgBriefStore`/`ObjectAssetStore` the routes go
@@ -42,6 +52,16 @@ const PNG = Buffer.from(
   "base64",
 );
 
+/**
+ * A DIFFERENT byte string, uploaded under a second name in the friend campaign.
+ *
+ * `copyAssets` decides a collision on `sha256` and REUSES a name the target already
+ * holds by these exact bytes, so a copy of the same PNG under the same name is a no-op
+ * with no new row and no new id. Testing the copy against that would assert a target-owned
+ * id without a copy ever having happened.
+ */
+const PNG_ALT = Buffer.concat([PNG, Buffer.from([0x00])]);
+
 /** The brief's OWN campaign — the `target`, and the owner its own refs have. */
 const RUN = "run-me";
 /** A second visible campaign in the same org: foreign, and legal. */
@@ -51,6 +71,9 @@ const THEIRS = "theirs";
 /** Another org's campaign, with a real asset in that org and none in this one. */
 const OTHER_ORG_CAMP = "theirs-other";
 const OTHER_ORG = "other";
+
+/** The friend campaign's SECOND, differently-bitted asset — the one a copy really moves. */
+const FRIEND_ALT = "friend-alt";
 
 const CALLER: TenantContext = { orgId: "local", userId: "u1", roles: [], teamIds: ["t1"] };
 
@@ -179,6 +202,9 @@ describe("resolveBriefAssetRefs — render mode under s3 (PT-4k2a, D208 D, D210 
     for (const slug of [RUN, FRIEND, THEIRS]) {
       ids[slug] = (await localAssets.writeAsset(slug, "logo.png", PNG)).id!;
     }
+    // A second, DIFFERENT asset in the friend campaign: this is the one the copy tests
+    // move, so the copy is a real new row (see `PNG_ALT`).
+    ids[FRIEND_ALT] = (await localAssets.writeAsset(FRIEND, "alt.png", PNG_ALT)).id!;
     // The other org's asset really exists — under ITS org's key, with a row of its own.
     // A query that forgot `org_id` would find it, so this is where such a leak surfaces.
     ids[OTHER_ORG_CAMP] = (
@@ -426,10 +452,204 @@ describe("resolveBriefAssetRefs — render mode under s3 (PT-4k2a, D208 D, D210 
     expect(resolved.brief).toBe(brief);
   });
 
-  test("save mode is PT-4k2b's, and refuses rather than doing today's path-derived check", async () => {
-    await expect(
-      resolveBriefAssetRefs(CALLER, storedBrief(RUN), { target: RUN, mode: "save" }),
-    ).rejects.toThrow("save mode lands in PT-4k2b");
+  /**
+   * `save` mode under s3 (PT-4k2b, D208 D, D210 a/b): the write side, where a check
+   * becomes a rewrite and a copy-source list.
+   *
+   * **The fixture's neutral ref is the TARGET'S OWN asset, not `DEMO_REF`** — this is
+   * the trap the render fixture above walks straight into. Under `save` a ref naming no
+   * campaign is refused BY DESIGN (D208 D: "a root-level demo ref cannot be saved under
+   * s3"), so a brief carrying the editor's `assets/inputs/hydra-logo.png` in any field
+   * the test is not about would 404 on that field instead of the one under test, and
+   * every case below would pass for the wrong reason.
+   */
+  describe("save mode (PT-4k2b, D208 D, D210 a/b)", () => {
+    /** The target's own path ref. Under `save` this becomes `ids[RUN]`. */
+    const ownPath = pathRef(RUN);
+
+    const save = (brief: CampaignBrief) =>
+      resolveBriefAssetRefs(CALLER, brief, { target: brief.id, mode: "save" });
+
+    /** Whatever is in the one field under test after the resolve. */
+    const readRef = (brief: CampaignBrief, field: Field): string => {
+      switch (field) {
+        case "products[].logoPath":
+          return brief.products[0]!.logoPath;
+        case "products[].inputAsset":
+          return brief.products[0]!.inputAsset!;
+        case "audio.path":
+          return brief.audio!.path;
+        case "copy.timeline.beats[].background":
+          return brief.copy!.timeline!.beats[0]!.background!;
+      }
+    };
+
+    /** `ref` in the one field under test, and the target's OWN ref everywhere else. */
+    const withSaveRef = (field: Field, ref: string): CampaignBrief => {
+      const base = storedBrief(RUN);
+      switch (field) {
+        case "products[].logoPath":
+          return {
+            ...base,
+            products: [{ id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: ref }],
+          };
+        case "products[].inputAsset":
+          return {
+            ...base,
+            products: [
+              { id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: ownPath, inputAsset: ref },
+            ],
+          };
+        case "audio.path":
+          return {
+            ...base,
+            // The neutral ref is the TARGET'S OWN, never `DEMO_REF`: under `save` a
+            // campaign-less ref is refused by design, so a leftover one would make every
+            // audio case below 404 on the logo instead of on the field under test.
+            products: [{ id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: ownPath }],
+            audio: { path: ref, rights: { licenceId: "lic-1", source: "library" } },
+          };
+        case "copy.timeline.beats[].background":
+          return {
+            ...base,
+            products: [{ id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: ownPath }],
+            copy: {
+              timeline: {
+                beats: [{ text: "Go", weight: 1, background: ref }],
+                transition: "cut",
+                keyBeat: 1,
+              },
+            },
+          };
+      }
+    };
+
+    describe.each(FIELDS)("the %s field", (field) => {
+      test("a visible FOREIGN id is kept as it is, recorded foreign, and names a copy source", async () => {
+        const resolved = await save(withSaveRef(field, ids[FRIEND]!));
+        expect(readRef(resolved.brief, field)).toBe(ids[FRIEND]!);
+        expect(resolved.foreignIds).toEqual(new Set([ids[FRIEND]!]));
+        expect(resolved.copyFrom).toEqual([FRIEND]);
+      });
+
+      test("a visible FOREIGN path is rewritten to the row's id and recorded foreign", async () => {
+        const resolved = await save(withSaveRef(field, pathRef(FRIEND)));
+        // No path is ever STORED under s3 (D208 D), so the brief handed back for writing
+        // already carries the id — the same row `listAssets` found by name.
+        expect(readRef(resolved.brief, field)).toBe(ids[FRIEND]!);
+        expect(resolved.foreignIds).toEqual(new Set([ids[FRIEND]!]));
+        expect(resolved.copyFrom).toEqual([FRIEND]);
+      });
+
+      test("the target's OWN path becomes its id, counts as own, and copies nothing", async () => {
+        const resolved = await save(withSaveRef(field, ownPath));
+        expect(readRef(resolved.brief, field)).toBe(ids[RUN]!);
+        expect(resolved.ownIds).toEqual(new Set([ids[RUN]!]));
+        expect(resolved.foreignIds).toEqual(new Set());
+        expect(resolved.copyFrom).toEqual([]);
+      });
+
+      test("a team-HIDDEN id is refused, naming the caller's own brief", async () => {
+        const error = await save(withSaveRef(field, ids[THEIRS]!)).catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(BriefRefNotFoundError);
+        expect((error as CampaignNotFoundError).campaignId).toBe(RUN);
+        expect((error as Error).message).not.toContain(THEIRS);
+      });
+
+      test("a path naming a team-HIDDEN campaign is refused the same way", async () => {
+        const error = await save(withSaveRef(field, pathRef(THEIRS))).catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(BriefRefNotFoundError);
+        expect((error as CampaignNotFoundError).campaignId).toBe(RUN);
+        expect((error as Error).message).not.toContain(THEIRS);
+      });
+
+      test("another org's id is refused — org-scoped, so absent and never forbidden", async () => {
+        await expect(save(withSaveRef(field, ids[OTHER_ORG_CAMP]!))).rejects.toBeInstanceOf(
+          BriefRefNotFoundError,
+        );
+      });
+
+      test("an id whose ROW is gone is refused, naming the caller's own brief", async () => {
+        await db.query(`delete from asset where id = $1`, [ids[FRIEND]!]);
+        await expect(save(withSaveRef(field, ids[FRIEND]!))).rejects.toBeInstanceOf(
+          BriefRefNotFoundError,
+        );
+      });
+
+      test("a path whose ROW is gone is refused the same way", async () => {
+        // A missing upload is not a reason to save a brief whose logo is not there
+        // (D210 c): it answers the same 404 a hidden campaign does.
+        await db.query(`delete from asset where id = $1`, [ids[FRIEND]!]);
+        await expect(save(withSaveRef(field, pathRef(FRIEND)))).rejects.toBeInstanceOf(
+          BriefRefNotFoundError,
+        );
+      });
+
+      test("a MALFORMED id is refused on save, though render lets it through", async () => {
+        // Shape alone names no campaign, and under s3 there is no row to store behind it:
+        // D208 D's "a ref that names no campaign is refused on save".
+        await expect(save(withSaveRef(field, MALFORMED_ID))).rejects.toBeInstanceOf(
+          BriefRefNotFoundError,
+        );
+      });
+
+      test("a root-level demo ref cannot be saved under s3", async () => {
+        // This is the editor's own default brief, and the reason D210(e) sequences the
+        // web writing ids (PT-4l) BEFORE staging moves to s3.
+        const error = await save(withSaveRef(field, DEMO_REF)).catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(BriefRefNotFoundError);
+        expect((error as Error).message).not.toContain("hydra-logo");
+      });
+    });
+
+    test("absent audio and absent beat background gain NO key, while the logo does become its id", async () => {
+      // `rewriteAssetPaths`' discipline (VE-D3 / VE5b2) survives the rewrite: a key that
+      // was not there must not appear, or a byte-identity comparison sees a difference
+      // nothing rendered.
+      const brief: CampaignBrief = {
+        ...withSaveRef("products[].logoPath", ownPath),
+        copy: { timeline: { beats: [{ text: "Go", weight: 1 }], transition: "cut", keyBeat: 1 } },
+      };
+      const resolved = await save(brief);
+      expect("audio" in resolved.brief).toBe(false);
+      expect("background" in (resolved.brief.copy!.timeline!.beats[0] as object)).toBe(false);
+      expect(readRef(resolved.brief, "products[].logoPath")).toBe(ids[RUN]!);
+    });
+
+    test("copyBriefRefs brings a foreign id over, and the copy's ref is TARGET-owned", async () => {
+      const resolved = await save(withSaveRef("products[].logoPath", ids[FRIEND_ALT]!));
+      expect(resolved.copyFrom).toEqual([FRIEND]);
+      const copied = await copyBriefRefs(CALLER, resolved.brief, resolved.copyFrom, RUN);
+      const copiedRef = readRef(copied, "products[].logoPath");
+      expect(copiedRef).not.toBe(ids[FRIEND_ALT]!);
+      // The copy's `<source id> → <target id>` map entry (`object-asset-store.ts`'s
+      // `record`) is the only thing that can remap an id: the asset belongs to the
+      // campaign being written, so its `deleteAssets` is this caller's to lean on.
+      const owner = await new ObjectAssetStore(db, store, "local").assetOwner(copiedRef);
+      expect(owner?.slug).toBe(RUN);
+      // ...and with every foreign id remapped, the post-copy check has nothing to refuse.
+      expect(() => assertRefsCopied(copied, resolved.foreignIds, RUN)).not.toThrow();
+    });
+
+    test("assertRefsCopied refuses a copy that mapped nothing", async () => {
+      const resolved = await save(withSaveRef("products[].logoPath", ids[FRIEND_ALT]!));
+      // The race the check exists for: `copyAssets` copies the rows that exist WHEN it
+      // runs, so a row deleted between the resolve and the copy is simply missing from
+      // the map — the id survives the rewrite untouched and no other check can see it.
+      vi.spyOn(ObjectAssetStore.prototype, "copyAssets").mockResolvedValue({});
+      const copied = await copyBriefRefs(CALLER, resolved.brief, resolved.copyFrom, RUN);
+      expect(readRef(copied, "products[].logoPath")).toBe(ids[FRIEND_ALT]!);
+      expect(() => assertRefsCopied(copied, resolved.foreignIds, RUN)).toThrow(
+        BriefRefNotFoundError,
+      );
+    });
+
+    test("assertRefsCopied is a no-op when the resolve found nothing foreign", async () => {
+      // Off s3 `stale` is always empty, which is what keeps D208(D)'s "fs and pg+fs are
+      // unchanged" true for a route that calls it unconditionally.
+      const resolved = await save(withSaveRef("products[].logoPath", ownPath));
+      expect(() => assertRefsCopied(resolved.brief, resolved.foreignIds, RUN)).not.toThrow();
+    });
   });
 });
 
@@ -452,6 +672,9 @@ describe("resolveBriefAssetRefs — render mode on pg + fs (staging: D210 d, r2)
     );
     const ownerStore = new PgBriefStore(db, "local", "owner", ["owner"], []);
     await ownerStore.createBrief(storedBrief(RUN));
+    // A second VISIBLE campaign: `save` off s3 has to name it as a copy source, which is
+    // what `assertSourceVisible` lets through when it answers "visible".
+    await ownerStore.createBrief(storedBrief(FRIEND));
     await ownerStore.createBrief(storedBrief(THEIRS), { teamId: "t2" });
   });
 
@@ -502,6 +725,55 @@ describe("resolveBriefAssetRefs — render mode on pg + fs (staging: D210 d, r2)
     expect(assetOwner).not.toHaveBeenCalled();
     expect(listAssets).not.toHaveBeenCalled();
   });
+
+  describe("save mode — the route code, behaviour for behaviour (PT-4k2b, D208 D)", () => {
+    const save = (brief: CampaignBrief, target = RUN) =>
+      resolveBriefAssetRefs(CALLER, brief, { target, mode: "save" });
+
+    test("copyFrom is what extractSourceAssetBriefIds reads, and the brief is the INPUT object", async () => {
+      // Off s3 there are no asset rows to own an id, so the write side is exactly the
+      // path-derived answer the four write routes have always given — no rewrite, no ids.
+      const brief = withRef("products[].logoPath", `assets/inputs/${FRIEND}/logo.png`);
+      const resolved = await save(brief);
+      expect(resolved.copyFrom).toEqual([FRIEND]);
+      expect(resolved.copyFrom).toEqual(extractSourceAssetBriefIds(brief, RUN));
+      expect(resolved.brief).toBe(brief);
+      expect(resolved.foreignIds).toEqual(new Set());
+      expect(resolved.ownIds).toEqual(new Set());
+    });
+
+    test("a team-HIDDEN slug rejects with the PLAIN CampaignNotFoundError, not the s3 refusal", async () => {
+      const error = await save(
+        withRef("products[].logoPath", `assets/inputs/${THEIRS}/logo.png`),
+      ).catch((e: unknown) => e);
+      // NOT `BriefRefNotFoundError`: that class is the s3 refusal, and this branch has to
+      // keep the exact error `duplicate.post`/`index.post` still catch themselves —
+      // `Brief "<error.campaignId>" not found.`, naming the slug the caller named.
+      expect(error).toBeInstanceOf(CampaignNotFoundError);
+      expect(error).not.toBeInstanceOf(BriefRefNotFoundError);
+      expect((error as CampaignNotFoundError).campaignId).toBe(THEIRS);
+    });
+
+    test("an ABSENT slug passes, exactly as assertSourceVisible has always let it", async () => {
+      // On fs a directory name need never have been a saved campaign at all (a demo
+      // asset dropped into it), and `campaignVisibility` answers "absent" for that case
+      // just as it does for a typo. Inventing a 404 here would be a new answer on the
+      // backend D208(D) leaves unchanged.
+      const brief = withRef("products[].logoPath", `assets/inputs/${RUN}-demo/logo.png`);
+      const resolved = await save(brief);
+      expect(resolved.copyFrom).toEqual([`${RUN}-demo`]);
+      expect(resolved.brief).toBe(brief);
+    });
+
+    test("an id ref is left alone off s3 — there is no row behind it to own", async () => {
+      const assetOwner = vi.spyOn(ObjectAssetStore.prototype, "assetOwner");
+      const brief = withRef("products[].logoPath", "00000000-0000-4000-8000-000000000000");
+      const resolved = await save(brief);
+      expect(resolved.brief).toBe(brief);
+      expect(resolved.copyFrom).toEqual([]);
+      expect(assetOwner).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe("resolveBriefAssetRefs — render mode on fs (no teams: D210 d)", () => {
@@ -551,5 +823,19 @@ describe("resolveBriefAssetRefs — render mode on fs (no teams: D210 d)", () =>
     }
     expect(visibility).not.toHaveBeenCalled();
     expect(assetStore).not.toHaveBeenCalled();
+  });
+
+  test("save mode passes through the same way, and still makes NO store call", async () => {
+    // fs has no teams at all, so `assertSourceVisible` cannot answer "hidden" and skips
+    // its call — the write side here is the same pass-through `render` is.
+    const visibility = vi.spyOn(FsBriefStore.prototype, "campaignVisibility");
+    const brief = withRef("products[].logoPath", `assets/inputs/${FRIEND}/logo.png`);
+    const resolved = await resolveBriefAssetRefs(CALLER, brief, { target: RUN, mode: "save" });
+    expect(resolved.copyFrom).toEqual([FRIEND]);
+    expect(resolved.copyFrom).toEqual(extractSourceAssetBriefIds(brief, RUN));
+    expect(resolved.brief).toBe(brief);
+    expect(resolved.foreignIds).toEqual(new Set());
+    expect(resolved.ownIds).toEqual(new Set());
+    expect(visibility).not.toHaveBeenCalled();
   });
 });
