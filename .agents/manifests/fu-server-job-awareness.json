@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/web/src/lib/run-context.tsx",
-      "before": "        void adoptJob(startBrief, jobId, { adopted: true });",
-      "after": "          void startBrief; void jobId;",
-      "because": "skipping the adoption call after restoring a brief prevents the web client from adopting an in-flight background run",
+      "before": "          void adoptJob(next, jobId);\n          return;",
+      "after": "          void next; void jobId;\n          return;",
+      "because": "skipping the adoption call after restoring a brief prevents the web client from adopting an in-flight background run. Re-anchored by PT-4g1 onto `setBrief`'s OWN discovery call site, which is what this `because` describes — the earlier anchor sat in `restoreDefaultBrief`, the NO-POINTER path, which this test never reaches (it seeds a last-opened pointer, so the restore goes through `setBrief`). Verified against `main`'s own `run-context.tsx`: the old anchor survived there too, so the claim was stale before this lane rather than broken by it, and the text alone would have kept it looking alive. The anchor carries the `return` after the call so it cannot also match the same-campaign call site further up the same function.",
       "command": [
         "yarn",
         "vitest",
@@ -21,8 +21,8 @@
     },
     {
       "file": "apps/web/src/lib/run-context.tsx",
-      "before": "    async (target: CampaignBrief, jobId: string, opts: { adopted?: boolean } = {}) => {\n      setLoading(true);",
-      "after": "    async (target: CampaignBrief, jobId: string, opts: { adopted?: boolean } = {}) => {",
+      "before": "  const adoptJob = useCallback(async (target: CampaignBrief, jobId: string) => {\n    setLoading(true);",
+      "after": "  const adoptJob = useCallback(async (target: CampaignBrief, jobId: string) => {",
       "because": "failing to set loading when adopting a running job lets the UI show settled controls while background work is still polling",
       "command": [
         "yarn",

@@ -93,23 +93,32 @@ interface AssetUrlField {
 const lastSegment = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
 
 /**
- * The five URL fields, one per source path, in the order they are appended.
+ * The seven URL fields, one per source path, in the order they are appended.
  *
- * **The disposition on the last two is what makes a `download` button a download**
- * (D209d), and it is only those two. Every other field is something the browser
- * DISPLAYS — `<img src>`, `<video src>` — so a disposition on those would be a
- * download dialog on a poster, which is the opposite of what they are for. `<a
- * download>` is ignored for a cross-origin target, and a presigned URL is on the
- * store's origin by definition, so `proofUrl` and `htmlBundleUrl` are the two
- * whose "download" intent cannot survive without the header. `htmlBundleUrl` is
+ * **The disposition on the last four is what makes a `download` button a
+ * download** (D209d, D212), and it is only those four. Every other field is
+ * something the browser DISPLAYS — `<img src>`, `<video src>` — so a disposition
+ * on those would be a download dialog on a poster, which is the opposite of what
+ * they are for. `<a download>` is ignored for a cross-origin target, and a
+ * presigned URL is on the store's origin by definition, so `proofUrl`,
+ * `htmlBundleUrl`, `outputDownloadUrl` and `videoDownloadUrl` are the four whose
+ * "download" intent cannot survive without the header. `htmlBundleUrl` is
  * signed `attachment` for a second reason: fs serves it as
  * `application/octet-stream` (there is no `.html` in the fs route's type table),
  * and stored tenant HTML must not render on the store's origin.
  *
- * `proofUrl`'s filename is the path's LAST SEGMENT, and it needs no quoting or
- * escaping inside the quoted string because the key that carried it already passed
- * `assertObjectKey`, whose alphabet is `A-Za-z0-9._/-`. A name that could break
- * out of the quotes therefore never reaches this line at all.
+ * **The two download fields are APPENDED, never a rewrite of the display ones**
+ * (D212). A browser that has the PNG open in an `<img>` and a link that saves the
+ * same bytes as a file are two different intents against one object, so they get
+ * two names and two signatures: `outputUrl` displays, `outputDownloadUrl`
+ * attaches, and only the latter carries a filename. Re-signing `outputUrl` with a
+ * disposition instead would have made every `<img src>` a download.
+ *
+ * `proofUrl`'s filename is the path's LAST SEGMENT, and so is each download
+ * field's. It needs no quoting or escaping inside the quoted string because the
+ * key that carried it already passed `assertObjectKey`, whose alphabet is
+ * `A-Za-z0-9._/-`. A name that could break out of the quotes therefore never
+ * reaches this line at all.
  */
 const FIELDS: readonly AssetUrlField[] = [
   { field: "outputUrl", source: "outputPath" },
@@ -124,6 +133,16 @@ const FIELDS: readonly AssetUrlField[] = [
     field: "htmlBundleUrl",
     source: "htmlBundlePath",
     disposition: () => 'attachment; filename="index.html"',
+  },
+  {
+    field: "outputDownloadUrl",
+    source: "outputPath",
+    disposition: (path) => `attachment; filename="${lastSegment(path)}"`,
+  },
+  {
+    field: "videoDownloadUrl",
+    source: "videoPath",
+    disposition: (path) => `attachment; filename="${lastSegment(path)}"`,
   },
 ];
 
