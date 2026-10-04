@@ -24,7 +24,7 @@ import { dropRoot, makeRoot } from "./fixtures/tree.js";
  */
 
 const SWITCHED_AT = "2026-10-01T00:00:00Z";
-const ENV_KEYS = ["STORE_BACKEND", "DATABASE_URL"] as const;
+const ENV_KEYS = ["STORE_BACKEND", "DATABASE_URL", "OUTPUT_DIR"] as const;
 const saved = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
 
 /** A `SqlClient` that answers nothing and records every statement it was asked for. */
@@ -41,9 +41,12 @@ function spyClient(): SqlClient {
 
 /** Point the environment at the file stores (the default) or at a configured postgres. */
 function setEnv(backend: "fs" | "postgres"): void {
-  delete process.env["STORE_BACKEND"];
+  // Named EXPLICITLY, never left unset (the `auth-boot-guard.test.ts` convention):
+  // `loadEnv()` never overrides a var already in `process.env`, so an operator's
+  // `.env.local` saying `STORE_BACKEND=postgres` would otherwise flip every fs-only test
+  // in this file on their machine and not on mine.
+  process.env["STORE_BACKEND"] = backend;
   if (backend === "postgres") {
-    process.env["STORE_BACKEND"] = "postgres";
     // The harness's own URL: loopback, and the credential comes from the operator's
     // `.pgpass` rather than from here. It only has to be PRESENT for `resolveSource`;
     // every test that reaches a database installs its own client with `setDatabase`.
@@ -55,6 +58,7 @@ function setEnv(backend: "fs" | "postgres"): void {
     // that inferred the backend from this URL's presence would prove nothing.
     process.env["DATABASE_URL"] = "postgres://cf_test@127.0.0.1:5433/postgres";
   }
+  delete process.env["OUTPUT_DIR"];
 }
 
 function restoreEnv(): void {
@@ -100,18 +104,24 @@ describe("resolveSource (PT-8a reqs 1-4)", () => {
   });
 
   test("req 1: both roots default as config.ts resolves them", async () => {
-    // `<repo>/output` does not exist in a fresh checkout, and `plan` refuses an output
-    // root it cannot read (D223 reads renders out of it) — so this asserts the DEFAULTS
-    // with a tree that has both, and the refusal for an absent one is the next test.
-    mkdirSync(processOutputRoot(), { recursive: true });
+    // `OUTPUT_DIR` is set rather than creating `<repo>/output` in the real checkout: this
+    // test is about which directory `config.ts` resolves, and making it true by writing
+    // into the repository would leave state behind for every later run on this machine.
+    // `outputRoot()` is `resolve(projectRoot(), OUTPUT_DIR ?? "output")`, so the override
+    // IS the resolution being asserted.
+    const out = join(root, "out");
+    mkdirSync(out, { recursive: true });
+    process.env["OUTPUT_DIR"] = out;
     const defaulted = await resolveSource({ includeSamples: false, switchedAt: SWITCHED_AT });
+
     expect(defaulted).toMatchObject({
       ok: true,
       source: {
         backend: "fs-only",
-        ctx: { projectRoot: resolve(processProjectRoot()), outputRoot: processOutputRoot() },
+        ctx: { projectRoot: resolve(processProjectRoot()), outputRoot: resolve(out) },
       },
     });
+    expect(resolve(processOutputRoot())).toBe(resolve(out));
   });
 
   test("req 1: both flags override the roots, and an absent one refuses NAMING the path", async () => {

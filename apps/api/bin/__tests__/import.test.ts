@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import * as scanModule from "../../server/lib/import/scan.js";
 import { USAGE, main } from "../import.js";
 import {
   dropRoot,
@@ -25,6 +26,17 @@ import {
  */
 
 const SWITCHED_AT = "2026-10-01T00:00:00Z";
+const SAVED_STORE_BACKEND = process.env["STORE_BACKEND"];
+
+/** The fs-only backend, set EXPLICITLY (the `auth-boot-guard.test.ts` convention). */
+function useFileStores(): void {
+  process.env["STORE_BACKEND"] = "fs";
+}
+
+function restoreEnv(): void {
+  if (SAVED_STORE_BACKEND === undefined) delete process.env["STORE_BACKEND"];
+  else process.env["STORE_BACKEND"] = SAVED_STORE_BACKEND;
+}
 
 function io(): {
   out: string[];
@@ -41,6 +53,11 @@ describe("import CLI (PT-8a)", () => {
   let output: string | undefined;
 
   beforeEach(() => {
+    // Every test here except the `--org` refusal and the bad-value one wants the file
+    // stores, and an operator's `.env.local` saying `STORE_BACKEND=postgres` would flip
+    // all of them: `loadEnv` never overrides a var already in `process.env`, so naming it
+    // here is what makes this suite mean the same thing on every machine.
+    useFileStores();
     root = makeRoot();
     output = join(root, "output");
     mkdirSync(output, { recursive: true });
@@ -58,6 +75,7 @@ describe("import CLI (PT-8a)", () => {
     dropRoot(root);
     root = undefined;
     output = undefined;
+    restoreEnv();
   });
 
   /** `plan` against this suite's temp tree, with any flags added or replaced. */
@@ -175,6 +193,43 @@ describe("import CLI (PT-8a)", () => {
       '--org "local" needs STORE_BACKEND=postgres: the file stores have no org row to ' +
         "check it against.",
     ]);
+  });
+
+  /**
+   * Fable fix round 1, FIX 2b: `plan` never rejects, whatever the run throws.
+   *
+   * The entry guard is `main(...).then(code => { process.exitCode = code })` — there is no
+   * rejection handler, and the brief fixes it verbatim — so a rejection out of `plan`
+   * became an unhandled rejection and an abort with no plan and no message. This test
+   * stands in for every throw the CLI cannot rule out internally, `storeBackend()` refusing
+   * a bad `STORE_BACKEND` among them.
+   */
+  test("FIX 2b: a THROW inside plan is a run-level refusal, not a rejected promise", async () => {
+    const boom = new Error("the tree is on fire");
+    const scan = vi.spyOn(scanModule, "scanBriefs").mockRejectedValue(boom);
+    const { out, err, deps } = io();
+    try {
+      expect(await main(planArgv(), deps)).toBe(1);
+      expect(err).toEqual(["the tree is on fire"]);
+      // Nothing half-printed: a run that failed to plan must not leave a plan-shaped
+      // header on stdout for an operator to mistake for the plan.
+      expect(out).toEqual([]);
+    } finally {
+      scan.mockRestore();
+    }
+  });
+
+  test("FIX 2b: a bad STORE_BACKEND value refuses instead of rejecting", async () => {
+    const saved = process.env["STORE_BACKEND"];
+    process.env["STORE_BACKEND"] = "postgres-ish";
+    const { err, deps } = io();
+    try {
+      expect(await main(planArgv(), deps)).toBe(1);
+      expect(err[0]).toContain("STORE_BACKEND must be");
+    } finally {
+      if (saved === undefined) delete process.env["STORE_BACKEND"];
+      else process.env["STORE_BACKEND"] = saved;
+    }
   });
 
   test("a flag with no value, and a flag this command does not take, both refuse", async () => {

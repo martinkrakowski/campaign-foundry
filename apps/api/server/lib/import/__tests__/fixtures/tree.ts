@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -48,6 +48,25 @@ export function writeAt(root: string, rel: string, bytes: Buffer | string): stri
   const path = join(root, rel);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, bytes);
+  return path;
+}
+
+/**
+ * A brief file written from TEXT rather than from a serialized body.
+ *
+ * For the shapes `dumpBrief` will not emit and a test still needs on disk: a `logoPath`
+ * that is not a string, a self-referencing YAML alias. Both are things a legacy tree
+ * really contains, and neither survives a round trip through the domain type.
+ */
+export function writeRawBrief(root: string, file: string, yaml: string): string {
+  return writeAt(root, join("briefs", file), yaml);
+}
+
+/** A symlink at `<root>/<rel>` pointing at `target`. Used for the symlink refusals. */
+export function linkAt(root: string, rel: string, target: string): string {
+  const path = join(root, rel);
+  mkdirSync(dirname(path), { recursive: true });
+  symlinkSync(target, path);
   return path;
 }
 

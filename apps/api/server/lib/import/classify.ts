@@ -1,6 +1,7 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import { basename, relative, resolve } from "node:path";
 import { resolveAssetPath } from "@campaignfoundry/CreativeGeneration";
+import { errorMessage } from "@campaignfoundry/shared";
 import {
   ASSET_NAME_PATTERN,
   AUDIO_ASSET_NAME_PATTERN,
@@ -59,7 +60,7 @@ function inputRuleProblem(path: string, name: string): string | undefined {
   if (!ASSET_NAME_PATTERN.test(name)) {
     return `${JSON.stringify(name)} is not a path-safe asset name (lower-case, .png/.jpg/.jpeg/.mp3/.m4a).`;
   }
-  if (statSync(path).size > MAX_ASSET_BYTES) {
+  if (lstatSync(path).size > MAX_ASSET_BYTES) {
     return `${JSON.stringify(name)} is over the ${MAX_ASSET_BYTES}-byte (2 MiB) limit.`;
   }
   const bytes = readFileSync(path);
@@ -93,21 +94,63 @@ function shapeKind(rel: string, slug: string): CleanRefKind {
   return parts[1] === slug ? "own-campaign" : "other-campaign";
 }
 
-/** One ref, its category, and — where a rule or the filesystem says so — why. */
-function classify(ctx: StepContext, campaign: ScannedCampaign, ref: string): RefClassification {
+/**
+ * One ref, its category, and — where a rule or the filesystem says so — why.
+ *
+ * **TOTAL BY CONSTRUCTION (fix round 1, FIX 1).** `scanBriefs` calls `classifyRefs`
+ * OUTSIDE the try that captures a parse failure, so a throw here escapes the scan, escapes
+ * `plan`, and lands in the entry guard's `.then`, which has no rejection handler: one bad
+ * ref in one file used to abort the whole run instead of costing that campaign its place in
+ * the plan. Every filesystem answer below is therefore a value, never an exception —
+ * including the three that are only reachable because the path came off a legacy disk:
+ * a directory (EISDIR), a symlink (followed OUT of both roots), and an unreadable file
+ * (EACCES).
+ *
+ * **`lstatSync`, never `stat`/`existsSync`.** Those follow a symlink, and following one is
+ * the whole hazard: a legacy tree's `logo.png` can point at `/etc/hosts`, and a link to
+ * `/dev/zero` makes `readFileSync` block forever on a FIFO-shaped target. `lstat` asks what
+ * the NAME is, so a symlink is refused as a symlink and never read through. This is
+ * STRICTER than the live pipeline — `FileSystemInputAssets` follows a link — and stricter on
+ * purpose, matching `fs-brief-store.ts:381-382`'s own refusal of a symlinked brief, so the
+ * importer and the store agree that a link in a tree is a thing to fix, not to follow.
+ */
+function classify(ctx: StepContext, campaign: ScannedCampaign, ref: unknown): RefClassification {
+  // Before `resolveAssetPath`, which does `resolve(root, input)` and therefore throws
+  // ERR_INVALID_ARG_TYPE on a number. `parseBrief` never type-checks `products[].logoPath`
+  // or `.inputAsset`, so a non-string really does arrive.
+  if (typeof ref !== "string") {
+    return { ref: String(ref), kind: "unsafe", reason: "the ref is not a string" };
+  }
   const path = resolveAssetPath(ref, ctx.projectRoot);
   if (path === undefined) {
     return { ref, kind: "unsafe", reason: "the ref does not resolve to a path under assets/" };
   }
   const rel = relative(resolve(ctx.projectRoot, "assets"), path);
   const kind = shapeKind(rel, campaign.slug);
-  // Existence before the rules: the name, size and magic of a file that is not there
-  // describe nothing, and "missing" is the fact. One `statSync` answers both.
-  if (!existsSync(path)) {
+  const st = lstatSync(path, { throwIfNoEntry: false });
+  if (st === undefined) {
     return { ref, kind: "missing", reason: `no file at ${JSON.stringify(ref)}` };
   }
-  const problem = inputRuleProblem(path, basename(rel));
-  return problem === undefined ? { ref, kind } : { ref, kind: "refused-file", reason: problem };
+  if (st.isSymbolicLink()) {
+    return { ref, kind: "unsafe", reason: "the ref is a symlink; the importer never follows one" };
+  }
+  // Not a file and not a link: a directory left where an asset belongs, or a FIFO, whose
+  // `st.size` is 0 — so the size cap would pass it and the read would never return.
+  if (!st.isFile()) {
+    return {
+      ref,
+      kind: "refused-file",
+      reason: `${JSON.stringify(basename(rel))} is not a regular file.`,
+    };
+  }
+  try {
+    const problem = inputRuleProblem(path, basename(rel));
+    return problem === undefined ? { ref, kind } : { ref, kind: "refused-file", reason: problem };
+  } catch (error) {
+    // EACCES on a mode-000 file, and anything else the read can raise. A refusal naming the
+    // reason is the same KIND of fact the three upload rules produce, so it belongs here.
+    return { ref, kind: "refused-file", reason: `could not be read: ${errorMessage(error)}` };
+  }
 }
 
 /**

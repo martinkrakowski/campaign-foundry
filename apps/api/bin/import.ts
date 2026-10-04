@@ -1,4 +1,5 @@
 import { pathToFileURL } from "node:url";
+import { errorMessage } from "@campaignfoundry/shared";
 import { resolveSource, type SourceFlags } from "../server/lib/import/source.js";
 import { scanBriefs } from "../server/lib/import/scan.js";
 
@@ -64,34 +65,48 @@ function parseFlags(argv: readonly string[]): SourceFlags | string {
  * row's item 9): a brief the parser refuses is a fact about the tree, and the reviewer
  * still needs the plan for everything else. Only a source this run cannot read is a
  * failure to have run at all.
+ *
+ * **`plan` NEVER REJECTS (fix round 1, FIX 2b).** The entry guard is
+ * `main(...).then(code => { process.exitCode = code })` with no rejection handler, so any
+ * throw below became an unhandled rejection: an abort, no exit code, no message, and no
+ * plan. The per-file capture inside `scanBriefs` stops the throws we know about — a
+ * circular brief, a bad ref, an unreadable file — and this catch stops the ones we do not,
+ * including `storeBackend()` refusing a malformed `STORE_BACKEND` (`config.ts:43`), which
+ * no amount of per-file handling can reach. The whole body is inside the try for that
+ * reason, and the entry guard is left exactly as it is.
  */
 async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
-  const flags = parseFlags(argv);
-  if (typeof flags === "string") {
-    io.stderr(flags);
+  try {
+    const flags = parseFlags(argv);
+    if (typeof flags === "string") {
+      io.stderr(flags);
+      return 1;
+    }
+    const outcome = await resolveSource(flags);
+    if (!outcome.ok) {
+      io.stderr(outcome.reason);
+      return 1;
+    }
+    const { ctx, backend, switchedAtIso } = outcome.source;
+    const result = await scanBriefs(ctx);
+    io.stdout(`import plan — switched-at: ${switchedAtIso}`);
+    io.stdout(`org: ${ctx.orgId}`);
+    io.stdout(`backend: ${backend}`);
+    io.stdout(
+      JSON.stringify({
+        switchedAt: switchedAtIso,
+        orgId: ctx.orgId,
+        backend,
+        campaigns: result.campaigns,
+        refusals: result.refusals,
+        samples: result.samples,
+      }),
+    );
+    return 0;
+  } catch (error) {
+    io.stderr(errorMessage(error));
     return 1;
   }
-  const outcome = await resolveSource(flags);
-  if (!outcome.ok) {
-    io.stderr(outcome.reason);
-    return 1;
-  }
-  const { ctx, backend, switchedAtIso } = outcome.source;
-  const result = await scanBriefs(ctx);
-  io.stdout(`import plan — switched-at: ${switchedAtIso}`);
-  io.stdout(`org: ${ctx.orgId}`);
-  io.stdout(`backend: ${backend}`);
-  io.stdout(
-    JSON.stringify({
-      switchedAt: switchedAtIso,
-      orgId: ctx.orgId,
-      backend,
-      campaigns: result.campaigns,
-      refusals: result.refusals,
-      samples: result.samples,
-    }),
-  );
-  return 0;
 }
 
 /**

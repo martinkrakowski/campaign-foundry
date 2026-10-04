@@ -52,6 +52,23 @@
         "req 4: a MISSING --switched-at refuses with its own message"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/classify.ts",
+      "before": "  if (st.isSymbolicLink()) {\n    return { ref, kind: \"unsafe\", reason: \"the ref is a symlink; the importer never follows one\" };\n  }\n",
+      "after": "\n",
+      "because": "What this mutation proves is the DIAGNOSIS, and it is worth being exact about that, because the obvious reading of the branch is wrong. Deleting it does NOT restore the read-through hazard: `lstatSync` never follows a link, so `st.isFile()` is false for EVERY symlink and the following `!st.isFile()` branch already refuses one before any read. The safety half of this fix belongs to the choice of `lstat` over `stat`/`existsSync`, not to this branch. What the branch buys is that the two failures stay distinguishable. A link is answered `unsafe` + \"the ref is a symlink; the importer never follows one\", which tells the operator to remove the link; the mutant answers `refused-file` + \"is not a regular file\", which tells them to put a regular file there — and a file they create BESIDE the link leaves the link in place, still pointing wherever it pointed, still one `readFileSync` away from being read. The assertion that fails is the whole object: `kind` `unsafe` → `refused-file` and the reason string, on the symlink test only. The directory test is unaffected, and so is the dangling-symlink test in its KIND but not its reason — which is the point of pinning this branch rather than the `lstat` call: the link's own answer is what is under test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/classify.test.ts",
+        "-t",
+        "a SYMLINK at the ref path is unsafe: the importer never follows one"
+      ],
+      "verdict": "caught"
     }
   ]
 }

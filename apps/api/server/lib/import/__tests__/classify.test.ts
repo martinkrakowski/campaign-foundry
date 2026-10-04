@@ -1,11 +1,21 @@
 import { afterEach, describe, expect, test } from "vitest";
+import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { projectRoot as processProjectRoot } from "@campaignfoundry/shared";
 import { parseBriefText } from "../../load-brief.js";
 import { classifyRefs } from "../classify.js";
 import { scanBriefs, type ScannedCampaign } from "../scan.js";
 import type { StepContext } from "../steps.js";
-import { MP3, NOT_A_PNG, PNG, briefYaml, dropRoot, makeRoot, writeAt } from "./fixtures/tree.js";
+import {
+  MP3,
+  NOT_A_PNG,
+  PNG,
+  briefYaml,
+  dropRoot,
+  linkAt,
+  makeRoot,
+  writeAt,
+} from "./fixtures/tree.js";
 
 /**
  * PT-8a req 12: every distinct ref in a campaign, in exactly one of seven categories.
@@ -32,13 +42,19 @@ function context(projectRoot: string): StepContext {
   };
 }
 
-/** One campaign holding one ref, parsed but not yet classified. */
-function campaignFor(root: string, id: string, ref: string): ScannedCampaign {
+/**
+ * One campaign holding one ref, parsed but not yet classified.
+ *
+ * **`ref` is `unknown` on purpose**: `parseBrief` never type-checks
+ * `products[].logoPath`, so a non-string is a shape a legacy brief really carries, and a
+ * fixture helper that only accepted `string` could not build one.
+ */
+function campaignFor(root: string, id: string, ref: unknown): ScannedCampaign {
   const overrides = {
     id,
     products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: ref }],
   };
-  const yaml = briefYaml(overrides);
+  const yaml = briefYaml(overrides as never);
   const path = writeAt(root, join("briefs", `${id}.yaml`), yaml);
   return {
     slug: id,
@@ -168,6 +184,108 @@ describe("classifyRefs (PT-8a req 12, D219)", () => {
         ref: "assets/inputs/camp-audio/bed.mp3",
         kind: "refused-file",
         reason: '"bed.mp3" is not an MP3 or M4A file.',
+      },
+    ]);
+  });
+});
+
+/**
+ * Fable fix round 1: `classifyRefs` is TOTAL.
+ *
+ * Every ref a legacy brief can carry must come back as a classification, because
+ * `scanBriefs` calls this OUTSIDE the try that captures a parse failure — so a throw here
+ * escapes the scan, escapes `plan`, and lands in the entry guard's `.then`, which has no
+ * rejection handler. One bad ref in one file would then abort the whole run instead of
+ * costing that one campaign its place in the plan.
+ */
+describe("classifyRefs is total (PT-8a1 fix round 1, FIX 1)", () => {
+  let root: string | undefined;
+
+  afterEach(() => {
+    dropRoot(root);
+    root = undefined;
+  });
+
+  test("a ref that is not a string is unsafe, not a thrown ERR_INVALID_ARG_TYPE", () => {
+    root = makeRoot();
+    // `parseBrief` never type-checks `products[].logoPath`, so `5` reaches
+    // `resolveAssetPath` exactly as it does in production — and `resolve(root, 5)` throws.
+    const campaign = campaignFor(root, "camp-num", 5);
+
+    expect(classifyRefs(context(root), campaign)).toEqual([
+      { ref: "5", kind: "unsafe", reason: "the ref is not a string" },
+    ]);
+  });
+
+  test("a DIRECTORY at the ref path is refused-file, not an EISDIR read", () => {
+    root = makeRoot();
+    // Size is not consulted for a directory, so this used to reach `readFileSync` and
+    // throw EISDIR — an operator's `briefs/` directory left where an asset was expected.
+    mkdirSync(join(root, "assets", "inputs", "camp-dir", "logo.png"), { recursive: true });
+    const campaign = campaignFor(root, "camp-dir", "assets/inputs/camp-dir/logo.png");
+
+    expect(classifyRefs(context(root), campaign)).toEqual([
+      {
+        ref: "assets/inputs/camp-dir/logo.png",
+        kind: "refused-file",
+        reason: '"logo.png" is not a regular file.',
+      },
+    ]);
+  });
+
+  test("a SYMLINK at the ref path is unsafe: the importer never follows one", () => {
+    root = makeRoot();
+    // Points at a real PNG, so nothing about the bytes is wrong — only the NAME of the
+    // thing is. `lstat` is the whole point: `existsSync`/`stat` follow the link and read
+    // through it, which is how a legacy tree's `logo.png` becomes `/etc/hosts`.
+    writeAt(root, "elsewhere/target.png", PNG);
+    linkAt(
+      root,
+      join("assets", "inputs", "camp-link", "logo.png"),
+      join(root, "elsewhere/target.png"),
+    );
+    const campaign = campaignFor(root, "camp-link", "assets/inputs/camp-link/logo.png");
+
+    expect(classifyRefs(context(root), campaign)).toEqual([
+      {
+        ref: "assets/inputs/camp-link/logo.png",
+        kind: "unsafe",
+        reason: "the ref is a symlink; the importer never follows one",
+      },
+    ]);
+  });
+
+  test("a DANGLING symlink is unsafe, not missing", () => {
+    root = makeRoot();
+    linkAt(root, join("assets", "inputs", "camp-dangle", "logo.png"), join(root, "gone.png"));
+    const campaign = campaignFor(root, "camp-dangle", "assets/inputs/camp-dangle/logo.png");
+
+    // The distinction is the point: `existsSync` follows the link, finds no target, and
+    // answers `missing` — which would tell the operator to put the file back at a path
+    // that is a symlink, when the link itself is what must go.
+    expect(classifyRefs(context(root), campaign)).toEqual([
+      {
+        ref: "assets/inputs/camp-dangle/logo.png",
+        kind: "unsafe",
+        reason: "the ref is a symlink; the importer never follows one",
+      },
+    ]);
+  });
+
+  test("an UNREADABLE file is refused-file, not a thrown EACCES", () => {
+    root = makeRoot();
+    writeAt(root, "assets/inputs/camp-locked/logo.png", PNG);
+    const path = join(root, "assets/inputs/camp-locked/logo.png");
+    chmodSync(path, 0o000);
+    const campaign = campaignFor(root, "camp-locked", "assets/inputs/camp-locked/logo.png");
+
+    // Node's own message, path and all: the operator needs to be told WHICH file was
+    // unreadable, and `briefs/` can hold a great many of them.
+    expect(classifyRefs(context(root), campaign)).toEqual([
+      {
+        ref: "assets/inputs/camp-locked/logo.png",
+        kind: "refused-file",
+        reason: `could not be read: EACCES: permission denied, open '${path}'`,
       },
     ]);
   });

@@ -14,6 +14,7 @@ import {
   writeBrief,
   writeCampaignMeta,
   writeHtmlLayerBrief,
+  writeRawBrief,
 } from "./fixtures/tree.js";
 
 /**
@@ -137,7 +138,15 @@ describe("scanBriefs (PT-8a reqs 6-11)", () => {
     expect(result.refusals).toEqual([]);
   });
 
-  test("req 7: a campaign.json that will not parse does NOT refuse the campaign", async () => {
+  /**
+   * Fable fix round 1, FIX 5: a `campaign.json` that will not parse REFUSES its campaign.
+   *
+   * Degrading it to `null`/`null` looked faithful to `FsBriefStore.campaignMeta`'s
+   * `hasVersion` branch, but it is not the same fact once the importer is the caller: the
+   * plan would show a campaign with no name, `apply` would create it with `name: null`, and
+   * nothing anywhere would say a `campaign.json` existed at all. D227 is never silent.
+   */
+  test("FIX 5: a campaign.json that will not parse REFUSES its campaign", async () => {
     root = makeRoot();
     inputs(root);
     campaign(root, "camp-broken-meta");
@@ -145,13 +154,12 @@ describe("scanBriefs (PT-8a reqs 6-11)", () => {
 
     const result = await scanBriefs(context(root));
 
-    // `FsBriefStore.campaignMeta`'s own `hasVersion` branch: a brief file IS a saved
-    // version, so that store degrades name/type to null rather than failing the campaign.
-    // The importer reads the same file by the same rule — the name is decoration, and the
-    // brief is what makes this campaign importable.
-    expect(result.campaigns.map((one) => one.slug)).toEqual(["camp-broken-meta"]);
-    expect(result.campaigns[0]).toMatchObject({ name: null, type: null });
-    expect(result.refusals).toEqual([]);
+    expect(result.campaigns).toEqual([]);
+    expect(result.refusals).toHaveLength(1);
+    expect(result.refusals[0]!.slug).toBe("camp-broken-meta");
+    expect(result.refusals[0]!.reason).toMatch(
+      /^campaign\.json could not be read: .*(JSON|SyntaxError)/,
+    );
   });
 
   test("req 8: a briefs/<slug>/ directory with NO campaign.json is not a reservation", async () => {
@@ -166,6 +174,44 @@ describe("scanBriefs (PT-8a reqs 6-11)", () => {
 
     expect(result.campaigns.map((one) => one.slug)).toEqual(["camp-saved"]);
     expect(result.refusals).toEqual([]);
+  });
+
+  /**
+   * Fable fix round 1, FIX 2a: a brief that parses but cannot be SERIALISED is a refusal
+   * of that one file.
+   *
+   * `parseBrief` keeps unknown top-level keys, so a self-referencing alias survives as a
+   * circular object — and `JSON.stringify` on it throws `TypeError: Converting circular
+   * structure to JSON`. Left uncaptured, that throw happened in `plan`, one file from the
+   * end, and cost the operator the plan for every campaign.
+   */
+  test("FIX 2: a CIRCULAR brief is its own refusal, and the neighbour is planned", async () => {
+    root = makeRoot();
+    inputs(root);
+    campaign(root, "camp-ok");
+    writeRawBrief(
+      root,
+      "looping.yaml",
+      `id: looping
+targetRegion: DE
+targetAudience: aud
+campaignMessage: Hello
+products:
+  - id: p1
+    name: P1
+    primaryColor: "#111111"
+    logoPath: assets/inputs/logo.png
+meta: &a
+  self: *a
+`,
+    );
+
+    const result = await scanBriefs(context(root));
+
+    expect(result.campaigns.map((one) => one.slug)).toEqual(["camp-ok"]);
+    expect(result.refusals).toHaveLength(1);
+    expect(result.refusals[0]!.sourcePath).toBe(join(root, "briefs", "looping.yaml"));
+    expect(result.refusals[0]!.reason).toMatch(/circular structure/i);
   });
 
   test("req 9: briefs/sample-* is skipped by default, and the count is reported", async () => {
@@ -225,9 +271,11 @@ describe("scanBriefs (PT-8a reqs 6-11)", () => {
     const result = await scanBriefs(context(root));
 
     expect(result.campaigns).toEqual([]);
-    // Two entries skipped: the sample's brief file AND its sidecar directory. `pools.json`
-    // is never an orphan file here — the sample rule took the whole subtree with it.
-    expect(result.samples).toEqual({ skipped: 2, imported: 0 });
+    // `pools.json` is never an orphan file here — the sample rule took the whole subtree
+    // with it — and it is not a SECOND skip either. The brief file IS the skip; counting
+    // the sidecar directory as well inflated the number an operator reads as "how many
+    // samples did you skip", which is the only thing this count is for.
+    expect(result.samples).toEqual({ skipped: 1, imported: 0 });
     expect(result.refusals).toEqual([]);
   });
 
@@ -383,5 +431,75 @@ describe("scanBriefs (PT-8a reqs 6-11)", () => {
     expect(result.refusals).toHaveLength(1);
     expect(result.refusals[0]!.sourcePath).toBe(join(root, "briefs"));
     expect(result.refusals[0]!.reason).toMatch(/^briefs\/ could not be read: /);
+  });
+
+  /**
+   * Fable fix round 1, FIX 1: this is the test that proves NO THROW escapes `scanBriefs`.
+   *
+   * `scanBriefs` calls `classifyRefs` OUTSIDE the try that captures a per-file parse
+   * failure, so a throw in the classifier used to propagate out of the scan, out of
+   * `plan`, and into the entry guard's `.then` — which has no rejection handler — turning
+   * one malformed ref in one file into an unhandled-rejection abort of the whole run.
+   * `await` on a rejecting promise is the assertion that would fail; a campaign refused
+   * with a reason is the assertion that must hold.
+   */
+  test("FIX 1: a non-string ref is REFUSED, and the scan still resolves", async () => {
+    root = makeRoot();
+    inputs(root);
+    campaign(root, "camp-kept");
+    // `logoPath: 5` — `parseBrief` never type-checks the field, so this is a brief the
+    // parser ACCEPTS and the classifier must survive.
+    writeRawBrief(
+      root,
+      "camp-num.yaml",
+      `id: camp-num
+targetRegion: DE
+targetAudience: aud
+campaignMessage: Hello
+products:
+  - id: p1
+    name: P1
+    primaryColor: "#111111"
+    logoPath: 5
+`,
+    );
+
+    const result = await scanBriefs(context(root));
+
+    expect(result.campaigns.map((one) => one.slug)).toEqual(["camp-kept"]);
+    expect(result.refusals).toEqual([
+      {
+        slug: "camp-num",
+        sourcePath: join(root, "briefs", "camp-num.yaml"),
+        reason: 'ref "5": the ref is not a string',
+      },
+    ]);
+  });
+
+  /**
+   * Fable fix round 1, FIX 3: a brief that FAILED to parse beside its own
+   * `briefs/<stem>/campaign.json` is ONE refusal, not two.
+   *
+   * The reservation rule turns on "no brief file for that slug". A file that failed to
+   * parse IS a brief file for that slug — its id was never read, which is precisely why
+   * the importer cannot claim the campaign has no brief. The second refusal asserted
+   * something false about the operator's tree.
+   */
+  test("FIX 3: an unparsed brief beside briefs/<stem>/campaign.json is ONE refusal", async () => {
+    root = makeRoot();
+    inputs(root);
+    campaign(root, "camp-kept");
+    writeHtmlLayerBrief(root, "legacy.yaml", "legacy");
+    writeCampaignMeta(root, "legacy", { name: "Legacy campaign" });
+
+    const result = await scanBriefs(context(root));
+
+    expect(result.campaigns.map((one) => one.slug)).toEqual(["camp-kept"]);
+    // Exactly one, and it is the parser's message — not a second entry claiming there is
+    // no brief file for a slug whose brief file is right there.
+    expect(result.refusals).toHaveLength(1);
+    expect(result.refusals[0]!.slug).toBeNull();
+    expect(result.refusals[0]!.sourcePath).toBe(join(root, "briefs", "legacy.yaml"));
+    expect(result.refusals[0]!.reason).toBe(HTML_LAYER_REFUSAL);
   });
 });

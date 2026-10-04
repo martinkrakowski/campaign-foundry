@@ -1,6 +1,6 @@
 import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { isReservedCampaignId, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
 import { isBriefSourceName, isErrno } from "../brief-files.js";
@@ -58,13 +58,17 @@ type Parsed = { readonly file: string; readonly path: string; readonly brief: Ca
 type CampaignMeta = { readonly name: string | null; readonly type: string | null };
 
 /**
- * Whether the campaign has a meta file at all, and what it said. **Presence and
- * readability are two facts**, because the versionless-reservation rule turns on the
- * first and the campaign's own name on the second.
+ * Whether the campaign has a meta file at all, and what it said.
+ *
+ * **Three states, because presence and readability are two facts** (fix round 1, FIX 5):
+ * the versionless-reservation rule turns on the first, the campaign's own name on the
+ * second, and a file that is present but unreadable is a REFUSAL of that campaign rather
+ * than a silent `null`.
  */
 type MetaLookup =
   | { readonly present: false }
-  | { readonly present: true; readonly meta: CampaignMeta };
+  | { readonly present: true; readonly meta: CampaignMeta }
+  | { readonly present: true; readonly error: string };
 
 /** Q2: `briefs/sample-*` is a demo, skipped unless `--include-samples` says otherwise. */
 function isSample(name: string): boolean {
@@ -107,12 +111,15 @@ async function readMeta(briefsDir: string, slug: string): Promise<MetaLookup> {
     };
   } catch (error) {
     if (isErrno(error, "ENOENT")) return { present: false };
-    // Present but unreadable, which is `FsBriefStore.campaignMeta`'s own `hasVersion`
-    // branch: a brief file IS a saved version, so that store degrades name/type to null
-    // here rather than failing the campaign. The importer reads the same file through the
-    // same store's rules and must not invent a stricter one — and the file is still
-    // `present`, so a versionless reservation built on it is still a reservation.
-    return { present: true, meta: { name: null, type: null } };
+    // Present and unreadable (fix round 1, FIX 5). The earlier shape of this branch
+    // degraded to `null`/`null` because that is what `FsBriefStore.campaignMeta` does when
+    // a version exists — but the importer is NOT that store's caller, it is a plan the
+    // operator reads before anything is written. A null name there became
+    // `createCampaign(slug, { name: null })` in PT-8b, and nothing in the plan said a
+    // `campaign.json` had ever existed. D227: never silent. The campaign is refused with
+    // the read error; the RESERVATION loop below still treats the file as present, because
+    // "a `campaign.json` is there and we cannot read it" is not "no campaign was reserved".
+    return { present: true, error: errorMessage(error) };
   }
 }
 
@@ -176,21 +183,46 @@ export async function scanBriefs(ctx: StepContext): Promise<ScanResult> {
   const refusals: ScanRefusal[] = [];
   if (refusal !== undefined) refuse(refusals, null, refusal.sourcePath, refusal.reason);
 
-  // Q2: the flag decides, never the file's contents (F7), so an operator-edited sample
-  // is still skipped by default. Counted before anything is parsed, and by NAME, so a
-  // skipped sample's `briefs/<slug>/` sidecar (the tracked `briefs/sample-pooled/pools.json`)
-  // is reported under the same skip instead of being an orphan file.
-  const sampleDirs = ctx.includeSamples ? [] : dirs.filter(isSample);
-  const skipped = (ctx.includeSamples ? [] : files.filter(isSample)).length + sampleDirs.length;
+  // Q2: the flag decides, never the file's contents (F7), so an operator-edited sample is
+  // still skipped by default. Counted before anything is parsed, and by NAME, so a skipped
+  // sample's sidecar can never be mistaken for something the sample rule did not take.
+  //
+  // **A sidecar directory is COUNTED only when no sample file claims that stem** (fix round
+  // 1, FIX 4). `briefs/sample-pooled.yaml` plus `briefs/sample-pooled/` is one sample, and
+  // the count's only job is to tell the operator how many samples were skipped: counting
+  // both inflated it to two, for one demo brief. An orphan `sample-*` directory with no
+  // brief file beside it is still counted — something under `briefs/` really was skipped,
+  // and PT-8a2's census is where it gets named.
+  //
+  // `skippedSampleDirs` stays the FULL list, because the reservation loop below is not about
+  // counting: it skips every sample-named directory so a skipped demo can never also be
+  // reported as a versionless reservation. Narrowing that list would be a behaviour change
+  // FIX 4 did not ask for.
+  const sampleFiles = ctx.includeSamples ? [] : files.filter(isSample);
+  const skippedSampleDirs = ctx.includeSamples ? [] : dirs.filter(isSample);
+  const skipped =
+    sampleFiles.length +
+    skippedSampleDirs.filter((dir) => !sampleFiles.includes(`${dir}.yaml`)).length;
 
   const parsed: Parsed[] = [];
+  const unparsed = new Set<string>();
   for (const file of files) {
     const path = join(briefsDir, file);
     if (!ctx.includeSamples && isSample(file)) continue;
     try {
       const bytes = await readFile(path);
-      parsed.push({ file, path, brief: parseBriefText(path, bytes.toString("utf8")) });
+      const brief = parseBriefText(path, bytes.toString("utf8"));
+      // Fix round 1, FIX 2a: `parseBrief` KEEPS unknown top-level keys, so a YAML
+      // self-referencing alias survives as a circular object — and the plan is serialised
+      // with `JSON.stringify`, which throws on one. Proving serialisability HERE, inside
+      // the try that already captures this file's failures, is what turns a run-ending
+      // TypeError in `plan` into a refusal of the one brief that caused it.
+      JSON.stringify(brief);
+      parsed.push({ file, path, brief });
     } catch (error) {
+      // The STEM, and only the stem: this file exists, so the reservation loop below must
+      // not report its directory as a campaign with no brief (fix round 1, FIX 3).
+      unparsed.add(basename(file, extname(file)));
       refuse(refusals, null, path, errorMessage(error));
     }
   }
@@ -223,6 +255,12 @@ export async function scanBriefs(ctx: StepContext): Promise<ScanResult> {
       continue;
     }
     const meta = await readMeta(briefsDir, brief.id);
+    // FIX 5: a `campaign.json` that is there and unreadable refuses the campaign, with the
+    // read error named — rather than importing it with `name: null` and saying nothing.
+    if ("error" in meta) {
+      refuse(refusals, brief.id, path, `campaign.json could not be read: ${meta.error}`);
+      continue;
+    }
     // The draft carries no refs because {@link classifyRefs} takes the campaign it
     // classifies: the campaign is the thing that knows its slug and its brief, and a
     // classifier handed two loose arguments would be one step from disagreeing with it.
@@ -252,8 +290,14 @@ export async function scanBriefs(ctx: StepContext): Promise<ScanResult> {
   // RESERVATION (PT-5b3's shape), not a parse failure: the campaign was named before any
   // version was saved, and the importer must list it rather than invent a brief for it.
   for (const dir of dirs) {
-    if (sampleDirs.includes(dir)) continue;
+    if (skippedSampleDirs.includes(dir)) continue;
     if (bySlug.has(dir)) continue;
+    // FIX 3: a file that FAILED to parse is still a brief file for its stem. Its id was
+    // never read — which is exactly why the importer cannot claim the campaign has no brief
+    // — so without this the same tree produced a second refusal asserting something false.
+    // Only UNPARSED stems are collected, never every stem: `legacy.yaml` failing to parse
+    // says nothing about `legacy-2.yaml`.
+    if (unparsed.has(dir)) continue;
     const meta = await readMeta(briefsDir, dir);
     if (!meta.present) continue;
     refuse(
