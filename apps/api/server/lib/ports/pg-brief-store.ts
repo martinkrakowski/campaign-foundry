@@ -136,7 +136,7 @@ export class PgBriefStore implements BriefStorePort {
       `select bv.campaign_id, bv.version, bv.revision, bv.body, c.team_id
          from campaign c
          join brief_version bv on bv.campaign_id = c.id
-        where c.org_id = $1 and c.slug = $2
+        where c.org_id = $1 and c.slug = $2 and c.deleted_at is null
         order by bv.version desc
         limit 1`,
       [this.orgId, slug],
@@ -147,31 +147,68 @@ export class PgBriefStore implements BriefStorePort {
   }
 
   /**
-   * "absent" | "visible" | "hidden" (D166 item 4, `BriefStorePort`): tells
-   * "never created" (a campaign row does not exist at all — `lib/ownership.ts`
-   * `campaignKnown` must still fall through to its report/asset fallback for
-   * an unsaved draft) from "exists but hidden" (a row exists whose team the
-   * caller's role or memberships cannot see — `campaignKnown` must 404
-   * immediately, even when a report or asset exists in the org's scope), from
-   * plain "visible". `findBriefById` alone cannot make this distinction:
-   * team scope already makes it answer `undefined` for both "absent" and
-   * "hidden". Also used by the brief write routes (item 3) to answer 409 on
-   * a hidden or already-visible target before any write or asset copy runs.
+   * "absent" | "visible" | "hidden" (D166 item 4, D233, `BriefStorePort`):
+   * tells "never created" (a campaign row does not exist at all —
+   * `lib/ownership.ts` `campaignKnown` must still fall through to its
+   * report/asset fallback for an unsaved draft) from "exists but hidden" (a row
+   * exists whose team the caller's role or memberships cannot see, or which has
+   * been TOMBSTONED — `campaignKnown` must 404 immediately, even when a report
+   * or asset exists in the org's scope), from plain "visible". `findBriefById`
+   * alone cannot make this distinction: team scope already makes it answer
+   * `undefined` for both "absent" and "hidden". Also used by the brief write
+   * routes (item 3) to answer 409 on a hidden or already-visible target before
+   * any write or asset copy runs.
+   *
+   * The uuid-then-slug shape is `campaignMeta`'s own, for the same reason
+   * (`PgBriefStore.campaignMeta`): every caller passes `resolved?.slug ?? ref`,
+   * so a ref that DID resolve never reaches this as a uuid — but one that did
+   * NOT resolve (`resolveCampaign` is itself filtered) reaches it as the raw
+   * uuid text, and a slug-only query would find no row for that text at all.
+   *
+   * **A uuid match that is tombstoned or team-hidden answers "hidden" and
+   * RETURNS** — it does not fall through to the slug branch, unlike
+   * `campaignMeta`'s and `resolveCampaign`'s uuid branches. Those fall through
+   * because `id` and `slug` share one text space, so a uuid-shaped ref may be
+   * nobody's id and somebody's slug. That is exactly why the fallthrough cannot
+   * happen here: it could only ever MISS, and would silently convert the "hidden"
+   * above into the "absent" this method exists to distinguish — reopening the
+   * `campaignKnown` report/asset fallback for a deleted, ever-generated
+   * campaign, whose `report`/`asset`/`pool`/`job` rows are slug-OR-uuid-text
+   * keyed (D246) and survive until D232 step 3 deletes them. Only a uuid that
+   * matches NO row at all falls through: genuinely never created, which is
+   * "absent", and which every `id` and `slug` share a text space with.
+   *
+   * Neither branch FILTERS the tombstone out of its row set — both SELECT
+   * `deleted_at` and answer "hidden" on the value, because that is the only way
+   * this method can tell "deleted" from "never created". The nine other readers
+   * this lane filters do exclude the row outright, which is right for them: for
+   * them the two ARE the same answer.
    */
   async campaignVisibility(id: string): Promise<"absent" | "visible" | "hidden"> {
-    const { rows } = await this.db.query<{ team_id: string | null }>(
-      `select team_id from campaign where org_id = $1 and slug = $2`,
+    if (CANONICAL_UUID_PATTERN.test(id)) {
+      const { rows } = await this.db.query<{ team_id: string | null; deleted_at: string | null }>(
+        `select team_id, deleted_at from campaign where org_id = $1 and id = $2`,
+        [this.orgId, id.toLowerCase()],
+      );
+      const byId = rows[0];
+      if (byId) {
+        return byId.deleted_at !== null || !this.visible(byId.team_id) ? "hidden" : "visible";
+      }
+    }
+    const { rows } = await this.db.query<{ team_id: string | null; deleted_at: string | null }>(
+      `select team_id, deleted_at from campaign where org_id = $1 and slug = $2`,
       [this.orgId, id],
     );
     const row = rows[0];
     if (!row) return "absent";
+    if (row.deleted_at !== null) return "hidden";
     return this.visible(row.team_id) ? "visible" : "hidden";
   }
 
   /** See `BriefStorePort.campaignTeam` (PT-5b2 fix-round item 1). */
   async campaignTeam(slug: string): Promise<string | null | undefined> {
     const { rows } = await this.db.query<{ team_id: string | null }>(
-      `select team_id from campaign where org_id = $1 and slug = $2`,
+      `select team_id from campaign where org_id = $1 and slug = $2 and deleted_at is null`,
       [this.orgId, slug],
     );
     const row = rows[0];
@@ -190,14 +227,14 @@ export class PgBriefStore implements BriefStorePort {
     // so the ref still falls through to the slug lookup.
     if (CANONICAL_UUID_PATTERN.test(ref)) {
       const { rows } = await this.db.query<{ id: string; slug: string; team_id: string | null }>(
-        `select id, slug, team_id from campaign where org_id = $1 and id = $2`,
+        `select id, slug, team_id from campaign where org_id = $1 and id = $2 and deleted_at is null`,
         [this.orgId, ref.toLowerCase()],
       );
       const byId = rows[0];
       if (byId && this.visible(byId.team_id)) return { campaignId: byId.id, slug: byId.slug };
     }
     const { rows } = await this.db.query<{ id: string; slug: string; team_id: string | null }>(
-      `select id, slug, team_id from campaign where org_id = $1 and slug = $2`,
+      `select id, slug, team_id from campaign where org_id = $1 and slug = $2 and deleted_at is null`,
       [this.orgId, ref],
     );
     const bySlug = rows[0];
@@ -217,7 +254,7 @@ export class PgBriefStore implements BriefStorePort {
          select distinct on (c.id) c.id as campaign_id, c.slug, c.team_id, bv.body, bv.revision
            from campaign c
            join brief_version bv on bv.campaign_id = c.id
-          where c.org_id = $1
+          where c.org_id = $1 and c.deleted_at is null
           order by c.id, bv.version desc
        ) latest
        order by slug`,
@@ -337,14 +374,34 @@ export class PgBriefStore implements BriefStorePort {
         // grandfathers a reserved slug (D181's scope note) — `assertNotReserved`
         // never runs in this branch, reserved or not, because this write is
         // onto a campaign that already exists, not a fresh mint of one.
-        const { rows: existing } = await tx.query<{ id: string; team_id: string | null }>(
-          `select id, team_id from campaign where org_id = $1 and slug = $2 for update`,
+        const { rows: existing } = await tx.query<{
+          id: string;
+          team_id: string | null;
+          deleted_at: string | null;
+        }>(
+          `select id, team_id, deleted_at from campaign where org_id = $1 and slug = $2 for update`,
           [this.orgId, brief.id],
         );
         const row = existing[0]!; // the insert's own conflict proves this row exists
         if (!this.visible(row.team_id)) {
           // D166: hidden from this caller by team — answers exactly like an
           // existing brief (EEXIST), never written into, versionless or not.
+          const err = new Error(`Brief "${brief.id}" already exists.`);
+          (err as { code?: string }).code = "EEXIST";
+          throw err;
+        }
+        // D233, PT-9-2: a TOMBSTONED row (D231) is refused here too, and this
+        // select stays UNFILTERED on purpose — filtering it would leave
+        // `existing` empty immediately after the insert's own conflict proved
+        // the row exists, and `existing[0]!` would be a TypeError (500) rather
+        // than the EEXIST this is. So the row is read as it is and the tombstone
+        // is checked as a value.
+        //
+        // BEFORE the version-count read below, which is the whole of the order:
+        // this row is versionless (a blank `POST /campaigns` mint that a delete
+        // outran), so a check after that read would let this write go on to
+        // insert version 1 — the first version of a deleted campaign.
+        if (row.deleted_at !== null) {
           const err = new Error(`Brief "${brief.id}" already exists.`);
           (err as { code?: string }).code = "EEXIST";
           throw err;
@@ -452,7 +509,7 @@ export class PgBriefStore implements BriefStorePort {
     if (CANONICAL_UUID_PATTERN.test(ref)) {
       const { rows } = await this.db.query<Row>(
         `select c.id, c.slug, c.name, c.type, c.team_id, ${selectHasVersion}
-           from campaign c where c.org_id = $1 and c.id = $2`,
+           from campaign c where c.org_id = $1 and c.id = $2 and c.deleted_at is null`,
         [this.orgId, ref.toLowerCase()],
       );
       const metaById = rows[0];
@@ -460,7 +517,7 @@ export class PgBriefStore implements BriefStorePort {
     }
     const { rows } = await this.db.query<Row>(
       `select c.id, c.slug, c.name, c.type, c.team_id, ${selectHasVersion}
-         from campaign c where c.org_id = $1 and c.slug = $2`,
+         from campaign c where c.org_id = $1 and c.slug = $2 and c.deleted_at is null`,
       [this.orgId, ref],
     );
     const metaBySlug = rows[0];
@@ -519,7 +576,10 @@ export class PgBriefStore implements BriefStorePort {
    * row's current team is read here too so a campaign hidden from this caller by
    * team (D166) answers `notFound`, the same as a genuinely missing row —
    * without it, a member of another team could rewrite, or even reassign, a
-   * campaign they cannot otherwise see at all.
+   * campaign they cannot otherwise see at all. A TOMBSTONED campaign (D231) is
+   * `notFound` here too, by the same filter and for the same reason: the row
+   * reads as absent, so a Save onto a deleted slug is refused rather than
+   * writing version N+1 of a campaign no reader will ever serve again.
    */
   private async rewriteBriefInternal(
     brief: CampaignBrief,
@@ -529,7 +589,7 @@ export class PgBriefStore implements BriefStorePort {
     assertSafeSlug(brief.id);
     return this.db.transaction(async (tx) => {
       const { rows: campaigns } = await tx.query<{ id: string; team_id: string | null }>(
-        `select id, team_id from campaign where org_id = $1 and slug = $2 for update`,
+        `select id, team_id from campaign where org_id = $1 and slug = $2 and deleted_at is null for update`,
         [this.orgId, brief.id],
       );
       const campaignRow = campaigns[0];

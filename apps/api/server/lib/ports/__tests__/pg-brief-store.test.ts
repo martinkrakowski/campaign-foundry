@@ -1192,3 +1192,290 @@ describe("campaignId and resolveCampaign (PT-5a, D168, D178)", () => {
     expect(await store.resolveCampaign("00000000-0000-0000-0000-000000000000")).toBeUndefined();
   });
 });
+
+/**
+ * The tombstone (PT-9a1, D231, D233). Every case here plants `deleted_at` with
+ * raw SQL on the harness's own database — the writers are lanes 9f/9g/9l/9m, and
+ * no port writes the column yet, so a fixture that went through one would be
+ * testing a lane that does not exist.
+ *
+ * The claim under all of it is that a tombstone reads as ABSENCE at every reader,
+ * with the one deliberate exception of `campaignVisibility`, which says "hidden"
+ * (D233 r2) because `campaignKnown` reads "absent" as "never created" and falls
+ * through to its slug-keyed `report`/`asset` fallback — which a deleted,
+ * ever-generated campaign still has rows in.
+ */
+describe("the campaign tombstone (PT-9a1, D231, D233)", () => {
+  let db: SqlClient;
+  let owner: PgBriefStore;
+
+  beforeEach(async () => {
+    db = await migratedDatabase();
+    await seedTeams(db);
+    owner = new PgBriefStore(db, "local", "owner", ["owner"], []);
+  });
+  afterEach(async () => {
+    await db.end();
+  });
+
+  /** One saved version, then the tombstone: a campaign nobody has purged yet. */
+  const tombstone = async (slug: string): Promise<string> => {
+    const stored = await owner.createBrief(brief(slug));
+    await db.query(`update campaign set deleted_at = now() where org_id = $1 and slug = $2`, [
+      "local",
+      slug,
+    ]);
+    return stored.campaignId!;
+  };
+
+  test("every brief reader answers a tombstoned campaign absent", async () => {
+    const uuid = await tombstone("gone");
+
+    expect(await owner.campaignTeam("gone")).toBeUndefined();
+    expect(await owner.resolveCampaign("gone")).toBeUndefined();
+    expect(await owner.resolveCampaign(uuid)).toBeUndefined();
+    expect(await owner.listBriefs()).toEqual([]);
+    expect(await owner.findBriefById("gone")).toBeUndefined();
+    expect(await owner.getRevision("gone")).toBeUndefined();
+    expect(await owner.exists("gone")).toBe(false);
+    expect(await owner.campaignMeta("gone")).toBeUndefined();
+    expect(await owner.campaignMeta(uuid)).toBeUndefined();
+    // `readBrief` refuses rather than answering absence — ENOENT for a row no
+    // reader can see, the same as for a slug never created. (`rewriteBrief`'s
+    // own refusal is its own test below, which also asserts nothing was written.)
+    await expect(owner.readBrief("gone")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("a live campaign's readers are unchanged by the tombstone's presence", async () => {
+    // The unchanged-behaviour control, and it is the one that can catch a filter
+    // that over-reaches: a second, live campaign in the same org must be served
+    // in full while a tombstoned sibling of the same shape sits beside it.
+    await tombstone("gone");
+    const live = await owner.createBrief(brief("live"));
+
+    expect(await owner.campaignTeam("live")).toBeNull();
+    expect(await owner.resolveCampaign("live")).toEqual({
+      campaignId: live.campaignId,
+      slug: "live",
+    });
+    expect((await owner.listBriefs()).map((b) => b.brief.id)).toEqual(["live"]);
+    expect((await owner.findBriefById("live"))?.brief.id).toBe("live");
+    expect(await owner.getRevision("live")).toBe(live.revision);
+    expect(await owner.exists("live")).toBe(true);
+    expect(await owner.campaignMeta("live")).toMatchObject({ slug: "live", hasVersion: true });
+    expect(await owner.campaignMeta(live.campaignId!)).toMatchObject({ slug: "live" });
+  });
+
+  test("rewriteBrief answers notFound for a tombstoned slug, exactly as for a missing one", async () => {
+    await tombstone("gone");
+    await expect(owner.rewriteBrief(brief("gone", "v2"))).rejects.toMatchObject({ code: "ENOENT" });
+    // And the refusal wrote nothing: the tombstoned campaign keeps its one
+    // version, so a later reader that un-tombstones cannot find a v2.
+    const { rows } = await db.query<{ n: number }>(
+      `select count(*)::int as n from brief_version bv
+         join campaign c on c.id = bv.campaign_id where c.org_id = 'local' and c.slug = 'gone'`,
+    );
+    expect(rows[0]!.n).toBe(1);
+  });
+
+  // D233 r2: "hidden", not "absent" — the mechanism is `ownership.ts`'s
+  // `campaignKnown` fallback, and the consequence is a deleted, ever-generated
+  // campaign keeping serving its slug-keyed report. "Absent" is how this method
+  // says "never created", which is the one case where that fallback is wanted.
+  test("a tombstoned campaign answers hidden by slug", async () => {
+    await tombstone("gone");
+    expect(await owner.campaignVisibility("gone")).toBe("hidden");
+  });
+
+  test("a tombstoned campaign answers hidden by uuid", async () => {
+    const uuid = await tombstone("gone");
+    // The uuid ref, not the slug: this is the shape every route actually sends.
+    // `resolveCampaign` is itself filtered, so it answers `undefined`, and
+    // `result.get.ts`'s `resolved?.slug ?? campaignId` hands the RAW UUID TEXT to
+    // this method — a slug-only query finds nothing for that text and would say
+    // "absent", reopening the report fallback for a deleted campaign.
+    expect(await owner.campaignVisibility(uuid)).toBe("hidden");
+  });
+
+  test("a team-hidden but NOT tombstoned uuid ref still answers hidden", async () => {
+    // The control for the new uuid branch: it must not have changed the existing
+    // by-team answer, which used to reach it through the slug query.
+    const created = await owner.createBrief(brief("t2-only"), { teamId: "t2" });
+    const outsider = new PgBriefStore(db, "local", "u1", [], ["t1"]);
+    expect(await outsider.campaignVisibility(created.campaignId!)).toBe("hidden");
+    expect(await owner.campaignVisibility(created.campaignId!)).toBe("visible");
+  });
+
+  test("campaignVisibility by uuid: a live campaign answers visible and an unknown uuid answers absent (tombstone-branch controls)", async () => {
+    // The two arms of the new uuid branch that are NOT "hidden", which no route
+    // can reach: every caller passes `resolved?.slug ?? ref`, so a uuid only
+    // arrives here when `resolveCampaign` found nothing. Without these the branch
+    // is uncovered below the 100% threshold, and the "live campaign answers
+    // visible by uuid" half is the only observable change for a live campaign.
+    const stored = await owner.createBrief(brief("live"));
+    expect(await owner.campaignVisibility(stored.campaignId!)).toBe("visible");
+    // The uuid branch misses, and the slug branch it falls through to misses too.
+    expect(await owner.campaignVisibility("00000000-0000-4000-8000-000000000000")).toBe("absent");
+  });
+
+  // PT-9-2, D233: the race backstop. `createBrief`'s conflict branch reads the
+  // row UNFILTERED (filtering it would leave `existing` empty right after the
+  // insert's own conflict proved the row exists) and throws EEXIST on a
+  // tombstone — before the version-count read, which is what stops a first-ever
+  // Save writing version 1 into a tombstoned, versionless row.
+  test("a first-ever Save against a tombstoned blank mint throws EEXIST, having written no version", async () => {
+    const { campaignId } = await owner.createCampaign("blank");
+    await db.query(`update campaign set deleted_at = now() where org_id = $1 and slug = $2`, [
+      "local",
+      "blank",
+    ]);
+
+    // Both assertions, in THIS order, and the order is the point: `expect(n).toBe(0)`
+    // is the witness, so it must be able to fail FIRST. A `rejects` assertion placed
+    // above it would abort the test at the mutant's first symptom — the missing
+    // EEXIST — and the count, which is the only thing that can tell "threw before
+    // the insert" from "threw after it", would never be evaluated at all.
+    const outcome = await owner.createBrief(brief("blank")).then(
+      () => undefined,
+      (rejected: unknown) => rejected,
+    );
+    const { rows } = await db.query<{ n: number }>(
+      `select count(*)::int as n from brief_version where campaign_id = $1`,
+      [campaignId],
+    );
+    // Zero, not one: the throw ran before the insert into `brief_version`, so this
+    // is not merely refused-before-a-second-version.
+    expect(rows[0]!.n).toBe(0);
+    expect(outcome).toMatchObject({ code: "EEXIST" });
+  });
+});
+
+/**
+ * The tombstone's own shape (PT-9a1, D231, D233 r2). Separate from the reader
+ * block above because these are CLAIMS ABOUT THE MIGRATION, not about any
+ * reader: no lane after this one may change the shape without its own migration,
+ * and each claim below is a way a later change could quietly break.
+ */
+describe("0017_deletion migration (D231, D233 r2)", () => {
+  /** Everything below 0017, applied — so 0017 is the only pending one. */
+  const through0016 = async (db: SqlClient): Promise<void> => {
+    const all = await loadMigrations();
+    await migrate(
+      db,
+      all.filter((m) => m.id < "0017"),
+    );
+  };
+
+  test("the tombstone columns exist and an existing row reads null for both", async () => {
+    const db = await emptyDatabase();
+    try {
+      const all = await loadMigrations();
+      await migrate(
+        db,
+        all.filter((m) => m.id < "0017"),
+      );
+      const { rows: inserted } = await db.query<{ id: string }>(
+        `insert into campaign (org_id, slug) values ('local', 'pre-migration') returning id`,
+      );
+
+      expect((await migrate(db, all))[0]).toBe("0017_deletion");
+
+      const { rows } = await db.query<{ deleted_at: string | null; deleted_by: string | null }>(
+        `select deleted_at, deleted_by from campaign where id = $1`,
+        [inserted[0]!.id],
+      );
+      // Null-to-null for every pre-existing row, and no default: a live campaign
+      // is live because nobody wrote a tombstone, not because a column defaulted.
+      expect(rows[0]).toEqual({ deleted_at: null, deleted_by: null });
+      const { rows: cols } = await db.query<{ column_name: string; data_type: string }>(
+        `select column_name, data_type from information_schema.columns
+          where table_name = 'campaign' and column_name in ('deleted_at', 'deleted_by')
+          order by column_name`,
+      );
+      expect(cols).toEqual([
+        { column_name: "deleted_at", data_type: "timestamp with time zone" },
+        { column_name: "deleted_by", data_type: "text" },
+      ]);
+    } finally {
+      await db.end();
+    }
+  });
+
+  test("deletion.org_id keeps a value naming no org row — there is no foreign key", async () => {
+    const db = await emptyDatabase();
+    try {
+      await through0016(db);
+      await migrate(db, await loadMigrations());
+
+      const { rows } = await db.query<{ org_id: string }>(
+        `insert into deletion (org_id, kind, subject, requested_by, not_before)
+         values ('no-such-org', 'campaign', 'x', 'u1', now())
+         returning org_id`,
+      );
+      expect(rows[0]!.org_id).toBe("no-such-org");
+      // The no-FK proof, read from the constraint catalog rather than inferred
+      // from the insert succeeding: a `kind = 'org'` row is retained PAST its
+      // org row's own purge window (D241), so a FK would refuse that org's delete
+      // outright — this row must be able to outlive what it names.
+      const { rows: fks } = await db.query<{ conname: string }>(
+        `select conname from pg_constraint
+          where conrelid = 'deletion'::regclass and contype = 'f'`,
+      );
+      expect(fks).toEqual([]);
+      const { rows: org } = await db.query<{ n: number }>(
+        `select count(*)::int as n from org where id = 'no-such-org'`,
+      );
+      expect(org[0]!.n).toBe(0);
+    } finally {
+      await db.end();
+    }
+  });
+
+  test("the CHECK ties org_id to kind both ways, and a user row may be unscoped", async () => {
+    const db = await emptyDatabase();
+    try {
+      await through0016(db);
+      await migrate(db, await loadMigrations());
+
+      // Both halves: a user erasure scoped to an org, and an org-scoped erasure
+      // with no org. Either one alone would pass under a two-constraint shape
+      // that only pinned `kind = 'user'`.
+      await expect(
+        db.query(
+          `insert into deletion (org_id, kind, subject, requested_by, not_before)
+           values ('local', 'user', 'erased:x', 'u1', now())`,
+        ),
+      ).rejects.toThrow(/check/i);
+      await expect(
+        db.query(
+          `insert into deletion (org_id, kind, subject, requested_by, not_before)
+           values (null, 'campaign', 'x', 'u1', now())`,
+        ),
+      ).rejects.toThrow(/check/i);
+      // And the shape D240 (lane 9l) inserts: no single org to scope it to.
+      const { rows } = await db.query<{ kind: string; org_id: string | null }>(
+        `insert into deletion (kind, subject, requested_by, not_before)
+         values ('user', 'erased:someone', 'u1', now())
+         returning kind, org_id`,
+      );
+      expect(rows[0]).toEqual({ kind: "user", org_id: null });
+    } finally {
+      await db.end();
+    }
+  });
+
+  test("the sweeper's partial index exists on not_before where not purged", async () => {
+    const db = await emptyDatabase();
+    try {
+      await through0016(db);
+      await migrate(db, await loadMigrations());
+
+      const { rows } = await db.query<{ indexdef: string }>(
+        `select indexdef from pg_indexes where indexname = 'deletion_sweep_idx'`,
+      );
+      expect(rows[0]!.indexdef).toMatch(/WHERE \(purged_at IS NULL\)/);
+    } finally {
+      await db.end();
+    }
+  });
+});

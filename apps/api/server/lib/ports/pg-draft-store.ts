@@ -76,6 +76,20 @@ export class PgDraftStore implements DraftStorePort {
    * exactly the race this method exists to close. It exists only for the fs
    * adapter below, which has no row to lock and so must trust a value its
    * own caller read under `withBriefLock`.
+   *
+   * The lock query is FILTERED on `deleted_at is null` (D231) and its result is
+   * CHECKED, which is one change and not two: filtering alone would let this
+   * transaction take a lock on no row, read no versions, and carry straight on
+   * into the `insert` below — a draft written against a deleted campaign, with no
+   * error at all. So a filtered query that matched nothing throws.
+   *
+   * A plain uncaught `Error`, deliberately: the route that reaches here already
+   * gates on `campaignMeta` (itself filtered) before it gets here, so this fires
+   * ONLY in the race gap between that gate's read and this write's commit — a
+   * tombstone committing in between. A new typed error would be a new status
+   * code for that window alone, and every caller already treats an unexpected
+   * throw from this store as a failure; an accepted 500 is a smaller claim than
+   * a new one.
    */
   async writeDraftIfCurrent(
     campaignId: string,
@@ -84,10 +98,13 @@ export class PgDraftStore implements DraftStorePort {
     baseRevision: string | null,
   ): Promise<WriteDraftOutcome> {
     return this.db.transaction(async (tx) => {
-      await tx.query(`select id from campaign where org_id = $1 and id = $2 for update`, [
-        this.orgId,
-        campaignId,
-      ]);
+      const { rows: campaigns } = await tx.query<{ id: string }>(
+        `select id from campaign where org_id = $1 and id = $2 and deleted_at is null for update`,
+        [this.orgId, campaignId],
+      );
+      if (campaigns.length === 0) {
+        throw new Error(`Campaign "${campaignId}" is deleted.`);
+      }
       const { rows: versions } = await tx.query<{ revision: string }>(
         `select revision from brief_version where campaign_id = $1 order by version desc limit 1`,
         [campaignId],

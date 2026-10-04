@@ -214,12 +214,27 @@ export interface BriefStorePort {
 
   /**
    * Whether a campaign is unknown ("absent"), visible to the caller
-   * ("visible"), or exists but is hidden from the caller by team (D166 item
-   * 4) — "hidden" only ever from `PgBriefStore`, since the filesystem store
-   * has no team column (item 5) and never distinguishes hidden from absent.
-   * Used by `lib/ownership.ts` (fail closed on a storage failure — see D166
-   * item 1) and by the brief write routes to answer 404/409 on a hidden or
-   * existing target before any write or asset copy runs.
+   * ("visible"), or exists but is hidden from the caller by team or tombstone
+   * (D166, D233) — "hidden" only ever from `PgBriefStore`, since the
+   * filesystem store has no team column (item 5) and never distinguishes
+   * hidden from absent. Used by `lib/ownership.ts` (fail closed on a storage
+   * failure — see D166 item 1) and by the brief write routes to answer 404/409
+   * on a hidden or existing target before any write or asset copy runs.
+   *
+   * A tombstoned campaign (D231's `campaign.deleted_at`) is "hidden", never
+   * "absent": `campaignKnown` reads "absent" as "never created" and falls
+   * through to its slug-keyed `report`/`asset`/`pool`/`job` fallback, and those
+   * rows are keyed by whichever ref the caller used (D246) — so "absent" would
+   * keep serving a deleted, ever-generated campaign's report.
+   *
+   * A ref that is a CANONICAL UUID naming a row that is tombstoned or hidden by
+   * team answers "hidden" WITHOUT being retried as a slug. It does not change
+   * what any caller receives (each already turns "hidden" into the same single
+   * 404 it turns a by-team "hidden" into), only which rows answer which of the
+   * two, so the port's contract states it: `id` and `slug` share one text space,
+   * so a uuid-shaped ref may be nobody's id and somebody's slug — but a ref that
+   * reached this method as a uuid found no row under it, which is the one case
+   * that IS genuinely absent.
    */
   campaignVisibility(id: string): Promise<"absent" | "visible" | "hidden">;
 

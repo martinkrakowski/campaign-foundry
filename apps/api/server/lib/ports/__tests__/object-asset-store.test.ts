@@ -220,6 +220,27 @@ describe("ObjectAssetStore (PT-4b)", () => {
       expect(await countRows(db)).toBe(0);
     });
 
+    test("a tombstoned slug is refused with the same error an absent one gets (PT-9a1, D231)", async () => {
+      // One filter, six callers: `writeAsset` reaches `resolveCampaignId`, so a
+      // tombstoned campaign writes nothing and reports it in the ONE vocabulary
+      // this store has for "no such campaign here" — a second error would let a
+      // caller treat a deleted campaign differently from a typo'd slug. The
+      // campaign is this describe's own `beforeEach` fixture, so the live write
+      // above proves the store works and only the tombstone changes.
+      await db.query(`update campaign set deleted_at = now() where org_id = $1 and slug = $2`, [
+        ORG,
+        SLUG,
+      ]);
+      const error = await assets.writeAsset(SLUG, "logo.png", PNG).then(
+        () => undefined,
+        (rejected: unknown) => rejected,
+      );
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("does not resolve in this org");
+      expect(await store.list("org/")).toEqual([]);
+      expect(await countRows(db)).toBe(0);
+    });
+
     test("a driver that puts a NUMBER on `code` is not read as a duplicate", async () => {
       // `pgErrorCode` insists on a string, and this is the case that insists: a
       // driver that attached `23505` as a number must not be taken for one that

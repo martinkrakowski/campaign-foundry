@@ -511,3 +511,102 @@ function campaignIdFor(body: Answered): string {
   const start = new URL(body.assets[0]!["outputUrl"]!).pathname.indexOf(marker) + marker.length;
   return new URL(body.assets[0]!["outputUrl"]!).pathname.slice(start, start + 36);
 }
+
+/**
+ * A tombstoned campaign that already generated (PT-9a1, D231, D233 r2).
+ *
+ * This is the one case in the lane whose fixture is deliberately NOT "no
+ * report/asset/pool/job rows". `campaignKnown` reads `campaignVisibility`'s
+ * "absent" as "never created" and falls back to the slug-keyed `report` /
+ * `asset` rows, which is correct for an unsaved draft and wrong for a deleted
+ * one — so the fixture plants BOTH `report` rows a deleted campaign can still be
+ * found under (its slug, and its uuid as text, per D246) and asserts 404.
+ *
+ * The planted body is the "never ran" shape on purpose: a mutant that let the
+ * report through would answer 200 with exactly `{ halted: false, assets: [],
+ * log: null }`, which is the same body the route answers for a campaign that
+ * genuinely has no report — so the status code, not the body, is what carries
+ * this claim, and it is asserted on both.
+ */
+describe("GET /campaigns/result answers 404 for a tombstoned campaign (PT-9a1, D233 r2)", () => {
+  let harness: PgHarness;
+  let store: InMemoryObjectStore;
+  const SAVED = process.env.OBJECT_STORE;
+
+  const ask = async (tenant: typeof LOCAL_TENANT, ref: string): Promise<Response> => {
+    const call = mountTenantRoute(resultGetHandler, {
+      path: "/campaigns/result",
+      tenant,
+    });
+    return call(new Request(`http://x/campaigns/result?campaignId=${ref}`));
+  };
+
+  beforeEach(async () => {
+    harness = await setupPgHarness();
+    store = new InMemoryObjectStore({ publicEndpoint: PUBLIC_ENDPOINT, bucket: BUCKET });
+    setObjectStoreClient(store);
+    process.env.OBJECT_STORE = "s3";
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    resetAssetStore();
+    resetObjectStoreClient();
+    if (SAVED === undefined) delete process.env.OBJECT_STORE;
+    else process.env.OBJECT_STORE = SAVED;
+    await harness.cleanup();
+  });
+
+  /** A saved campaign, tombstoned, with a `report` row under BOTH of its refs. */
+  const tombstoneWithReports = async (): Promise<string> => {
+    const stored = await getBriefStore(LOCAL_TENANT).createBrief(makeBrief(SLUG));
+    const campaignId = stored.campaignId!;
+    // Raw SQL against `report`'s own `(org_id, campaign_id)` primary key
+    // (0003_report.sql), for the two keys a caller may address this campaign by.
+    for (const key of [SLUG, campaignId]) {
+      await harness.db.query(
+        `insert into report (org_id, campaign_id, body, revision) values ($1, $2, $3, $4)`,
+        [LOCAL_TENANT.orgId, key, '{"halted":false,"assets":[],"log":null}', "rev-planted"],
+      );
+    }
+    await harness.db.query(`update campaign set deleted_at = now() where org_id = $1 and id = $2`, [
+      LOCAL_TENANT.orgId,
+      campaignId,
+    ]);
+    return campaignId;
+  };
+
+  test("a tombstoned campaign's existing report answers 404 by slug, not the report", async () => {
+    await tombstoneWithReports();
+    // Serving the row would answer 200 with `{"halted":false,"assets":[],"log":null}`
+    // — indistinguishable from "never ran" by body alone, which is why the status
+    // is the assertion. The read spy says the store was never even opened.
+    const revision = vi.spyOn(reportModule, "reportRevision");
+    const res = await ask(LOCAL_TENANT, SLUG);
+    expect(res.status).toBe(404);
+    expect(revision).not.toHaveBeenCalled();
+  });
+
+  test("a tombstoned campaign's existing report answers 404 by uuid", async () => {
+    const campaignId = await tombstoneWithReports();
+    // The uuid case is the one D233 r2 exists for: `resolveCampaign` is itself
+    // filtered, so it answers `undefined` and the route hands the RAW UUID TEXT
+    // to `campaignKnown` as the slug. A `campaignVisibility` that only ever
+    // queried `slug = $2` would say "absent" here, and the planted uuid-keyed
+    // report row would be found by the fallback and served.
+    const revision = vi.spyOn(reportModule, "reportRevision");
+    const res = await ask(LOCAL_TENANT, campaignId);
+    expect(res.status).toBe(404);
+    expect(revision).not.toHaveBeenCalled();
+  });
+
+  test("a live campaign's own report is still served, so the 404s above are the tombstone's", async () => {
+    // The unchanged-behaviour control on this exact fixture: same planted report
+    // row, same route, no tombstone — and the answer is the report, not a 404.
+    await writeReport(LOCAL_TENANT, resultWith(SLUG, fullRow()));
+    const res = await ask(LOCAL_TENANT, SLUG);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Answered;
+    expect(body.assets[0]!["productId"]).toBe("p1");
+  });
+});
