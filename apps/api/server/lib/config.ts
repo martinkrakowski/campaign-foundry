@@ -62,6 +62,23 @@ export function objectStore(): ObjectStoreMode {
   throw new Error(`OBJECT_STORE must be "fs" or "s3".`);
 }
 
+/**
+ * `PURGE_GRACE_HOURS` (D231, Q1): how long after a DELETE the sweeper may purge
+ * the campaign. Default 0 = the next sweep. A whole number of hours, never
+ * negative: `deletion.not_before = now() + this`.
+ */
+export function purgeGraceHours(): number {
+  loadEnv();
+  const raw = process.env.PURGE_GRACE_HOURS;
+  if (raw === undefined || raw.trim() === "") return 0;
+  const trimmed = raw.trim();
+  const parsed = Number(trimmed);
+  if (!/^\d+$/.test(trimmed) || !Number.isSafeInteger(parsed)) {
+    throw new Error(`Malformed PURGE_GRACE_HOURS: must be a non-negative integer, got "${raw}".`);
+  }
+  return parsed;
+}
+
 /** The S3-compatible store's coordinates, read only when `OBJECT_STORE=s3` (D201). */
 export interface S3Settings {
   /** `S3_ENDPOINT`: the store the API signs its own requests to (e.g. `http://seaweedfs-s3:8333`). */
@@ -377,23 +394,6 @@ function readCertFile(envVar: string, rawPath: string): string {
  * Unset brokers mean Kafka is off and `undefined` is returned.
  * Every cert is read from a file path under `certs/`, never inline.
  */
-/**
- * `PURGE_GRACE_HOURS` (D231, Q1): how long after a DELETE the sweeper may purge
- * the campaign. Default 0 = the next sweep. A whole number of hours, never
- * negative: `deletion.not_before = now() + this`.
- */
-export function purgeGraceHours(): number {
-  loadEnv();
-  const raw = process.env.PURGE_GRACE_HOURS;
-  if (raw === undefined || raw.trim() === "") return 0;
-  const trimmed = raw.trim();
-  const parsed = Number(trimmed);
-  if (!/^\d+$/.test(trimmed) || !Number.isSafeInteger(parsed)) {
-    throw new Error(`Malformed PURGE_GRACE_HOURS: must be a non-negative integer, got "${raw}".`);
-  }
-  return parsed;
-}
-
 export function kafkaSettings(): KafkaSettings | undefined {
   loadEnv();
   const rawBrokers = process.env.KAFKA_BROKERS;
