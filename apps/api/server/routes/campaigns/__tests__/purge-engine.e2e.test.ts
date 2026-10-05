@@ -232,6 +232,35 @@ const CAMPAIGN_TABLES = [
   "job",
 ] as const;
 
+/** The three fs tenant trees the purge frees, keyed by the campaign's slug. */
+function fsTrees(harness: PgHarness, slug: string): string[] {
+  const a = ACME_TENANT.orgId;
+  return [
+    join(harness.projectRoot, "orgs", a, "assets", "inputs", slug),
+    join(harness.outputRoot, "orgs", a, slug),
+    join(harness.outputRoot, "orgs", a, "packages", slug),
+  ];
+}
+
+/** The s3 prefix the purge empties, keyed by the campaign's uuid. */
+function s3Prefix(campaignId: string): string {
+  return campaignPrefix(ACME_TENANT.orgId, campaignId.toLowerCase());
+}
+
+/** Row count for one campaign across the slug/uuid dual-key (D246). */
+async function countRows(
+  harness: PgHarness,
+  table: string,
+  campaignId: string,
+  slug: string,
+): Promise<number> {
+  const { rows } = await harness.db.query<{ n: number }>(
+    `select count(*)::int as n from ${table} where org_id = $1 and campaign_id::text in ($2, $3)`,
+    [ACME_TENANT.orgId, campaignId, slug],
+  );
+  return rows[0]!.n;
+}
+
 /**
  * The DoD, pinned per table and per key (slug and uuid text) — one `select
  * count(*)` per pair so a surviving row names its table and key exactly.
@@ -285,18 +314,12 @@ async function assertGone(
 
   if (memStore) {
     // `s3`: the whole campaign prefix is empty.
-    expect(
-      await memStore.list(campaignPrefix(ACME_TENANT.orgId, campaignId.toLowerCase())),
-    ).toEqual([]);
+    expect(await memStore.list(s3Prefix(campaignId))).toEqual([]);
   } else {
     // `fs`: all three slug-keyed tenant trees are gone.
-    expect(
-      existsSync(join(harness.projectRoot, "orgs", ACME_TENANT.orgId, "assets", "inputs", slug)),
-    ).toBe(false);
-    expect(existsSync(join(harness.outputRoot, "orgs", ACME_TENANT.orgId, slug))).toBe(false);
-    expect(existsSync(join(harness.outputRoot, "orgs", ACME_TENANT.orgId, "packages", slug))).toBe(
-      false,
-    );
+    for (const dir of fsTrees(harness, slug)) {
+      expect(existsSync(dir)).toBe(false);
+    }
   }
 }
 
@@ -328,7 +351,6 @@ interface E2eContext {
  */
 async function withE2e<T>(fn: (ctx: E2eContext) => Promise<T>): Promise<T> {
   const savedMode = process.env.OBJECT_STORE;
-  const savedMotion = process.env.MOTION;
   let memStore: InMemoryObjectStore | undefined;
   let harness: PgHarness | undefined;
   try {
@@ -355,14 +377,37 @@ async function withE2e<T>(fn: (ctx: E2eContext) => Promise<T>): Promise<T> {
     resetAllStores();
     if (savedMode === undefined) delete process.env.OBJECT_STORE;
     else process.env.OBJECT_STORE = savedMode;
-    if (savedMotion === undefined) delete process.env.MOTION;
-    else process.env.MOTION = savedMotion;
     if (harness) {
       await resetJobs();
       await harness.cleanup();
     }
   }
 }
+
+// Hoisted to the whole file (FIX 4): the real-producer chain reads provider
+// keys through `overlayOrgKeys`, so a host whose `.env.local` holds them would
+// otherwise let a unit test's run pick up a key the integration did not set,
+// making the file order-dependent. Saved and restored around every test —
+// including the top-level ones that do not own their own beforeEach.
+const PROVIDER_KEYS = [
+  "OPENROUTER_API_KEY",
+  "GEMINI_API_KEY",
+  "FIREFLY_CLIENT_ID",
+  "FIREFLY_CLIENT_SECRET",
+] as const;
+const savedProviderKeys: Record<string, string | undefined> = {};
+beforeEach(() => {
+  for (const key of PROVIDER_KEYS) {
+    savedProviderKeys[key] = process.env[key];
+    delete process.env[key];
+  }
+});
+afterEach(() => {
+  for (const key of PROVIDER_KEYS) {
+    if (savedProviderKeys[key] === undefined) delete process.env[key];
+    else process.env[key] = savedProviderKeys[key];
+  }
+});
 
 describe.each([{ store: "fs" }, { store: "s3" }])(
   "the purge engine end to end under $store:",
@@ -374,10 +419,6 @@ describe.each([{ store: "fs" }, { store: "s3" }])(
 
     beforeEach(async () => {
       process.env.OBJECT_STORE = store;
-      delete process.env.OPENROUTER_API_KEY;
-      delete process.env.GEMINI_API_KEY;
-      delete process.env.FIREFLY_CLIENT_ID;
-      delete process.env.FIREFLY_CLIENT_SECRET;
       harness = await setupPgHarness();
       resetAllStores();
       if (store === "s3") {
@@ -405,12 +446,41 @@ describe.each([{ store: "fs" }, { store: "s3" }])(
 
     test("upload render package decide draft then delete and sweep", async () => {
       const { campaignId, slug } = await produceCampaign(api);
-      // Sanity: the campaign row exists before the sweep claims it.
+      // Pre-purge: prove the data actually EXISTS so the post-purge zeros are
+      // not vacuous. The campaign row itself.
       const { rows } = await harness.db.query<{ n: number }>(
         `select count(*)::int as n from campaign where org_id = $1 and id = $2`,
         [ACME_TENANT.orgId, campaignId],
       );
       expect(rows[0]!.n).toBe(1);
+
+      // The objects the purge is responsible for freeing.
+      if (memStore) {
+        expect((await memStore.list(s3Prefix(campaignId))).length).toBeGreaterThan(0);
+      } else {
+        for (const dir of fsTrees(harness, slug)) {
+          expect(existsSync(dir)).toBe(true);
+        }
+      }
+
+      // The rows D232 step 3 deletes. `draft`/`decision`/`report`/`job` are rows
+      // under every STORE_BACKEND=postgres run, so they are checked on both
+      // backends; `asset` is rows only under `s3` (FsAssetStore writes files,
+      // not rows, under `fs` — covered by the tree-exists check above) and
+      // `pool`/`last_opened` are deliberately not pre-asserted: no pool is
+      // written without OPENROUTER_API_KEY (pipeline.ts:485).
+      for (const table of ["draft", "decision", "report", "job"] as const) {
+        expect(
+          await countRows(harness, table, campaignId, slug),
+          `${table} pre-purge`,
+        ).toBeGreaterThan(0);
+      }
+      if (memStore) {
+        expect(
+          await countRows(harness, "asset", campaignId, slug),
+          `asset pre-purge`,
+        ).toBeGreaterThan(0);
+      }
 
       await plantDeletion(harness, campaignId);
 
@@ -418,6 +488,7 @@ describe.each([{ store: "fs" }, { store: "s3" }])(
       expect(purged).toBe(1);
       expect(failed).toBe(0);
 
+      await assertConverged(harness, campaignId, slug, memStore);
       await assertGone(harness, campaignId, slug, memStore);
     }, 120_000);
   },
@@ -465,6 +536,20 @@ test("re-creating a deleted campaign's slug never surfaces the old report decisi
 test("a uuid-addressed run is purged identically to its slug-addressed twin", async () => {
   await withE2e(async ({ harness, api, memStore }) => {
     const { campaignId, slug } = await produceCampaign(api, { uuidAddressed: true });
+
+    // Pre-purge: the run keyed its job/report by the uuid — prove they exist under
+    // that key, so "gone" afterwards cannot pass vacuously.
+    const preJob = await harness.db.query<{ n: number }>(
+      `select count(*)::int as n from job where org_id = $1 and campaign_id = $2`,
+      [ACME_TENANT.orgId, campaignId],
+    );
+    expect(preJob.rows[0]!.n).toBeGreaterThan(0);
+    const preReport = await harness.db.query<{ n: number }>(
+      `select count(*)::int as n from report where org_id = $1 and campaign_id = $2`,
+      [ACME_TENANT.orgId, campaignId],
+    );
+    expect(preReport.rows[0]!.n).toBeGreaterThan(0);
+
     await plantDeletion(harness, campaignId);
 
     const { purged, failed } = await sweep(harness.db, () => {});

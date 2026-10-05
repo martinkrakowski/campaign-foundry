@@ -239,10 +239,18 @@ describe("purge CLI (PT-9g3, D231)", () => {
   test("sweep stops after MAX_CLAIMS_PER_SWEEP claims in one run", async () => {
     const db = stubDb();
     // A claim that would never return undefined on its own: the per-invocation
-    // cap is the only thing that can stop the loop. Fresh ids so no dedupe logic
-    // (which does not exist here) could mask the count.
+    // cap is the only thing that can stop the loop. After it hands the cap's
+    // worth of rows it starts returning undefined, so a mutant that REMOVES the
+    // cap (the plan's own "delete the campaign row before the slug-keyed rows"
+    // mutation, transplanted into the loop bound) terminates on its OWN
+    // stub — `claim` is called 2*MAX+1 times and the
+    // `toHaveBeenCalledTimes(MAX)` assertion fails on its own line, never a
+    // hang (a synchronous stub resolved on the microtask queue would starve
+    // vitest's timeout and wedge the worker).
     let n = 0;
-    const claim = vi.fn(async () => deletionRow(`row-${n++}`));
+    const claim = vi.fn(async () =>
+      n < MAX_CLAIMS_PER_SWEEP * 2 ? deletionRow(`row-${n++}`) : undefined,
+    );
     const purge = vi.fn().mockResolvedValue("purged");
 
     const { purged, failed } = await sweep(db, () => {}, claim, purge);
