@@ -456,7 +456,9 @@ describe("purge-campaign objects (PT-9g2)", () => {
     test("purgeCampaign resume frees a late object before markPurged", async () => {
       const slug = `camp-${randomUUID().slice(0, 8)}`;
       const campaignId = await seedCampaign(db, ORG, slug, { tombstoned: true, id: randomUUID() });
-      const deletionRow = await seedDeletion(db, ORG, campaignId);
+      // An upper-case subject: `resolveCampaignForPurge` matches it case-insensitively, so only
+      // the resume branch's own `toLowerCase` keeps the s3 prefix pointing at the real keys.
+      const deletionRow = await seedDeletion(db, ORG, campaignId.toUpperCase());
 
       const prefix = campaignPrefix(ORG, campaignId);
       await store.put(`${prefix}inputs/original`, BYTES);
