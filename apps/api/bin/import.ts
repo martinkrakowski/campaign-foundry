@@ -1,19 +1,28 @@
 import { pathToFileURL } from "node:url";
+import { writeFile } from "node:fs/promises";
 import { errorMessage } from "@campaignfoundry/shared";
+import { database, resetDatabase } from "../server/lib/db/database.js";
+import { databaseSettings, storeBackend } from "../server/lib/config.js";
 import { resolveSource, type SourceFlags } from "../server/lib/import/source.js";
 import { scanBriefs } from "../server/lib/import/scan.js";
+import { assemblePlan } from "../server/lib/import/plan.js";
+import { assembleCensus } from "../server/lib/import/census.js";
+import { digestSourceFiles, planDigest } from "../server/lib/import/digest.js";
 
 /**
  * The PT-8 data-migration CLI (D217, D225).
  *
  *   yarn import plan [--project-root <dir>] [--output-root <dir>] [--org <id>]
- *                    --switched-at <iso> [--include-samples]
+ *                    --switched-at <iso> [--include-samples] [--out <path>]
  *
- * **`plan` is read-only and is the only subcommand that does anything yet.** It resolves
+ * **`plan` is read-only (D225) and is the only subcommand that does anything yet.** It resolves
  * the source, probes the target read-only, and prints what the tree holds: every campaign
- * found with its refs classified, every refusal with the reason it was refused, and the
- * sample count Q2 asks for. It writes NOTHING — no row, no object, no file under
- * `briefs/`, `assets/` or `<output>/`. Its own stdout is the only write in the lane.
+ * found with its refs classified, its legacy report fields, pool and decisions, every
+ * refusal with the reason it was refused, the D227 census, and the D225 digest. It writes
+ * NOTHING to the tree it reads — no row, no object, no file under `briefs/`, `assets/` or
+ * `<output>/`. Its own stdout is the only write in the lane, plus the `--out <path>` file
+ * when the flag is given: that file is the machine-readable plan (`loadEnv()` logs an
+ * `[env] …` line on a real stdout before the header, so piped stdout is not parseable).
  *
  * `apply` and `verify` exist as refusals so the CLI shape is settled before the code
  * behind it is (D225 puts the digest, `--expect` and the quiet target on `apply`), and
@@ -21,7 +30,10 @@ import { scanBriefs } from "../server/lib/import/scan.js";
  */
 export const USAGE =
   "usage: yarn import plan --switched-at <iso> [--project-root <dir>] [--output-root <dir>]" +
-  " [--org <id>] [--include-samples]";
+  " [--org <id>] [--include-samples] [--out <path>]";
+
+/** argv's flags, as {@link resolveSource} takes them — plus `--out`, which `plan` alone reads. */
+type PlanFlags = SourceFlags & { readonly out?: string };
 
 /** A refused subcommand's exact stderr, so a caller can key on it (req 4's habit). */
 const NOT_YET_IMPLEMENTED = "not yet implemented";
@@ -32,12 +44,13 @@ export interface ImportIO {
 }
 
 /** argv's flags, as {@link resolveSource} takes them. An unknown flag refuses the run. */
-function parseFlags(argv: readonly string[]): SourceFlags | string {
+function parseFlags(argv: readonly string[]): PlanFlags | string {
   let flags: {
     projectRoot?: string;
     outputRoot?: string;
     org?: string;
     switchedAt?: string;
+    out?: string;
     includeSamples: boolean;
   } = { includeSamples: false };
   for (let i = 0; i < argv.length; i++) {
@@ -55,6 +68,7 @@ function parseFlags(argv: readonly string[]): SourceFlags | string {
     else if (flag === "--output-root") flags = { ...flags, outputRoot: value };
     else if (flag === "--org") flags = { ...flags, org: value };
     else if (flag === "--switched-at") flags = { ...flags, switchedAt: value };
+    else if (flag === "--out") flags = { ...flags, out: value };
     else return `${flag} is not a flag this command takes.`;
   }
   return flags;
@@ -91,23 +105,83 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
     }
     const { ctx, backend, switchedAtIso } = outcome.source;
     const result = await scanBriefs(ctx);
+    const assembled = await assemblePlan(ctx, result);
+    // The renders a report row names (req 13's lexical resolutions, refused or
+    // not) are what separate an orphan render from a named one (D223); the OK
+    // ones are what the import would WRITE, and the digest fingerprints them.
+    const named = new Set(
+      assembled.reports.flatMap((report) =>
+        report.fields.flatMap((field) => (field.resolved === null ? [] : [field.resolved])),
+      ),
+    );
+    const planned = new Set(
+      assembled.reports.flatMap((report) =>
+        report.fields.flatMap((field) => (field.status === "ok" ? [field.resolved] : [])),
+      ),
+    );
+    const census = await assembleCensus(ctx, result, named);
+    const digest = planDigest({
+      files: await digestSourceFiles(ctx, result, planned),
+      orgId: ctx.orgId,
+      switchedAt: ctx.switchedAt.toISOString(),
+      includeSamples: ctx.includeSamples,
+    });
+    const json = JSON.stringify({
+      switchedAt: switchedAtIso,
+      orgId: ctx.orgId,
+      backend,
+      includeSamples: ctx.includeSamples,
+      campaigns: result.campaigns,
+      refusals: assembled.refusals,
+      samples: result.samples,
+      reports: assembled.reports,
+      pools: assembled.pools,
+      decisions: assembled.decisions,
+      census,
+      digest,
+    });
+    // The `--out` write happens BEFORE anything is printed: a failed write
+    // throws into the catch below — exit 1, nothing printed, no partial file —
+    // while a run-level refusal above returns before any write at all.
+    if (flags.out !== undefined) {
+      await writeFile(flags.out, `${json}\n`, { encoding: "utf8" });
+    }
     io.stdout(`import plan — switched-at: ${switchedAtIso}`);
     io.stdout(`org: ${ctx.orgId}`);
     io.stdout(`backend: ${backend}`);
+    io.stdout(json);
     io.stdout(
-      JSON.stringify({
-        switchedAt: switchedAtIso,
-        orgId: ctx.orgId,
-        backend,
-        campaigns: result.campaigns,
-        refusals: result.refusals,
-        samples: result.samples,
-      }),
+      `${result.campaigns.length} importable, ${assembled.refusals.length} refused, ` +
+        `digest ${digest.slice(0, 12)}`,
     );
     return 0;
   } catch (error) {
     io.stderr(errorMessage(error));
     return 1;
+  } finally {
+    await closeDatabase(io);
+  }
+}
+
+/**
+ * End the pool this run may have opened, in a finally that always runs (req
+ * 20): a fs-only run never opened one, and a failed probe names its own
+ * problem — so a close that cannot is swallowed here rather than masking it.
+ * `resetDatabase()` runs in a finally of its own, so a REJECTING `end()` still
+ * uninstalls the client and a second in-process `main()` builds a fresh pool;
+ * the failure itself is named on stderr, and never changes the plan's code.
+ */
+async function closeDatabase(io: ImportIO): Promise<void> {
+  try {
+    if (storeBackend() === "postgres" && databaseSettings().url !== undefined) {
+      try {
+        await database().end();
+      } finally {
+        resetDatabase();
+      }
+    }
+  } catch (error) {
+    io.stderr(`could not close the database: ${errorMessage(error)}`);
   }
 }
 

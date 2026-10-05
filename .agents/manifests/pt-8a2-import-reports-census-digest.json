@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "PT-8a2-import-reports-census-digest",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/census.ts",
+      "before": "    templates: PG_ONLY,\n",
+      "after": "\n",
+      "because": "The D227 census must name every category it answers, and `templates` is one of the thirteen named keys (pg-only, so its literal answer is the shared `PG_ONLY` line). Deleting that one line costs the census its thirteenth name: `Object.keys(census).sort()` comes back twelve and the test asserting the sorted thirteen names fails. No other test in the file this lane runs can see it — every other census test asserts counts of categories whose answers come from the walk, not from the `PG_ONLY` constant — which is exactly why the `-t` pattern names the thirteen-keys test and not the file.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/census.test.ts",
+        "-t",
+        "req 17: the census names all thirteen categories with their counts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/plan.ts",
+      "before": "    contentTypeFor(path);\n",
+      "after": "\n",
+      "because": "Req 13's extension rule is the standalone `contentTypeFor` call inside its own try: delete it and the try throws nothing, so the field is planned as `ok` instead of refused and the test asserting the field's reason equals `contentTypeFor`'s own refusal (`Refusing to export .txt: no content type is defined for it.`) fails. The surrounding lstat checks are untouched by this one line, so the four other req-13 tests — missing file, escaping path, symlinked target, symlinked directory — still pass, which is why the `-t` pattern names this one test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/plan.test.ts",
+        "-t",
+        "req 13: an unsupported extension on one report field is listed with contentTypeFor's own refusal"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
