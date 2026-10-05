@@ -27,6 +27,8 @@ const fsRace = vi.hoisted(() => ({
   failNextRead: false,
   failPath: "",
   failed: false,
+  writeErrorPath: "",
+  writeErrorCode: "",
 }));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -48,6 +50,14 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       }
       return (actual.readFile as (...args: unknown[]) => Promise<unknown>)(...args);
     }),
+    writeFile: vi.fn(async (...args: unknown[]) => {
+      if (fsRace.writeErrorPath !== "" && args[0] === fsRace.writeErrorPath) {
+        const err = new Error(`${fsRace.writeErrorCode}: planted`) as Error & { code: string };
+        err.code = fsRace.writeErrorCode;
+        throw err;
+      }
+      return (actual.writeFile as (...args: unknown[]) => Promise<unknown>)(...args);
+    }),
   };
 });
 
@@ -65,6 +75,8 @@ describe("FsAssetStore", () => {
     fsRace.failNextRead = false;
     fsRace.failPath = "";
     fsRace.failed = false;
+    fsRace.writeErrorPath = "";
+    fsRace.writeErrorCode = "";
   });
 
   test("getBaseDir returns base directory", () => {
@@ -377,6 +389,30 @@ describe("FsAssetStore", () => {
     mkdirSync(join(dir, "dst-dir", "logo.png"), { recursive: true });
 
     await expect(store.copyAssets("src-dir", "dst-dir")).rejects.toMatchObject({ code: "EISDIR" });
+  }, 5_000);
+
+  test("copyAssets rethrows a write failure that is not EEXIST instead of retrying", async () => {
+    // Only EEXIST means "an upload got here first, decide again"; any other write
+    // failure (here a planted EACCES) is the copy's own error and must surface.
+    await store.writeAsset("src-wfail", "logo.png", pngBytes);
+    fsRace.writeErrorPath = join(dir, "dst-wfail", "logo.png");
+    fsRace.writeErrorCode = "EACCES";
+
+    await expect(store.copyAssets("src-wfail", "dst-wfail")).rejects.toMatchObject({
+      code: "EACCES",
+    });
+  }, 5_000);
+
+  test("copyAssets rejects a disambiguation candidate that is a directory", async () => {
+    // The same ENOENT-only rule inside the candidate walk: the plain name holds other
+    // bytes, and the first `-<source>` candidate is a directory, not a free name.
+    await store.writeAsset("src-cand", "logo.png", pngBytes);
+    await store.writeAsset("dst-cand", "logo.png", jpegBytes);
+    mkdirSync(join(dir, "dst-cand", "logo-src-cand.png"), { recursive: true });
+
+    await expect(store.copyAssets("src-cand", "dst-cand")).rejects.toMatchObject({
+      code: "EISDIR",
+    });
   }, 5_000);
 
   test("copyAssets does not rewrite a sha-deduped reuse", async () => {

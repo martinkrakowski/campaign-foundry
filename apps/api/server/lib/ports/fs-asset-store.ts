@@ -19,8 +19,9 @@ import type {
  * re-decide loop would never end.
  */
 function hasErrorCode(error: unknown, code: string): boolean {
-  if (typeof error !== "object" || error === null || !("code" in error)) return false;
-  return (error as { code: unknown }).code === code;
+  // `Object(…)` boxes a primitive and maps null/undefined to `{}`, so any thrown
+  // value is safe to read `.code` from without a branch per shape.
+  return (Object(error) as { code?: unknown }).code === code;
 }
 
 /**
