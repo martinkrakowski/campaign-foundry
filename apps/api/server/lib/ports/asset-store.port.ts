@@ -164,9 +164,43 @@ export interface AssetStorePort {
    * a `copyAssets` this same request made into a slug whose `createCampaign`
    * reservation is about to be released, because a later step — the
    * `assertRefsCopied` post-copy check, or the first-version `createBrief` —
-   * failed). A no-op when the brief has no assets.
+   * failed). A no-op when the brief has no assets. PT-9e/D237: the create
+   * rollback's replacement is `freeUnreferencedAssets` (wired by PT-9j); this
+   * whole-campaign delete stays for the purge (by uuid/prefix) and for the fs
+   * release.
    */
   deleteAssets(briefId: string): Promise<void>;
+
+  /**
+   * Free `ids` where no COMMITTED brief_version of this campaign names them
+   * (D237). **This method TRUSTS `ids` and cannot tell a reused, sha-deduped
+   * id from a freshly created one on its own** — the caller's `copyAssets`
+   * result already marks that distinction (`AssetCopyResult.created`), so the
+   * whole of the "never free a reused id" rule is "pass only `created`, never
+   * the whole map"; this method does not re-derive or re-check it. `campaign`
+   * is a slug, resolved the same tombstone-filtered way `deleteAssets(slug)`
+   * is (never the bare-uuid shortcut `deleteAssets` also offers): this is a
+   * request's own rollback, reached only while its campaign row still exists,
+   * not a purge.
+   *
+   * Lock order: the campaign row `for update`, then `asset` rows (the delete's
+   * own row locks) — the same direction as `PgBriefStore.createBrief`/
+   * `rewriteBrief` (campaign `for update` at `pg-brief-store.ts:461`/`:678`,
+   * then `asset … for share` at `:398`) and as every `pg-job-store.ts` path
+   * (campaign before `job`); this method never takes the org advisory lock or
+   * a `job` row, so it adds no cycle.
+   *
+   * On `FsAssetStore` this does no reference check and takes no lock of its
+   * own: call it only from within a `withBriefLock` section already held by
+   * the caller (every production caller does), which rules out a second WRITE
+   * request touching this brief. The one writer the lock does NOT reach is an
+   * upload (`assets.post.ts`, no brief lock) — safe for a different reason:
+   * `copyAssets` writes every path it hands back with `{ flag: "wx" }`, an
+   * exclusive create, so a same-named upload racing it gets `EEXIST` rather
+   * than silently taking the path over. A path this method is handed was
+   * minted by THIS call and nothing has written over it since.
+   */
+  freeUnreferencedAssets(campaign: string, ids: readonly string[]): Promise<void>;
 
   /**
    * Compute the canonical relative path for an asset (`assets/inputs/<briefId>/<name>`).
