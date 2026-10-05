@@ -136,15 +136,15 @@ jobs:
           # accepted in some GHA examples; __ is the documented form and a legal POSIX name.
           OPENROUTER__KEY: ${{ secrets.OPENROUTER_KEY }}
           config.restricted_mode: "true"
-          # Swapped 2026-10-04 (owner): mercury-2's findings on this repo were almost all
-          # premise-false or nits, while the paid Qodo app (which caught the real defects)
-          # outgrew its plan. Qwen3.8 27B is free on OpenRouter and is not the lane
-          # implementer, so it reviews code it did not write. Haiku stays as the paid
-          # fallback, so a rate-limited or unavailable free endpoint still yields a review.
-          config.model: "openrouter/qwen/qwen3.8-27b:free"
+          # Swapped 2026-10-04 (owner), mercury-2 → Qwen3.8 27B (free) → GPT-6 Luna:
+          # mercury-2's findings were almost all premise-false or nits, and the paid Qodo app
+          # outgrew its plan. Qwen is now on trial as an implementer, and a reviewer should not
+          # be the seat that wrote the code. Luna is $0.10/$0.50 per M tokens on OpenRouter, so
+          # one review costs well under a cent. Haiku stays as the paid fallback.
+          config.model: "openrouter/openai/gpt-6-luna"
           config.fallback_models: '["openrouter/anthropic/claude-haiku-4.5"]'
-          # Qwen3.8 27B's window per OpenRouter is 262144. 128000 is declared (Haiku's
-          # capacity bounds the fallback), and max_model_tokens below caps actual spend.
+          # Luna's window per OpenRouter is 1050000. 128000 is declared (Haiku's capacity
+          # bounds the fallback), and max_model_tokens below caps actual spend.
           config.custom_model_max_tokens: "128000"
           # custom_model_max_tokens declares the model's capacity; max_model_tokens caps
           # what PR-Agent actually spends and defaults to 32000 regardless — which is what
