@@ -1,6 +1,13 @@
+import { rm } from "node:fs/promises";
 import type { SqlClient, SqlQuery } from "../db/sql-client.js";
+import { resolveConfined } from "../confined-path.js";
+import { objectStore } from "../config.js";
+import { objectStoreClient } from "../object-store/index.js";
+import { UUID_PATTERN, campaignPrefix } from "../object-store/object-keys.js";
+import { scopeRoots } from "../run-environment.js";
 import { QUEUED_TTL_MS } from "../ports/job-store.port.js";
-import { UUID_PATTERN } from "../object-store/object-keys.js";
+import type { TenantContext } from "../tenant.js";
+import { recordFailure, type DeletionRow } from "./deletion-store.js";
 
 function asInterval(ms: number): string {
   return `${ms} milliseconds`;
@@ -126,4 +133,93 @@ export async function deleteCampaignRows(
 /** D232 step 5. */
 export async function markPurged(db: SqlClient, deletionId: string): Promise<void> {
   await db.query(`update deletion set purged_at = now() where id = $1`, [deletionId]);
+}
+
+/**
+ * D232 step 4, and the resume branch's only cleanup (GAP): the uuid-keyed half
+ * ALONE. `s3`: `campaignPrefix` already names the whole campaign tree in one
+ * key — inputs, renders AND packages — so this is the exact same idempotent
+ * call step 2 makes, run again to pick up anything that landed late. `fs` has
+ * no uuid-keyed tree at all — platform packages are keyed by SLUG, not
+ * uuid (`package.post.ts:122-123`, `:218`; `packages/[campaignId].get.ts:32`), and
+ * every other fs tree is slug-keyed too, so there is nothing left for step 4
+ * to free under `fs` (`resolveCampaignForPurge`'s own doc comment, this file:
+ * "fs trees are freed in step 2 only"). The split from `deleteCampaignObjects`
+ * exists so the step-4/resume path has NO slug argument to misuse — under
+ * `fs` that makes this function deliberately a no-op, not an optimisation.
+ */
+export async function deleteCampaignObjectsByUuid(
+  orgId: string,
+  campaignId: string,
+): Promise<void> {
+  if (objectStore() === "s3") {
+    await objectStoreClient().deletePrefix(campaignPrefix(orgId, campaignId.toLowerCase()));
+  }
+  // `fs`: nothing. Every fs tree is slug-keyed and the slug is released when
+  // step 3 commits (D232), so there is no tree this function may touch after it.
+}
+
+/**
+ * D232 step 2: everything, while the slug is still this campaign's own. `s3`:
+ * nothing beyond `deleteCampaignObjectsByUuid` — `campaignPrefix` already spans
+ * every namespace, so there is no separate slug-keyed call to make. `fs`: all
+ * three slug-named trees — `assets/inputs/<slug>/`, `<outputRoot>/<slug>/` AND
+ * `<outputRoot>/packages/<slug>/` (platform packages are keyed by slug, not
+ * uuid: `package.post.ts:122-123`, `:218`; `packages/[campaignId].get.ts:32`)
+ * — freed directly here, never through `deleteCampaignObjectsByUuid`, which is
+ * a no-op under `fs`. This is the only point in the whole sequence where any
+ * fs tree is freed.
+ */
+export async function deleteCampaignObjects(
+  orgId: string,
+  campaignId: string,
+  slug: string,
+): Promise<void> {
+  if (objectStore() === "s3") {
+    await deleteCampaignObjectsByUuid(orgId, campaignId);
+    return;
+  }
+  const tenant: TenantContext = { orgId, userId: "system", roles: [], teamIds: [] };
+  const { projectRoot, outputRoot } = scopeRoots(tenant);
+  await rm(resolveConfined(projectRoot, "assets", "inputs", slug), {
+    recursive: true,
+    force: true,
+  });
+  await rm(resolveConfined(outputRoot, slug), { recursive: true, force: true });
+  await rm(resolveConfined(outputRoot, "packages", slug), { recursive: true, force: true });
+}
+
+/**
+ * D232 steps 1–5, composing the lease (PT-9g1) with this lane's object frees.
+ * A crash at any point leaves the `deletion` row re-claimable once its lease
+ * lapses (D231); `resolveCampaignForPurge`'s own doc comment explains the
+ * resume branch that re-enters at step 4.
+ */
+export async function purgeCampaign(
+  db: SqlClient,
+  orgId: string,
+  deletionRow: Pick<DeletionRow, "id" | "subject">,
+): Promise<"purged" | "retry"> {
+  const campaign = await resolveCampaignForPurge(db, orgId, deletionRow.subject);
+  if (campaign === undefined) {
+    // Resumed after a crash between step 3's commit and step 5
+    // (`resolveCampaignForPurge`'s own doc comment, this file): steps 1-3 are
+    // already done, but step 4 is NOT skipped — only the uuid-keyed half can
+    // still be run (`deletionRow.subject` is the uuid already, never a slug).
+    // Under `s3` this frees anything that landed late in the campaign prefix;
+    // under `fs` every tree is slug-keyed and was already freed in step 2, so
+    // this call is a deliberate no-op.
+    await deleteCampaignObjectsByUuid(orgId, deletionRow.subject);
+    await markPurged(db, deletionRow.id);
+    return "purged";
+  }
+  if (await hasActiveJob(db, orgId, campaign.slug, campaign.id)) {
+    await recordFailure(db, deletionRow.id, "an active job exists for this campaign");
+    return "retry";
+  }
+  await deleteCampaignObjects(orgId, campaign.id, campaign.slug); // step 2
+  await deleteCampaignRows(db, orgId, campaign.id); // step 3
+  await deleteCampaignObjectsByUuid(orgId, campaign.id); // step 4
+  await markPurged(db, deletionRow.id); // step 5
+  return "purged";
 }

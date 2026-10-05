@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-9g2-purge-objects",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign.ts",
+      "before": "    await deleteCampaignObjectsByUuid(orgId, deletionRow.subject);\n    await markPurged(db, deletionRow.id);\n",
+      "after": "    await markPurged(db, deletionRow.id);\n",
+      "because": "resolveCampaignForPurge's own doc comment says step 4 is NOT skipped on resume; dropping the uuid-keyed deleteCampaignObjectsByUuid call here leaves a late s3 object in the campaign prefix forever once the row is marked purged — the test lists the prefix after purgeCampaign and finds the late key (an assertion failure, not a throw).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign.objects.test.ts",
+        "-t",
+        "purgeCampaign resume frees a late object before markPurged"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
