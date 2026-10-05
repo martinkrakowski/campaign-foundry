@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as scanModule from "../../server/lib/import/scan.js";
+import { resetDatabase, setDatabase } from "../../server/lib/db/database.js";
+import type { SqlClient } from "../../server/lib/db/sql-client.js";
 import { USAGE, main } from "../import.js";
 import {
   dropRoot,
   makeRoot,
   writeAt,
   writeBrief,
+  writeHtmlLayerBrief,
   PNG,
 } from "../../server/lib/import/__tests__/fixtures/tree.js";
 
@@ -291,5 +294,260 @@ describe("import CLI (PT-8a)", () => {
       log.mockRestore();
       error.mockRestore();
     }
+  });
+});
+
+/**
+ * PT-8a2: the `--out` plan file, the TWO exit classes, and the pool `plan` opened.
+ *
+ * **There are two exit classes, not one** (req 18): a run-level refusal — a root this
+ * run cannot read, a missing or un-parseable `--switched-at`, an unknown org — exits
+ * NON-ZERO and writes NO JSON at all, while every per-campaign refusal exits 0 and
+ * appears in the plan's refusal list. `--out` is the only machine-readable surface, so
+ * the tests read the written FILE, never piped stdout.
+ */
+
+/** source.test.ts's spy: answers nothing, records everything, ends when asked. */
+function spyClient(orgRows: readonly unknown[] = []): SqlClient {
+  return {
+    query: vi.fn(async () => ({ rows: orgRows })) as unknown as SqlClient["query"],
+    exec: vi.fn(async () => undefined),
+    transaction: vi.fn(async () => {
+      throw new Error("the importer must never open a transaction");
+    }),
+    end: vi.fn(async () => undefined),
+  };
+}
+
+describe("the plan file, the exit classes and the pool (PT-8a2 reqs 18 and 20)", () => {
+  let root: string | undefined;
+  let output: string | undefined;
+  const savedEnv = new Map(
+    ["STORE_BACKEND", "DATABASE_URL"].map((key) => [key, process.env[key]] as const),
+  );
+
+  beforeEach(() => {
+    useFileStores();
+    root = makeRoot();
+    output = join(root, "output");
+    mkdirSync(output, { recursive: true });
+    mkdirSync(join(root, "briefs"), { recursive: true });
+    writeAt(root, "assets/inputs/logo.png", PNG);
+    writeBrief(root, "camp-one.yaml", {
+      id: "camp-one",
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/logo.png" },
+      ],
+    });
+  });
+
+  afterEach(() => {
+    resetDatabase();
+    dropRoot(root);
+    root = undefined;
+    output = undefined;
+    for (const [key, value] of savedEnv) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  /** `plan` against this suite's temp tree, with any flags added or replaced. */
+  function planArgv(...extra: readonly string[]): string[] {
+    return [
+      "plan",
+      "--project-root",
+      root!,
+      "--output-root",
+      output!,
+      "--switched-at",
+      SWITCHED_AT,
+      ...extra,
+    ];
+  }
+
+  test("req 18: --out writes the plan file, and the summary line follows the JSON line", async () => {
+    // A report with one VALID field and one ESCAPING one: the named render is
+    // separated from the orphan one (D223), and the escape names nothing.
+    writeAt(output!, "camp-one/logo.png", PNG);
+    writeAt(
+      output!,
+      "reports/camp-one.json",
+      JSON.stringify({ outputPath: "camp-one/logo.png", proofPath: "../../etc/passwd" }),
+    );
+    const outPath = join(root!, "plan.json");
+    const { out, err, deps } = io();
+
+    expect(await main(planArgv("--out", outPath), deps)).toBe(0);
+    expect(err).toEqual([]);
+    expect(out).toHaveLength(5);
+    expect(out[0]).toBe(`import plan — switched-at: ${SWITCHED_AT}`);
+    expect(out[1]).toBe("org: local");
+    expect(out[2]).toBe("backend: fs-only");
+
+    const content = readFileSync(outPath, "utf8");
+    expect(content).toBe(`${out[3]}\n`);
+    const plan = JSON.parse(content) as {
+      includeSamples: boolean;
+      reports: unknown[];
+      pools: unknown[];
+      decisions: unknown[];
+      census: Record<string, unknown>;
+      digest: string;
+    };
+    expect(plan.includeSamples).toBe(false);
+    expect(plan.reports).toEqual([
+      {
+        slug: "camp-one",
+        present: true,
+        fields: [
+          {
+            field: "outputPath",
+            path: "camp-one/logo.png",
+            status: "ok",
+            resolved: join(output!, "camp-one/logo.png"),
+          },
+          {
+            field: "proofPath",
+            path: "../../etc/passwd",
+            status: "refused",
+            resolved: null,
+            reason: "Path escapes the allowed directory.",
+          },
+        ],
+        problems: [],
+      },
+    ]);
+    // The escape is on the run's refusal list, with the slug set (D223).
+    expect(
+      (JSON.parse(out[3]!) as { refusals: { reason: string }[] }).refusals.map((one) => one.reason),
+    ).toEqual(["proofPath: Path escapes the allowed directory."]);
+    expect(plan.pools).toEqual([{ slug: "camp-one", present: false, problems: [] }]);
+    expect(plan.decisions).toEqual([{ slug: "camp-one", present: false, problems: [] }]);
+    expect(Object.keys(plan.census).sort()).toEqual(
+      [
+        "backgroundCache",
+        "drafts",
+        "jobs",
+        "lastOpened",
+        "legacyReportPointer",
+        "nonBriefFiles",
+        "orphanRenders",
+        "packages",
+        "providerKeys",
+        "refusedBriefs",
+        "samples",
+        "templates",
+        "usage",
+      ].sort(),
+    );
+    expect(plan.digest).toMatch(/^[0-9a-f]{64}$/);
+    // The named render is not an orphan (D223); the summary is the LAST line:
+    // `<n> importable, <m> refused, digest <first 12 hex>`.
+    expect(plan.census.orphanRenders).toEqual({ count: 0 });
+    expect(out[4]).toMatch(/^1 importable, 1 refused, digest [0-9a-f]{12}$/);
+  });
+
+  test("req 18: an all-refused tree still exits 0, and the JSON lists every refusal", async () => {
+    // Both briefs are refused — the retired layer, and a ref to a missing file —
+    // and no run-level refusal is in play, so the run still plans (exit 0).
+    writeHtmlLayerBrief(root!, "camp-one.yaml", "camp-one");
+    writeBrief(root!, "camp-broken.yaml", {
+      id: "camp-broken",
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/gone.png" },
+      ],
+    });
+    const { out, deps } = io();
+
+    expect(await main(planArgv(), deps)).toBe(0);
+    const plan = JSON.parse(out[3]!) as {
+      campaigns: { slug: string }[];
+      refusals: { slug: string | null; reason: string }[];
+    };
+    // D223: a refusal is a fact about the tree, never the end of the run.
+    expect(plan.campaigns).toEqual([]);
+    // A parse refusal never learned the id (slug null); the ref refusal did.
+    expect(plan.refusals.map((one) => one.slug).sort()).toEqual(["camp-broken", null]);
+    expect(out[4]).toMatch(/^0 importable, 2 refused, digest [0-9a-f]{12}$/);
+  });
+
+  test("req 18: an unreadable --project-root exits 1 and NO --out file appears", async () => {
+    const outPath = join(root!, "plan.json");
+    const { out, err, deps } = io();
+    const missing = join(root!, "no-such-dir");
+
+    expect(
+      await main(
+        planArgv("--out", outPath).map((arg) => (arg === root! ? missing : arg)),
+        deps,
+      ),
+    ).toBe(1);
+    expect(err[0]).toContain(`--project-root ${JSON.stringify(missing)}`);
+    expect(out).toEqual([]);
+    expect(existsSync(outPath)).toBe(false);
+  });
+
+  test("req 18: a missing --switched-at exits 1 with no --out file", async () => {
+    const outPath = join(root!, "plan.json");
+    const { out, err, deps } = io();
+
+    expect(
+      await main(
+        ["plan", "--project-root", root!, "--output-root", output!, "--out", outPath],
+        deps,
+      ),
+    ).toBe(1);
+    expect(err).toEqual(["--switched-at <iso> is required"]);
+    expect(out).toEqual([]);
+    expect(existsSync(outPath)).toBe(false);
+  });
+
+  test("req 18: an --out under a missing directory exits 1, names the ENOENT, prints nothing", async () => {
+    const outPath = join(root!, "no-such-dir", "plan.json");
+    const { out, err, deps } = io();
+
+    expect(await main(planArgv("--out", outPath), deps)).toBe(1);
+    expect(err[0]).toContain("ENOENT");
+    // Nothing half-printed: a failed write is a failed run.
+    expect(out).toEqual([]);
+  });
+
+  test("req 20: a postgres run ends the pool once, even when the org row is missing", async () => {
+    process.env["STORE_BACKEND"] = "postgres";
+    process.env["DATABASE_URL"] =
+      process.env["TEST_PG_URL"] ?? "postgres://cf_test@127.0.0.1:5433/postgres";
+    const spy = spyClient();
+    setDatabase(spy);
+
+    // The probe refuses a missing org row (a RUN-level refusal, exit 1) — and the
+    // pool the probe OPENED is still ended exactly once.
+    expect(await main(planArgv(), io().deps)).toBe(1);
+    expect(spy.query).toHaveBeenCalledTimes(1);
+    expect(spy.end).toHaveBeenCalledTimes(1);
+  });
+
+  test("req 20: a fs-only run never opens, so never ends, a pool", async () => {
+    const spy = spyClient();
+    setDatabase(spy);
+
+    expect(await main(planArgv(), io().deps)).toBe(0);
+    expect(spy.end).not.toHaveBeenCalled();
+  });
+
+  test("req 20: a rejecting pool end still returns the plan's own code", async () => {
+    process.env["STORE_BACKEND"] = "postgres";
+    process.env["DATABASE_URL"] =
+      process.env["TEST_PG_URL"] ?? "postgres://cf_test@127.0.0.1:5433/postgres";
+    const spy = spyClient([{ id: "local" }]);
+    spy.end = vi.fn(async () => {
+      throw new Error("the pool is stuck");
+    });
+    setDatabase(spy);
+
+    // The plan succeeded (exit 0) and stays 0: a failed close is swallowed, the
+    // way a refusal that already named its problem is not re-reported.
+    expect(await main(planArgv(), io().deps)).toBe(0);
+    expect(spy.end).toHaveBeenCalledTimes(1);
   });
 });
