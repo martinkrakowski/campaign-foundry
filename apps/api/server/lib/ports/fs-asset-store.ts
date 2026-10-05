@@ -11,13 +11,16 @@ import type {
 } from "./asset-store.port.js";
 
 /**
- * Whether an error is an fs `EEXIST` — the one a `{ flag: "wx" }` write can
- * still throw when an upload raced in between our read and our write.
+ * Whether an error is the fs error `code` names. `copyAssets` needs two: `EEXIST`,
+ * the one a `{ flag: "wx" }` write throws when an upload raced in between our read
+ * and our write; and `ENOENT`, the only read failure that means "nothing is here".
+ * Any other read failure (`EISDIR`, `EACCES`) must propagate: read as "absent",
+ * an `EISDIR` destination makes every `wx` write answer `EEXIST` and the
+ * re-decide loop would never end.
  */
-function isEexist(error: unknown): boolean {
+function hasErrorCode(error: unknown, code: string): boolean {
   if (typeof error !== "object" || error === null || !("code" in error)) return false;
-  const { code } = error as { code: unknown };
-  return code === "EEXIST";
+  return (error as { code: unknown }).code === code;
 }
 
 /**
@@ -203,7 +206,8 @@ export class FsAssetStore implements AssetStorePort {
                   reused = true;
                   break;
                 }
-              } catch {
+              } catch (error) {
+                if (!hasErrorCode(error, "ENOENT")) throw error;
                 destRelPath = candidateRel;
                 break;
               }
@@ -215,8 +219,9 @@ export class FsAssetStore implements AssetStorePort {
             // The plain candidate already carries these exact bytes: a sha-deduped reuse.
             reused = true;
           }
-        } catch {
+        } catch (error) {
           // Destination file does not exist yet; use destRelPath as-is
+          if (!hasErrorCode(error, "ENOENT")) throw error;
         }
 
         if (reused) break;
@@ -229,7 +234,7 @@ export class FsAssetStore implements AssetStorePort {
           await writeFile(destPath, srcBytes, { flag: "wx" });
           break;
         } catch (error) {
-          if (isEexist(error)) continue;
+          if (hasErrorCode(error, "EEXIST")) continue;
           throw error;
         }
       }

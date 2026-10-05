@@ -370,6 +370,15 @@ describe("FsAssetStore", () => {
     expect(paths["logo.png"]).toBe("logo-src-race.png");
   });
 
+  test("copyAssets rejects a destination that is a directory instead of retrying forever", async () => {
+    // Only ENOENT means "nothing is here". Read as absent, a directory at the
+    // destination makes every `wx` write answer EEXIST and the re-decide loop spins.
+    await store.writeAsset("src-dir", "logo.png", pngBytes);
+    mkdirSync(join(dir, "dst-dir", "logo.png"), { recursive: true });
+
+    await expect(store.copyAssets("src-dir", "dst-dir")).rejects.toMatchObject({ code: "EISDIR" });
+  }, 5_000);
+
   test("copyAssets does not rewrite a sha-deduped reuse", async () => {
     await store.writeAsset("src-reuse", "logo.png", pngBytes);
     await store.writeAsset("target-reuse", "logo.png", pngBytes);
