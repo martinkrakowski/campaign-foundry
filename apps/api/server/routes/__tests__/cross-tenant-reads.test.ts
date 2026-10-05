@@ -2,7 +2,7 @@ import { describe, test, expect } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createJob } from "../../lib/jobs.js";
-import { getAssetStore } from "../../lib/ports/index.js";
+import { getAssetStore, getBriefStore } from "../../lib/ports/index.js";
 import { writePool } from "../../lib/pools.js";
 import assetsGetHandler from "../campaigns/assets.get.js";
 import jobGetHandler from "../campaigns/jobs/[id].get.js";
@@ -79,6 +79,9 @@ describe("cross-tenant id-taking reads (PT-2a item 3)", () => {
   test("GET /campaigns/jobs/:id answers 404 for another org's job id on postgres", async () => {
     const harness = await setupPgHarness();
     try {
+      // PT-9c: a postgres job claim refuses an absent campaign, so mint it first,
+      // exactly as a real run does before claiming.
+      await getBriefStore(LOCAL_TENANT).createCampaign("camp");
       const jobId = await createJob(LOCAL_TENANT, "camp");
 
       const callAcme = mountTenantRoute(jobGetHandler, {
