@@ -382,7 +382,7 @@ export class PgJobStore implements RunRegistryPort {
         // row nobody will start; the claim it held is released by that settle.
         await tx.query(
           `update job set status = 'failed', error = $2, settled_at = now()
-           where id = $1`,
+           where id = $1 and status = 'queued'`,
           [id, CAMPAIGN_DELETED_MESSAGE],
         );
         return false;
