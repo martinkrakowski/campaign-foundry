@@ -209,6 +209,9 @@ export default defineEventHandler(async (event) => {
       setResponseHeader(event, "retry-after", 30);
       return { error: error.message, campaignId: brief.id };
     }
+    // PT-9c (D235): the claim itself found the campaign absent or tombstoned —
+    // a race between the `campaignMeta` check above and a concurrent delete.
+    // The route's own not-found body, not the 409's (that one is an ACTIVE job).
     if (error instanceof CampaignGoneError) {
       setResponseStatus(event, 404);
       return { error: `Campaign "${brief.id}" not found.` };

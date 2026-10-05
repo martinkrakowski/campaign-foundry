@@ -815,17 +815,18 @@ describe("PgJobStore (PT-6a, D171)", () => {
   });
 
   test("acquireJob and enqueueJob admit a live campaign by slug and by uuid text", async () => {
+    // All four combinations (ported from a sibling implementation): each acquire is
+    // completed before the next, so the incumbent-adopt path never answers instead.
+    const campaignId = await seedCampaign(db, "local", "live");
     const store = new PgJobStore(db, "local");
-    const u = "aaaaaaaa-aaaa-4aaa-8aaa-111111111111";
-    await seedCampaign(db, "local", "uuid-live", { id: u });
-    await expect(store.acquireJob("camp")).resolves.toEqual({
-      acquired: true,
-      jobId: expect.any(String),
-    });
-    await expect(store.enqueueJob(u)).resolves.toEqual({
-      acquired: true,
-      jobId: expect.any(String),
-    });
+    const bySlug = await store.acquireJob("live");
+    expect(bySlug.acquired).toBe(true);
+    if (bySlug.acquired) await store.completeJob(bySlug.jobId, payload());
+    const byUuid = await store.acquireJob(campaignId);
+    expect(byUuid.acquired).toBe(true);
+    if (byUuid.acquired) await store.completeJob(byUuid.jobId, payload());
+    await expect(store.enqueueJob("live")).resolves.toMatchObject({ acquired: true });
+    await expect(store.enqueueJob(campaignId)).resolves.toMatchObject({ acquired: true });
   });
 
   test("acquireJob and enqueueJob refuse an absent campaign", async () => {

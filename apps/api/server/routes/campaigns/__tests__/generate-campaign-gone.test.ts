@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { createApp, createRouter, toWebHandler } from "h3";
 import { resetProjectRoot } from "@campaignfoundry/shared";
 import { setCapabilities } from "../../../lib/capabilities.js";
-import { getBriefStore } from "../../../lib/ports/index.js";
+import { resetJobs } from "../../../lib/jobs.js";
+import { getBriefStore, resetProviderKeyStore, resetUsageStore } from "../../../lib/ports/index.js";
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
 import generateHandler from "../generate.post.js";
 
@@ -75,8 +76,12 @@ describe("POST /campaigns/generate — a claim refused as CampaignGoneError answ
     resetProjectRoot();
     await getBriefStore(LOCAL_TENANT).createCampaign("camp");
     setCapabilities({ motion: true });
+    enqueueMock.mockClear();
   });
   afterEach(async () => {
+    await resetJobs();
+    resetUsageStore();
+    resetProviderKeyStore();
     rmSync(dir, { recursive: true, force: true });
     if (origOut === undefined) delete process.env.OUTPUT_DIR;
     else process.env.OUTPUT_DIR = origOut;
