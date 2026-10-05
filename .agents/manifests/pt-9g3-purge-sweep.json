@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "lane": "PT-9g3-purge-sweep",
+  "mutations": [
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "      const outcome = await purge(db, row.orgId, row);\n      if (outcome === \"purged\") purged++;",
+      "after": "      const outcome = await purge(db, row.orgId, row);\n      purged++;\n      void outcome;",
+      "because": "without the guard, a row that purge() answered \"retry\" for (an active job — nothing was actually freed) is counted as purged anyway. The witness test's fixture returns a mix of \"purged\" and \"retry\" across several rows and asserts the exact purged count; under this mutant every row counts, so expect(purged).toBe(<the real count>) fails on that assertion line.",
+      "command": [
+        "yarn", "vitest", "run", "--project", "api",
+        "apps/api/bin/__tests__/purge.test.ts",
+        "-t", "sweep purges and counts across a mix of outcomes"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
