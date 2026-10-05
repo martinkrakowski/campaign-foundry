@@ -1,13 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
-import {
-  mkdtempSync,
-  mkdirSync,
-  writeFileSync,
-  readFileSync,
-  existsSync,
-  rmSync,
-  statSync,
-} from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FsAssetStore } from "../fs-asset-store.js";
@@ -420,13 +413,14 @@ describe("FsAssetStore", () => {
     await store.writeAsset("target-reuse", "logo.png", pngBytes);
 
     const reusedPath = join(dir, "target-reuse", "logo.png");
-    const beforeMtime = statSync(reusedPath).mtimeMs;
+    vi.mocked(writeFile).mockClear();
 
     const { paths, created } = await store.copyAssets("src-reuse", "target-reuse");
 
-    // No write happened to the reused path — the copy's read found matching
-    // bytes and skipped the write entirely.
-    expect(statSync(reusedPath).mtimeMs).toBe(beforeMtime);
+    // No write happened to the reused path: the copy's read found matching bytes
+    // and skipped the write. Asserted on the call itself, not `mtimeMs`, which a
+    // same-tick rewrite on a coarse-timestamp filesystem would leave unchanged.
+    expect(vi.mocked(writeFile).mock.calls.some((call) => call[0] === reusedPath)).toBe(false);
     // The reused path is NOT in created.
     expect(created.has("logo.png")).toBe(false);
     // paths still maps correctly (the name maps to itself).
