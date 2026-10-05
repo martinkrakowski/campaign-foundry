@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-9c-claim-guard",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/pg-job-store.ts",
+      "before": "`select 1 from campaign where org_id = $1 and slug = $2 and deleted_at is null for share`",
+      "after": "`select 1 from campaign where org_id = $1 and slug = $2 for share`",
+      "because": "the slug-branch deleted_at filter is what refuses a tombstoned campaign addressed by slug (the common case: every route reaches a campaign by slug until PT-5). Dropping it lets enqueueJob insert a job for a deleted campaign, so `enqueueJob refuses a tombstoned campaign by slug` (which asserts rejects.toBeInstanceOf(CampaignGoneError)) stops rejecting and the claim is admitted instead — the test goes red. The uuid branch carries its own deleted_at clause a few lines above (matched by `id = $2::uuid`, not `slug = $2`), so this anchor is unique and lands on the slug branch alone.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-job-store.test.ts",
+        "-t",
+        "enqueueJob refuses a tombstoned campaign by slug"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

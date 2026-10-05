@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { SqlClient, SqlQuery } from "../db/sql-client.js";
+import { UUID_PATTERN } from "../object-store/object-keys.js";
 import { JOB_TTL_MS, JobCapacityError, MAX_JOBS } from "./fs-job-store.js";
 import {
+  CampaignGoneError,
   JobLeaseLostError,
   QUEUED_TTL_MS,
   type Job,
@@ -37,6 +39,15 @@ function asInterval(ms: number): string {
  */
 const LEASE_EXPIRED_MESSAGE = "Lease expired: the worker holding it stopped heartbeating.";
 const QUEUED_EXPIRED_MESSAGE = "Queued run expired before a worker started it.";
+
+/**
+ * The message a queued job is settled with when `startQueuedJob` refuses it for
+ * a gone campaign (PT-9c, item 3). Same column and shape the reaper uses for
+ * `QUEUED_EXPIRED_MESSAGE` above (`status`/`error`/`settled_at`): a refused
+ * start settles the row just like an expired one, so a 202 that is never going
+ * to run does not sit `queued` forever waiting to be picked up.
+ */
+const CAMPAIGN_DELETED_MESSAGE = "the campaign was deleted before the run started";
 
 interface JobRow {
   id: string;
@@ -106,6 +117,32 @@ const SELECT_COLUMNS = `id, campaign_id, status, done, total, log, result, error
  * Jobs as rows (PT-6a, D171), one org's: the run's lease, adoption handle and
  * poll target. Every statement is scoped to the org, so another org's jobs are
  * invisible and its own capacity (`MAX_JOBS`) is its own.
+ *
+ * Lock order (D235). Every claim-or-refuse path in this file takes the campaign
+ * row BEFORE the job row — campaign → job, always — and a future lane adding a
+ * fourth path MUST check against the three below, not assume any of them:
+ *
+ *  (i) `acquireJob`/`enqueueJob`: the org advisory lock (`lockOrg`) THEN the
+ *      campaign row `for share`, then `job` rows (`reap`, `evictToFit`, the
+ *      insert) only after the campaign is confirmed live.
+ *  (ii) `startQueuedJob`: the job's `campaign_id` is read lock-free, then the
+ *       campaign row `for share` (inside `campaignClaimable`), then the job row
+ *       `for update` — campaign before job, no org lock at all. The lock-free
+ *       read is what stops it from holding the job row while it waits on the
+ *       campaign (the PT-9c deadlock).
+ *  (iii) the delete/tombstone transaction (PT-9f, unmerged): the campaign row
+ *        ONLY, `for update`, no org lock and no job-row lock of its own (it
+ *        reads `job` unlocked).
+ *
+ * All three take the campaign row first, so no path holds a job-row lock while
+ * waiting on the campaign row and no two paths take the same two resources in
+ * opposite orders — there is no cycle, and whichever transaction commits first
+ * decides. The "opposite orders were benign because both held the campaign
+ * `for share`" caveat that guarded the old (ii) no longer applies: (ii) now
+ * takes its job row AFTER the campaign row, the same direction as (i). The line
+ * this summary still exists to make visible is PT-9f's upgrade of (iii) to
+ * `for update` on the campaign row (already the case by design) and any future
+ * lane that takes a job row before the campaign — that is the cycle to close.
  */
 export class PgJobStore implements RunRegistryPort {
   constructor(
@@ -191,12 +228,52 @@ export class PgJobStore implements RunRegistryPort {
     return rows[0]?.id;
   }
 
+  /**
+   * PT-9c (D235): the campaign a claim is for must still be live — present and
+   * un-tombstoned — before a run is claimed against it. Mirrors
+   * `PgBriefStore.resolveCampaign`'s uuid-then-slug shape (D246): a canonical
+   * uuid is tried as an `id` first (gated on the shared `UUID_PATTERN`, so a
+   * slug-shaped ref never reaches `::uuid` and raises `22P02`). The uuid branch
+   * selects the row WITHOUT the `deleted_at` filter and returns `row.deleted_at
+   * === null` directly — a match on the id settles the ref (live `true`,
+   * tombstoned `false`, **never** a fall-through) so a tombstoned uuid can never
+   * be rescued by a second live campaign that happens to use that uuid text as
+   * its slug. Only a uuid that matches NO campaign id falls through to the slug
+   * branch (id and slug share one text space, `campaignMeta`'s shape). One
+   * statement cannot serve both shapes (Postgres types a unioned `$2` from the
+   * first cast and rejects the other branch's operator), so this is two
+   * parameterised queries, exactly `resolveCampaign`'s control flow. Returns a
+   * boolean and never throws — each call site decides what a `false` means. Both
+   * branches take the row `for share` so a concurrent tombstone (`for update`,
+   * PT-9f) serialises with the claim rather than the claim racing past a
+   * just-committed delete.
+   */
+  private async campaignClaimable(tx: SqlQuery, campaignId: string): Promise<boolean> {
+    if (UUID_PATTERN.test(campaignId)) {
+      const { rows } = await tx.query<{ deleted_at: string | null }>(
+        `select deleted_at from campaign where org_id = $1 and id = $2::uuid for share`,
+        [this.orgId, campaignId.toLowerCase()],
+      );
+      const row = rows[0];
+      if (row) return row.deleted_at === null;
+      // No row with this id at all — fall through: id and slug share one text
+      // space (campaignMeta's shape), a uuid-shaped ref that is no live id may
+      // still be a live campaign's slug.
+    }
+    const { rows } = await tx.query(
+      `select 1 from campaign where org_id = $1 and slug = $2 and deleted_at is null for share`,
+      [this.orgId, campaignId],
+    );
+    return rows.length > 0;
+  }
+
   async acquireJob(
     campaignId: string,
     customId?: string,
   ): Promise<{ acquired: true; jobId: string } | { acquired: false; runningJobId: string }> {
     return this.db.transaction(async (tx) => {
       await this.lockOrg(tx);
+      if (!(await this.campaignClaimable(tx, campaignId))) throw new CampaignGoneError(campaignId);
       await this.reap(tx);
       // The incumbent, before any capacity decision (item 1): a retry for a
       // campaign this org is already running must adopt it even when the org
@@ -240,6 +317,7 @@ export class PgJobStore implements RunRegistryPort {
   ): Promise<{ acquired: true; jobId: string } | { acquired: false; runningJobId: string }> {
     return this.db.transaction(async (tx) => {
       await this.lockOrg(tx);
+      if (!(await this.campaignClaimable(tx, campaignId))) throw new CampaignGoneError(campaignId);
       await this.reap(tx);
       const incumbent = await this.runningIncumbent(tx, campaignId);
       if (incumbent !== undefined) return { acquired: false, runningJobId: incumbent };
@@ -268,15 +346,66 @@ export class PgJobStore implements RunRegistryPort {
    * row without reading it through `lapsedAsFailed` first (finding 5). Without
    * this, an unreaped stale queued row polls as failed but a late delivery
    * could still flip it to running underneath that answer.
+   *
+   * PT-9c (D235): the row is re-locked inside its own transaction and the
+   * campaign re-checked via `campaignClaimable` before the status flip — a
+   * replayed Kafka message for a campaign that has since been purged must be
+   * refused (`false`) here, never started, so PT-9f's own tombstone read never
+   * has to reject an already-running job. A refusal settles the row to 'failed'
+   * (item 3: `CAMPAIGN_DELETED_MESSAGE`) rather than leaving it `queued`, so a
+   * 202 that cannot run does not sit waiting to be picked up; `false` still
+   * means "do not run" to `startOrDropWithSettled`, and a settle it never doubles.
+   *
+   * Lock order (item 2): the campaign row is locked (`for share`, inside
+   * `campaignClaimable`) BEFORE the job row — never the reverse. The job's
+   * `campaign_id` is read first WITHOUT a lock so this method never holds the
+   * job row while it waits on the campaign; holding it there would let a
+   * pending tombstone on the campaign row close exactly that cycle (claim →
+   * start → tombstone → claim). See the class docstring's lock-order summary.
    */
   async startQueuedJob(id: string): Promise<boolean> {
-    const { rows } = await this.db.query<{ id: string }>(
-      `update job set status = 'running', lease_expires_at = now() + $3::interval, heartbeat_at = now()
-       where id = $1 and org_id = $2 and status = 'queued' and created_at > now() - $4::interval
-       returning id`,
-      [id, this.orgId, asInterval(LEASE_MS), asInterval(QUEUED_TTL_MS)],
-    );
-    return rows.length > 0;
+    return this.db.transaction(async (tx) => {
+      // (a) The campaign id, lock-free — so the job row is never held while the
+      // campaign row is waited on (PT-9c: campaign → job, always).
+      const { rows } = await tx.query<{ campaign_id: string }>(
+        `select campaign_id from job
+         where id = $1 and org_id = $2 and status = 'queued' and created_at > now() - $3::interval`,
+        [id, this.orgId, asInterval(QUEUED_TTL_MS)],
+      );
+      const row = rows[0];
+      if (!row) return false;
+      // (b) Take the campaign row BEFORE the job row.
+      if (!(await this.campaignClaimable(tx, row.campaign_id))) {
+        // (item 3) A refused start settles the row to 'failed' — the same
+        // column/shape the reaper uses for `QUEUED_EXPIRED_MESSAGE` — so a 202
+        // whose claim was refused by a concurrent delete never leaves a queued
+        // row nobody will start; the claim it held is released by that settle.
+        await tx.query(
+          `update job set status = 'failed', error = $2, settled_at = now()
+           where id = $1 and org_id = $3 and status = 'queued'`,
+          [id, CAMPAIGN_DELETED_MESSAGE, this.orgId],
+        );
+        return false;
+      }
+      // (c) Re-lock the job row now (campaign locked first), re-checking that it
+      // is still queued — the only window a concurrent settle could flip it
+      // between step (a) and the update below.
+      const { rows: locked } = await tx.query<{ id: string }>(
+        `select id from job
+         where id = $1 and org_id = $2 and status = 'queued' and created_at > now() - $3::interval
+         for update`,
+        [id, this.orgId, asInterval(QUEUED_TTL_MS)],
+      );
+      if (!locked[0]) return false;
+      // (d) The status flip.
+      const updated = await tx.query<{ id: string }>(
+        `update job set status = 'running', lease_expires_at = now() + $2::interval, heartbeat_at = now()
+         where id = $1
+         returning id`,
+        [id, asInterval(LEASE_MS)],
+      );
+      return updated.rows.length > 0;
+    });
   }
 
   async createJob(campaignId: string, customId?: string): Promise<string> {

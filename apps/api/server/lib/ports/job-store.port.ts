@@ -39,6 +39,25 @@ export class JobLeaseLostError extends Error {
 }
 
 /**
+ * Thrown by `acquireJob`/`enqueueJob` when the campaign a run is claimed for is
+ * gone — absent or tombstoned (PT-9c, D235). The route that reaches the claim
+ * maps this to its existing 404, so a deleted campaign answers the same body
+ * as one that was never minted. Standalone (not a subclass of `CampaignNotFoundError`)
+ * to avoid the `ownership → ports/index → pg-job-store → subclass` TDZ cycle
+ * PT-9d diagnosed for `BriefRefNotFoundError`; no caller needs it to satisfy
+ * `instanceof CampaignNotFoundError` (confirmed: `generate.post.ts` has no such
+ * catch — its arm is a fresh `instanceof CampaignGoneError` check).
+ */
+export class CampaignGoneError extends Error {
+  readonly campaignId: string;
+  constructor(campaignId: string) {
+    super(`Campaign "${campaignId}" is absent or deleted; its run is refused.`);
+    this.name = "CampaignGoneError";
+    this.campaignId = campaignId;
+  }
+}
+
+/**
  * A job as persisted in storage with its metadata.
  */
 export interface StoredJob {

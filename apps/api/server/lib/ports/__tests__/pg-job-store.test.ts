@@ -1,13 +1,13 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { PipelineExecutionLog } from "@campaignfoundry/CampaignOrchestration";
-import type { SqlClient } from "../../db/sql-client.js";
+import type { SqlClient, SqlQuery } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import { resetDatabase, setDatabase } from "../../db/database.js";
 import { runEnvironment } from "../../run-environment.js";
 import { LOCAL_TENANT, type TenantContext } from "../../tenant.js";
 import { getJobStore, resetJobStore } from "../index.js";
 import { FsJobStore, JOB_TTL_MS, JobCapacityError, MAX_JOBS } from "../fs-job-store.js";
-import { QUEUED_TTL_MS, type JobResult } from "../job-store.port.js";
+import { QUEUED_TTL_MS, CampaignGoneError, type JobResult } from "../job-store.port.js";
 import { HEARTBEAT_INTERVAL_MS, JobLeaseLostError, LEASE_MS, PgJobStore } from "../pg-job-store.js";
 
 const acme: TenantContext = { ...LOCAL_TENANT, orgId: "acme", userId: "u1" };
@@ -28,7 +28,7 @@ async function seed(
     id: string;
     orgId: string;
     campaignId: string;
-    status?: "running" | "completed" | "failed";
+    status?: "queued" | "running" | "completed" | "failed";
     leaseOffsetMs?: number;
     settled?: boolean;
   },
@@ -47,11 +47,47 @@ async function seed(
   );
 }
 
+/** Insert a campaign row directly, so a claim-guard test can plant a live,
+ * tombstoned, or absent campaign of its own choosing — `campaign.id` defaults
+ * to `gen_random_uuid()`, but a test that resolves a campaign by its uuid text
+ * passes its own `id` so it can name that same value at the claim call. */
+async function seedCampaign(
+  db: SqlClient,
+  orgId: string,
+  slug: string,
+  opts: { id?: string; deleted?: boolean } = {},
+): Promise<string> {
+  const { rows } = await db.query<{ id: string }>(
+    `insert into campaign (id, org_id, slug, deleted_at) values (coalesce($1::uuid, gen_random_uuid()), $2, $3, $4) returning id`,
+    [opts.id ?? null, orgId, slug, opts.deleted ? new Date() : null],
+  );
+  return rows[0]!.id;
+}
+
 describe("PgJobStore (PT-6a, D171)", () => {
   let db: SqlClient;
   beforeEach(async () => {
     db = await migratedDatabase();
     await db.query("insert into org (id, name) values ($1, $2)", ["acme", "Acme"]);
+    // PT-9c: every `acquireJob`/`enqueueJob`/`createJob` in this describe is now
+    // gated on a live `campaign` row, so seed every slug passed to one. A single
+    // bulk insert covers the lot (plus `c0`..`c${MAX_JOBS - 1}` for the capacity
+    // tests); `acme` only ever claims "camp", so it gets one seeded row.
+    await db.query(`insert into campaign (org_id, slug) select 'local', unnest($1::text[])`, [
+      [
+        "camp",
+        "camp1",
+        "camp2",
+        "next",
+        "overflow",
+        "runner1",
+        "settled",
+        "camp-other",
+        "camp-stale",
+        ...Array.from({ length: MAX_JOBS }, (_, i) => `c${i}`),
+      ],
+    ]);
+    await seedCampaign(db, "acme", "camp");
   });
   afterEach(async () => {
     await db.end();
@@ -712,6 +748,209 @@ describe("PgJobStore (PT-6a, D171)", () => {
     ]);
     expect(row.rows[0]).toEqual({ status: "queued" });
   });
+
+  test("acquireJob refuses a tombstoned campaign by slug", async () => {
+    const store = new PgJobStore(db, "local");
+    await seedCampaign(db, "local", "tomb-by-slug", { deleted: true });
+    const before = await db.query<{ n: number }>(
+      "select count(*)::int as n from job where org_id = $1",
+      ["local"],
+    );
+    await expect(store.acquireJob("tomb-by-slug")).rejects.toBeInstanceOf(CampaignGoneError);
+    const after = await db.query<{ n: number }>(
+      "select count(*)::int as n from job where org_id = $1",
+      ["local"],
+    );
+    expect(after.rows[0]!.n).toBe(before.rows[0]!.n);
+  });
+
+  test("enqueueJob refuses a tombstoned campaign by slug", async () => {
+    const store = new PgJobStore(db, "local");
+    await seedCampaign(db, "local", "tomb-enq-by-slug", { deleted: true });
+    const before = await db.query<{ n: number }>(
+      "select count(*)::int as n from job where org_id = $1",
+      ["local"],
+    );
+    await expect(store.enqueueJob("tomb-enq-by-slug")).rejects.toBeInstanceOf(CampaignGoneError);
+    const after = await db.query<{ n: number }>(
+      "select count(*)::int as n from job where org_id = $1",
+      ["local"],
+    );
+    expect(after.rows[0]!.n).toBe(before.rows[0]!.n);
+  });
+
+  test("acquireJob refuses a tombstoned campaign by its uuid text", async () => {
+    const store = new PgJobStore(db, "local");
+    const u = "11111111-1111-4111-8111-111111111111";
+    // Tombstoned by its UUID id; the slug is distinct text, so neither branch
+    // can match a LIVE row for this ref — the uuid branch hits the tombstone
+    // (deleted) and falls through to a slug branch that also finds nothing live.
+    await seedCampaign(db, "local", "tomb-by-uuid", { id: u, deleted: true });
+    const before = await db.query<{ n: number }>(
+      "select count(*)::int as n from job where org_id = $1",
+      ["local"],
+    );
+    await expect(store.acquireJob(u)).rejects.toBeInstanceOf(CampaignGoneError);
+    const after = await db.query<{ n: number }>(
+      "select count(*)::int as n from job where org_id = $1",
+      ["local"],
+    );
+    expect(after.rows[0]!.n).toBe(before.rows[0]!.n);
+  });
+
+  test("enqueueJob refuses a tombstoned campaign by its uuid text", async () => {
+    const store = new PgJobStore(db, "local");
+    const u = "22222222-2222-4222-8222-222222222222";
+    await seedCampaign(db, "local", "tomb-enq-by-uuid", { id: u, deleted: true });
+    const before = await db.query<{ n: number }>(
+      "select count(*)::int as n from job where org_id = $1",
+      ["local"],
+    );
+    await expect(store.enqueueJob(u)).rejects.toBeInstanceOf(CampaignGoneError);
+    const after = await db.query<{ n: number }>(
+      "select count(*)::int as n from job where org_id = $1",
+      ["local"],
+    );
+    expect(after.rows[0]!.n).toBe(before.rows[0]!.n);
+  });
+
+  test("acquireJob and enqueueJob admit a live campaign by slug and by uuid text", async () => {
+    // All four combinations (ported from a sibling implementation): each acquire is
+    // completed before the next, so the incumbent-adopt path never answers instead.
+    const campaignId = await seedCampaign(db, "local", "live");
+    const store = new PgJobStore(db, "local");
+    const bySlug = await store.acquireJob("live");
+    expect(bySlug.acquired).toBe(true);
+    if (bySlug.acquired) await store.completeJob(bySlug.jobId, payload());
+    const byUuid = await store.acquireJob(campaignId);
+    expect(byUuid.acquired).toBe(true);
+    if (byUuid.acquired) await store.completeJob(byUuid.jobId, payload());
+    await expect(store.enqueueJob("live")).resolves.toMatchObject({ acquired: true });
+    await expect(store.enqueueJob(campaignId)).resolves.toMatchObject({ acquired: true });
+  });
+
+  test("acquireJob and enqueueJob refuse an absent campaign", async () => {
+    const store = new PgJobStore(db, "local");
+    const before = await db.query<{ n: number }>(
+      "select count(*)::int as n from job where org_id = $1",
+      ["local"],
+    );
+    await expect(store.acquireJob("nowhere")).rejects.toBeInstanceOf(CampaignGoneError);
+    await expect(store.enqueueJob("nowhere")).rejects.toBeInstanceOf(CampaignGoneError);
+    const after = await db.query<{ n: number }>(
+      "select count(*)::int as n from job where org_id = $1",
+      ["local"],
+    );
+    expect(after.rows[0]!.n).toBe(before.rows[0]!.n);
+  });
+
+  test("an upper-case uuid ref to a live campaign is admitted", async () => {
+    const store = new PgJobStore(db, "local");
+    const u = "aaaaaaaa-aaaa-4aaa-8aaa-111111111111";
+    await seedCampaign(db, "local", "upper-live", { id: u });
+    const upper = u.toUpperCase();
+    await expect(store.acquireJob(upper)).resolves.toEqual({
+      acquired: true,
+      jobId: expect.any(String),
+    });
+  });
+
+  test("a uuid that names a tombstoned campaign is refused even when a live campaign has that uuid as its slug", async () => {
+    const store = new PgJobStore(db, "local");
+    const u = "11111111-1111-4111-8111-111111111111";
+    // The uuid branch must NOT fall through here: the id names a tombstoned
+    // campaign, so the claim refuses on the id match itself (deletion wins) —
+    // even though a second LIVE campaign uses that uuid text as its slug.
+    await seedCampaign(db, "local", "dead", { id: u, deleted: true });
+    await seedCampaign(db, "local", u);
+    await expect(store.enqueueJob(u)).rejects.toBeInstanceOf(CampaignGoneError);
+  });
+
+  test("a uuid that matches no campaign id is admitted via a live campaign whose slug is that uuid", async () => {
+    const store = new PgJobStore(db, "local");
+    const u = "11111111-1111-4111-8111-111111111111";
+    // No campaign has this uuid as its id, but a live campaign has it as its
+    // slug — the uuid branch falls through (no id row at all) and the slug
+    // branch admits. Pins the fall-through as a feature, not a bug.
+    await seedCampaign(db, "local", u);
+    const res = await store.enqueueJob(u);
+    expect(res).toEqual({ acquired: true, jobId: expect.any(String) });
+  });
+
+  test("startQueuedJob fails a queued job whose campaign was tombstoned", async () => {
+    const store = new PgJobStore(db, "local");
+    // Seed the campaign LIVE first, so enqueueJob admits the queued job; the
+    // tombstone comes AFTER, to exercise startQueuedJob's own re-check.
+    await seedCampaign(db, "local", "gone-failed");
+    const enq = await store.enqueueJob("gone-failed");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+    // Tombstone the campaign under the still-queued job: startQueuedJob's
+    // campaign re-check refuses it, and a refused start settles the row to
+    // 'failed' (not 'queued') so a 202 that is never going to run does not sit
+    // here forever waiting to be picked up.
+    await db.query("update campaign set deleted_at = now() where org_id = $1 and slug = $2", [
+      "local",
+      "gone-failed",
+    ]);
+    const started = await store.startQueuedJob(enq.jobId);
+    expect(started).toBe(false);
+    const row = await db.query<{ status: string; error: string | null }>(
+      "select status, error from job where id = $1",
+      [enq.jobId],
+    );
+    expect(row.rows[0]).toEqual({
+      status: "failed",
+      error: "the campaign was deleted before the run started",
+    });
+  });
+
+  test("startQueuedJob still starts a live campaign's queued job", async () => {
+    const store = new PgJobStore(db, "local");
+    const enq = await store.enqueueJob("camp");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+    const started = await store.startQueuedJob(enq.jobId);
+    expect(started).toBe(true);
+    const stored = await store.getStoredJob(enq.jobId);
+    expect(stored?.job.status).toBe("running");
+  });
+
+  test("startQueuedJob refuses when the queued row is settled between the campaign check and its re-lock", async () => {
+    const store = new PgJobStore(db, "local");
+    await seedCampaign(db, "local", "mid-settle");
+    const enq = await store.enqueueJob("mid-settle");
+    expect(enq.acquired).toBe(true);
+    if (!enq.acquired) return;
+    // The job row vanishes between the lock-free read (step a) and the `for
+    // update` re-check (step c): a concurrent settle. It is simulated by deleting
+    // the row inside the campaign check (same tx) — the only injection point on
+    // a single connection. The lock-order itself is proven by the concurrency
+    // file; this only pins that step c's guard returns false instead of flipping
+    // a gone row to running.
+    const spy = vi
+      .spyOn(
+        store as unknown as {
+          campaignClaimable: (tx: SqlQuery, campaignId: string) => Promise<boolean>;
+        },
+        "campaignClaimable",
+      )
+      .mockImplementation(async (tx: SqlQuery, _campaignId: string) => {
+        await tx.query(`delete from job where id = $1`, [enq.jobId]);
+        return true;
+      });
+    try {
+      const started = await store.startQueuedJob(enq.jobId);
+      expect(started).toBe(false);
+      const row = await db.query<{ status: string | null }>(
+        `select status from job where id = $1`,
+        [enq.jobId],
+      );
+      expect(row.rows[0]).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 describe("STORE_BACKEND=postgres puts jobs in the database, one lease-backed store per org (PT-6a)", () => {
@@ -732,6 +971,7 @@ describe("STORE_BACKEND=postgres puts jobs in the database, one lease-backed sto
     const database = await migratedDatabase();
     setDatabase(database);
     await database.query("insert into org (id, name) values ($1, $2)", ["acme", "Acme"]);
+    await database.query("insert into campaign (org_id, slug) values ('local', 'camp')");
     process.env.STORE_BACKEND = "postgres";
     const local = getJobStore(LOCAL_TENANT);
     expect(local).toBeInstanceOf(PgJobStore);
