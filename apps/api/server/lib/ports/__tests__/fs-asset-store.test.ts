@@ -1,5 +1,13 @@
-import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FsAssetStore } from "../fs-asset-store.js";
@@ -10,6 +18,38 @@ const mp3Bytes = Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x
 const m4aBytes = Buffer.from([
   0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x4d, 0x34, 0x41, 0x20, 0x00, 0x00, 0x02, 0x00,
 ]);
+
+/**
+ * One-shot ENOENT hook for `readFile` — only the first read of `failPath`
+ * throws; all other reads delegate to the real implementation.
+ */
+const fsRace = vi.hoisted(() => ({
+  failNextRead: false,
+  failPath: "",
+  failed: false,
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    readFile: vi.fn(async (...args: unknown[]) => {
+      const path = args[0];
+      if (
+        fsRace.failNextRead &&
+        typeof path === "string" &&
+        path === fsRace.failPath &&
+        !fsRace.failed
+      ) {
+        fsRace.failed = true;
+        const err = new Error("ENOENT: no such file or directory") as Error & { code: string };
+        err.code = "ENOENT";
+        throw err;
+      }
+      return (actual.readFile as (...args: unknown[]) => Promise<unknown>)(...args);
+    }),
+  };
+});
 
 describe("FsAssetStore", () => {
   let dir: string;
@@ -22,6 +62,9 @@ describe("FsAssetStore", () => {
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
+    fsRace.failNextRead = false;
+    fsRace.failPath = "";
+    fsRace.failed = false;
   });
 
   test("getBaseDir returns base directory", () => {
@@ -296,6 +339,52 @@ describe("FsAssetStore", () => {
     const { paths, created } = await store.copyAssets("src-reuse", "target-reuse");
     expect(created.size).toBe(0);
     expect(created.has("logo.png")).toBe(false);
+    expect(paths["logo.png"]).toBe("logo.png");
+  });
+
+  test("copyAssets never overwrites or claims a file an upload created mid-copy", async () => {
+    // The "upload": different bytes at the plain destination that appear
+    // between the copy's read (ENOENT) and its wx write (EEXIST).
+    const uploadBytes = Buffer.from([0xff, 0x00, 0xff, 0x00]);
+    const uploadPath = join(dir, "target", "logo.png");
+    mkdirSync(join(dir, "target"), { recursive: true });
+    writeFileSync(uploadPath, uploadBytes);
+
+    // Source carries different bytes.
+    await store.writeAsset("src-race", "logo.png", pngBytes);
+
+    // The copy's first read of the target answers ENOENT (the upload appeared
+    // between the copy's read and its wx write); all later reads see the real file.
+    fsRace.failNextRead = true;
+    fsRace.failPath = uploadPath;
+
+    const { paths, created } = await store.copyAssets("src-race", "target");
+
+    // (a) the upload's bytes are unchanged — the copy never overwrote them
+    expect(readFileSync(uploadPath)).toEqual(uploadBytes);
+    // (b) the upload's path is NOT in created
+    expect(created.has("logo.png")).toBe(false);
+    // (c) the source landed at a disambiguated path, which IS in created, and
+    //     paths maps the original name to it
+    expect(created.has("logo-src-race.png")).toBe(true);
+    expect(paths["logo.png"]).toBe("logo-src-race.png");
+  });
+
+  test("copyAssets does not rewrite a sha-deduped reuse", async () => {
+    await store.writeAsset("src-reuse", "logo.png", pngBytes);
+    await store.writeAsset("target-reuse", "logo.png", pngBytes);
+
+    const reusedPath = join(dir, "target-reuse", "logo.png");
+    const beforeMtime = statSync(reusedPath).mtimeMs;
+
+    const { paths, created } = await store.copyAssets("src-reuse", "target-reuse");
+
+    // No write happened to the reused path — the copy's read found matching
+    // bytes and skipped the write entirely.
+    expect(statSync(reusedPath).mtimeMs).toBe(beforeMtime);
+    // The reused path is NOT in created.
+    expect(created.has("logo.png")).toBe(false);
+    // paths still maps correctly (the name maps to itself).
     expect(paths["logo.png"]).toBe("logo.png");
   });
 

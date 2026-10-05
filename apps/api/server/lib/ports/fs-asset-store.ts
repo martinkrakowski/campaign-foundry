@@ -11,6 +11,16 @@ import type {
 } from "./asset-store.port.js";
 
 /**
+ * Whether an error is an fs `EEXIST` — the one a `{ flag: "wx" }` write can
+ * still throw when an upload raced in between our read and our write.
+ */
+function isEexist(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) return false;
+  const { code } = error as { code: unknown };
+  return code === "EEXIST";
+}
+
+/**
  * Filesystem implementation of AssetStorePort.
  * Stores assets under `<projectRoot>/assets/inputs/<briefId>/<name>`.
  */
@@ -166,46 +176,63 @@ export class FsAssetStore implements AssetStorePort {
       const srcPath = resolveConfined(sourceDir, relPath);
       const srcBytes = await readFile(srcPath);
 
-      let destRelPath = relPath;
-      let reused = false;
-      const destCandidate = resolveConfined(targetDir, destRelPath);
-      try {
-        const existingBytes = await readFile(destCandidate);
-        if (Buffer.compare(srcBytes, existingBytes) !== 0) {
-          // Collision with different contents: disambiguate path
-          const parsedExt = extname(relPath);
-          const parsedDir = dirname(relPath);
-          const parsedStem = basename(relPath, parsedExt);
-          let counter = 1;
-          let candidateName = `${parsedStem}-${fromBriefId}${parsedExt}`;
-          let candidateRel = parsedDir === "." ? candidateName : `${parsedDir}/${candidateName}`;
-          while (true) {
-            try {
-              const candBytes = await readFile(resolveConfined(targetDir, candidateRel));
-              if (Buffer.compare(srcBytes, candBytes) === 0) {
+      // An upload (no brief lock, `assets.post.ts:105`) can create the
+      // destination between our read and our write; `wx` rejects that case,
+      // and each EEXIST means the tree grew, so re-deciding always terminates.
+      let destRelPath: string;
+      let reused: boolean;
+      while (true) {
+        destRelPath = relPath;
+        reused = false;
+        const destCandidate = resolveConfined(targetDir, destRelPath);
+        try {
+          const existingBytes = await readFile(destCandidate);
+          if (Buffer.compare(srcBytes, existingBytes) !== 0) {
+            // Collision with different contents: disambiguate path
+            const parsedExt = extname(relPath);
+            const parsedDir = dirname(relPath);
+            const parsedStem = basename(relPath, parsedExt);
+            let counter = 1;
+            let candidateName = `${parsedStem}-${fromBriefId}${parsedExt}`;
+            let candidateRel = parsedDir === "." ? candidateName : `${parsedDir}/${candidateName}`;
+            while (true) {
+              try {
+                const candBytes = await readFile(resolveConfined(targetDir, candidateRel));
+                if (Buffer.compare(srcBytes, candBytes) === 0) {
+                  destRelPath = candidateRel;
+                  reused = true;
+                  break;
+                }
+              } catch {
                 destRelPath = candidateRel;
-                reused = true;
                 break;
               }
-            } catch {
-              destRelPath = candidateRel;
-              break;
+              counter++;
+              candidateName = `${parsedStem}-${fromBriefId}-${counter}${parsedExt}`;
+              candidateRel = parsedDir === "." ? candidateName : `${parsedDir}/${candidateName}`;
             }
-            counter++;
-            candidateName = `${parsedStem}-${fromBriefId}-${counter}${parsedExt}`;
-            candidateRel = parsedDir === "." ? candidateName : `${parsedDir}/${candidateName}`;
+          } else {
+            // The plain candidate already carries these exact bytes: a sha-deduped reuse.
+            reused = true;
           }
-        } else {
-          // The plain candidate already carries these exact bytes: a sha-deduped reuse.
-          reused = true;
+        } catch {
+          // Destination file does not exist yet; use destRelPath as-is
         }
-      } catch {
-        // Destination file does not exist yet; use destRelPath as-is
-      }
 
-      const destPath = resolveConfined(targetDir, destRelPath);
-      await mkdir(dirname(destPath), { recursive: true });
-      await writeFile(destPath, srcBytes);
+        if (reused) break;
+
+        const destPath = resolveConfined(targetDir, destRelPath);
+        await mkdir(dirname(destPath), { recursive: true });
+        try {
+          // `wx` not `w`: an upload may have appeared at this path since the
+          // read above (uploads take no brief lock, `assets.post.ts:105`).
+          await writeFile(destPath, srcBytes, { flag: "wx" });
+          break;
+        } catch (error) {
+          if (isEexist(error)) continue;
+          throw error;
+        }
+      }
 
       if (!reused) created.add(destRelPath);
       pathMap[relPath] = destRelPath;

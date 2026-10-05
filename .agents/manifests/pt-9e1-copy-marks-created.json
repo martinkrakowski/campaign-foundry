@@ -18,6 +18,23 @@
         "copyAssets never marks a sha-deduped reuse as created"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-asset-store.ts",
+      "before": "          await writeFile(destPath, srcBytes, { flag: \"wx\" });",
+      "after": "          await writeFile(destPath, srcBytes);",
+      "because": "dropping { flag: \"wx\" } turns the write into a plain overwrite that clobbers a file an upload created between the copy's read and its write, and then claims that path in `created` — PT-9e2's compensation would free the upload. The test asserts `readFileSync(uploadPath)` is unchanged (line 356), and under the mutant it is overwritten with the source bytes.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-asset-store.test.ts",
+        "-t",
+        "copyAssets never overwrites or claims a file an upload created mid-copy"
+      ],
+      "verdict": "caught"
     }
   ]
 }
