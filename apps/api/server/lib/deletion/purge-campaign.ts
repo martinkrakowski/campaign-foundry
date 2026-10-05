@@ -1,6 +1,14 @@
+import { rm } from "node:fs/promises";
+import { isReservedCampaignId } from "@campaignfoundry/CampaignOrchestration";
 import type { SqlClient, SqlQuery } from "../db/sql-client.js";
+import { resolveConfined } from "../confined-path.js";
+import { objectStore } from "../config.js";
+import { objectStoreClient } from "../object-store/index.js";
+import { UUID_PATTERN, campaignPrefix } from "../object-store/object-keys.js";
+import { scopeRoots } from "../run-environment.js";
 import { QUEUED_TTL_MS } from "../ports/job-store.port.js";
-import { UUID_PATTERN } from "../object-store/object-keys.js";
+import type { TenantContext } from "../tenant.js";
+import { recordFailure, type DeletionRow } from "./deletion-store.js";
 
 function asInterval(ms: number): string {
   return `${ms} milliseconds`;
@@ -65,6 +73,30 @@ export async function resolveCampaignForPurge(
 }
 
 /**
+ * D232 pre-step-2 guard: the same uuid-shaped-slug collision `deleteCampaignRows`
+ * checks, but evaluated BEFORE step 2 frees any bytes. Without this, a tombstoned
+ * A whose slug equals B's id (B live, same org) would have step 2's `rm` free
+ * B's legacy `<output>/<B.id>/` tree under fs — bytes `deleteCampaignRows` can
+ * never get back once it refuses and rolls back.
+ *
+ * `deleteCampaignRows` re-checks in-transaction as defense-in-depth for direct
+ * callers that bypass `purgeCampaign`; this is the one the orchestrator consults
+ * first, precisely because it is the one that can spare the bytes.
+ */
+export async function sharesCampaignKey(
+  db: SqlQuery,
+  orgId: string,
+  campaignId: string,
+  slug: string,
+): Promise<boolean> {
+  const { rows } = await db.query<{ one: number }>(
+    `select 1 from campaign where org_id = $1 and id <> $2::uuid and (id::text = $3 or slug = $2::text) limit 1`,
+    [orgId, campaignId, slug],
+  );
+  return rows.length > 0;
+}
+
+/**
  * D232 step 3: in its own short transaction, the campaign row `for update` FIRST
  * (lock order campaign -> job, PT-9c's own rule, `pg-job-store.ts:121-146` — this
  * transaction is a fourth path that takes the same two resources in the same
@@ -99,12 +131,10 @@ export async function deleteCampaignRows(
     // id and somebody's slug"): another campaign in this org may carry `row.slug` as
     // its `id::text`, or `row.id::text` as its slug, in which case the dual-key
     // delete below could not be scoped to this campaign's own rows. The rows' owner
-    // cannot be told apart from the data, so refuse rather than guess.
-    const { rows: collision } = await tx.query<{ one: number }>(
-      `select 1 from campaign where org_id = $1 and id <> $2::uuid and (id::text = $3 or slug = $2::text) limit 1`,
-      [orgId, row.id, row.slug],
-    );
-    if (collision[0]) {
+    // cannot be told apart from the data, so refuse rather than guess. Re-checked
+    // in-transaction as defense-in-depth; `purgeCampaign` runs the same guard
+    // before step 2 so step 2 never frees bytes for a colliding campaign.
+    if (await sharesCampaignKey(tx, orgId, row.id, row.slug)) {
       throw new Error(
         `campaign ${row.id} shares a key with another campaign in its org; refusing to delete its rows`,
       );
@@ -126,4 +156,114 @@ export async function deleteCampaignRows(
 /** D232 step 5. */
 export async function markPurged(db: SqlClient, deletionId: string): Promise<void> {
   await db.query(`update deletion set purged_at = now() where id = $1`, [deletionId]);
+}
+
+/**
+ * D232 step 4, and the resume branch's only cleanup (GAP): the uuid-keyed half
+ * ALONE. `s3`: `campaignPrefix` already names the whole campaign tree in one
+ * key — inputs, renders AND packages — so this is the exact same idempotent
+ * call step 2 makes, run again to pick up anything that landed late. `fs` has
+ * no uuid-keyed tree at all — platform packages are keyed by SLUG, not
+ * uuid (`package.post.ts:122-123`, `:218`; `packages/[campaignId].get.ts:32`), and
+ * every other fs tree is slug-keyed too, so there is nothing left for step 4
+ * to free under `fs` (`resolveCampaignForPurge`'s own doc comment, this file:
+ * "fs trees are freed in step 2 only"). The split from `deleteCampaignObjects`
+ * exists so the step-4/resume path has NO slug argument to misuse — under
+ * `fs` that makes this function deliberately a no-op, not an optimisation.
+ */
+export async function deleteCampaignObjectsByUuid(
+  orgId: string,
+  campaignId: string,
+): Promise<void> {
+  if (objectStore() === "s3") {
+    await objectStoreClient().deletePrefix(campaignPrefix(orgId, campaignId.toLowerCase()));
+  }
+  // `fs`: nothing. Every fs tree is slug-keyed and the slug is released when
+  // step 3 commits (D232), so there is no tree this function may touch after it.
+}
+
+/**
+ * D232 step 2: everything, while the slug is still this campaign's own. `s3`:
+ * nothing beyond `deleteCampaignObjectsByUuid` — `campaignPrefix` already spans
+ * every namespace, so there is no separate slug-keyed call to make. `fs`: all
+ * three slug-named trees — `assets/inputs/<slug>/`, `<outputRoot>/<slug>/` AND
+ * `<outputRoot>/packages/<slug>/` (platform packages are keyed by slug, not
+ * uuid: `package.post.ts:122-123`, `:218`; `packages/[campaignId].get.ts:32`)
+ * — freed directly here, never through `deleteCampaignObjectsByUuid`, which is
+ * a no-op under `fs`. This is the only point in the whole sequence where any
+ * fs tree is freed.
+ */
+export async function deleteCampaignObjects(
+  orgId: string,
+  campaignId: string,
+  slug: string,
+): Promise<void> {
+  if (objectStore() === "s3") {
+    await deleteCampaignObjectsByUuid(orgId, campaignId);
+    return;
+  }
+  // RESERVED_OUTPUT_ROOT_NAMES (census.ts:85) — top-level names under <output>/
+  // that are NOT campaign slugs: a slug like "packages" or "orgs" would make the
+  // rm below target a shared tree. `isReservedCampaignId` covers the union of
+  // RESERVED_STORE_AREAS and RESERVED_ROUTE_SEGMENTS; census.ts:85 adds "reports"
+  // and "report.json" (plus "decisions", already covered — included verbatim for
+  // traceability).
+  if (
+    isReservedCampaignId(slug) ||
+    slug === "reports" ||
+    slug === "decisions" ||
+    slug === "report.json"
+  ) {
+    throw new Error(
+      `campaign slug "${slug}" names a shared storage area; refusing to free its files`,
+    );
+  }
+  const tenant: TenantContext = { orgId, userId: "system", roles: [], teamIds: [] };
+  const { projectRoot, outputRoot } = scopeRoots(tenant);
+  await rm(resolveConfined(projectRoot, "assets", "inputs", slug), {
+    recursive: true,
+    force: true,
+  });
+  await rm(resolveConfined(outputRoot, slug), { recursive: true, force: true });
+  await rm(resolveConfined(outputRoot, "packages", slug), { recursive: true, force: true });
+}
+
+/**
+ * D232 steps 1–5, composing the lease (PT-9g1) with this lane's object frees.
+ * A crash at any point leaves the `deletion` row re-claimable once its lease
+ * lapses (D231); `resolveCampaignForPurge`'s own doc comment explains the
+ * resume branch that re-enters at step 4.
+ */
+export async function purgeCampaign(
+  db: SqlClient,
+  orgId: string,
+  deletionRow: Pick<DeletionRow, "id" | "subject">,
+): Promise<"purged" | "retry"> {
+  const campaign = await resolveCampaignForPurge(db, orgId, deletionRow.subject);
+  if (campaign === undefined) {
+    // Resumed after a crash between step 3's commit and step 5
+    // (`resolveCampaignForPurge`'s own doc comment, this file): steps 1-3 are
+    // already done, but step 4 is NOT skipped — only the uuid-keyed half can
+    // still be run (`deletionRow.subject` is the uuid already, never a slug).
+    // Under `s3` this frees anything that landed late in the campaign prefix;
+    // under `fs` every tree is slug-keyed and was already freed in step 2, so
+    // this call is a deliberate no-op.
+    await deleteCampaignObjectsByUuid(orgId, deletionRow.subject);
+    await markPurged(db, deletionRow.id);
+    return "purged";
+  }
+  if (await hasActiveJob(db, orgId, campaign.slug, campaign.id)) {
+    await recordFailure(db, deletionRow.id, "an active job exists for this campaign");
+    return "retry";
+  }
+  if (await sharesCampaignKey(db, orgId, campaign.id, campaign.slug)) {
+    throw new Error(
+      `campaign ${campaign.id} shares a key with another campaign in its org; refusing to delete its rows`,
+    );
+  }
+  await deleteCampaignObjects(orgId, campaign.id, campaign.slug); // step 2
+  await deleteCampaignRows(db, orgId, campaign.id); // step 3
+  await deleteCampaignObjectsByUuid(orgId, campaign.id); // step 4
+  await markPurged(db, deletionRow.id); // step 5
+  return "purged";
 }
