@@ -1,4 +1,5 @@
 import { rm } from "node:fs/promises";
+import { isReservedCampaignId } from "@campaignfoundry/CampaignOrchestration";
 import type { SqlClient, SqlQuery } from "../db/sql-client.js";
 import { resolveConfined } from "../confined-path.js";
 import { objectStore } from "../config.js";
@@ -72,6 +73,30 @@ export async function resolveCampaignForPurge(
 }
 
 /**
+ * D232 pre-step-2 guard: the same uuid-shaped-slug collision `deleteCampaignRows`
+ * checks, but evaluated BEFORE step 2 frees any bytes. Without this, a tombstoned
+ * A whose slug equals B's id (B live, same org) would have step 2's `rm` free
+ * B's legacy `<output>/<B.id>/` tree under fs — bytes `deleteCampaignRows` can
+ * never get back once it refuses and rolls back.
+ *
+ * `deleteCampaignRows` re-checks in-transaction as defense-in-depth for direct
+ * callers that bypass `purgeCampaign`; this is the one the orchestrator consults
+ * first, precisely because it is the one that can spare the bytes.
+ */
+export async function sharesCampaignKey(
+  db: SqlQuery,
+  orgId: string,
+  campaignId: string,
+  slug: string,
+): Promise<boolean> {
+  const { rows } = await db.query<{ one: number }>(
+    `select 1 from campaign where org_id = $1 and id <> $2::uuid and (id::text = $3 or slug = $2::text) limit 1`,
+    [orgId, campaignId, slug],
+  );
+  return rows.length > 0;
+}
+
+/**
  * D232 step 3: in its own short transaction, the campaign row `for update` FIRST
  * (lock order campaign -> job, PT-9c's own rule, `pg-job-store.ts:121-146` — this
  * transaction is a fourth path that takes the same two resources in the same
@@ -106,12 +131,10 @@ export async function deleteCampaignRows(
     // id and somebody's slug"): another campaign in this org may carry `row.slug` as
     // its `id::text`, or `row.id::text` as its slug, in which case the dual-key
     // delete below could not be scoped to this campaign's own rows. The rows' owner
-    // cannot be told apart from the data, so refuse rather than guess.
-    const { rows: collision } = await tx.query<{ one: number }>(
-      `select 1 from campaign where org_id = $1 and id <> $2::uuid and (id::text = $3 or slug = $2::text) limit 1`,
-      [orgId, row.id, row.slug],
-    );
-    if (collision[0]) {
+    // cannot be told apart from the data, so refuse rather than guess. Re-checked
+    // in-transaction as defense-in-depth; `purgeCampaign` runs the same guard
+    // before step 2 so step 2 never frees bytes for a colliding campaign.
+    if (await sharesCampaignKey(tx, orgId, row.id, row.slug)) {
       throw new Error(
         `campaign ${row.id} shares a key with another campaign in its org; refusing to delete its rows`,
       );
@@ -179,6 +202,22 @@ export async function deleteCampaignObjects(
     await deleteCampaignObjectsByUuid(orgId, campaignId);
     return;
   }
+  // RESERVED_OUTPUT_ROOT_NAMES (census.ts:85) — top-level names under <output>/
+  // that are NOT campaign slugs: a slug like "packages" or "orgs" would make the
+  // rm below target a shared tree. `isReservedCampaignId` covers the union of
+  // RESERVED_STORE_AREAS and RESERVED_ROUTE_SEGMENTS; census.ts:85 adds "reports"
+  // and "report.json" (plus "decisions", already covered — included verbatim for
+  // traceability).
+  if (
+    isReservedCampaignId(slug) ||
+    slug === "reports" ||
+    slug === "decisions" ||
+    slug === "report.json"
+  ) {
+    throw new Error(
+      `campaign slug "${slug}" names a shared storage area; refusing to free its files`,
+    );
+  }
   const tenant: TenantContext = { orgId, userId: "system", roles: [], teamIds: [] };
   const { projectRoot, outputRoot } = scopeRoots(tenant);
   await rm(resolveConfined(projectRoot, "assets", "inputs", slug), {
@@ -216,6 +255,11 @@ export async function purgeCampaign(
   if (await hasActiveJob(db, orgId, campaign.slug, campaign.id)) {
     await recordFailure(db, deletionRow.id, "an active job exists for this campaign");
     return "retry";
+  }
+  if (await sharesCampaignKey(db, orgId, campaign.id, campaign.slug)) {
+    throw new Error(
+      `campaign ${campaign.id} shares a key with another campaign in its org; refusing to delete its rows`,
+    );
   }
   await deleteCampaignObjects(orgId, campaign.id, campaign.slug); // step 2
   await deleteCampaignRows(db, orgId, campaign.id); // step 3

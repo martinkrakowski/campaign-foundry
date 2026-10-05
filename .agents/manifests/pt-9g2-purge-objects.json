@@ -18,6 +18,40 @@
         "purgeCampaign resume frees a late object before markPurged"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign.ts",
+      "before": "  if (await sharesCampaignKey(db, orgId, campaign.id, campaign.slug)) {",
+      "after": "  if (false) {",
+      "because": "disabling the pre-step-2 sharesCampaignKey refusal lets step 2 free bytes before step 3's in-transaction guard throws — the key-sharing test plants an object under A's campaignPrefix and asserts it survives; under this mutant step 2 runs (via deleteCampaignObjectsByUuid under s3), emptying the prefix, so `expect(await store.list(prefix)).toHaveLength(1)` fails on that assertion line, not on a throw.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign.objects.test.ts",
+        "-t",
+        "purgeCampaign never marks a key sharing campaign as purged"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign.ts",
+      "before": "isReservedCampaignId(slug)",
+      "after": "false",
+      "because": "disabling the isReservedCampaignId half of the reserved-slug guard lets step 2 rm the shared <output>/packages/ tree — the packages slug test plants <output>/packages/other/x and asserts it survives; under this mutant the throw is skipped, the rm deletes the file, and `statSync` on it no longer throws, failing the `.not.toThrow()` assertion before the `rejects.toThrow` line is even reached.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign.objects.test.ts",
+        "-t",
+        "deleteCampaignObjects under fs refuses a reserved slug: packages"
+      ],
+      "verdict": "caught"
     }
   ]
 }

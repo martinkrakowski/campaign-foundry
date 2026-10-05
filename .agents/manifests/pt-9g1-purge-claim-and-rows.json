@@ -38,7 +38,7 @@
     },
     {
       "file": "apps/api/server/lib/deletion/purge-campaign.ts",
-      "before": "if (collision[0]) {",
+      "before": "if (await sharesCampaignKey(tx, orgId, row.id, row.slug)) {",
       "after": "if (false) {",
       "because": "disabling the key-collision refusal lets deleteCampaignRows(A) proceed when A.slug collides with another campaign's id in the same org, so it deletes both A's and B's keyed rows (B.id = A.slug) and A's campaign row instead of refusing — the pinned test asserts a /shares a key/ rejection and that both campaigns' rows survive; under this mutant the rejection never happens and the row-existence assertions fail on an assertion line, not a throw or compile error",
       "command": [

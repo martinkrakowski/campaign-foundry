@@ -359,6 +359,43 @@ describe("purge-campaign objects (PT-9g2)", () => {
 
       expect(() => statSync(join(dir, slug, "f.txt"))).not.toThrow();
     });
+
+    test("deleteCampaignObjects under fs refuses a reserved slug: packages", async () => {
+      const campaignId = randomUUID();
+      const slug = "packages";
+
+      mkdirSync(join(dir, "packages", "other"), { recursive: true });
+      writeFileSync(join(dir, "packages", "other", "x"), "data");
+
+      await expect(deleteCampaignObjects(ORG, campaignId, slug)).rejects.toThrow(
+        /shared storage area/,
+      );
+
+      expect(() => statSync(join(dir, "packages", "other", "x"))).not.toThrow();
+    });
+
+    test("deleteCampaignObjects under fs refuses a reserved slug: orgs", async () => {
+      const campaignId = randomUUID();
+      const slug = "orgs";
+
+      mkdirSync(join(dir, "orgs", "other-org"), { recursive: true });
+      writeFileSync(join(dir, "orgs", "other-org", "x"), "data");
+
+      await expect(deleteCampaignObjects(ORG, campaignId, slug)).rejects.toThrow(
+        /shared storage area/,
+      );
+
+      expect(() => statSync(join(dir, "orgs", "other-org", "x"))).not.toThrow();
+    });
+
+    test("deleteCampaignObjects under fs refuses a reserved slug: reports", async () => {
+      const campaignId = randomUUID();
+      const slug = "reports";
+
+      await expect(deleteCampaignObjects(ORG, campaignId, slug)).rejects.toThrow(
+        /shared storage area/,
+      );
+    });
   });
 
   describe("purgeCampaign under s3", () => {
@@ -491,6 +528,10 @@ describe("purge-campaign objects (PT-9g2)", () => {
       const aId = await seedCampaign(db, ORG, bId, { tombstoned: true });
       const deletionRow = await seedDeletion(db, ORG, aId);
 
+      // Plant A's objects so the test can prove step 2 never ran.
+      const prefix = campaignPrefix(ORG, aId);
+      await store.put(`${prefix}inputs/asset`, BYTES);
+
       await expect(purgeCampaign(db, ORG, deletionRow)).rejects.toThrow(/shares a key/);
 
       const { rows } = await db.query<{ purged_at: Date | null }>(
@@ -504,6 +545,9 @@ describe("purge-campaign objects (PT-9g2)", () => {
         [aId, bId],
       );
       expect(bothCount[0]!.n).toBe(2);
+
+      // Step 2 never ran: A's objects are still present.
+      expect(await store.list(prefix)).toHaveLength(1);
     });
   });
 
