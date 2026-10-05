@@ -418,10 +418,21 @@ describe("the plan file, the exit classes and the pool (PT-8a2 reqs 18 and 20)",
         problems: [],
       },
     ]);
-    // The escape is on the run's refusal list, with the slug set (D223).
+    // The escape is on the run's refusal list, with the slug and the field set (D223).
     expect(
-      (JSON.parse(out[3]!) as { refusals: { reason: string }[] }).refusals.map((one) => one.reason),
-    ).toEqual(["proofPath: Path escapes the allowed directory."]);
+      (
+        JSON.parse(out[3]!) as {
+          refusals: { slug: string; reason: string; field: string }[];
+        }
+      ).refusals,
+    ).toEqual([
+      {
+        slug: "camp-one",
+        sourcePath: join(output!, "reports/camp-one.json"),
+        reason: "Path escapes the allowed directory.",
+        field: "proofPath",
+      },
+    ]);
     expect(plan.pools).toEqual([{ slug: "camp-one", present: false, problems: [] }]);
     expect(plan.decisions).toEqual([{ slug: "camp-one", present: false, problems: [] }]);
     expect(Object.keys(plan.census).sort()).toEqual(
@@ -501,6 +512,14 @@ describe("the plan file, the exit classes and the pool (PT-8a2 reqs 18 and 20)",
     expect(err).toEqual(["--switched-at <iso> is required"]);
     expect(out).toEqual([]);
     expect(existsSync(outPath)).toBe(false);
+  });
+
+  test("req 18: an --out with no value refuses with its exact message (ported from PT-8a1's loop)", async () => {
+    const { out, err, deps } = io();
+
+    expect(await main(["plan", "--out"], deps)).toBe(1);
+    expect(err).toEqual(["--out needs a value."]);
+    expect(out).toEqual([]);
   });
 
   test("req 18: an --out under a missing directory exits 1, names the ENOENT, prints nothing", async () => {

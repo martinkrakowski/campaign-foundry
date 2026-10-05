@@ -30,6 +30,17 @@ const REPORT_FIELDS = [
   "htmlBundlePath",
 ] as const;
 
+/** The five report fields, as a type, so a refusal can name its field structurally. */
+export type ReportPathField = (typeof REPORT_FIELDS)[number];
+
+/**
+ * A refusal as the plan carries it: a scan refusal, plus the structured field
+ * a report-field refusal came from. The reason stays BARE — the field is a
+ * property of the refusal, not decoration on its message, so a consumer sorts
+ * by field without parsing strings.
+ */
+export type PlanRefusal = ScanRefusal & { readonly field?: ReportPathField };
+
 /**
  * One report field's verdict. `resolved` is the LEXICAL resolution under the
  * output root — set whenever `resolveConfined` accepted the value, refused or
@@ -60,11 +71,16 @@ export type ReportPlan = {
   readonly problems: readonly string[];
 };
 
-/** One campaign's copy pool. */
+/**
+ * One campaign's copy pool. A valid pool passes THROUGH to the plan (req 15):
+ * `pool` is the parsed `CopyPool` the campaign was found with, so the reviewer
+ * reads what `apply` would copy, not just that something is there.
+ */
 export type PoolPlan = {
   readonly slug: string;
   readonly present: boolean;
   readonly problems: readonly string[];
+  readonly pool?: unknown;
 };
 
 /** One campaign's decision record. */
@@ -79,7 +95,7 @@ export type PlanAssembled = {
   readonly reports: readonly ReportPlan[];
   readonly pools: readonly PoolPlan[];
   readonly decisions: readonly DecisionPlan[];
-  readonly refusals: readonly ScanRefusal[];
+  readonly refusals: readonly PlanRefusal[];
 };
 
 /** A file read if it is there: present (with bytes or the reason it was not read) or absent. */
@@ -123,14 +139,14 @@ async function readIfPresent(path: string, display: string): Promise<PresentFile
  */
 function planReportField(
   ctx: StepContext,
-  refusals: ScanRefusal[],
+  refusals: PlanRefusal[],
   slug: string,
   reportPath: string,
-  field: string,
+  field: ReportPathField,
   path: string,
 ): ReportFieldPlan {
   const refuse = (resolved: string | null, reason: string): ReportFieldPlan => {
-    refusals.push({ slug, sourcePath: reportPath, reason: `${field}: ${reason}` });
+    refusals.push({ slug, sourcePath: reportPath, reason, field });
     return { field, path, status: "refused", resolved, reason };
   };
   let resolved: string;
@@ -181,7 +197,7 @@ function planReportField(
 /** One campaign's report section, reading `<output>/reports/<slug>.json` when it is there. */
 async function reportPlan(
   ctx: StepContext,
-  refusals: ScanRefusal[],
+  refusals: PlanRefusal[],
   campaign: ScannedCampaign,
 ): Promise<ReportPlan> {
   const slug = campaign.slug;
@@ -221,7 +237,7 @@ async function reportPlan(
 /** One campaign's pool section, reading `briefs/<slug>/pools.json` when it is there. */
 async function poolPlan(
   ctx: StepContext,
-  refusals: ScanRefusal[],
+  refusals: PlanRefusal[],
   campaign: ScannedCampaign,
 ): Promise<PoolPlan> {
   const slug = campaign.slug;
@@ -266,7 +282,7 @@ async function poolPlan(
     append(problem);
     return { slug, present: true, problems: [problem] };
   }
-  return { slug, present: true, problems: [] };
+  return { slug, present: true, problems: [], pool: parsed };
 }
 
 /**
@@ -306,7 +322,7 @@ function isDecisionTime(at: string): boolean {
 /** One campaign's decision section, reading `<output>/decisions/<slug>.json` when it is there. */
 async function decisionPlan(
   ctx: StepContext,
-  refusals: ScanRefusal[],
+  refusals: PlanRefusal[],
   campaign: ScannedCampaign,
 ): Promise<DecisionPlan> {
   const slug = campaign.slug;
@@ -351,7 +367,7 @@ async function decisionPlan(
  * removing a campaign (D223).
  */
 export async function assemblePlan(ctx: StepContext, scan: ScanResult): Promise<PlanAssembled> {
-  const refusals: ScanRefusal[] = [...scan.refusals];
+  const refusals: PlanRefusal[] = [...scan.refusals];
   const reports: ReportPlan[] = [];
   const pools: PoolPlan[] = [];
   const decisions: DecisionPlan[] = [];

@@ -156,7 +156,6 @@ describe("assembleCensus (reqs 14 and 17)", () => {
     expect(census.backgroundCache).toEqual({ count: 1 });
     expect(census.orphanRenders).toEqual({
       count: 2,
-      names: [join(output, "camp-a/orphan.png"), join(output, "camp-a/sub/nested.png")],
       symlinks: 1,
     });
     expect(census.drafts).toEqual({ count: 1, symlinks: 1 });
@@ -165,7 +164,9 @@ describe("assembleCensus (reqs 14 and 17)", () => {
     expect(census.legacyReportPointer).toEqual({ count: 1 });
     expect(census.nonBriefFiles).toEqual({
       count: 1,
-      names: ["README.md", "ghost-link"],
+      // The ghost link is recorded ONLY by `symlinks`: its name is not a file
+      // the tree holds, so it is not beside the one that is.
+      names: ["README.md"],
       symlinks: 1,
     });
     expect(census.refusedBriefs).toEqual({ count: 1 });
@@ -196,7 +197,6 @@ describe("assembleCensus (reqs 14 and 17)", () => {
 
     expect(census.orphanRenders).toEqual({
       count: 1,
-      names: [join(output, "camp-b/orphan.png")],
       symlinks: 1,
     });
   });
@@ -215,9 +215,11 @@ describe("assembleCensus (reqs 14 and 17)", () => {
       new Set(),
     );
 
+    // `jobs` as a FILE: the ROOT lstat answers "is not a directory." instead of
+    // letting the readdir raise ENOTDIR.
     expect(census.jobs).toEqual({
       count: 0,
-      refusal: expect.stringContaining("could not be read"),
+      refusal: expect.stringContaining("is not a directory."),
     });
     expect(census.orphanRenders.count).toBe(0);
   });
@@ -230,6 +232,12 @@ describe("assembleCensus (reqs 14 and 17)", () => {
     // A campaign directory with no drafts: the draft count stays 0 (no refusal).
     mkdirSync(join(briefs, "camp-plain"), { recursive: true });
     writeAt(output, "camp-a/orphan.png", "png\n");
+    // A skipped sample's two halves: the `briefs/sample-x/` SIDECAR directory
+    // and its `<output>/sample-x/` output directory — neither is a campaign,
+    // neither is a non-brief file, neither carries drafts, and the sample
+    // itself is counted once, under `samples`.
+    mkdirSync(join(briefs, "sample-x"), { recursive: true });
+    mkdirSync(join(output, "sample-x"), { recursive: true });
 
     const skipped = await assembleCensus(
       context(root),
@@ -237,6 +245,11 @@ describe("assembleCensus (reqs 14 and 17)", () => {
       new Set(),
     );
     expect(skipped.samples).toEqual({ count: 3 });
+    expect(skipped.drafts).toEqual({ count: 0 });
+    expect(skipped.nonBriefFiles).toEqual({ count: 0 });
+    // The empty `<output>/sample-x/` is walked as a slug with nothing in it:
+    // no file, no count, no refusal — it is nobody's render.
+    expect(skipped.orphanRenders).toEqual({ count: 1 });
 
     const imported = await assembleCensus(
       { ...context(root), includeSamples: true },
@@ -284,7 +297,7 @@ describe("assembleCensus (reqs 14 and 17)", () => {
     });
     expect(census.jobs).toEqual({
       count: 0,
-      refusal: expect.stringContaining("could not be read"),
+      refusal: expect.stringContaining("ENOTDIR"),
     });
     expect(census.legacyReportPointer).toEqual({
       count: 0,
@@ -352,6 +365,27 @@ describe("assembleCensus (reqs 14 and 17)", () => {
       refusal: expect.stringContaining("could not be read"),
       symlinks: 1,
     });
+  });
+
+  test("a symlinked category ROOT is counted as a link, never read through", async () => {
+    root = makeRoot();
+    const output = join(root, "output");
+    const briefs = join(root, "briefs");
+    writeAt(briefs, "camp-a.yaml", "id: camp-a\n");
+    // The target the links point at: real files a following walk WOULD count.
+    writeAt(join(root, "outside"), "secret.txt", "top secret\n");
+    linkAt(output, "jobs", join(root, "outside"));
+    writeAt(output, "camp-a/orphan.png", "png\n");
+    linkAt(briefs, "camp-a/drafts", join(root, "outside"));
+
+    const census = await assembleCensus(
+      context(root),
+      { refusals: [], samples: { skipped: 0, imported: 0 } },
+      new Set(),
+    );
+
+    expect(census.jobs).toEqual({ count: 0, symlinks: 1 });
+    expect(census.drafts).toEqual({ count: 0, symlinks: 1 });
   });
 
   test("briefs/ as a file is a refusal on the two categories that read it", async () => {

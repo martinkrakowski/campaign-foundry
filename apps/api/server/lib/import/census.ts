@@ -105,12 +105,21 @@ export type CensusScanInput = Pick<ScanResult, "refusals" | "samples">;
 async function countFiles(dir: string): Promise<CensusCategory> {
   const tally = { count: 0, symlinks: 0 };
   const categoryRefusals: string[] = [];
+  // The ROOT is lstat-checked first: `readdir` follows a symlinked directory,
+  // so a `jobs` that is a link to `/etc` would otherwise count `/etc`'s files.
+  try {
+    const st = await lstat(dir);
+    if (st.isSymbolicLink()) return { count: 0, symlinks: 1 };
+    if (!st.isDirectory()) return { count: 0, refusal: `${dir} is not a directory.` };
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return { count: 0 };
+    return { count: 0, refusal: errorMessage(error) };
+  }
   const walk = async (current: string): Promise<void> => {
     let entries: Dirent[];
     try {
       entries = await readdir(current, { withFileTypes: true });
     } catch (error) {
-      if (isErrno(error, "ENOENT") && current === dir) return;
       categoryRefusals.push(`${current} could not be read: ${errorMessage(error)}`);
       return;
     }
@@ -159,7 +168,7 @@ async function orphanWalk(
   ctx: StepContext,
   namedRenders: ReadonlySet<string>,
 ): Promise<{ orphans: CensusCategory; packages: CensusCategory }> {
-  const orphans = { count: 0, symlinks: 0, names: [] as string[], refusals: [] as string[] };
+  const orphans = { count: 0, symlinks: 0, refusals: [] as string[] };
   const packages = { count: 0, symlinks: 0, refusals: [] as string[] };
   const walkSlugDir = async (dir: string): Promise<void> => {
     let entries: Dirent[];
@@ -189,10 +198,7 @@ async function orphanWalk(
       }
       // Not a link, not a directory: a render, or a special file a legacy tree
       // left behind — both counted, and neither ever opened.
-      if (!namedRenders.has(join(dir, entry.name))) {
-        orphans.count++;
-        orphans.names.push(join(dir, entry.name));
-      }
+      if (!namedRenders.has(join(dir, entry.name))) orphans.count++;
     }
   };
   const walkRoot = async (current: string): Promise<void> => {
@@ -215,12 +221,10 @@ async function orphanWalk(
     }
   };
   await walkRoot(ctx.outputRoot);
-  orphans.names.sort();
   return {
     orphans: {
       count: orphans.count,
       symlinks: orphans.symlinks > 0 ? orphans.symlinks : undefined,
-      names: orphans.names.length > 0 ? orphans.names : undefined,
       refusal: orphans.refusals[0],
     },
     packages: {
@@ -270,8 +274,10 @@ export async function assembleCensus(
         continue;
       }
       if (entry.isSymbolicLink()) {
+        // The link is recorded ONLY by the symlinks count: a link's name is
+        // not a file the tree holds, and listing it beside the files it is
+        // not would read like one.
         nonBrief.symlinks++;
-        nonBrief.names.push(entry.name);
         continue;
       }
       if (!isBriefSourceName(entry.name)) {

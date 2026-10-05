@@ -132,8 +132,14 @@ describe("reports (req 13)", () => {
       resolved: join(root, "output", "camp-a/gone.png"),
       reason: 'no file at "camp-a/gone.png"',
     });
-    expect(plan.refusals.map((one) => one.reason)).toEqual([
-      'outputPath: no file at "camp-a/gone.png"',
+    // The field refusal carries the field structurally, and the reason bare.
+    expect(plan.refusals).toEqual([
+      {
+        slug: "camp-a",
+        sourcePath: join(root, "output", "reports", "camp-a.json"),
+        reason: 'no file at "camp-a/gone.png"',
+        field: "outputPath",
+      },
     ]);
   });
 
@@ -171,8 +177,13 @@ describe("reports (req 13)", () => {
       resolved: null,
       reason: "Path escapes the allowed directory.",
     });
-    expect(plan.refusals.map((one) => one.reason)).toEqual([
-      "outputPath: Path escapes the allowed directory.",
+    expect(plan.refusals).toEqual([
+      {
+        slug: "camp-a",
+        sourcePath: join(root, "output", "reports", "camp-a.json"),
+        reason: "Path escapes the allowed directory.",
+        field: "outputPath",
+      },
     ]);
   });
 
@@ -317,8 +328,15 @@ describe("pools (req 15)", () => {
     mkdirSync(join(briefs, "camp-b"), { recursive: true });
 
     const valid = await assemblePlan(context(root), scan("camp-a", "camp-b"));
+    // The valid pool passes THROUGH with its content (req 15): what apply
+    // would copy is in the plan, not just the fact that something is there.
     expect(valid.pools).toEqual([
-      { slug: "camp-a", present: true, problems: [] },
+      {
+        slug: "camp-a",
+        present: true,
+        problems: [],
+        pool: { briefId: "camp-a", generatedAt: "2026-10-01T00:00:00Z", model: "m", entries: [] },
+      },
       { slug: "camp-b", present: false, problems: [] },
     ]);
     expect(valid.refusals).toEqual([]);
