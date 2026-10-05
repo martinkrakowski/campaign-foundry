@@ -35,6 +35,23 @@
         "resolveCampaignForPurge refuses a live campaign"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign.ts",
+      "before": "if (collision[0]) {",
+      "after": "if (false) {",
+      "because": "disabling the key-collision refusal lets deleteCampaignRows(A) proceed when A.slug collides with another campaign's id in the same org, so it deletes both A's and B's keyed rows (B.id = A.slug) and A's campaign row instead of refusing — the pinned test asserts a /shares a key/ rejection and that both campaigns' rows survive; under this mutant the rejection never happens and the row-existence assertions fail on an assertion line, not a throw or compile error",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign.test.ts",
+        "-t",
+        "deleteCampaignRows refuses a campaign whose slug is another campaign's id"
+      ],
+      "verdict": "caught"
     }
   ]
 }

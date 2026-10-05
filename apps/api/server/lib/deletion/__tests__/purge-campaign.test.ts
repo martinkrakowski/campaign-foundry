@@ -110,6 +110,42 @@ async function plantKeyedRows(
   );
 }
 
+/** Count rows in a table keyed by an EXACT `campaign_id` text value. */
+async function countByKey(
+  db: SqlClient,
+  table: string,
+  orgId: string,
+  campaignId: string,
+): Promise<number> {
+  const { rows } = await db.query<{ n: number }>(
+    `select count(*)::int as n from ${table} where org_id = $1 and campaign_id = $2`,
+    [orgId, campaignId],
+  );
+  return rows[0]!.n;
+}
+
+/** Count a campaign row by id. */
+async function countCampaign(db: SqlClient, id: string): Promise<number> {
+  const { rows } = await db.query<{ n: number }>(
+    `select count(*)::int as n from campaign where id = $1`,
+    [id],
+  );
+  return rows[0]!.n;
+}
+
+/** One `job` + one `decision` row keyed by an exact campaign_id (a uuid or its slug text). */
+async function plantRowsFor(db: SqlClient, orgId: string, campaignId: string): Promise<void> {
+  await db.query(
+    `insert into job (id, org_id, campaign_id, status) values ($1, $2, $3, 'completed')`,
+    [`job-${campaignId}`, orgId, campaignId],
+  );
+  await db.query(
+    `insert into decision (org_id, campaign_id, asset_key, ordinal, verdict, actor, decided_at, run)
+       values ($1, $2, 'k', 1, 'approved', 'a', now(), 'r')`,
+    [orgId, campaignId],
+  );
+}
+
 describe("purge-campaign (D232, D246)", () => {
   let db: SqlClient;
   beforeEach(async () => {
@@ -332,6 +368,79 @@ describe("purge-campaign (D232, D246)", () => {
         [otherId],
       );
       expect(counted[0]!.n).toBe(1);
+    });
+
+    test("deleteCampaignRows refuses a campaign whose slug is another campaign's id", async () => {
+      // Case (a): A is tombstoned, A.slug = B.id (B live, same org). `id::text =
+      // $slug` finds B, so the dual-key delete would scope B's rows too — refuse.
+      const bId = await seedCampaign(db, "local", `camp-${randomUUID().slice(0, 8)}`, {
+        tombstoned: false,
+      });
+      const aId = await seedCampaign(db, "local", bId, { tombstoned: true }); // A.slug := B.id
+      await plantRowsFor(db, "local", bId);
+      await plantRowsFor(db, "local", aId);
+
+      const before = {
+        aCampaign: await countCampaign(db, aId),
+        bCampaign: await countCampaign(db, bId),
+        aJob: await countByKey(db, "job", "local", aId),
+        bJob: await countByKey(db, "job", "local", bId),
+        aDecision: await countByKey(db, "decision", "local", aId),
+        bDecision: await countByKey(db, "decision", "local", bId),
+      };
+      expect(before.aCampaign).toBe(1);
+      expect(before.bCampaign).toBe(1);
+
+      await expect(deleteCampaignRows(db, "local", aId)).rejects.toThrow(/shares a key/);
+
+      // The transaction rolled back: BOTH campaigns' rows survive untouched.
+      expect(await countCampaign(db, aId)).toBe(before.aCampaign);
+      expect(await countCampaign(db, bId)).toBe(before.bCampaign);
+      expect(await countByKey(db, "job", "local", aId)).toBe(before.aJob);
+      expect(await countByKey(db, "job", "local", bId)).toBe(before.bJob);
+      expect(await countByKey(db, "decision", "local", aId)).toBe(before.aDecision);
+      expect(await countByKey(db, "decision", "local", bId)).toBe(before.bDecision);
+    });
+
+    test("deleteCampaignRows refuses a campaign whose id another campaign's slug carries", async () => {
+      // Case (b): the reverse shape — B.slug = A.id::text. `slug = $id` finds B.
+      const aId = await seedCampaign(db, "local", `camp-${randomUUID().slice(0, 8)}`, {
+        tombstoned: true,
+      });
+      const bId = await seedCampaign(db, "local", aId, { tombstoned: false }); // B.slug := A.id
+      await plantRowsFor(db, "local", bId);
+      await plantRowsFor(db, "local", aId);
+
+      const before = {
+        aCampaign: await countCampaign(db, aId),
+        bCampaign: await countCampaign(db, bId),
+        aJob: await countByKey(db, "job", "local", aId),
+        bJob: await countByKey(db, "job", "local", bId),
+      };
+
+      await expect(deleteCampaignRows(db, "local", aId)).rejects.toThrow(/shares a key/);
+
+      expect(await countCampaign(db, aId)).toBe(before.aCampaign);
+      expect(await countCampaign(db, bId)).toBe(before.bCampaign);
+      expect(await countByKey(db, "job", "local", aId)).toBe(before.aJob);
+      expect(await countByKey(db, "job", "local", bId)).toBe(before.bJob);
+    });
+
+    test("deleteCampaignRows purges a campaign whose key only a foreign org shares", async () => {
+      // Case (c): C is in ANOTHER org with C.slug = A.id. The collision query is
+      // org-scoped (`org_id = $1`), so it finds nothing in `local` and A is freed.
+      await db.query("insert into org (id, name) values ($1, $2)", ["other-org", "Other"]);
+      const aId = await seedCampaign(db, "local", `camp-${randomUUID().slice(0, 8)}`, {
+        tombstoned: true,
+      });
+      const cId = await seedCampaign(db, "other-org", aId, { tombstoned: true }); // C.slug := A.id
+      await plantRowsFor(db, "local", aId);
+
+      const result = await deleteCampaignRows(db, "local", aId);
+      expect(result).toBe("deleted");
+      expect(await countCampaign(db, aId)).toBe(0);
+      expect(await countCampaign(db, cId)).toBe(1); // foreign campaign untouched
+      expect(await countByKey(db, "job", "local", aId)).toBe(0);
     });
   });
 

@@ -32,10 +32,17 @@ export async function hasActiveJob(
  * before casting. `undefined` means ONLY "no row with this id in this org" — the
  * resumed case (GAP): an earlier, crashed purge attempt already deleted it. A
  * LIVE (non-tombstoned) row THROWS and must never return `undefined` here —
- * PT-9g2's orchestrator treats `undefined` as proof steps 1-4 already converged
- * and skips straight to step 5 (`markPurged`); silently returning `undefined`
- * for a live campaign would let that orchestrator stamp a live campaign's
- * deletion record as purged without ever deleting it.
+ * silently returning it for a live campaign would let PT-9g2's orchestrator
+ * stamp that campaign's deletion record as purged without ever deleting it.
+ *
+ * On `undefined`: an earlier attempt has already run steps 1–3 (the campaign row
+ * is gone); step 4 is NOT skipped. Under s3 the orchestrator still re-lists
+ * `campaignPrefix(org, uuid)` and `deletePrefix`es again (step 4 needs only the
+ * uuid, which `subject` already is) before `markPurged`. Under fs there is no
+ * step 4 after step 3: the slug is released when step 3 commits (D232, "the slug
+ * stays reserved until step 3 commits"), so freeing `<slug>/` trees afterwards
+ * could erase a NEW campaign's files that inherited the slug — fs trees are freed
+ * in step 2 only.
  */
 export async function resolveCampaignForPurge(
   db: SqlQuery,
@@ -87,6 +94,20 @@ export async function deleteCampaignRows(
     if (!row) return "already-gone";
     if (row.deleted_at === null) {
       throw new Error(`campaign ${row.id} is not tombstoned; refusing to delete its rows`);
+    }
+    // A uuid-shaped slug (render-target.ts:88-95 — "a uuid-shaped ref may be nobody's
+    // id and somebody's slug"): another campaign in this org may carry `row.slug` as
+    // its `id::text`, or `row.id::text` as its slug, in which case the dual-key
+    // delete below could not be scoped to this campaign's own rows. The rows' owner
+    // cannot be told apart from the data, so refuse rather than guess.
+    const { rows: collision } = await tx.query<{ one: number }>(
+      `select 1 from campaign where org_id = $1 and id <> $2::uuid and (id::text = $3 or slug = $2::text) limit 1`,
+      [orgId, row.id, row.slug],
+    );
+    if (collision[0]) {
+      throw new Error(
+        `campaign ${row.id} shares a key with another campaign in its org; refusing to delete its rows`,
+      );
     }
     // Fixed literal table names, never caller input: no injection surface.
     for (const table of ["decision", "decision_set", "report", "pool", "job"]) {
