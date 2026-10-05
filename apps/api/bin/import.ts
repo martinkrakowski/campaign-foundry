@@ -107,15 +107,21 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
     const result = await scanBriefs(ctx);
     const assembled = await assemblePlan(ctx, result);
     // The renders a report row names (req 13's lexical resolutions, refused or
-    // not) are what separate an orphan render from a named one (D223).
+    // not) are what separate an orphan render from a named one (D223); the OK
+    // ones are what the import would WRITE, and the digest fingerprints them.
     const named = new Set(
       assembled.reports.flatMap((report) =>
         report.fields.flatMap((field) => (field.resolved === null ? [] : [field.resolved])),
       ),
     );
+    const planned = new Set(
+      assembled.reports.flatMap((report) =>
+        report.fields.flatMap((field) => (field.status === "ok" ? [field.resolved] : [])),
+      ),
+    );
     const census = await assembleCensus(ctx, result, named);
     const digest = planDigest({
-      files: await digestSourceFiles(ctx, result),
+      files: await digestSourceFiles(ctx, result, planned),
       orgId: ctx.orgId,
       switchedAt: ctx.switchedAt.toISOString(),
       includeSamples: ctx.includeSamples,
@@ -153,7 +159,7 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
     io.stderr(errorMessage(error));
     return 1;
   } finally {
-    await closeDatabase();
+    await closeDatabase(io);
   }
 }
 
@@ -161,16 +167,21 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
  * End the pool this run may have opened, in a finally that always runs (req
  * 20): a fs-only run never opened one, and a failed probe names its own
  * problem — so a close that cannot is swallowed here rather than masking it.
- * `resetDatabase()` so a second in-process `main()` builds a fresh pool.
+ * `resetDatabase()` runs in a finally of its own, so a REJECTING `end()` still
+ * uninstalls the client and a second in-process `main()` builds a fresh pool;
+ * the failure itself is named on stderr, and never changes the plan's code.
  */
-async function closeDatabase(): Promise<void> {
+async function closeDatabase(io: ImportIO): Promise<void> {
   try {
     if (storeBackend() === "postgres" && databaseSettings().url !== undefined) {
-      await database().end();
-      resetDatabase();
+      try {
+        await database().end();
+      } finally {
+        resetDatabase();
+      }
     }
-  } catch {
-    // a refusal already named the problem
+  } catch (error) {
+    io.stderr(`could not close the database: ${errorMessage(error)}`);
   }
 }
 

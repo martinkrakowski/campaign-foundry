@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as scanModule from "../../server/lib/import/scan.js";
-import { resetDatabase, setDatabase } from "../../server/lib/db/database.js";
+import { database, resetDatabase, setDatabase } from "../../server/lib/db/database.js";
 import type { SqlClient } from "../../server/lib/db/sql-client.js";
 import { USAGE, main } from "../import.js";
 import {
@@ -544,6 +544,30 @@ describe("the plan file, the exit classes and the pool (PT-8a2 reqs 18 and 20)",
     expect(await main(planArgv(), io().deps)).toBe(1);
     expect(spy.query).toHaveBeenCalledTimes(1);
     expect(spy.end).toHaveBeenCalledTimes(1);
+  });
+
+  test("req 20: a failed close uninstalls the client, names the failure, keeps the plan's code", async () => {
+    process.env["STORE_BACKEND"] = "postgres";
+    process.env["DATABASE_URL"] =
+      process.env["TEST_PG_URL"] ?? "postgres://cf_test@127.0.0.1:5433/postgres";
+    const spy = spyClient([{ id: "local" }]);
+    spy.end = vi.fn(async () => {
+      throw new Error("the pool is stuck");
+    });
+    setDatabase(spy);
+    const { out, err, deps } = io();
+
+    // The plan succeeded (exit 0) and stays 0: a failed close does not become
+    // the run's answer — but it is NAMED, and the broken client is uninstalled
+    // either way, so a second in-process run builds a fresh one.
+    expect(await main(planArgv(), deps)).toBe(0);
+    expect(spy.end).toHaveBeenCalledTimes(1);
+    expect(err).toEqual(["could not close the database: the pool is stuck"]);
+    expect(out).toHaveLength(5);
+    // `database()` no longer answers with the stuck client: resetDatabase ran
+    // inside the finally, and the next `database()` rebuilds from the env.
+    expect(database()).not.toBe(spy);
+    resetDatabase();
   });
 
   test("req 20: a fs-only run never opens, so never ends, a pool", async () => {

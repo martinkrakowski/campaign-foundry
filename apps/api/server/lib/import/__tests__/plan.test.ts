@@ -249,6 +249,70 @@ describe("reports (req 13)", () => {
     expect(throughFile.refusals.map((one) => one.slug)).toEqual(["camp-a"]);
   });
 
+  test("a field naming ANOTHER campaign's render area is refused, as renderObjectKey's rule demands", async () => {
+    root = makeRoot();
+    const output = join(root, "output");
+    writeAt(output, "camp-b/x.png", "png\n");
+    writeAt(output, "reports/camp-a.json", JSON.stringify({ outputPath: "camp-b/x.png" }));
+
+    const plan = await assemblePlan(context(root), scan("camp-a"));
+
+    expect(plan.reports[0]!.fields[0]).toEqual({
+      field: "outputPath",
+      path: "camp-b/x.png",
+      status: "refused",
+      resolved: join(output, "camp-b/x.png"),
+      reason: '"camp-b/x.png" names "camp-b"\'s render area, not "camp-a"\'s.',
+    });
+    expect(plan.refusals).toHaveLength(1);
+  });
+
+  test("a report behind a symlinked reports/ directory is refused, never read", async () => {
+    root = makeRoot();
+    const output = join(root, "output");
+    // A real report, reachable only THROUGH a symlinked `<output>/reports`.
+    writeAt(
+      join(root, "elsewhere"),
+      "reports/camp-a.json",
+      JSON.stringify({ outputPath: "camp-a/out.png" }),
+    );
+    writeAt(output, "camp-a/out.png", "png\n");
+    linkAt(output, "reports", join(root, "elsewhere", "reports"));
+
+    const plan = await assemblePlan(context(root), scan("camp-a"));
+
+    expect(plan.reports[0]).toEqual({
+      slug: "camp-a",
+      present: true,
+      fields: [],
+      problems: ["reports is a symlinked directory; the importer never follows one"],
+    });
+    expect(plan.refusals.map((one) => one.reason)).toEqual([
+      "reports is a symlinked directory; the importer never follows one",
+    ]);
+  });
+
+  test("decisions behind a symlinked decisions/ directory are refused, never read", async () => {
+    root = makeRoot();
+    const output = join(root, "output");
+    writeAt(
+      join(root, "elsewhere"),
+      "decisions/camp-a.json",
+      JSON.stringify({
+        "asset-1": { verdict: "approved", actor: "u", at: "2026-10-01T00:00:00.000Z", run: "r1" },
+      }),
+    );
+    linkAt(output, "decisions", join(root, "elsewhere", "decisions"));
+
+    const plan = await assemblePlan(context(root), scan("camp-a"));
+
+    expect(plan.decisions[0]).toEqual({
+      slug: "camp-a",
+      present: true,
+      problems: ["decisions is a symlinked directory; the importer never follows one"],
+    });
+  });
+
   test("a report file that is absent, a symlink, a directory, unparseable, or not an object is answered", async () => {
     root = makeRoot();
     const output = join(root, "output");
@@ -347,6 +411,33 @@ describe("pools (req 15)", () => {
       { slug: "camp-a", present: true, problems: ["briefId must be a string"] },
     ]);
     expect(invalid.refusals.map((one) => one.reason)).toEqual(["briefId must be a string"]);
+  });
+
+  test("a pool naming another campaign is refused, as the keyed pool reads refuse it", async () => {
+    root = makeRoot();
+    writeAt(
+      join(root, "briefs"),
+      "camp-a/pools.json",
+      JSON.stringify({
+        briefId: "camp-b",
+        generatedAt: "2026-10-01T00:00:00Z",
+        model: "m",
+        entries: [],
+      }),
+    );
+
+    const plan = await assemblePlan(context(root), scan("camp-a"));
+
+    expect(plan.pools).toEqual([
+      {
+        slug: "camp-a",
+        present: true,
+        problems: ['pools.json names briefId "camp-b", not "camp-a"'],
+      },
+    ]);
+    expect(plan.refusals.map((one) => one.reason)).toEqual([
+      'pools.json names briefId "camp-b", not "camp-a"',
+    ]);
   });
 
   test("an absent, unparseable, oversize, or unreachable pool file is answered", async () => {

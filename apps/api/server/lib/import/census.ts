@@ -1,6 +1,6 @@
 import type { Dirent } from "node:fs";
 import { lstat, readdir, readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { errorMessage } from "@campaignfoundry/shared";
 import { isBriefSourceName, isErrno } from "../brief-files.js";
 import type { ScanResult } from "./scan.js";
@@ -146,8 +146,35 @@ async function countFiles(dir: string): Promise<CensusCategory> {
   return { count: tally.count, symlinks: tally.symlinks > 0 ? tally.symlinks : undefined };
 }
 
-/** The one file a category names, answered the same way the walk answers a tree. */
-async function countOneFile(path: string): Promise<CensusCategory> {
+/**
+ * Whether every directory between `root` and a file's parent is real: `lstat`
+ * of each segment from the root down, refusing a symlinked directory with
+ * `scan.ts:109`'s rule for a symlinked `briefs/<slug>/`, and a non-directory.
+ * `rel` is the file's path relative to `root`; the FINAL segment is the file
+ * itself and is not asked here — `readBounded` answers for it.
+ */
+export async function parentsAreReal(root: string, rel: string): Promise<string | undefined> {
+  const parts = rel.split("/");
+  try {
+    for (let depth = 1; depth < parts.length; depth++) {
+      const dir = resolve(root, ...parts.slice(0, depth));
+      const st = await lstat(dir);
+      if (st.isSymbolicLink()) {
+        return `${relative(root, dir)} is a symlinked directory; the importer never follows one`;
+      }
+      if (!st.isDirectory()) {
+        return `${relative(root, dir)} is not a directory.`;
+      }
+    }
+  } catch (error) {
+    return errorMessage(error);
+  }
+  return undefined;
+}
+
+/** The one file a category names, answered the same way the walk answers a tree. */ async function countOneFile(
+  path: string,
+): Promise<CensusCategory> {
   try {
     const st = await lstat(path);
     if (st.isSymbolicLink()) return { count: 0, symlinks: 1 };
@@ -253,8 +280,11 @@ export async function assembleCensus(
   const packagesSymlinks = (packagesRoot.symlinks ?? 0) + (slugPackages.symlinks ?? 0);
 
   // briefs/: the campaign directories' drafts (D227), and the top-level
-  // entries that are neither a brief nor a campaign directory.
-  const drafts = { count: 0, symlinks: 0 };
+  // entries that are neither a brief nor a campaign directory. Every
+  // campaign's draft area that cannot be counted is carried — joined with
+  // "; " into the one `refusal` the category carries, so a slug whose drafts
+  // are unreadable is NAMED, never silently counted as zero.
+  const drafts = { count: 0, symlinks: 0, refusals: [] as string[] };
   const nonBrief = { count: 0, names: [] as string[], symlinks: 0 };
   let briefsListing: Dirent[] | undefined;
   let briefsRefusal: string | undefined;
@@ -271,6 +301,7 @@ export async function assembleCensus(
         const draftFiles = await countFiles(join(briefsDir, entry.name, "drafts"));
         drafts.count += draftFiles.count;
         drafts.symlinks += draftFiles.symlinks ?? 0;
+        if (draftFiles.refusal !== undefined) drafts.refusals.push(draftFiles.refusal);
         continue;
       }
       if (entry.isSymbolicLink()) {
@@ -297,7 +328,10 @@ export async function assembleCensus(
     drafts: {
       count: drafts.count,
       symlinks: drafts.symlinks > 0 ? drafts.symlinks : undefined,
-      refusal: briefsRefusal,
+      // A briefs/ that cannot be listed and a draft area that cannot be
+      // counted never coexist (no listing, no draft walk), so one refusal
+      // slot carries whichever happened.
+      refusal: drafts.refusals.length > 0 ? drafts.refusals.join("; ") : briefsRefusal,
     },
     lastOpened,
     usage: PG_ONLY,

@@ -6,7 +6,7 @@ import { errorMessage } from "@campaignfoundry/shared";
 import { isErrno } from "../brief-files.js";
 import { resolveConfined } from "../confined-path.js";
 import { copyPoolProblem } from "../ports/pool-store.port.js";
-import { readBounded } from "./census.js";
+import { parentsAreReal, readBounded } from "./census.js";
 import type { ScanRefusal, ScanResult, ScannedCampaign } from "./scan.js";
 import type { StepContext } from "./steps.js";
 
@@ -106,9 +106,12 @@ type PresentFile =
 /**
  * Presence and read in one step, through {@link readBounded}: absent is a
  * normal state (no refusal), while a file that is there and cannot be read is
- * a refusal of that file — never a throw and never a silent skip.
+ * a refusal of that file — never a throw and never a silent skip. The parent
+ * directories are asked first (`parentsAreReal`): `lstat` follows every parent
+ * symlink, so a symlinked `<output>/reports/` or `briefs/<slug>/` would
+ * otherwise supply bytes from outside the roots.
  */
-async function readIfPresent(path: string, display: string): Promise<PresentFile> {
+async function readIfPresent(root: string, path: string, display: string): Promise<PresentFile> {
   try {
     const st = await lstat(path);
     if (st.isSymbolicLink()) {
@@ -120,6 +123,8 @@ async function readIfPresent(path: string, display: string): Promise<PresentFile
     if (!st.isFile()) {
       return { present: true, refusal: `${display} is not a regular file.` };
     }
+    const parents = await parentsAreReal(root, relative(root, path));
+    if (parents !== undefined) return { present: true, refusal: parents };
     const read = await readBounded(path);
     if (!read.ok) return { present: true, refusal: read.reason };
     return { present: true, bytes: read.bytes };
@@ -154,6 +159,17 @@ function planReportField(
     resolved = resolveConfined(ctx.outputRoot, path);
   } catch (error) {
     return refuse(null, errorMessage(error));
+  }
+  // A report names only its OWN campaign's renders — the rule `renderObjectKey`
+  // enforces by keeping the brief id as the leading path segment it is checked
+  // and then dropped against: a `camp-a` report pointing into `camp-b`'s area
+  // would plan bytes the exporter would refuse to write for this campaign.
+  const first = relative(ctx.outputRoot, resolved).split("/", 1)[0]!;
+  if (first !== slug) {
+    return refuse(
+      resolved,
+      `${JSON.stringify(path)} names ${JSON.stringify(first)}'s render area, not ${JSON.stringify(slug)}'s.`,
+    );
   }
   // ONE try from the file's lstat to the extension check, exactly as
   // `classify.ts` reads a ref: every filesystem error is this field's refusal,
@@ -205,7 +221,7 @@ async function reportPlan(
   const append = (reason: string): void => {
     refusals.push({ slug, sourcePath: reportPath, reason });
   };
-  const read = await readIfPresent(reportPath, `reports/${slug}.json`);
+  const read = await readIfPresent(ctx.outputRoot, reportPath, `reports/${slug}.json`);
   if (!read.present) return { slug, present: false, fields: [], problems: [] };
   if (read.refusal !== undefined) {
     append(read.refusal);
@@ -263,7 +279,7 @@ async function poolPlan(
     }
     return { slug, present: false, problems: [] };
   }
-  const read = await readIfPresent(poolsPath, `briefs/${slug}/pools.json`);
+  const read = await readIfPresent(ctx.projectRoot, poolsPath, `briefs/${slug}/pools.json`);
   if (!read.present) return { slug, present: false, problems: [] };
   if (read.refusal !== undefined) {
     append(read.refusal);
@@ -281,6 +297,15 @@ async function poolPlan(
   if (problem !== undefined) {
     append(problem);
     return { slug, present: true, problems: [problem] };
+  }
+  const pool = parsed as { briefId: unknown };
+  // The keyed pool reads' own rule (`fs-pool-store.ts`'s readPool): the file
+  // under `briefs/<slug>/pools.json` names ITS campaign, or it is not this
+  // campaign's pool and must not pass as one.
+  if (pool.briefId !== slug) {
+    const reason = `pools.json names briefId ${JSON.stringify(pool.briefId)}, not ${JSON.stringify(slug)}`;
+    append(reason);
+    return { slug, present: true, problems: [reason] };
   }
   return { slug, present: true, problems: [], pool: parsed };
 }
@@ -330,7 +355,7 @@ async function decisionPlan(
   const append = (reason: string): void => {
     refusals.push({ slug, sourcePath: decisionsPath, reason });
   };
-  const read = await readIfPresent(decisionsPath, `decisions/${slug}.json`);
+  const read = await readIfPresent(ctx.outputRoot, decisionsPath, `decisions/${slug}.json`);
   if (!read.present) return { slug, present: false, problems: [] };
   if (read.refusal !== undefined) {
     append(read.refusal);

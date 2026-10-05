@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "vitest";
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { MAX_IMPORT_JSON_BYTES, assembleCensus, readBounded } from "../census.js";
+import { MAX_IMPORT_JSON_BYTES, assembleCensus, parentsAreReal, readBounded } from "../census.js";
 import type { StepContext } from "../steps.js";
 import { dropRoot, linkAt, makeRoot, writeAt } from "./fixtures/tree.js";
 
@@ -277,6 +277,45 @@ describe("assembleCensus (reqs 14 and 17)", () => {
     expect(census.drafts).toEqual({ count: 0 });
     expect(census.nonBriefFiles).toEqual({ count: 0 });
     expect(census.lastOpened).toEqual({ count: 0 });
+  });
+
+  test("parentsAreReal refuses a parent it cannot lstat, and a file's own name is not asked", async () => {
+    root = makeRoot();
+    const output = join(root, "output");
+    writeAt(output, "camp-a/out.png", "png\n");
+    expect(await parentsAreReal(output, "camp-a/out.png")).toBeUndefined();
+    // A file directly in the root has no parents to ask.
+    writeAt(output, "top.png", "png\n");
+    expect(await parentsAreReal(output, "top.png")).toBeUndefined();
+    // A non-directory parent is refused with its own message.
+    writeAt(output, "camp-b", "not a directory\n");
+    expect(await parentsAreReal(output, "camp-b/out.png")).toContain("is not a directory.");
+    // An unreadable parent (EACCES on the lstat itself) is a refusal, not a throw.
+    mkdirSync(join(output, "locked"), { recursive: true });
+    chmodSync(join(output, "locked"), 0o000);
+    expect(await parentsAreReal(output, "locked/inside/x.png")).toContain("EACCES");
+    chmodSync(join(output, "locked"), 0o700);
+  });
+
+  test("a draft area that cannot be counted is the drafts category's refusal", async () => {
+    root = makeRoot();
+    const briefs = join(root, "briefs");
+    writeAt(briefs, "camp-a.yaml", "id: camp-a\n");
+    // `briefs/<slug>/drafts` as a regular FILE: its refusal is carried, not
+    // dropped — a silent count of 0 would claim nothing was there.
+    writeAt(briefs, "camp-a/drafts", "not a directory\n");
+    writeAt(join(root, "output"), "camp-a/orphan.png", "png\n");
+
+    const census = await assembleCensus(
+      context(root),
+      { refusals: [], samples: { skipped: 0, imported: 0 } },
+      new Set(),
+    );
+
+    expect(census.drafts).toEqual({
+      count: 0,
+      refusal: expect.stringContaining("is not a directory."),
+    });
   });
 
   test("a census whose output root cannot be listed is refusals, not a throw", async () => {
