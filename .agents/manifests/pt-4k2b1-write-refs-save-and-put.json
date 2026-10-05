@@ -57,16 +57,16 @@
       "file": "apps/api/server/lib/brief-asset-refs.ts",
       "before": "  if (stale.size === 0) return;\n  for (const ref of collectRefs(brief)) {\n    if (stale.has(ref)) throw new BriefRefNotFoundError(briefId);\n  }",
       "after": "  if (stale.size === 0) return;\n  return;\n  for (const ref of collectRefs(brief)) {\n    if (stale.has(ref)) throw new BriefRefNotFoundError(briefId);\n  }",
-      "because": "The check that covers the window between the resolve and the copy. `copyAssets` copies the rows that exist WHEN it runs, so an asset deleted in between — a concurrent `deleteAssets`, a failed create's rollback — is simply missing from the map; `rewriteAssetPaths` leaves the id in place and no other check can see it, because the resolve already ran and was right at the time. The write then succeeds with 201 and stores a brief naming an asset that is in no campaign at all. Mutating the function into an unconditional early return keeps the whole call in place and still pays for `collectRefs`, so it reads like a guard that was merely relaxed; the empty-set early return that survives is the off-s3 no-op D208(D) depends on, so the mutant also stays correct on the backends that are meant to be unchanged. Only a test that races the copy — a `copyAssets` stubbed to answer `{}` for the one source — distinguishes them, and it has to count `brief_version` rows rather than read a status.",
+      "because": "The check that covers the window between the resolve and the copy. `copyAssets` copies the rows that exist WHEN it runs, so an asset deleted in between — a concurrent `deleteAssets`, a failed create's rollback — is simply missing from the map; `rewriteAssetPaths` leaves the id in place and no other check can see it, because the resolve already ran and was right at the time. The write then succeeds with 201 and stores a brief naming an asset that is in no campaign at all. Mutating the function into an unconditional early return keeps the whole call in place and still pays for `collectRefs`, so it reads like a guard that was merely relaxed; the empty-set early return that survives is the off-s3 no-op D208(D) depends on, so the mutant also stays correct on the backends that are meant to be unchanged. Only a test that races the copy — a `copyAssets` stubbed to answer `{}` for the one source — distinguishes them, and it has to count `brief_version` rows rather than read a status. Re-pointed after #683 (PT-9d, D236): the route-level RACE test no longer catches this mutant, because the version transaction's own uuid-ref check refuses the same stale id with the same 404. So the guard is now pinned by the unit test that calls `assertRefsCopied` directly, where it is still the only thing that refuses.",
       "command": [
         "yarn",
         "vitest",
         "run",
         "--project",
         "api",
-        "apps/api/server/routes/campaigns/__tests__/write-ref-checks.test.ts",
+        "apps/api/server/lib/__tests__/brief-asset-refs.test.ts",
         "-t",
-        "RACE: a copy that maps nothing is refused, and no version is written"
+        "assertRefsCopied refuses a copy that mapped nothing"
       ],
       "verdict": "caught"
     },
