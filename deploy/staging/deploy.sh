@@ -117,6 +117,19 @@ git archive --format=tar HEAD | docker --context "$CONTEXT" build -t "$IMAGE" -
 echo "==> push"
 docker --context "$CONTEXT" push "$IMAGE"
 
+# Every deploy leaves a ~1.8 GB image on midnight's Docker, whose data lives on the
+# root SSD; twenty of them filled it (2026-10-05). The registry holds every tag and
+# k3s pulls from the registry, never from these local images, so keep only the two
+# newest locally. A failed removal never fails the deploy.
+echo "==> prune local images (keep the 2 newest)"
+docker --context "$CONTEXT" image ls --format "{{.CreatedAt}}|{{.Repository}}:{{.Tag}}" \
+  registry.midnight.lan/library/campaign-foundry |
+  sort -r | tail -n +3 | cut -d"|" -f2 |
+  while read -r old; do
+    docker --context "$CONTEXT" rmi "$old" >/dev/null 2>&1 ||
+      echo "deploy.sh: could not remove $old (kept)" >&2
+  done
+
 # The app must not start before its migrations have run: everything but the app's
 # own Deployment is applied first, then the migration, and only then the app. The
 # app is therefore selected by NAME as well as by kind — matching `kind: Deployment`
