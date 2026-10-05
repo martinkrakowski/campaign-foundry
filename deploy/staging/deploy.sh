@@ -122,13 +122,17 @@ docker --context "$CONTEXT" push "$IMAGE"
 # k3s pulls from the registry, never from these local images, so keep only the two
 # newest locally. A failed removal never fails the deploy.
 echo "==> prune local images (keep the 2 newest)"
-docker --context "$CONTEXT" image ls --format "{{.CreatedAt}}|{{.Repository}}:{{.Tag}}" \
-  registry.midnight.lan/library/campaign-foundry |
-  sort -r | tail -n +3 | cut -d"|" -f2 |
-  while read -r old; do
-    docker --context "$CONTEXT" rmi "$old" >/dev/null 2>&1 ||
-      echo "deploy.sh: could not remove $old (kept)" >&2
-  done
+if ! local_images=$(docker --context "$CONTEXT" image ls \
+  --format "{{.CreatedAt}}|{{.Repository}}:{{.Tag}}" registry.midnight.lan/library/campaign-foundry); then
+  echo "deploy.sh: could not list local images; prune skipped (old images remain on midnight)" >&2
+else
+  printf '%s\n' "$local_images" | sort -r | tail -n +3 | cut -d"|" -f2 |
+    while read -r old; do
+      [ -n "$old" ] || continue
+      docker --context "$CONTEXT" rmi "$old" >/dev/null 2>&1 ||
+        echo "deploy.sh: could not remove $old (kept)" >&2
+    done
+fi
 
 # The app must not start before its migrations have run: everything but the app's
 # own Deployment is applied first, then the migration, and only then the app. The
