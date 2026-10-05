@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "PT-9g1-purge-claim-and-rows",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign.ts",
+      "before": "      await tx.query(`delete from ${table} where org_id = $1 and campaign_id in ($2, $3)`, [\n        orgId,\n        row.slug,\n        row.id,\n      ]);\n",
+      "after": "      await tx.query(`delete from ${table} where org_id = $1 and campaign_id in ($2)`, [\n        orgId,\n        row.id,\n      ]);\n",
+      "because": "narrowing the dual-key match to the uuid alone (D246, H5) — dropping the slug bind value along with its placeholder — leaves every SLUG-keyed decision/decision_set/report/pool/job row un-deleted — the pinned test plants one row under the campaign's slug key and a separate row under its uuid key for each of the five tables and asserts both counts are zero; under this mutant the slug-keyed report row (and its four siblings) survives, so `expect(count).toBe(0)` fails on that assertion line, not on a thrown error — a clean, non-vacuous witness.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign.test.ts",
+        "-t",
+        "deleteCampaignRows frees decision, decision_set, report, pool and job by slug and by the campaigns uuid text"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign.ts",
+      "before": "  if (row.deleted_at === null) {\n    throw new Error(`campaign ${row.id} is not tombstoned; refusing to purge it`);\n  }\n",
+      "after": "\n",
+      "because": "dropping the live-campaign guard in `resolveCampaignForPurge` lets a purge resolve and proceed against a campaign that was never tombstoned — the pinned test plants a campaign with `deleted_at` null and asserts the call rejects; under this mutant it resolves instead, so `rejects.toThrow(/not tombstoned/)` fails on that assertion line, not on a thrown error from elsewhere.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign.test.ts",
+        "-t",
+        "resolveCampaignForPurge refuses a live campaign"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
