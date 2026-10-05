@@ -218,5 +218,94 @@ describe.skipIf(!url)(
       );
       expect(dual[0]!.found).toBe(1);
     });
+
+    test("startQueuedJob does not hold the job row while blocked on the campaign row (PT-9c lock order)", async () => {
+      const store = new PgJobStore(db, "local");
+      const slug = `pt9c-c-${randomUUID().slice(0, 8)}`;
+      const { rows: campaigns } = await db.query<{ id: string }>(
+        `insert into campaign (org_id, slug) values ('local', $1) returning id`,
+        [slug],
+      );
+      const campaignId = campaigns[0]!.id;
+      // A queued job row startQueuedJob(id) will try to start, within TTL.
+      const jobId = randomUUID();
+      await db.query(
+        `insert into job (id, org_id, campaign_id, status, created_at)
+         values ($1, 'local', $2, 'queued', now())`,
+        [jobId, slug],
+      );
+
+      // A `for update nowait` probe needs its own connection: the describe pool
+      // is max 2, and A + B already hold both while they interleave, so a probe
+      // over that pool would stall on connection acquisition (not on the row
+      // lock) and prove nothing.
+      const probe = pgClient(
+        databaseConfig({ url, poolMax: "1" }, () => {
+          throw new Error("a local TEST_DATABASE_URL needs no CA");
+        }),
+        (cfg) => new pg.Pool({ ...poolOptions(cfg), options: `-c search_path=${schema}` }),
+      );
+
+      let announce!: () => void;
+      const announced = new Promise<void>((resolve) => {
+        announce = resolve;
+      });
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      try {
+        // B takes the campaign row EXCLUSIVELY first, then waits.
+        const b = db.transaction(async (tx) => {
+          await tx.query(`update campaign set deleted_at = now() where id = $1`, [campaignId]);
+          announce();
+          await released;
+        });
+        b.catch(() => undefined);
+        await announced;
+
+        // A blocks on the campaign `for share`. Under the fixed order it has NOT
+        // yet taken the job row, so a `for update nowait` probe on the job
+        // succeeds while blocked; under the old order (job `for update` first)
+        // it would throw a lock-conflict — the deadlock this test pins out.
+        const a = store.startQueuedJob(jobId);
+        a.catch(() => undefined);
+        const blocked = await Promise.race([
+          a.then(
+            () => "settled",
+            () => "settled",
+          ),
+          sleep(300),
+        ]);
+        expect(blocked).toBe("timeout");
+
+        // The probe runs while A is blocked — its THROW (not a value) is what
+        // proves the job row is locked. Captured, not asserted here, so the
+        // failing expect can never be thrown mid-transaction.
+        let probeLocked = false;
+        try {
+          await probe.query(`select id from job where id = $1 for update nowait`, [jobId]);
+        } catch {
+          probeLocked = true;
+        }
+
+        // Release and drain BEFORE asserting: a mutant that leaves A blocked
+        // must not wedge `afterAll`'s drop schema on an open transaction.
+        release();
+        await Promise.allSettled([a, b]);
+
+        expect(probeLocked).toBe(false);
+        const outcome = await a;
+        expect(outcome).toBe(false);
+        // The start was refused: the job row must not have been flipped to running.
+        const { rows: job } = await db.query<{ status: string }>(
+          `select status from job where id = $1`,
+          [jobId],
+        );
+        expect(job[0]!.status).not.toBe("running");
+      } finally {
+        await probe.end();
+      }
+    });
   },
 );
