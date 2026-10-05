@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-9g4-fs-step2-share-lock",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign.ts",
+      "before": "      const locked = rows[0];\n      if (locked === undefined) return;\n",
+      "after": "      const locked = rows[0] ?? campaign;\n",
+      "because": "the `?? campaign` fall-back defeats the 'skip when the row is gone' guard: when the campaign row was already deleted by a concurrent purge, step 2 proceeds against the caller-supplied `campaign.slug` instead of the locked row's slug — `rm`-ing the slug trees that now belong to a reuse campaign Y, so Y's files are removed and the witness test's `.not.toThrow()` assertion on each file fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign.objects.test.ts",
+        "-t",
+        "fs step 2 skips the trees when the campaign row is already gone"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

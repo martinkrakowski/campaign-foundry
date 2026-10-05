@@ -588,5 +588,70 @@ describe("purge-campaign objects (PT-9g2)", () => {
       expect(() => statSync(join(dir, slug))).toThrow("ENOENT");
       expect(() => statSync(join(dir, "packages", slug))).toThrow("ENOENT");
     });
+
+    // D232/D231 defect (Qodo on PR #693): under fs the step-2 rm is keyed on the
+    // slug, which can be re-inherited by a new campaign once the row is gone. The
+    // seam below deletes X's row between sharesCampaignKey and step 2, so a fresh
+    // campaign Y reusing the slug "spring" is live with files in step 2's trees.
+    test("fs step 2 skips the trees when the campaign row is already gone", async () => {
+      const xId = await seedCampaign(db, ORG, "spring", { tombstoned: true });
+      const deletionRow = await seedDeletion(db, ORG, xId);
+
+      // Wrap db.query (NOT transaction) so the seam only fires on the bare
+      // sharesCampaignKey call purgeCampaign makes before step 2. The transactional
+      // selects inside deleteCampaignRows run through tx.query and bypass it.
+      const seamDb: SqlClient = {
+        ...db,
+        query: async <R>(text: string, params?: readonly unknown[]) => {
+          const result = await db.query<R>(text, params);
+          if (/id <> \$2::uuid/.test(text)) {
+            await db.query(`delete from campaign where id = $1::uuid`, [xId]);
+            await db.query(`insert into campaign (org_id, slug) values ($1, $2)`, [ORG, "spring"]);
+            mkdirSync(join(dir, "assets", "inputs", "spring"), { recursive: true });
+            writeFileSync(join(dir, "assets", "inputs", "spring", "y.txt"), "data");
+            mkdirSync(join(dir, "spring"), { recursive: true });
+            writeFileSync(join(dir, "spring", "y.png"), "data");
+            mkdirSync(join(dir, "packages", "spring"), { recursive: true });
+            writeFileSync(join(dir, "packages", "spring", "y.zip"), "data");
+          }
+          return result;
+        },
+      };
+
+      const result = await purgeCampaign(seamDb, ORG, deletionRow);
+      expect(result).toBe("purged");
+
+      expect(() => statSync(join(dir, "assets", "inputs", "spring", "y.txt"))).not.toThrow();
+      expect(() => statSync(join(dir, "spring", "y.png"))).not.toThrow();
+      expect(() => statSync(join(dir, "packages", "spring", "y.zip"))).not.toThrow();
+    });
+
+    // Regression for the fix: the locked row still exists, so step 2 frees the
+    // trees named by that row's slug and step 3 deletes the rows.
+    test("purgeCampaign under fs frees the trees named by the locked row", async () => {
+      const slug = "spring";
+      const campaignId = await seedCampaign(db, ORG, slug, { tombstoned: true });
+      const deletionRow = await seedDeletion(db, ORG, campaignId);
+
+      mkdirSync(join(dir, "assets", "inputs", slug), { recursive: true });
+      writeFileSync(join(dir, "assets", "inputs", slug, "x.txt"), "data");
+      mkdirSync(join(dir, slug), { recursive: true });
+      writeFileSync(join(dir, slug, "x.txt"), "data");
+      mkdirSync(join(dir, "packages", slug), { recursive: true });
+      writeFileSync(join(dir, "packages", slug, "x.txt"), "data");
+
+      const result = await purgeCampaign(db, ORG, deletionRow);
+      expect(result).toBe("purged");
+
+      expect(() => statSync(join(dir, "assets", "inputs", slug))).toThrow("ENOENT");
+      expect(() => statSync(join(dir, slug))).toThrow("ENOENT");
+      expect(() => statSync(join(dir, "packages", slug))).toThrow("ENOENT");
+
+      const { rows } = await db.query<{ purged_at: Date | null }>(
+        `select purged_at from deletion where id = $1`,
+        [deletionRow.id],
+      );
+      expect(rows[0]!.purged_at).not.toBeNull();
+    });
   });
 });

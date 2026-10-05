@@ -261,7 +261,28 @@ export async function purgeCampaign(
       `campaign ${campaign.id} shares a key with another campaign in its org; refusing to delete its rows`,
     );
   }
-  await deleteCampaignObjects(orgId, campaign.id, campaign.slug); // step 2
+  if (objectStore() === "s3") {
+    // uuid-keyed: no other campaign can share the prefix, and no transaction is
+    // ever held across an object-store call (D231).
+    await deleteCampaignObjects(orgId, campaign.id, campaign.slug); // step 2
+  } else {
+    // fs trees are SLUG-keyed. This is a deliberate, fs-only deviation from D231's
+    // "object deletes run outside any transaction": hold this campaign's row FOR
+    // SHARE while freeing them. `deleteCampaignRows` takes the same row FOR UPDATE,
+    // so the slug can't be released (and re-used by a new campaign) while any purge
+    // is still freeing that slug's trees. Use the LOCKED row's slug. If the row is
+    // already gone, a concurrent purge freed these trees in its own step 2, before
+    // its step 3, so skip them. Local fs only: no network call is held open.
+    await db.transaction(async (tx) => {
+      const { rows } = await tx.query<{ slug: string }>(
+        `select slug from campaign where org_id = $1 and id = $2::uuid for share`,
+        [orgId, campaign.id],
+      );
+      const locked = rows[0];
+      if (locked === undefined) return;
+      await deleteCampaignObjects(orgId, campaign.id, locked.slug); // step 2
+    });
+  }
   await deleteCampaignRows(db, orgId, campaign.id); // step 3
   await deleteCampaignObjectsByUuid(orgId, campaign.id); // step 4
   await markPurged(db, deletionRow.id); // step 5
