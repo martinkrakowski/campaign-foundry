@@ -157,6 +157,26 @@ describe("ObjectAssetStore.freeUnreferencedAssets (D237, PT-9e2)", () => {
     expect(await keysUnder(store, campaignIdA)).toEqual([inputKey(ORG, campaignIdA, assetId)]);
   });
 
+  test("freeUnreferencedAssets never resolves a slug in another org", async () => {
+    // The campaign lookup is org-scoped: a store for `local` must not lock, let alone
+    // free, a same-slug campaign that belongs to another org. Only the other org seeds
+    // the slug, so without `org_id = $1` the lookup would resolve the foreign row.
+    await db.query("insert into org (id, name) values ($1, $2)", ["other-org", "Other"]);
+    const foreignCampaignId = await seed(db, SLUG, "other-org");
+    const foreign = new ObjectAssetStore(db, store, "other-org");
+    const written = await foreign.writeAsset(SLUG, "logo.png", PNG);
+    const assetId = written.id!;
+
+    await assets.freeUnreferencedAssets(SLUG, [assetId]);
+
+    const { rows } = await db.query<{ n: number }>(
+      "select count(*)::int as n from asset where id = $1",
+      [assetId],
+    );
+    expect(rows[0]!.n).toBe(1);
+    expect(await store.list(inputPrefix("other-org", foreignCampaignId))).toHaveLength(1);
+  });
+
   test("freeUnreferencedAssets on a tombstoned campaign frees nothing", async () => {
     // The `deleteAssets(slug)`-rule check: `select … for update where deleted_at
     // is null` returns zero rows for a tombstoned campaign, so the method
