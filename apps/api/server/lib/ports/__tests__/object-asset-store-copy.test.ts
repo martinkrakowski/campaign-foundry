@@ -89,13 +89,19 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
     await db.end();
   });
 
-  test("answers {} for from === to, an empty source, and either ref unresolved", async () => {
+  test("answers { paths: {}, created: new Set() } for from === to, an empty source, and either ref unresolved", async () => {
     await seed(db, "empty");
     await seed(db, "target");
-    expect(await assets.copyAssets(SOURCE, SOURCE)).toEqual({});
-    expect(await assets.copyAssets("empty", "target")).toEqual({});
-    expect(await assets.copyAssets(SOURCE, "no-such-campaign")).toEqual({});
-    expect(await assets.copyAssets("no-such-campaign", "target")).toEqual({});
+    expect(await assets.copyAssets(SOURCE, SOURCE)).toEqual({ paths: {}, created: new Set() });
+    expect(await assets.copyAssets("empty", "target")).toEqual({ paths: {}, created: new Set() });
+    expect(await assets.copyAssets(SOURCE, "no-such-campaign")).toEqual({
+      paths: {},
+      created: new Set(),
+    });
+    expect(await assets.copyAssets("no-such-campaign", "target")).toEqual({
+      paths: {},
+      created: new Set(),
+    });
     // And nothing was written for any of them.
     expect(await store.list("org/")).toEqual([]);
   });
@@ -115,7 +121,7 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
     // IDS, so the only way to say what each entry must be is to name the row the
     // copy wrote — a shape-matched uuid here would prove nothing about whether it
     // is that row.
-    const map = await assets.copyAssets(SOURCE, "target");
+    const { paths: map, created } = await assets.copyAssets(SOURCE, "target");
     const sourceRows = await rowsOf(db, sourceId);
     const targetRows = await rowsOf(db, targetId);
     const [targetBed, targetLogo] = targetRows;
@@ -141,6 +147,11 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
       targetRows.map((row) => inputKey(ORG, targetId, row.id)).sort(),
     );
     expect(await keysUnder(store, sourceId)).toHaveLength(2);
+
+    // Every source asset was fresh-copied: `created` has exactly as many entries
+    // as sources, and each target id is in it (none are a sha-deduped reuse).
+    expect(created.size).toBe(targetRows.length);
+    expect(targetRows.every((row) => created.has(row.id))).toBe(true);
   });
 
   test("the same hash reuses the name and writes NOTHING — no second object, no second row", async () => {
@@ -151,7 +162,7 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
     const before = await keysUnder(store, targetId);
     const [theirs] = await rowsOf(db, twinId);
 
-    const map = await assets.copyAssets("twin", "target");
+    const { paths: map, created } = await assets.copyAssets("twin", "target");
     // The REUSED branch maps to the row the TARGET ALREADY HAS (PT-4k1), not to
     // a fresh id: there is no insert here, so a fresh id would name an object
     // nobody ever wrote — and a brief copying that name would ENOENT on its own
@@ -163,6 +174,11 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
       "assets/inputs/twin/logo.png": held!.id,
       [theirs!.id]: held!.id,
     });
+    // A sha-deduped reuse writes nothing: `created` is empty and the reused id is
+    // not in it (the mutation that swaps `created.add` before the reuse check
+    // would put `held.id` back in — that is the case the manifest catches).
+    expect(created.size).toBe(0);
+    expect(created.has(held!.id)).toBe(false);
     // The asset the target already has IS this asset, byte for byte. Copying it
     // again would leave an object no row could ever name.
     expect(await keysUnder(store, targetId)).toEqual(before);
@@ -177,7 +193,7 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
     // Each map is checked against the row that copy ACTUALLY made (PT-4k1), named
     // rather than picked by position — the target already holds a `logo.png`, and
     // `rowsOf` orders by name, so the copied row is not the first one.
-    const firstMap = await assets.copyAssets(SOURCE, "target");
+    const { paths: firstMap } = await assets.copyAssets(SOURCE, "target");
     const firstCopy = await rowNamed(db, targetId, `logo-${SOURCE}.png`);
     expect(firstMap).toEqual({
       "logo.png": `logo-${SOURCE}.png`,
@@ -192,7 +208,7 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
     // `logo.png`, which is fs's rule and is asserted above.)
     await assets.deleteAssets(SOURCE);
     const replacement = await assets.writeAsset(SOURCE, "logo.png", JPEG2);
-    const secondMap = await assets.copyAssets(SOURCE, "target");
+    const { paths: secondMap } = await assets.copyAssets(SOURCE, "target");
     const secondCopy = await rowNamed(db, targetId, `logo-${SOURCE}-2.png`);
     expect(secondCopy.id).not.toBe(firstCopy.id);
     expect(secondMap).toEqual({
@@ -223,19 +239,23 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
     // the EXISTING row (PT-4k1) — the row an earlier copy made, named here so a
     // freshly minted id would fail rather than merely look like one.
     const held = await rowNamed(db, targetId, `logo-${SOURCE}.png`);
-    const map = await assets.copyAssets(SOURCE, "target");
+    const { paths: map, created } = await assets.copyAssets(SOURCE, "target");
     expect(map).toEqual({
       "logo.png": `logo-${SOURCE}.png`,
       [`assets/inputs/${SOURCE}/logo.png`]: held.id,
       [source.id]: held.id,
     });
+    // Same-sha reuse through a SUFFIXED name: nothing was minted, so `created`
+    // is empty and the reused id is not in it.
+    expect(created.size).toBe(0);
+    expect(created.has(held.id)).toBe(false);
     // The target is exactly as it was: two rows, and the same two objects.
     expect(await rowsOf(db, targetId)).toHaveLength(2);
     expect(await keysUnder(store, targetId)).toEqual(before);
 
     // And running it again changes nothing either — the idempotency is not a
     // one-shot courtesy to the first copy after the collision was created.
-    expect(await assets.copyAssets(SOURCE, "target")).toEqual(map);
+    expect((await assets.copyAssets(SOURCE, "target")).paths).toEqual(map);
     expect(await rowsOf(db, targetId)).toHaveLength(2);
     expect(await keysUnder(store, targetId)).toEqual(before);
   });
@@ -317,7 +337,7 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
     const targetId = await seed(db, "target");
     await assets.writeAsset("target", "nested/logo.png", PNG);
     const source = await assets.writeAsset(SOURCE, "nested/logo.png", JPEG);
-    const map = await assets.copyAssets(SOURCE, "target");
+    const { paths: map } = await assets.copyAssets(SOURCE, "target");
     // Read after the copy: this is the row the copy inserted, under the SUFFIXED
     // name and inside the source's own directory — the whole of what the branch
     // this test guards is about.
@@ -345,7 +365,44 @@ describe("ObjectAssetStore.copyAssets (PT-4b)", () => {
     await seed(db, "target");
     // `winter-sale` resolves in BOTH orgs, so only the org predicate decides
     // which one this is a copy of — and it is not the other tenant's.
-    expect(await assets.copyAssets(SOURCE, "target")).toEqual({});
+    expect(await assets.copyAssets(SOURCE, "target")).toEqual({ paths: {}, created: new Set() });
     expect((await store.list(inputPrefix("other", theirs))).map((o) => o.key)).toHaveLength(1);
+  });
+
+  test("copyAssets marks a fresh copy as created", async () => {
+    // The two-campaigns-no-collision baseline: every asset is fresh, so `created`
+    // has exactly as many entries as sources and each target id is in it.
+    const targetId = await seed(db, "target");
+    await assets.writeAsset(SOURCE, "logo.png", PNG);
+    await assets.writeAsset(SOURCE, "bed.mp3", JPEG);
+
+    const { paths, created } = await assets.copyAssets(SOURCE, "target");
+    const targetRows = await rowsOf(db, targetId);
+    expect(targetRows).toHaveLength(2);
+    expect(created.size).toBe(targetRows.length);
+    expect(targetRows.every((row) => created.has(row.id))).toBe(true);
+    // `paths` is unchanged by this lane: still three entries per source asset.
+    expect(Object.keys(paths)).toHaveLength(6);
+  });
+
+  test("copyAssets never marks a sha-deduped reuse as created", async () => {
+    // A sha-deduped reuse: the target already holds the same bytes under the same
+    // name, so `destination.reused` is true and the id already exists — nothing is
+    // minted, so `created` is empty and the reused id is not in it.
+    const targetId = await seed(db, "target");
+    const twinId = await seed(db, "twin");
+    await assets.writeAsset("twin", "logo.png", PNG);
+    await assets.writeAsset("target", "logo.png", PNG);
+    const [theirs] = await rowsOf(db, twinId);
+
+    const { paths, created } = await assets.copyAssets("twin", "target");
+    const [held] = await rowsOf(db, targetId);
+    expect(paths).toEqual({
+      "logo.png": "logo.png",
+      "assets/inputs/twin/logo.png": held!.id,
+      [theirs!.id]: held!.id,
+    });
+    expect(created.size).toBe(0);
+    expect(created.has(held!.id)).toBe(false);
   });
 });

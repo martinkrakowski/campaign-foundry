@@ -267,7 +267,7 @@ export async function copyBriefRefs(
 ): Promise<CampaignBrief> {
   let copied = brief;
   for (const slug of from) {
-    const map = await getAssetStore(scope).copyAssets(slug, target);
+    const { paths: map } = await getAssetStore(scope).copyAssets(slug, target);
     copied = rewriteAssetPaths(copied, slug, target, map);
   }
   return copied;

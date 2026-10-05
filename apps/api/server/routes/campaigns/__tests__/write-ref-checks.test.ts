@@ -704,7 +704,9 @@ describe("the write routes under s3 — every ref stored as an id the caller can
     const copyAssets = vi
       .spyOn(ObjectAssetStore.prototype, "copyAssets")
       .mockImplementation(async function (this: ObjectAssetStore, from: string, to: string) {
-        return from === source.slug ? {} : await real.call(this, from, to);
+        return from === source.slug
+          ? { paths: {}, created: new Set<string>() }
+          : await real.call(this, from, to);
       });
     const snapshot = await counts(harness.db);
 
@@ -722,7 +724,9 @@ describe("the write routes under s3 — every ref stored as an id the caller can
     const copyAssets = vi
       .spyOn(ObjectAssetStore.prototype, "copyAssets")
       .mockImplementation(async function (this: ObjectAssetStore, from: string, to: string) {
-        return from === source.slug ? {} : await real.call(this, from, to);
+        return from === source.slug
+          ? { paths: {}, created: new Set<string>() }
+          : await real.call(this, from, to);
       });
     const snapshot = await counts(harness.db);
 
@@ -814,7 +818,9 @@ describe("the write routes under s3 — every ref stored as an id the caller can
     const copyAssets = vi
       .spyOn(ObjectAssetStore.prototype, "copyAssets")
       .mockImplementation(async function (this: ObjectAssetStore, from: string, to: string) {
-        return from === third.slug ? {} : await real.call(this, from, to);
+        return from === third.slug
+          ? { paths: {}, created: new Set<string>() }
+          : await real.call(this, from, to);
       });
     const snapshot = await counts(harness.db);
 
@@ -834,7 +840,9 @@ describe("the write routes under s3 — every ref stored as an id the caller can
     const copyAssets = vi
       .spyOn(ObjectAssetStore.prototype, "copyAssets")
       .mockImplementation(async function (this: ObjectAssetStore, from: string, to: string) {
-        return from === third.slug ? {} : await real.call(this, from, to);
+        return from === third.slug
+          ? { paths: {}, created: new Set<string>() }
+          : await real.call(this, from, to);
       });
     const snapshot = await counts(harness.db);
 

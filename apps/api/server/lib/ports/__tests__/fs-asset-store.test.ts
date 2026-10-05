@@ -159,7 +159,7 @@ describe("FsAssetStore", () => {
     mkdirSync(join(dir, "camp-src", "sub", "dir"), { recursive: true });
     writeFileSync(join(dir, "camp-src", "sub", "dir", "nested.png"), pngBytes);
 
-    const map = await store.copyAssets("camp-src", "camp-dst");
+    const { paths: map, created } = await store.copyAssets("camp-src", "camp-dst");
 
     expect(existsSync(join(dir, "camp-dst", "logo.png"))).toBe(true);
     expect(existsSync(join(dir, "camp-dst", "bg.jpg"))).toBe(true);
@@ -173,6 +173,12 @@ describe("FsAssetStore", () => {
     expect(map["assets/inputs/camp-src/sub/dir/nested.png"]).toBe(
       "assets/inputs/camp-dst/sub/dir/nested.png",
     );
+    // Every source file was fresh-copied: `created` has exactly as many entries
+    // as sources, and each relPath is in it.
+    expect(created.size).toBe(3);
+    expect(created.has("logo.png")).toBe(true);
+    expect(created.has("bg.jpg")).toBe(true);
+    expect(created.has("sub/dir/nested.png")).toBe(true);
   });
 
   test("copyAssets disambiguates same-name assets with differing content from multiple sources", async () => {
@@ -180,18 +186,26 @@ describe("FsAssetStore", () => {
     await store.writeAsset("src-a", "logo.png", pngBytes);
     await store.writeAsset("src-b", "logo.png", diffPngBytes);
 
-    const mapA = await store.copyAssets("src-a", "target");
-    const mapB = await store.copyAssets("src-b", "target");
+    const { paths: mapA, created: createdA } = await store.copyAssets("src-a", "target");
+    const { paths: mapB, created: createdB } = await store.copyAssets("src-b", "target");
 
     expect(mapA["logo.png"]).toBe("logo.png");
     expect(mapB["logo.png"]).toBe("logo-src-b.png");
+    // Both copied fresh: `created` holds each copy's target relPath.
+    expect(createdA.size).toBe(1);
+    expect(createdA.has("logo.png")).toBe(true);
+    expect(createdB.size).toBe(1);
+    expect(createdB.has("logo-src-b.png")).toBe(true);
 
     expect(readFileSync(join(dir, "target", "logo.png"))).toEqual(pngBytes);
     expect(readFileSync(join(dir, "target", "logo-src-b.png"))).toEqual(diffPngBytes);
 
     // If copying same bytes again, does not create duplicate
-    const mapC = await store.copyAssets("src-a", "target");
+    const { paths: mapC, created: createdC } = await store.copyAssets("src-a", "target");
     expect(mapC["logo.png"]).toBe("logo.png");
+    // `logo.png` already held these exact bytes — a sha-deduped reuse, so `created` is empty.
+    expect(createdC.size).toBe(0);
+    expect(createdC.has("logo.png")).toBe(false);
 
     // Pre-populate target to exercise candidate collision loop and candidate reuse
     const diffPngBytes2 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x11, 0x22, 0x33]);
@@ -201,13 +215,19 @@ describe("FsAssetStore", () => {
       "logo-src-c.png",
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xaa, 0xbb, 0xcc]),
     );
-    const mapD = await store.copyAssets("src-c", "target");
+    const { paths: mapD, created: createdD } = await store.copyAssets("src-c", "target");
     expect(mapD["logo.png"]).toBe("logo-src-c-2.png");
     expect(readFileSync(join(dir, "target", "logo-src-c-2.png"))).toEqual(diffPngBytes2);
+    // `logo-src-c-2.png` is a fresh name: `created` holds it.
+    expect(createdD.size).toBe(1);
+    expect(createdD.has("logo-src-c-2.png")).toBe(true);
 
     // If copying src-c again with identical bytes, it matches existing candidate bytes and reuses logo-src-c-2.png
-    const mapE = await store.copyAssets("src-c", "target");
+    const { paths: mapE, created: createdE } = await store.copyAssets("src-c", "target");
     expect(mapE["logo.png"]).toBe("logo-src-c-2.png");
+    // Same bytes under the suffixed candidate — a sha-deduped reuse, so `created` is empty.
+    expect(createdE.size).toBe(0);
+    expect(createdE.has("logo-src-c-2.png")).toBe(false);
 
     // Nested directory collision disambiguation
     mkdirSync(join(dir, "src-nested-a", "sub", "dir"), { recursive: true });
@@ -220,23 +240,63 @@ describe("FsAssetStore", () => {
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x99]),
     );
 
-    const mapNestA = await store.copyAssets("src-nested-a", "target");
-    const mapNestB = await store.copyAssets("src-nested-b", "target");
+    const { paths: mapNestA, created: createdNestA } = await store.copyAssets(
+      "src-nested-a",
+      "target",
+    );
+    const { paths: mapNestB, created: createdNestB } = await store.copyAssets(
+      "src-nested-b",
+      "target",
+    );
     expect(mapNestA["sub/dir/icon.png"]).toBe("sub/dir/icon.png");
     expect(mapNestB["sub/dir/icon.png"]).toBe("sub/dir/icon-src-nested-b-2.png");
     expect(readFileSync(join(dir, "target", "sub", "dir", "icon-src-nested-b-2.png"))).toEqual(
       diffPngBytes,
     );
+    // Both nested copies are fresh names: `created` holds each.
+    expect(createdNestA.size).toBe(1);
+    expect(createdNestA.has("sub/dir/icon.png")).toBe(true);
+    expect(createdNestB.size).toBe(1);
+    expect(createdNestB.has("sub/dir/icon-src-nested-b-2.png")).toBe(true);
   });
 
   test("copyAssets handles same source and destination, missing source, or empty source gracefully", async () => {
-    expect(await store.copyAssets("same-id", "same-id")).toEqual({}); // No-op
-    expect(await store.copyAssets("missing-src", "dst")).toEqual({}); // No-op
-    expect(await store.copyAssets("../invalid-src", "dst")).toEqual({}); // No-op
+    expect(await store.copyAssets("same-id", "same-id")).toEqual({ paths: {}, created: new Set() }); // No-op
+    expect(await store.copyAssets("missing-src", "dst")).toEqual({ paths: {}, created: new Set() }); // No-op
+    expect(await store.copyAssets("../invalid-src", "dst")).toEqual({
+      paths: {},
+      created: new Set(),
+    }); // No-op
 
     mkdirSync(join(dir, "empty-src"), { recursive: true });
-    expect(await store.copyAssets("empty-src", "dst")).toEqual({});
+    expect(await store.copyAssets("empty-src", "dst")).toEqual({ paths: {}, created: new Set() });
     expect(existsSync(join(dir, "dst"))).toBe(false);
+  });
+
+  test("copyAssets marks a fresh copy as created", async () => {
+    // Every source file is fresh: `created` has exactly as many entries as
+    // sources, and each target relPath is in it.
+    await store.writeAsset("src-fresh", "logo.png", pngBytes);
+    await store.writeAsset("src-fresh", "bg.jpg", jpegBytes);
+
+    const { paths, created } = await store.copyAssets("src-fresh", "dst-fresh");
+    expect(created.size).toBe(2);
+    expect(created.has("logo.png")).toBe(true);
+    expect(created.has("bg.jpg")).toBe(true);
+    expect(paths["logo.png"]).toBe("logo.png");
+    expect(paths["bg.jpg"]).toBe("bg.jpg");
+  });
+
+  test("copyAssets never marks a sha-deduped reuse as created", async () => {
+    // The target already holds the same bytes under the same name: a sha-deduped
+    // reuse, so nothing is minted and `created` is empty.
+    await store.writeAsset("src-reuse", "logo.png", pngBytes);
+    await store.writeAsset("target-reuse", "logo.png", pngBytes);
+
+    const { paths, created } = await store.copyAssets("src-reuse", "target-reuse");
+    expect(created.size).toBe(0);
+    expect(created.has("logo.png")).toBe(false);
+    expect(paths["logo.png"]).toBe("logo.png");
   });
 
   describe("deleteAssets (PT-5b2 fix-round item 2)", () => {

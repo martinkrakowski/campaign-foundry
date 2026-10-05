@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-9e1-copy-marks-created",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "      if (destination.reused) continue;\n      created.add(assetId);",
+      "after": "      created.add(assetId);\n      if (destination.reused) continue;",
+      "because": "a reused, sha-deduped destination would then be wrongly added to `created` before the `continue` short-circuits the rest of the loop body — the test that catches it asserts a reused id is absent from `created`, and under the mutant it is present.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store-copy.test.ts",
+        "-t",
+        "copyAssets never marks a sha-deduped reuse as created"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

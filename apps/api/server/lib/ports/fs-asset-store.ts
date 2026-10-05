@@ -3,7 +3,12 @@ import { basename, dirname, extname, resolve } from "node:path";
 import { resolveConfined } from "../confined-path.js";
 import { ASSET_NAME_PATTERN, assetContentType } from "../asset-files.js";
 import type { ObjectKey } from "@campaignfoundry/CampaignOrchestration";
-import type { AssetEntry, AssetOwner, AssetStorePort } from "./asset-store.port.js";
+import type {
+  AssetCopyResult,
+  AssetEntry,
+  AssetOwner,
+  AssetStorePort,
+} from "./asset-store.port.js";
 
 /**
  * Filesystem implementation of AssetStorePort.
@@ -120,15 +125,15 @@ export class FsAssetStore implements AssetStorePort {
     return assets.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  async copyAssets(fromBriefId: string, toBriefId: string): Promise<Record<string, string>> {
-    if (fromBriefId === toBriefId) return {};
+  async copyAssets(fromBriefId: string, toBriefId: string): Promise<AssetCopyResult> {
+    if (fromBriefId === toBriefId) return { paths: {}, created: new Set() };
     let sourceDir: string;
     let targetDir: string;
     try {
       sourceDir = this.briefDir(fromBriefId);
       targetDir = this.briefDir(toBriefId);
     } catch {
-      return {};
+      return { paths: {}, created: new Set() };
     }
 
     const collectFiles = async (currentDir: string, relPrefix = ""): Promise<string[]> => {
@@ -151,16 +156,18 @@ export class FsAssetStore implements AssetStorePort {
     };
 
     const sourceFiles = await collectFiles(sourceDir);
-    if (sourceFiles.length === 0) return {};
+    if (sourceFiles.length === 0) return { paths: {}, created: new Set() };
 
     await mkdir(targetDir, { recursive: true });
     const pathMap: Record<string, string> = {};
+    const created = new Set<string>();
 
     for (const relPath of sourceFiles) {
       const srcPath = resolveConfined(sourceDir, relPath);
       const srcBytes = await readFile(srcPath);
 
       let destRelPath = relPath;
+      let reused = false;
       const destCandidate = resolveConfined(targetDir, destRelPath);
       try {
         const existingBytes = await readFile(destCandidate);
@@ -177,6 +184,7 @@ export class FsAssetStore implements AssetStorePort {
               const candBytes = await readFile(resolveConfined(targetDir, candidateRel));
               if (Buffer.compare(srcBytes, candBytes) === 0) {
                 destRelPath = candidateRel;
+                reused = true;
                 break;
               }
             } catch {
@@ -187,6 +195,9 @@ export class FsAssetStore implements AssetStorePort {
             candidateName = `${parsedStem}-${fromBriefId}-${counter}${parsedExt}`;
             candidateRel = parsedDir === "." ? candidateName : `${parsedDir}/${candidateName}`;
           }
+        } else {
+          // The plain candidate already carries these exact bytes: a sha-deduped reuse.
+          reused = true;
         }
       } catch {
         // Destination file does not exist yet; use destRelPath as-is
@@ -196,12 +207,13 @@ export class FsAssetStore implements AssetStorePort {
       await mkdir(dirname(destPath), { recursive: true });
       await writeFile(destPath, srcBytes);
 
+      if (!reused) created.add(destRelPath);
       pathMap[relPath] = destRelPath;
       pathMap[`assets/inputs/${fromBriefId}/${relPath}`] =
         `assets/inputs/${toBriefId}/${destRelPath}`;
     }
 
-    return pathMap;
+    return { paths: pathMap, created };
   }
 
   /** See `AssetStorePort.deleteAssets` (PT-5b2 fix-round item 2). */
