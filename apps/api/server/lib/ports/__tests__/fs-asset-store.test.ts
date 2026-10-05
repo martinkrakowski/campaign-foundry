@@ -1,5 +1,6 @@
-import { describe, test, expect, beforeEach, afterEach } from "vitest";
+import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FsAssetStore } from "../fs-asset-store.js";
@@ -10,6 +11,48 @@ const mp3Bytes = Buffer.from([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x
 const m4aBytes = Buffer.from([
   0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x4d, 0x34, 0x41, 0x20, 0x00, 0x00, 0x02, 0x00,
 ]);
+
+/**
+ * One-shot ENOENT hook for `readFile` — only the first read of `failPath`
+ * throws; all other reads delegate to the real implementation.
+ */
+const fsRace = vi.hoisted(() => ({
+  failNextRead: false,
+  failPath: "",
+  failed: false,
+  writeErrorPath: "",
+  writeErrorCode: "",
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    readFile: vi.fn(async (...args: unknown[]) => {
+      const path = args[0];
+      if (
+        fsRace.failNextRead &&
+        typeof path === "string" &&
+        path === fsRace.failPath &&
+        !fsRace.failed
+      ) {
+        fsRace.failed = true;
+        const err = new Error("ENOENT: no such file or directory") as Error & { code: string };
+        err.code = "ENOENT";
+        throw err;
+      }
+      return (actual.readFile as (...args: unknown[]) => Promise<unknown>)(...args);
+    }),
+    writeFile: vi.fn(async (...args: unknown[]) => {
+      if (fsRace.writeErrorPath !== "" && args[0] === fsRace.writeErrorPath) {
+        const err = new Error(`${fsRace.writeErrorCode}: planted`) as Error & { code: string };
+        err.code = fsRace.writeErrorCode;
+        throw err;
+      }
+      return (actual.writeFile as (...args: unknown[]) => Promise<unknown>)(...args);
+    }),
+  };
+});
 
 describe("FsAssetStore", () => {
   let dir: string;
@@ -22,6 +65,11 @@ describe("FsAssetStore", () => {
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
+    fsRace.failNextRead = false;
+    fsRace.failPath = "";
+    fsRace.failed = false;
+    fsRace.writeErrorPath = "";
+    fsRace.writeErrorCode = "";
   });
 
   test("getBaseDir returns base directory", () => {
@@ -159,7 +207,7 @@ describe("FsAssetStore", () => {
     mkdirSync(join(dir, "camp-src", "sub", "dir"), { recursive: true });
     writeFileSync(join(dir, "camp-src", "sub", "dir", "nested.png"), pngBytes);
 
-    const map = await store.copyAssets("camp-src", "camp-dst");
+    const { paths: map, created } = await store.copyAssets("camp-src", "camp-dst");
 
     expect(existsSync(join(dir, "camp-dst", "logo.png"))).toBe(true);
     expect(existsSync(join(dir, "camp-dst", "bg.jpg"))).toBe(true);
@@ -173,6 +221,12 @@ describe("FsAssetStore", () => {
     expect(map["assets/inputs/camp-src/sub/dir/nested.png"]).toBe(
       "assets/inputs/camp-dst/sub/dir/nested.png",
     );
+    // Every source file was fresh-copied: `created` has exactly as many entries
+    // as sources, and each relPath is in it.
+    expect(created.size).toBe(3);
+    expect(created.has("logo.png")).toBe(true);
+    expect(created.has("bg.jpg")).toBe(true);
+    expect(created.has("sub/dir/nested.png")).toBe(true);
   });
 
   test("copyAssets disambiguates same-name assets with differing content from multiple sources", async () => {
@@ -180,18 +234,26 @@ describe("FsAssetStore", () => {
     await store.writeAsset("src-a", "logo.png", pngBytes);
     await store.writeAsset("src-b", "logo.png", diffPngBytes);
 
-    const mapA = await store.copyAssets("src-a", "target");
-    const mapB = await store.copyAssets("src-b", "target");
+    const { paths: mapA, created: createdA } = await store.copyAssets("src-a", "target");
+    const { paths: mapB, created: createdB } = await store.copyAssets("src-b", "target");
 
     expect(mapA["logo.png"]).toBe("logo.png");
     expect(mapB["logo.png"]).toBe("logo-src-b.png");
+    // Both copied fresh: `created` holds each copy's target relPath.
+    expect(createdA.size).toBe(1);
+    expect(createdA.has("logo.png")).toBe(true);
+    expect(createdB.size).toBe(1);
+    expect(createdB.has("logo-src-b.png")).toBe(true);
 
     expect(readFileSync(join(dir, "target", "logo.png"))).toEqual(pngBytes);
     expect(readFileSync(join(dir, "target", "logo-src-b.png"))).toEqual(diffPngBytes);
 
     // If copying same bytes again, does not create duplicate
-    const mapC = await store.copyAssets("src-a", "target");
+    const { paths: mapC, created: createdC } = await store.copyAssets("src-a", "target");
     expect(mapC["logo.png"]).toBe("logo.png");
+    // `logo.png` already held these exact bytes — a sha-deduped reuse, so `created` is empty.
+    expect(createdC.size).toBe(0);
+    expect(createdC.has("logo.png")).toBe(false);
 
     // Pre-populate target to exercise candidate collision loop and candidate reuse
     const diffPngBytes2 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x11, 0x22, 0x33]);
@@ -201,13 +263,19 @@ describe("FsAssetStore", () => {
       "logo-src-c.png",
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xaa, 0xbb, 0xcc]),
     );
-    const mapD = await store.copyAssets("src-c", "target");
+    const { paths: mapD, created: createdD } = await store.copyAssets("src-c", "target");
     expect(mapD["logo.png"]).toBe("logo-src-c-2.png");
     expect(readFileSync(join(dir, "target", "logo-src-c-2.png"))).toEqual(diffPngBytes2);
+    // `logo-src-c-2.png` is a fresh name: `created` holds it.
+    expect(createdD.size).toBe(1);
+    expect(createdD.has("logo-src-c-2.png")).toBe(true);
 
     // If copying src-c again with identical bytes, it matches existing candidate bytes and reuses logo-src-c-2.png
-    const mapE = await store.copyAssets("src-c", "target");
+    const { paths: mapE, created: createdE } = await store.copyAssets("src-c", "target");
     expect(mapE["logo.png"]).toBe("logo-src-c-2.png");
+    // Same bytes under the suffixed candidate — a sha-deduped reuse, so `created` is empty.
+    expect(createdE.size).toBe(0);
+    expect(createdE.has("logo-src-c-2.png")).toBe(false);
 
     // Nested directory collision disambiguation
     mkdirSync(join(dir, "src-nested-a", "sub", "dir"), { recursive: true });
@@ -220,23 +288,143 @@ describe("FsAssetStore", () => {
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x99]),
     );
 
-    const mapNestA = await store.copyAssets("src-nested-a", "target");
-    const mapNestB = await store.copyAssets("src-nested-b", "target");
+    const { paths: mapNestA, created: createdNestA } = await store.copyAssets(
+      "src-nested-a",
+      "target",
+    );
+    const { paths: mapNestB, created: createdNestB } = await store.copyAssets(
+      "src-nested-b",
+      "target",
+    );
     expect(mapNestA["sub/dir/icon.png"]).toBe("sub/dir/icon.png");
     expect(mapNestB["sub/dir/icon.png"]).toBe("sub/dir/icon-src-nested-b-2.png");
     expect(readFileSync(join(dir, "target", "sub", "dir", "icon-src-nested-b-2.png"))).toEqual(
       diffPngBytes,
     );
+    // Both nested copies are fresh names: `created` holds each.
+    expect(createdNestA.size).toBe(1);
+    expect(createdNestA.has("sub/dir/icon.png")).toBe(true);
+    expect(createdNestB.size).toBe(1);
+    expect(createdNestB.has("sub/dir/icon-src-nested-b-2.png")).toBe(true);
   });
 
   test("copyAssets handles same source and destination, missing source, or empty source gracefully", async () => {
-    expect(await store.copyAssets("same-id", "same-id")).toEqual({}); // No-op
-    expect(await store.copyAssets("missing-src", "dst")).toEqual({}); // No-op
-    expect(await store.copyAssets("../invalid-src", "dst")).toEqual({}); // No-op
+    expect(await store.copyAssets("same-id", "same-id")).toEqual({ paths: {}, created: new Set() }); // No-op
+    expect(await store.copyAssets("missing-src", "dst")).toEqual({ paths: {}, created: new Set() }); // No-op
+    expect(await store.copyAssets("../invalid-src", "dst")).toEqual({
+      paths: {},
+      created: new Set(),
+    }); // No-op
 
     mkdirSync(join(dir, "empty-src"), { recursive: true });
-    expect(await store.copyAssets("empty-src", "dst")).toEqual({});
+    expect(await store.copyAssets("empty-src", "dst")).toEqual({ paths: {}, created: new Set() });
     expect(existsSync(join(dir, "dst"))).toBe(false);
+  });
+
+  test("copyAssets marks a fresh copy as created", async () => {
+    // Every source file is fresh: `created` has exactly as many entries as
+    // sources, and each target relPath is in it.
+    await store.writeAsset("src-fresh", "logo.png", pngBytes);
+    await store.writeAsset("src-fresh", "bg.jpg", jpegBytes);
+
+    const { paths, created } = await store.copyAssets("src-fresh", "dst-fresh");
+    expect(created.size).toBe(2);
+    expect(created.has("logo.png")).toBe(true);
+    expect(created.has("bg.jpg")).toBe(true);
+    expect(paths["logo.png"]).toBe("logo.png");
+    expect(paths["bg.jpg"]).toBe("bg.jpg");
+  });
+
+  test("copyAssets never marks a sha-deduped reuse as created", async () => {
+    // The target already holds the same bytes under the same name: a sha-deduped
+    // reuse, so nothing is minted and `created` is empty.
+    await store.writeAsset("src-reuse", "logo.png", pngBytes);
+    await store.writeAsset("target-reuse", "logo.png", pngBytes);
+
+    const { paths, created } = await store.copyAssets("src-reuse", "target-reuse");
+    expect(created.size).toBe(0);
+    expect(created.has("logo.png")).toBe(false);
+    expect(paths["logo.png"]).toBe("logo.png");
+  });
+
+  test("copyAssets never overwrites or claims a file an upload created mid-copy", async () => {
+    // The "upload": different bytes at the plain destination that appear
+    // between the copy's read (ENOENT) and its wx write (EEXIST).
+    const uploadBytes = Buffer.from([0xff, 0x00, 0xff, 0x00]);
+    const uploadPath = join(dir, "target", "logo.png");
+    mkdirSync(join(dir, "target"), { recursive: true });
+    writeFileSync(uploadPath, uploadBytes);
+
+    // Source carries different bytes.
+    await store.writeAsset("src-race", "logo.png", pngBytes);
+
+    // The copy's first read of the target answers ENOENT (the upload appeared
+    // between the copy's read and its wx write); all later reads see the real file.
+    fsRace.failNextRead = true;
+    fsRace.failPath = uploadPath;
+
+    const { paths, created } = await store.copyAssets("src-race", "target");
+
+    // (a) the upload's bytes are unchanged — the copy never overwrote them
+    expect(readFileSync(uploadPath)).toEqual(uploadBytes);
+    // (b) the upload's path is NOT in created
+    expect(created.has("logo.png")).toBe(false);
+    // (c) the source landed at a disambiguated path, which IS in created, and
+    //     paths maps the original name to it
+    expect(created.has("logo-src-race.png")).toBe(true);
+    expect(paths["logo.png"]).toBe("logo-src-race.png");
+  });
+
+  test("copyAssets rejects a destination that is a directory instead of retrying forever", async () => {
+    // Only ENOENT means "nothing is here". Read as absent, a directory at the
+    // destination makes every `wx` write answer EEXIST and the re-decide loop spins.
+    await store.writeAsset("src-dir", "logo.png", pngBytes);
+    mkdirSync(join(dir, "dst-dir", "logo.png"), { recursive: true });
+
+    await expect(store.copyAssets("src-dir", "dst-dir")).rejects.toMatchObject({ code: "EISDIR" });
+  }, 5_000);
+
+  test("copyAssets rethrows a write failure that is not EEXIST instead of retrying", async () => {
+    // Only EEXIST means "an upload got here first, decide again"; any other write
+    // failure (here a planted EACCES) is the copy's own error and must surface.
+    await store.writeAsset("src-wfail", "logo.png", pngBytes);
+    fsRace.writeErrorPath = join(dir, "dst-wfail", "logo.png");
+    fsRace.writeErrorCode = "EACCES";
+
+    await expect(store.copyAssets("src-wfail", "dst-wfail")).rejects.toMatchObject({
+      code: "EACCES",
+    });
+  }, 5_000);
+
+  test("copyAssets rejects a disambiguation candidate that is a directory", async () => {
+    // The same ENOENT-only rule inside the candidate walk: the plain name holds other
+    // bytes, and the first `-<source>` candidate is a directory, not a free name.
+    await store.writeAsset("src-cand", "logo.png", pngBytes);
+    await store.writeAsset("dst-cand", "logo.png", jpegBytes);
+    mkdirSync(join(dir, "dst-cand", "logo-src-cand.png"), { recursive: true });
+
+    await expect(store.copyAssets("src-cand", "dst-cand")).rejects.toMatchObject({
+      code: "EISDIR",
+    });
+  }, 5_000);
+
+  test("copyAssets does not rewrite a sha-deduped reuse", async () => {
+    await store.writeAsset("src-reuse", "logo.png", pngBytes);
+    await store.writeAsset("target-reuse", "logo.png", pngBytes);
+
+    const reusedPath = join(dir, "target-reuse", "logo.png");
+    vi.mocked(writeFile).mockClear();
+
+    const { paths, created } = await store.copyAssets("src-reuse", "target-reuse");
+
+    // No write happened to the reused path: the copy's read found matching bytes
+    // and skipped the write. Asserted on the call itself, not `mtimeMs`, which a
+    // same-tick rewrite on a coarse-timestamp filesystem would leave unchanged.
+    expect(vi.mocked(writeFile).mock.calls.some((call) => call[0] === reusedPath)).toBe(false);
+    // The reused path is NOT in created.
+    expect(created.has("logo.png")).toBe(false);
+    // paths still maps correctly (the name maps to itself).
+    expect(paths["logo.png"]).toBe("logo.png");
   });
 
   describe("deleteAssets (PT-5b2 fix-round item 2)", () => {

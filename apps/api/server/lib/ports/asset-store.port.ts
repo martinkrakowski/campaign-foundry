@@ -65,6 +65,19 @@ export interface AssetOwner {
 }
 
 /**
+ * `copyAssets`'s answer, split so a caller that only rewrites paths (every
+ * production caller today) is unaffected and a caller that must know which
+ * target ids this call minted — never a reused, sha-deduped id — can ask
+ * (D237, wired in PT-9e2). `paths` is byte-for-byte what `copyAssets` returned
+ * before this lane; `created` is additive, nothing in `paths` changed shape or
+ * content.
+ */
+export interface AssetCopyResult {
+  readonly paths: Record<string, string>;
+  readonly created: ReadonlySet<string>;
+}
+
+/**
  * Port for storing, retrieving, listing, and copying assets.
  *
  * Abstracts local filesystem storage under `assets/inputs/` so cloud storage
@@ -140,11 +153,11 @@ export interface AssetStorePort {
   /**
    * Copy all brief-scoped assets from one brief to another (`fromBriefId` -> `toBriefId`).
    * Creates the target asset directory/prefix if missing. Preserves nested paths and disambiguates collisions.
-   * Returns a map of relative source asset path -> relative destination asset
-   * path, plus — on the backends that have ids — the source asset's path and id
-   * each mapped to the TARGET asset's id (PT-4k1).
+   * Returns `{ paths, created }` — `paths` is the map of relative source path / id to destination path or id
+   * (unchanged shape); `created` holds the ids (pg) or relative paths (fs) this call actually minted,
+   * never a sha-deduped reuse.
    */
-  copyAssets(fromBriefId: string, toBriefId: string): Promise<Record<string, string>>;
+  copyAssets(fromBriefId: string, toBriefId: string): Promise<AssetCopyResult>;
 
   /**
    * Delete every asset stored under a brief (PT-5b2 fix-round item 2: undoing

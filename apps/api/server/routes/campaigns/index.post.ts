@@ -413,7 +413,7 @@ export default defineEventHandler(async (event) => {
         // already the id of a row the caller can see, and `template` still carries the
         // paths (or the source's own ids) the copy below would then have nothing to map.
         let brief: CampaignBrief = { ...resolved.brief, id: targetSlug };
-        const sourceMap = await getAssetStore(scope).copyAssets(sourceSlug, targetSlug);
+        const { paths: sourceMap } = await getAssetStore(scope).copyAssets(sourceSlug, targetSlug);
         brief = rewriteAssetPaths(brief, sourceSlug, targetSlug, sourceMap);
         // Every OTHER campaign the source named, in the order the resolve found them.
         // Under `s3` this is what carries a THIRD campaign's id over (carry item 2); off

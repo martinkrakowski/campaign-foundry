@@ -11,6 +11,7 @@ import { inputKey, inputPrefix } from "../object-store/object-keys.js";
 import type { SqlClient } from "../db/sql-client.js";
 import {
   isAssetId,
+  type AssetCopyResult,
   type AssetEntry,
   type AssetOwner,
   type AssetStorePort,
@@ -393,17 +394,18 @@ export class ObjectAssetStore implements AssetStorePort {
    * only, is now seen by all four write routes (`briefs.post`, `briefs/[id].put`,
    * `duplicate.post`, `index.post`), and off `s3` the path-derived rule is unchanged.
    */
-  async copyAssets(fromBriefId: string, toBriefId: string): Promise<Record<string, string>> {
-    if (fromBriefId === toBriefId) return {};
+  async copyAssets(fromBriefId: string, toBriefId: string): Promise<AssetCopyResult> {
+    if (fromBriefId === toBriefId) return { paths: {}, created: new Set() };
     const [fromId, toId] = await Promise.all([
       this.resolveCampaignId(fromBriefId),
       this.resolveCampaignId(toBriefId),
     ]);
-    if (fromId === undefined || toId === undefined) return {};
+    if (fromId === undefined || toId === undefined) return { paths: {}, created: new Set() };
     const sources = await this.campaignAssets(fromId);
-    if (sources.length === 0) return {};
+    if (sources.length === 0) return { paths: {}, created: new Set() };
 
     const pathMap: Record<string, string> = {};
+    const created = new Set<string>();
     for (const source of sources) {
       const destination = await this.destination(toId, fromBriefId, source);
       // FIRST, so all three entries can name it: a reused asset already has an
@@ -418,6 +420,7 @@ export class ObjectAssetStore implements AssetStorePort {
       // the caller asked for. This is what makes a duplicated campaign, or a
       // replace-save over an already-copied asset, idempotent.
       if (destination.reused) continue;
+      created.add(assetId);
       const targetKey = inputKey(this.orgId, toId, assetId);
       try {
         // INSIDE the try, because a copy can fail AFTER it wrote: S3 answers
@@ -457,7 +460,7 @@ export class ObjectAssetStore implements AssetStorePort {
         throw error;
       }
     }
-    return pathMap;
+    return { paths: pathMap, created };
   }
 
   /**

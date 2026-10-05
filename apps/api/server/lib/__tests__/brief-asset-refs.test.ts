@@ -636,7 +636,10 @@ describe("resolveBriefAssetRefs — render mode under s3 (PT-4k2a, D208 D, D210 
       // The race the check exists for: `copyAssets` copies the rows that exist WHEN it
       // runs, so a row deleted between the resolve and the copy is simply missing from
       // the map — the id survives the rewrite untouched and no other check can see it.
-      vi.spyOn(ObjectAssetStore.prototype, "copyAssets").mockResolvedValue({});
+      vi.spyOn(ObjectAssetStore.prototype, "copyAssets").mockResolvedValue({
+        paths: {},
+        created: new Set<string>(),
+      });
       const copied = await copyBriefRefs(CALLER, resolved.brief, resolved.copyFrom, RUN);
       expect(readRef(copied, "products[].logoPath")).toBe(ids[FRIEND_ALT]!);
       expect(() => assertRefsCopied(copied, resolved.foreignIds, RUN)).toThrow(

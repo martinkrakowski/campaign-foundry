@@ -3,7 +3,26 @@ import { basename, dirname, extname, resolve } from "node:path";
 import { resolveConfined } from "../confined-path.js";
 import { ASSET_NAME_PATTERN, assetContentType } from "../asset-files.js";
 import type { ObjectKey } from "@campaignfoundry/CampaignOrchestration";
-import type { AssetEntry, AssetOwner, AssetStorePort } from "./asset-store.port.js";
+import type {
+  AssetCopyResult,
+  AssetEntry,
+  AssetOwner,
+  AssetStorePort,
+} from "./asset-store.port.js";
+
+/**
+ * Whether an error is the fs error `code` names. `copyAssets` needs two: `EEXIST`,
+ * the one a `{ flag: "wx" }` write throws when an upload raced in between our read
+ * and our write; and `ENOENT`, the only read failure that means "nothing is here".
+ * Any other read failure (`EISDIR`, `EACCES`) must propagate: read as "absent",
+ * an `EISDIR` destination makes every `wx` write answer `EEXIST` and the
+ * re-decide loop would never end.
+ */
+function hasErrorCode(error: unknown, code: string): boolean {
+  // `Object(…)` boxes a primitive and maps null/undefined to `{}`, so any thrown
+  // value is safe to read `.code` from without a branch per shape.
+  return (Object(error) as { code?: unknown }).code === code;
+}
 
 /**
  * Filesystem implementation of AssetStorePort.
@@ -120,15 +139,15 @@ export class FsAssetStore implements AssetStorePort {
     return assets.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  async copyAssets(fromBriefId: string, toBriefId: string): Promise<Record<string, string>> {
-    if (fromBriefId === toBriefId) return {};
+  async copyAssets(fromBriefId: string, toBriefId: string): Promise<AssetCopyResult> {
+    if (fromBriefId === toBriefId) return { paths: {}, created: new Set() };
     let sourceDir: string;
     let targetDir: string;
     try {
       sourceDir = this.briefDir(fromBriefId);
       targetDir = this.briefDir(toBriefId);
     } catch {
-      return {};
+      return { paths: {}, created: new Set() };
     }
 
     const collectFiles = async (currentDir: string, relPrefix = ""): Promise<string[]> => {
@@ -151,57 +170,83 @@ export class FsAssetStore implements AssetStorePort {
     };
 
     const sourceFiles = await collectFiles(sourceDir);
-    if (sourceFiles.length === 0) return {};
+    if (sourceFiles.length === 0) return { paths: {}, created: new Set() };
 
     await mkdir(targetDir, { recursive: true });
     const pathMap: Record<string, string> = {};
+    const created = new Set<string>();
 
     for (const relPath of sourceFiles) {
       const srcPath = resolveConfined(sourceDir, relPath);
       const srcBytes = await readFile(srcPath);
 
-      let destRelPath = relPath;
-      const destCandidate = resolveConfined(targetDir, destRelPath);
-      try {
-        const existingBytes = await readFile(destCandidate);
-        if (Buffer.compare(srcBytes, existingBytes) !== 0) {
-          // Collision with different contents: disambiguate path
-          const parsedExt = extname(relPath);
-          const parsedDir = dirname(relPath);
-          const parsedStem = basename(relPath, parsedExt);
-          let counter = 1;
-          let candidateName = `${parsedStem}-${fromBriefId}${parsedExt}`;
-          let candidateRel = parsedDir === "." ? candidateName : `${parsedDir}/${candidateName}`;
-          while (true) {
-            try {
-              const candBytes = await readFile(resolveConfined(targetDir, candidateRel));
-              if (Buffer.compare(srcBytes, candBytes) === 0) {
+      // An upload (no brief lock, `assets.post.ts:105`) can create the
+      // destination between our read and our write; `wx` rejects that case,
+      // and each EEXIST means the tree grew, so re-deciding always terminates.
+      let destRelPath: string;
+      let reused: boolean;
+      while (true) {
+        destRelPath = relPath;
+        reused = false;
+        const destCandidate = resolveConfined(targetDir, destRelPath);
+        try {
+          const existingBytes = await readFile(destCandidate);
+          if (Buffer.compare(srcBytes, existingBytes) !== 0) {
+            // Collision with different contents: disambiguate path
+            const parsedExt = extname(relPath);
+            const parsedDir = dirname(relPath);
+            const parsedStem = basename(relPath, parsedExt);
+            let counter = 1;
+            let candidateName = `${parsedStem}-${fromBriefId}${parsedExt}`;
+            let candidateRel = parsedDir === "." ? candidateName : `${parsedDir}/${candidateName}`;
+            while (true) {
+              try {
+                const candBytes = await readFile(resolveConfined(targetDir, candidateRel));
+                if (Buffer.compare(srcBytes, candBytes) === 0) {
+                  destRelPath = candidateRel;
+                  reused = true;
+                  break;
+                }
+              } catch (error) {
+                if (!hasErrorCode(error, "ENOENT")) throw error;
                 destRelPath = candidateRel;
                 break;
               }
-            } catch {
-              destRelPath = candidateRel;
-              break;
+              counter++;
+              candidateName = `${parsedStem}-${fromBriefId}-${counter}${parsedExt}`;
+              candidateRel = parsedDir === "." ? candidateName : `${parsedDir}/${candidateName}`;
             }
-            counter++;
-            candidateName = `${parsedStem}-${fromBriefId}-${counter}${parsedExt}`;
-            candidateRel = parsedDir === "." ? candidateName : `${parsedDir}/${candidateName}`;
+          } else {
+            // The plain candidate already carries these exact bytes: a sha-deduped reuse.
+            reused = true;
           }
+        } catch (error) {
+          // Destination file does not exist yet; use destRelPath as-is
+          if (!hasErrorCode(error, "ENOENT")) throw error;
         }
-      } catch {
-        // Destination file does not exist yet; use destRelPath as-is
+
+        if (reused) break;
+
+        const destPath = resolveConfined(targetDir, destRelPath);
+        await mkdir(dirname(destPath), { recursive: true });
+        try {
+          // `wx` not `w`: an upload may have appeared at this path since the
+          // read above (uploads take no brief lock, `assets.post.ts:105`).
+          await writeFile(destPath, srcBytes, { flag: "wx" });
+          break;
+        } catch (error) {
+          if (hasErrorCode(error, "EEXIST")) continue;
+          throw error;
+        }
       }
 
-      const destPath = resolveConfined(targetDir, destRelPath);
-      await mkdir(dirname(destPath), { recursive: true });
-      await writeFile(destPath, srcBytes);
-
+      if (!reused) created.add(destRelPath);
       pathMap[relPath] = destRelPath;
       pathMap[`assets/inputs/${fromBriefId}/${relPath}`] =
         `assets/inputs/${toBriefId}/${destRelPath}`;
     }
 
-    return pathMap;
+    return { paths: pathMap, created };
   }
 
   /** See `AssetStorePort.deleteAssets` (PT-5b2 fix-round item 2). */
