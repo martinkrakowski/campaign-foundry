@@ -62,6 +62,7 @@ describe.skipIf(!url)("PgJobStore.acquireJob races two real connections (PT-6a)"
        values ($1, $2, $3, 'running', now() - interval '1 second', now())`,
       [lapsedId, "local", campaignId],
     );
+    await db.query(`insert into campaign (org_id, slug) values ('local', $1)`, [campaignId]);
 
     const [a, b] = await Promise.all([store.acquireJob(campaignId), store.acquireJob(campaignId)]);
     const outcomes = [a, b];
@@ -84,6 +85,7 @@ describe.skipIf(!url)("PgJobStore.acquireJob races two real connections (PT-6a)"
   test("a fresh campaign under real concurrency still admits only one claim", async () => {
     const store = new PgJobStore(db, "local");
     const campaignId = `fresh-${randomUUID()}`;
+    await db.query(`insert into campaign (org_id, slug) values ('local', $1)`, [campaignId]);
     const [a, b] = await Promise.all([store.acquireJob(campaignId), store.acquireJob(campaignId)]);
     const acquiredCount = [a, b].filter((o) => o.acquired).length;
     expect(acquiredCount).toBe(1);
@@ -106,6 +108,8 @@ describe.skipIf(!url)("PgJobStore.acquireJob races two real connections (PT-6a)"
     }
     const campA = `distinct-a-${randomUUID()}`;
     const campB = `distinct-b-${randomUUID()}`;
+    await db.query(`insert into campaign (org_id, slug) values ('local', $1)`, [campA]);
+    await db.query(`insert into campaign (org_id, slug) values ('local', $1)`, [campB]);
     const results = await Promise.allSettled([store.acquireJob(campA), store.acquireJob(campB)]);
     const admitted = results.filter(
       (r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof store.acquireJob>>> =>
@@ -124,6 +128,7 @@ describe.skipIf(!url)("PgJobStore.acquireJob races two real connections (PT-6a)"
     await db.query("insert into org (id, name) values ($1, $2)", [orgId, "Queued race"]);
     const store = new PgJobStore(db, orgId);
     const campaignId = `queued-race-${randomUUID()}`;
+    await db.query(`insert into campaign (org_id, slug) values ($1, $2)`, [orgId, campaignId]);
 
     const [a, b] = await Promise.all([store.enqueueJob(campaignId), store.enqueueJob(campaignId)]);
     const outcomes = [a, b];

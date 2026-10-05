@@ -3,6 +3,7 @@ import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { BriefRefNotFoundError, resolveBriefAssetRefs } from "../../lib/brief-asset-refs.js";
 import { deleteJob, enqueueJob } from "../../lib/jobs.js";
 import { JobCapacityError } from "../../lib/ports/fs-job-store.js";
+import { CampaignGoneError } from "../../lib/ports/job-store.port.js";
 import { getBriefStore, getUsageStore } from "../../lib/ports/index.js";
 import { getRunDelivery } from "../../lib/ports/run-delivery-registry.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
@@ -207,6 +208,10 @@ export default defineEventHandler(async (event) => {
       setResponseStatus(event, 503);
       setResponseHeader(event, "retry-after", 30);
       return { error: error.message, campaignId: brief.id };
+    }
+    if (error instanceof CampaignGoneError) {
+      setResponseStatus(event, 404);
+      return { error: `Campaign "${brief.id}" not found.` };
     }
     throw error;
   }
