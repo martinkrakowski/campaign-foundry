@@ -259,4 +259,21 @@ export class FsAssetStore implements AssetStorePort {
     }
     await rm(dir, { recursive: true, force: true });
   }
+
+  async freeUnreferencedAssets(campaign: string, ids: readonly string[]): Promise<void> {
+    let dir: string;
+    try {
+      dir = this.briefDir(campaign);
+    } catch {
+      return;
+    }
+    for (const relPath of ids) {
+      try {
+        await rm(resolveConfined(dir, relPath), { force: true });
+      } catch {
+        // Best-effort, same discipline as `deleteAssets`: the caller's answer
+        // is already decided, and a file already gone is not a failure.
+      }
+    }
+  }
 }

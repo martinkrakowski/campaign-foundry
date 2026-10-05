@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "lane": "PT-9e2-free-unreferenced",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "          where campaign_id = $1 and id = any($2::uuid[])\n            and not exists (\n              select 1 from brief_version v where v.campaign_id = $1 and position(asset.id::text in v.body) > 0\n            )\n          returning id",
+      "after": "          where campaign_id = $1 and id = any($2::uuid[])\n          returning id",
+      "because": "dropping the `not exists` guard means `freeUnreferencedAssets` deletes a created id even though a committed `brief_version` still names it — a concurrent write that committed first is supposed to keep that id alive, and without the guard the delete ignores the committed version entirely. The test that catches it commits a version naming the id, then frees it, and asserts both the row and the object survive.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store-free-unreferenced.test.ts",
+        "-t",
+        "freeUnreferencedAssets keeps a created id a committed version names"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
