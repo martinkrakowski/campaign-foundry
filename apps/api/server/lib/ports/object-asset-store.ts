@@ -470,7 +470,10 @@ export class ObjectAssetStore implements AssetStorePort {
    * caller holding a campaign's id and no row can free. The routes do not use
    * it: they hold a SLUG and pass it, because this class has to resolve that
    * slug into a uuid through the campaign row, and a create rollback frees the
-   * assets BEFORE the release that removes the row (PT-4b). The uuid branch is
+   * assets BEFORE the release that removes the row (PT-4b). PT-9e/D237: the
+   * create rollback's replacement is `freeUnreferencedAssets` (wired by PT-9j);
+   * this whole-campaign delete stays for the purge (by uuid/prefix) and for the
+   * fs release. The uuid branch is
    * kept because it costs one regex test and answers a case that is otherwise
    * silently wrong: given an id no row resolves, a slug lookup would no-op.
    *
@@ -490,6 +493,35 @@ export class ObjectAssetStore implements AssetStorePort {
       this.orgId,
       campaignId,
     ]);
+  }
+
+  async freeUnreferencedAssets(campaign: string, ids: readonly string[]): Promise<void> {
+    // D236's 22P02 lesson: filter before the `::uuid[]` cast.
+    const uuidIds = ids.filter(isAssetId);
+    if (uuidIds.length === 0) return;
+    const freed = await this.db.transaction(async (tx) => {
+      const { rows: campaignRows } = await tx.query<{ id: string }>(
+        `select id from campaign where org_id = $1 and slug = $2 and deleted_at is null for update`,
+        [this.orgId, campaign],
+      );
+      const campaignId = campaignRows[0]?.id;
+      if (campaignId === undefined) return { campaignId: undefined, ids: [] as string[] };
+      const { rows } = await tx.query<{ id: string }>(
+        `delete from asset
+          where campaign_id = $1 and id = any($2::uuid[])
+            and not exists (
+              select 1 from brief_version v where v.campaign_id = $1 and position(asset.id::text in v.body) > 0
+            )
+          returning id`,
+        [campaignId, uuidIds],
+      );
+      return { campaignId, ids: rows.map((r) => r.id) };
+    });
+    if (freed.campaignId === undefined) return;
+    for (const id of freed.ids) {
+      // Best-effort, AFTER commit: no object-store call inside the transaction (D237).
+      await this.discard(inputKey(this.orgId, freed.campaignId, id));
+    }
   }
 
   /**

@@ -443,4 +443,56 @@ describe("FsAssetStore", () => {
       await expect(store.deleteAssets("../escape")).resolves.toBeUndefined();
     });
   });
+
+  describe("freeUnreferencedAssets (D237, PT-9e2)", () => {
+    // On fs there is no reference check and no lock of its own: the caller is
+    // expected to be inside a `withBriefLock` section, and "not passing a path"
+    // IS the protection for one that was reused. What is asserted here is the
+    // path-removal discipline: named paths go, un-named ones stay, and no call
+    // ever escapes the brief directory.
+
+    test("fs freeUnreferencedAssets removes only the named paths", async () => {
+      await store.writeAsset("camp-1", "logo.png", pngBytes);
+      await store.writeAsset("camp-1", "banner.jpg", jpegBytes);
+
+      await store.freeUnreferencedAssets("camp-1", ["logo.png"]);
+
+      // The named path is removed, but the one never passed in survives —
+      // there is no reference check on fs, so "not passing it" IS the
+      // protection.
+      expect(existsSync(join(dir, "camp-1", "logo.png"))).toBe(false);
+      expect(readFileSync(join(dir, "camp-1", "banner.jpg"))).toEqual(jpegBytes);
+    });
+
+    test("fs freeUnreferencedAssets is a no-op for a missing brief directory", async () => {
+      await expect(
+        store.freeUnreferencedAssets("never-had-assets", ["logo.png"]),
+      ).resolves.toBeUndefined();
+    });
+
+    test("fs freeUnreferencedAssets never leaves the brief directory", async () => {
+      // (a) An escaping campaign slug: `briefDir` throws BEFORE the loop, so the
+      // method returns early without touching anything or propagating the error.
+      await store.writeAsset("camp-1", "logo.png", pngBytes);
+      await expect(
+        store.freeUnreferencedAssets("../escape", ["logo.png"]),
+      ).resolves.toBeUndefined();
+      // The real brief directory is untouched.
+      expect(existsSync(join(dir, "camp-1", "logo.png"))).toBe(true);
+
+      // (b) An escaping relPath inside a valid campaign: `resolveConfined` throws
+      // INSIDE the loop, the per-iteration catch swallows it, and a file planted
+      // OUTSIDE the brief directory survives the attempt.
+      const outside = join(dir, "outside.png");
+      writeFileSync(outside, pngBytes);
+      await store.writeAsset("camp-2", "inside.png", pngBytes);
+      await expect(
+        store.freeUnreferencedAssets("camp-2", ["../outside.png"]),
+      ).resolves.toBeUndefined();
+      // The escape attempt never reached the file outside the brief directory.
+      expect(readFileSync(outside)).toEqual(pngBytes);
+      // The in-bounds asset is untouched (the escaping relPath threw before rm).
+      expect(existsSync(join(dir, "camp-2", "inside.png"))).toBe(true);
+    });
+  });
 });
