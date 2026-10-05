@@ -24,6 +24,7 @@ import {
   objectStore,
   objectStoreSettings,
   outputRoot,
+  purgeGraceHours,
   storeBackend,
 } from "../config.js";
 
@@ -751,6 +752,43 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
 
     process.env.KAFKA_MAX_IN_FLIGHT = String(Number.MAX_SAFE_INTEGER + 1);
     expect(() => kafkaSettings()).toThrow(/KAFKA_MAX_IN_FLIGHT/);
+  });
+});
+
+describe("purgeGraceHours (D231, Q1)", () => {
+  const saved = process.env.PURGE_GRACE_HOURS;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.PURGE_GRACE_HOURS;
+    else process.env.PURGE_GRACE_HOURS = saved;
+  });
+
+  test("purgeGraceHours defaults to 0", () => {
+    delete process.env.PURGE_GRACE_HOURS;
+    expect(purgeGraceHours()).toBe(0);
+
+    process.env.PURGE_GRACE_HOURS = "";
+    expect(purgeGraceHours()).toBe(0);
+
+    process.env.PURGE_GRACE_HOURS = "   ";
+    expect(purgeGraceHours()).toBe(0);
+  });
+
+  test("purgeGraceHours reads a whole number of hours", () => {
+    process.env.PURGE_GRACE_HOURS = "0";
+    expect(purgeGraceHours()).toBe(0);
+
+    process.env.PURGE_GRACE_HOURS = " 48 ";
+    expect(purgeGraceHours()).toBe(48);
+
+    process.env.PURGE_GRACE_HOURS = "168";
+    expect(purgeGraceHours()).toBe(168);
+  });
+
+  test("purgeGraceHours rejects a malformed value", () => {
+    for (const value of ["-1", "1.5", "abc", "1e3", "99999999999999999999"]) {
+      process.env.PURGE_GRACE_HOURS = value;
+      expect(() => purgeGraceHours()).toThrow(/Malformed PURGE_GRACE_HOURS/);
+    }
   });
 });
 

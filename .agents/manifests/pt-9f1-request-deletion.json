@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "lane": "PT-9f1-request-deletion",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/deletion/request.ts",
+      "before": "const jobId = await activeJobId(tx, request.orgId, row.slug, row.id);",
+      "after": "const jobId: string | undefined = undefined;",
+      "because": "skipping the active-job read lets the tombstone commit over a running job. The witness test seeds a running job keyed by slug and asserts outcome active-job with the seeded id; under this mutant the guard is gone, the tombstone commits, and the outcome equals requested instead — an assertion failure on the toEqual line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/request.test.ts",
+        "-t",
+        "requestCampaignDeletion refuses an active job and writes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/request.ts",
+      "before": "const jobId = await activeJobId(tx, request.orgId, row.slug, row.id);",
+      "after": "const jobId = await activeJobId(tx, request.orgId, row.slug, row.slug);",
+      "because": "reading the job table by slug twice instead of slug + uuid makes a uuid-keyed running job invisible. The witness test seeds a running job whose campaign_id is the campaign uuid text and asserts outcome active-job with that id; under this mutant activeJobId finds nothing, the tombstone commits, and the outcome equals requested — the toEqual assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/request.test.ts",
+        "-t",
+        "requestCampaignDeletion sees a job keyed by the campaign uuid"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/request.ts",
+      "before": "if (row === undefined || row.deleted_at !== null) return { outcome: \"gone\" };",
+      "after": "if (row === undefined) return { outcome: \"gone\" };",
+      "because": "dropping the tombstone read means a second DELETE on an already-tombstoned campaign re-inserts a deletion row. The witness test tombstones a campaign, calls a second time, and asserts outcome gone with exactly one deletion row; under this mutant the second call proceeds, the outcome is requested, and the count assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/request.test.ts",
+        "-t",
+        "requestCampaignDeletion on a tombstoned campaign answers gone and inserts nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/request.ts",
+      "before": "if (!request.mayDelete(row.team_id)) return { outcome: \"forbidden\" };",
+      "after": "if (false) return { outcome: \"forbidden\" };",
+      "because": "disabling the team-scope authorisation lets a member delete an org-wide campaign. The witness test seeds an org-wide campaign and asserts outcome forbidden; under this mutant the check is skipped, the tombstone commits, and the outcome equals requested — the toEqual assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/request.test.ts",
+        "-t",
+        "requestCampaignDeletion answers forbidden when mayDelete refuses the locked rows team and writes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/request.ts",
+      "before": "const grace = `${request.graceHours} hours`;",
+      "after": "const grace = \"0 hours\";",
+      "because": "ignoring the requested grace hours makes every deletion insert at now() instead of now() + grace. The witness test passes graceHours 48 and asserts not_before - requested_at is 172800 seconds; under this mutant the difference is 0 and the assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/request.test.ts",
+        "-t",
+        "requestCampaignDeletion sets not_before from the grace hours"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/request.ts",
+      "before": "campaignId: row.id,",
+      "after": "campaignId: row.slug,",
+      "because": "storing the slug as the deletion subject instead of the campaign uuid makes resolveCampaignForPurge throw or the subject assertion fail. The witness test asserts deletion.subject equals the campaign uuid; under this mutant subject is the slug and the toBe assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/request.test.ts",
+        "-t",
+        "requestCampaignDeletion tombstones the campaign and queues one deletion row"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
