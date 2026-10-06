@@ -10,7 +10,7 @@ import {
   readlinkSync,
 } from "node:fs";
 import { join } from "node:path";
-import { afterAll, describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test, vi } from "vitest";
 import { serializeBrief } from "../../brief-files.js";
 import {
   ACME_TENANT,
@@ -38,6 +38,48 @@ import {
   snapshotTree,
 } from "./fs-delete-fixtures.js";
 import { deleteCampaignOnFileStore, UnsafeCampaignPathError } from "../purge-campaign-fs.js";
+
+/**
+ * Hoisted spy for `node:fs/promises`'s `rm`: passes through by default, and
+ * throws `EACCES` once for the FIRST call whose path is the campaign's output
+ * tree (`<output>/sale`), so a removal can fail after the earlier data targets
+ * have been removed — without chmod, so it runs as non-root and on CI.
+ */
+const rmSpy = vi.hoisted(() => {
+  const real = {
+    value: null as unknown as (
+      path: string,
+      options?: { recursive?: boolean; force?: boolean },
+    ) => Promise<void>,
+  };
+  let shouldFail = false;
+  const spy = (path: string, options?: { recursive?: boolean; force?: boolean }) => {
+    if (shouldFail && path.endsWith("/output/sale")) {
+      shouldFail = false;
+      const err: NodeJS.ErrnoException = new Error("EACCES");
+      err.code = "EACCES";
+      throw err;
+    }
+    return real.value(path, options);
+  };
+  return {
+    spy,
+    setReal: (rm: typeof spy) => {
+      real.value = rm;
+    },
+    fire: () => {
+      shouldFail = true;
+    },
+    reset: () => {
+      shouldFail = false;
+    },
+  };
+});
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  rmSpy.setReal(actual.rm);
+  return { ...actual, rm: rmSpy.spy };
+});
 
 const lastOpenedDir = (harness: FsHarness) => join(harness.projectRoot, "state", "last-opened");
 
@@ -89,6 +131,8 @@ describe("purge-campaign-fs", () => {
         ]),
       );
       expect(await hasJobNamed("sale")).toBe(true);
+      expect(await hasJobNamed("sale-2")).toBe(true);
+      expect(await hasJobNamed("unrelated")).toBe(true);
       expect(pointedAt(lastOpenedDir(harness), "sale")).toEqual(["u-sale.json"]);
 
       const sale2AndUnrelated = filterSnapshot(before, "sale-2", "unrelated");
@@ -99,6 +143,8 @@ describe("purge-campaign-fs", () => {
 
       expect(pathsNaming(harness.tmpDir, "sale")).toEqual([]);
       expect(await hasJobNamed("sale")).toBe(false);
+      expect(await hasJobNamed("sale-2")).toBe(true);
+      expect(await hasJobNamed("unrelated")).toBe(true);
       expect(pointedAt(lastOpenedDir(harness), "sale")).toEqual([]);
 
       const after = snapshotTree(harness.tmpDir);
@@ -304,7 +350,14 @@ describe("purge-campaign-fs", () => {
       try {
         await plantCampaign(LOCAL_TENANT, harness.localRoots, "sale", "u-sale");
         chmodSync(locked, 0o500);
-        await expect(deleteCampaignOnFileStore(LOCAL_TENANT, "sale")).rejects.toThrow();
+        let chmodErr: unknown;
+        try {
+          await deleteCampaignOnFileStore(LOCAL_TENANT, "sale");
+        } catch (e) {
+          chmodErr = e;
+        }
+        expect(chmodErr).toBeInstanceOf(Error);
+        expect((chmodErr as { code?: string }).code).toMatch(/^(EACCES|EPERM)$/);
         expect(existsSync(join(harness.projectRoot, "briefs", "sale.yaml"))).toBe(true);
         expect(existsSync(join(harness.projectRoot, "briefs", "sale", "campaign.json"))).toBe(true);
         expect(await getBriefStore(LOCAL_TENANT).campaignMeta("sale")).toBeDefined();
@@ -325,6 +378,68 @@ describe("purge-campaign-fs", () => {
       }
     },
   );
+
+  test("deleteCampaignOnFileStore leaves the campaign resolvable when a removal fails before the markers", async () => {
+    const harness = setupFsHarness();
+    try {
+      await plantCampaign(LOCAL_TENANT, harness.localRoots, "sale", "u-sale");
+
+      let firstErr: unknown;
+      rmSpy.fire();
+      try {
+        await deleteCampaignOnFileStore(LOCAL_TENANT, "sale");
+      } catch (e) {
+        firstErr = e;
+      }
+      expect(firstErr).toBeInstanceOf(Error);
+      expect((firstErr as { code?: string }).code).toBe("EACCES");
+      // Markers intact: the campaign is still resolvable.
+      expect(existsSync(join(harness.projectRoot, "briefs", "sale.yaml"))).toBe(true);
+      expect(existsSync(join(harness.projectRoot, "briefs", "sale", "campaign.json"))).toBe(true);
+      expect(await getBriefStore(LOCAL_TENANT).campaignMeta("sale")).toBeDefined();
+      // Data targets ordered BEFORE the output tree are already gone.
+      expect(existsSync(join(harness.outputRoot, "decisions", "sale.json"))).toBe(false);
+      expect(existsSync(join(harness.outputRoot, "reports", "sale.json"))).toBe(false);
+      expect(existsSync(join(harness.outputRoot, "packages", "sale"))).toBe(false);
+      expect(existsSync(join(harness.projectRoot, "assets", "inputs", "sale"))).toBe(false);
+      // The output tree that failed to remove is still there.
+      expect(existsSync(join(harness.outputRoot, "sale"))).toBe(true);
+
+      // A second call (rm now passes through) completes the delete.
+      expect(await deleteCampaignOnFileStore(LOCAL_TENANT, "sale")).toEqual({
+        outcome: "deleted",
+      });
+      expect(pathsNaming(harness.tmpDir, "sale")).toEqual([]);
+    } finally {
+      rmSpy.reset();
+      harness.cleanup();
+    }
+  });
+
+  test("deleteCampaignOnFileStore refuses a symlinked non-local org root and removes nothing", async () => {
+    const harness = setupFsHarness();
+    try {
+      await plantCampaign(ACME_TENANT, harness.acmeRoots, "sale", "u-acme");
+      await plantCampaign(LOCAL_TENANT, harness.localRoots, "sale", "u-local");
+      // Replace the OUTPUT-side org root with a link back to the output root: an
+      // unguarded delete of acme would follow it and erase the local sale's tree.
+      const acmeOut = join(harness.outputRoot, "orgs", "acme");
+      rmSync(acmeOut, { recursive: true, force: true });
+      symlinkSync(harness.outputRoot, acmeOut);
+
+      const before = snapshotTree(harness.tmpDir);
+      await expect(deleteCampaignOnFileStore(ACME_TENANT, "sale")).rejects.toBeInstanceOf(
+        UnsafeCampaignPathError,
+      );
+      expect(snapshotTree(harness.tmpDir)).toEqual(before);
+      // The local sale is untouched even though the acme tree redirects to it.
+      expect(await getBriefStore(LOCAL_TENANT).campaignMeta("sale")).toBeDefined();
+      expect(existsSync(join(harness.outputRoot, "decisions", "sale.json"))).toBe(true);
+      expect(existsSync(join(harness.outputRoot, "sale"))).toBe(true);
+    } finally {
+      harness.cleanup();
+    }
+  });
 
   test.each([
     "project/briefs/sale",

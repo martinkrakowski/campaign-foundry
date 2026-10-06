@@ -7,7 +7,7 @@ import { RESERVED_OUTPUT_ROOT_NAMES } from "../import/census.js";
 import { withPoolLock } from "../pools.js";
 import { getBriefStore, getJobStore } from "../ports/index.js";
 import { scopeRoots } from "../run-environment.js";
-import type { TenantContext } from "../tenant.js";
+import { LOCAL_TENANT, type TenantContext } from "../tenant.js";
 
 /** A storage path of the campaign passes through a symlink; thrown BEFORE anything is removed. */
 export class UnsafeCampaignPathError extends Error {
@@ -152,6 +152,17 @@ async function deleteLocked(tenant: TenantContext, slug: string): Promise<FsDele
   if (jobId !== undefined) return { outcome: "active-job", jobId };
 
   const plan = await planDelete(tenant, slug);
+  // The targets' ROOTS are the org-scoped roots `scopeRoots` handed out, and
+  // `assertNoSymlinkOnPath` walks below a root, not the root itself — so a symlinked
+  // `orgs/<orgId>` (the whole non-local tenant tree) is otherwise invisible, and a
+  // `orgs/<orgId> -> ..` link would make every confined removal resolve back into the
+  // local tree. Refuse it first, on the LOCAL roots where `orgs/<orgId>` is a real
+  // child of the trusted anchor.
+  if (tenant.orgId !== LOCAL_TENANT.orgId) {
+    const localRoots = scopeRoots(LOCAL_TENANT);
+    await assertNoSymlinkOnPath(at(localRoots.projectRoot, "orgs", tenant.orgId), slug);
+    await assertNoSymlinkOnPath(at(localRoots.outputRoot, "orgs", tenant.orgId), slug);
+  }
   for (const target of [...plan.data, ...plan.markers]) {
     await assertNoSymlinkOnPath(target, slug);
   }

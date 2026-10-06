@@ -110,7 +110,7 @@
         "api",
         "apps/api/server/lib/deletion/__tests__/purge-campaign-fs.test.ts",
         "-t",
-        "deleteCampaignOnFileStore leaves the markers in place when a removal fails and a retry completes",
+        "deleteCampaignOnFileStore leaves the campaign resolvable when a removal fails before the markers",
         "--tagsFilter",
         "!golden-bytes && !cpu-bound"
       ],
@@ -137,6 +137,25 @@
     },
     {
       "file": "apps/api/server/lib/deletion/purge-campaign-fs.ts",
+      "before": "  if (tenant.orgId !== LOCAL_TENANT.orgId) {",
+      "after": "  if (false) {",
+      "because": "Non-local org-root symlink guard dropped: a symlinked `orgs/acme` is not refused, so an acme delete follows it and removes the local campaign's tree through the link.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign-fs.test.ts",
+        "-t",
+        "deleteCampaignOnFileStore refuses a symlinked non-local org root and removes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign-fs.ts",
       "before": "  if (!isSharedOutputName(slug)) data.push(at(outputRoot, slug));",
       "after": "  if (slug.length > 0) data.push(at(outputRoot, slug));",
       "because": "Shared-name guard dropped: a campaign named `reports` has its own render tree `output/reports/` removed, deleting another campaign's report file.",
@@ -149,6 +168,25 @@
         "apps/api/server/lib/deletion/__tests__/purge-campaign-fs.test.ts",
         "-t",
         "deleteCampaignOnFileStore never removes a shared output area named like the slug",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign-fs.ts",
+      "before": "    .filter((job) => job.campaignId === slug)",
+      "after": "    .filter(() => true)",
+      "because": "Job filter dropped: every job in the org is removed, so the neighbour campaigns' job files vanish and the survivor assertion on `sale-2`/`unrelated` jobs fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign-fs.test.ts",
+        "-t",
+        "deleteCampaignOnFileStore removes every location of one campaign and leaves its neighbour untouched",
         "--tagsFilter",
         "!golden-bytes && !cpu-bound"
       ],
