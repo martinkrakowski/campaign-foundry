@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "lane": "PT-9i-copy-recheck",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "    await assertSourcesStillVisible(scope, from, brief.id);",
+      "after": "    await Promise.resolve();",
+      "because": "Removes the post-copy visibility re-check. Without it the copy succeeds and the created alt/bg rows stay in the target, so `copyBriefRefs frees every created id and refuses when the source is reassigned mid-copy under s3` resolves instead of rejecting, failing its `rejects.toBeInstanceOf(BriefRefNotFoundError)` assertion.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.copy-recheck.test.ts",
+        "-t",
+        "copyBriefRefs frees every created id and refuses when the source is reassigned mid-copy under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "    await assets.freeUnreferencedAssets(target, createdIds);",
+      "after": "    await Promise.resolve(createdIds);",
+      "because": "Replaces the post-refusal free with a no-op. The BriefRefNotFoundError still throws, so every route still answers the same 404 with the same body, but the created rows survive; only the `target rows are exactly [logo.png]` assertion sees the difference — the `briefs.post`/`[id].put` gap this lane closes (no rollback).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.copy-recheck.test.ts",
+        "-t",
+        "copyBriefRefs frees every created id and refuses when the source is reassigned mid-copy under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "    await assets.freeUnreferencedAssets(target, createdIds);",
+      "after": "    await assets.deleteAssets(target);",
+      "because": "Frees the whole campaign instead of `createdIds`. `deleteAssets` empties the target prefix with no `not exists` guard, so the target's OWN logo and the version-named alt are destroyed alongside bg — only `copyBriefRefs keeps the target own asset, a reused asset and a version-named asset when the re-check fails under s3` (which keeps logo and alt) catches it.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.copy-recheck.test.ts",
+        "-t",
+        "copyBriefRefs keeps the target own asset, a reused asset and a version-named asset when the re-check fails under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "    if (strict ? answer !== \"visible\" : answer === \"hidden\") {\n      throw new BriefRefNotFoundError(briefId);",
+      "after": "    if (strict ? answer !== \"visible\" : answer === \"hidden\") {\n      throw new CampaignNotFoundError(briefId);",
+      "because": "Throws the superclass instead of BriefRefNotFoundError. `briefs.post` still maps the superclass to the same 404, so the route body/status are unchanged; only `the re-check refusal is a BriefRefNotFoundError naming the callers brief id and never the source slug` catches it via its `instanceof BriefRefNotFoundError` assertion (and the route tests would 500).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.copy-recheck.test.ts",
+        "-t",
+        "the re-check refusal is a BriefRefNotFoundError naming the callers brief id and never the source slug"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "    if (strict ? answer !== \"visible\" : answer === \"hidden\") {",
+      "after": "    if (answer === \"hidden\") {",
+      "because": "Weakens the s3 predicate to `answer === \"hidden\"` so an ABSENT source is no longer refused under s3. `copyBriefRefs refuses an absent source under s3 like a hidden one` resolves instead of rejecting, failing its `rejects.toBeInstanceOf` assertion.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.copy-recheck.test.ts",
+        "-t",
+        "copyBriefRefs refuses an absent source under s3 like a hidden one"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "      createdIds.push(...created);",
+      "after": "      createdIds.splice(0, createdIds.length, ...created);",
+      "because": "Clears the array before inserting the current source's ids, so `createdIds` holds only the LAST source's ids. When the second source is hidden, the first source's created copy is never freed — `copyBriefRefs frees the first source created assets too when only the second source is hidden under s3` sees `[logo.png, s1.png]` instead of `[logo.png]`.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.copy-recheck.test.ts",
+        "-t",
+        "copyBriefRefs frees the first source created assets too when only the second source is hidden under s3"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

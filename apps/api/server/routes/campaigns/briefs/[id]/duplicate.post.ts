@@ -324,7 +324,7 @@ export default defineEventHandler(async (event) => {
         // Every OTHER campaign the source named, in the order the resolve found them.
         // Under `s3` this is what carries a THIRD campaign's id over (carry item 2); off
         // it is the loop this line replaces, remapping paths prefix for prefix.
-        brief = await copyBriefRefs(scope, brief, resolved.copyFrom, targetSlug);
+        ({ brief } = await copyBriefRefs(scope, brief, resolved.copyFrom, targetSlug));
         // **The source's own ids are in this set too.** From the fresh target's point of
         // view the SOURCE's assets are foreign as well, and every one of them had to come
         // back from `sourceMap` — so a source id that survived it (a row deleted between

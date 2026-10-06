@@ -619,7 +619,7 @@ describe("resolveBriefAssetRefs — render mode under s3 (PT-4k2a, D208 D, D210 
     test("copyBriefRefs brings a foreign id over, and the copy's ref is TARGET-owned", async () => {
       const resolved = await save(withSaveRef("products[].logoPath", ids[FRIEND_ALT]!));
       expect(resolved.copyFrom).toEqual([FRIEND]);
-      const copied = await copyBriefRefs(CALLER, resolved.brief, resolved.copyFrom, RUN);
+      const { brief: copied } = await copyBriefRefs(CALLER, resolved.brief, resolved.copyFrom, RUN);
       const copiedRef = readRef(copied, "products[].logoPath");
       expect(copiedRef).not.toBe(ids[FRIEND_ALT]!);
       // The copy's `<source id> → <target id>` map entry (`object-asset-store.ts`'s
@@ -640,7 +640,7 @@ describe("resolveBriefAssetRefs — render mode under s3 (PT-4k2a, D208 D, D210 
         paths: {},
         created: new Set<string>(),
       });
-      const copied = await copyBriefRefs(CALLER, resolved.brief, resolved.copyFrom, RUN);
+      const { brief: copied } = await copyBriefRefs(CALLER, resolved.brief, resolved.copyFrom, RUN);
       expect(readRef(copied, "products[].logoPath")).toBe(ids[FRIEND_ALT]!);
       expect(() => assertRefsCopied(copied, resolved.foreignIds, RUN)).toThrow(
         BriefRefNotFoundError,

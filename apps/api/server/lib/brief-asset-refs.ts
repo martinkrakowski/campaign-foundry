@@ -241,6 +241,18 @@ export async function resolveBriefAssetRefs(
   return { brief: resolved, copyFrom, foreignIds, ownIds };
 }
 
+/** What {@link copyBriefRefs} hands back. */
+export interface CopiedBriefRefs {
+  /** `brief` with every copied ref remapped onto `target`. */
+  readonly brief: CampaignBrief;
+  /**
+   * What THIS call minted in `target`, across every source in copy order: asset ids under
+   * `s3`, target-relative file paths on fs. A sha-deduped reuse is never in it (D237), so
+   * handing it to `freeUnreferencedAssets` can never free a row or file the target already had.
+   */
+  readonly createdIds: readonly string[];
+}
+
 /**
  * Copy every source campaign's assets into `target` and remap the brief's refs onto the
  * copies (PT-4k2b, D210 a/b) — the whole-campaign copy `AssetStorePort.copyAssets` has
@@ -258,19 +270,62 @@ export async function resolveBriefAssetRefs(
  * `from` is `resolveBriefAssetRefs`' `copyFrom`, in its first-seen order, and is walked in
  * that order: two slugs can name the same file, and the order decides which map sees the
  * ref first.
+ *
+ * The re-check runs AFTER every copy, over `from` in order: a source that is now refused
+ * frees every id this call created (all sources) and answers the one 404, under the
+ * backend predicate in the table; a reassignment that lands after the re-check is the
+ * accepted residual (D237 c).
  */
 export async function copyBriefRefs(
   scope: StorageScope,
   brief: CampaignBrief,
   from: readonly string[],
   target: string,
-): Promise<CampaignBrief> {
+): Promise<CopiedBriefRefs> {
+  const assets = getAssetStore(scope);
   let copied = brief;
-  for (const slug of from) {
-    const { paths: map } = await getAssetStore(scope).copyAssets(slug, target);
-    copied = rewriteAssetPaths(copied, slug, target, map);
+  const createdIds: string[] = [];
+  try {
+    for (const slug of from) {
+      const { paths: map, created } = await assets.copyAssets(slug, target);
+      createdIds.push(...created);
+      copied = rewriteAssetPaths(copied, slug, target, map);
+    }
+    await assertSourcesStillVisible(scope, from, brief.id);
+  } catch (error) {
+    await freeCreated(assets, target, createdIds);
+    throw error;
   }
-  return copied;
+  return { brief: copied, createdIds };
+}
+
+async function assertSourcesStillVisible(
+  scope: StorageScope,
+  from: readonly string[],
+  briefId: string,
+): Promise<void> {
+  const briefs = getBriefStore(scope);
+  if (!briefs.supportsTeams) return;
+  const strict = objectStore() === "s3";
+  for (const slug of from) {
+    const answer = await briefs.campaignVisibility(slug);
+    if (strict ? answer !== "visible" : answer === "hidden") {
+      throw new BriefRefNotFoundError(briefId);
+    }
+  }
+}
+
+async function freeCreated(
+  assets: AssetStorePort,
+  target: string,
+  createdIds: readonly string[],
+): Promise<void> {
+  try {
+    await assets.freeUnreferencedAssets(target, createdIds);
+  } catch {
+    // Best-effort: the caller's answer is already decided and an error here must never
+    // replace it (D237, D239). There is no structured logger in this repo to report it to.
+  }
 }
 
 /**
