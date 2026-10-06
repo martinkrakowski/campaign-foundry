@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "lane": "PT-9f2-delete-route",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/[id].delete.ts",
+      "before": "    mayDelete: (teamId) => canAssignTeam(tenant, teamId),",
+      "after": "    mayDelete: () => true,",
+      "because": "Authorisation unwired: mayDelete always returns true, so a member on an org-wide campaign receives 202 instead of the required 403.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.delete.test.ts",
+        "-t",
+        "DELETE /campaigns/:id answers 403 for a member on an org-wide campaign and writes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/[id].delete.ts",
+      "before": "  if (storeBackend() !== \"postgres\") {",
+      "after": "  if (false) {",
+      "because": "fs guard removed: the route proceeds under the file store, so it cannot answer 501 as required.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.delete.test.ts",
+        "-t",
+        "DELETE /campaigns/:id answers 501 under the file store and touches nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/[id].delete.ts",
+      "before": "    graceHours: purgeGraceHours(),",
+      "after": "    graceHours: 0,",
+      "because": "grace not wired: not_before is always now() instead of now() + PURGE_GRACE_HOURS, so the grace-period test fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.delete.test.ts",
+        "-t",
+        "DELETE /campaigns/:id sets not_before from PURGE_GRACE_HOURS",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/[id].delete.ts",
+      "before": "    requestedBy: tenant.userId,",
+      "after": "    requestedBy: \"x\",",
+      "because": "actor not recorded: deleted_by and requested_by become 'x' instead of the caller userId, so the tombstone test fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.delete.test.ts",
+        "-t",
+        "DELETE /campaigns/:id answers 202 and tombstones the campaign for an admin",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/[id].delete.ts",
+      "before": "      return { error: `Campaign \"${id}\" has a run in progress.`, jobId: result.jobId };",
+      "after": "      return { error: `Campaign \"${id}\" has a run in progress.` };",
+      "because": "409 body without the job: jobId is omitted, so the jobId assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.delete.test.ts",
+        "-t",
+        "DELETE /campaigns/:id answers 409 with the running jobId and writes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/[id].delete.ts",
+      "before": "    case \"gone\":\n      return notFound();",
+      "after": "    case \"gone\":\n      return { deletionId: \"x\" };",
+      "because": "a lost race is not a 404: the gone case returns 200 with a body instead of the required 404 not-found body.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.delete.test.ts",
+        "-t",
+        "DELETE /campaigns/:id answers 404 when the transaction finds the campaign already gone",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
