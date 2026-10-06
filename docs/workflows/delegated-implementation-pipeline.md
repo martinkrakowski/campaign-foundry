@@ -445,6 +445,13 @@ Rules:
   worktree** even at `CF_GATE_SLOTS=3`: the slots are per host, not per checkout, and
   `verify-manifests` mutates the tree it verifies, so two gates in two worktrees would each be
   handed a slot and each would write manifests the other reads.
+- `CF_TEST_TIMEOUT_MS` lifts vitest's test and hook timeouts on a SLOW lane host, and it is set
+  **HOST-WIDE** beside the two variables below, never per seat and never in a brief. Unset (CI,
+  the Mac) it changes nothing: the committed 5 s limit is what notices a test that became slow,
+  and a slowdown is still never answered by raising that number. On midnight an in-memory
+  database start costs 5–6 s, so without the lift those tests time out on unmodified code. It can
+  only lift (10 000–600 000 ms, refused otherwise), and it does not save a `cpu-bound` test,
+  which fails on its own internal deadline (`tools/gate/lib/test-timeout.ts`).
 - `CF_TEST_MAX_WORKERS` is how many workers ONE vitest run may spawn, and it is set
   **HOST-WIDE** beside `CF_GATE_SLOTS`, by the same rule and for the same reason: the two are one
   decision, `CF_GATE_SLOTS × CF_TEST_MAX_WORKERS ≤ the host's threads` (on midnight, 6 × 4 or

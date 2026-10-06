@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "lane": "host-test-timeout",
+  "mutations": [
+    {
+      "file": "tools/gate/lib/test-timeout.ts",
+      "before": "  const raw = host[\"CF_TEST_TIMEOUT_MS\"];",
+      "after": "  const raw = undefined as string | undefined;",
+      "because": "the read itself: answered from a literal, the helper takes the unset path on every host, so the variable an operator set host-wide lifts nothing and nothing goes red. FAILS ON: expect(resolveTestTimeout(env(\"30000\"))).toBe(30000);",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/test-timeout.test.ts",
+        "-t",
+        "a whole number of milliseconds is passed through as the timeout"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/gate/lib/test-timeout.ts",
+      "before": "ms < MIN_HOST_TEST_TIMEOUT_MS || ",
+      "after": "false || ",
+      "because": "the floor: without it a host value of 9999 is applied to hooks and SHORTENS them below vitest's 10 s default, the opposite of what the variable is for. FAILS ON: the toThrowError of the test below.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/test-timeout.test.ts",
+        "-t",
+        "a value below the hook default is refused because it would shorten a hook"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "vitest.config.ts",
+      "before": "    testTimeout: resolveTestTimeout(),",
+      "after": "    testTimeout: undefined,",
+      "because": "the wiring: with the call gone the helper is correct and unused, and every run on the slow host is back on 5 s with no red anywhere. FAILS ON: expect(cfg.test?.testTimeout).toBe(30000);",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/test-timeout.test.ts",
+        "-t",
+        "the host timeout reaches testTimeout and hookTimeout when the variable is set"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "vitest.config.ts",
+      "before": "    hookTimeout: resolveTestTimeout(),",
+      "after": "    hookTimeout: undefined,",
+      "because": "the hook half of the wiring: the timeouts seen on the lane host were beforeAll hooks migrating an in-memory database, which testTimeout alone does not lift. FAILS ON: expect(cfg.test?.hookTimeout).toBe(30000);",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/test-timeout.test.ts",
+        "-t",
+        "the host timeout reaches testTimeout and hookTimeout when the variable is set"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "vitest.config.ts",
+      "before": "Math.max(15000, resolveTestTimeout() ?? 0)",
+      "after": "Math.min(15000, resolveTestTimeout() ?? 15000)",
+      "because": "the direction: a host value may lift the web project's own 15 s and must never lower it; with min, a host that sets 30 s leaves web at 15 s (and one that sets 10 s would cut it). FAILS ON: expect(webProject(cfg)?.testTimeout).toBe(30000);",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/test-timeout.test.ts",
+        "-t",
+        "the web project takes the host timeout when it is the larger one"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
