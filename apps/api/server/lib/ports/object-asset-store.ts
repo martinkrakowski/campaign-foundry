@@ -395,6 +395,28 @@ export class ObjectAssetStore implements AssetStorePort {
    * `duplicate.post`, `index.post`), and off `s3` the path-derived rule is unchanged.
    */
   async copyAssets(fromBriefId: string, toBriefId: string): Promise<AssetCopyResult> {
+    // PT-9j0 (D237): `created` is owned by THIS frame and handed to the body, so a throw
+    // part-way through still knows what the call had already made. Rows 1..N-1 of a source whose asset N failed are freed (version-checked) before the error is rethrown; the failed asset's own object was already discarded.
+    const created = new Set<string>();
+    try {
+      return await this.copyAssetsInto(fromBriefId, toBriefId, created);
+    } catch (error) {
+      try {
+        await this.freeUnreferencedAssets(toBriefId, [...created]);
+      } catch {
+        // Best-effort: the copy's own error is what the caller must hear, and a failed free
+        // here is the leftover D239's reconciler (objects) or the release cascade (rows) takes.
+      }
+      throw error;
+    }
+  }
+
+  /** The body of {@link copyAssets}; every id it mints is added to `created` the moment it is minted. */
+  private async copyAssetsInto(
+    fromBriefId: string,
+    toBriefId: string,
+    created: Set<string>,
+  ): Promise<AssetCopyResult> {
     if (fromBriefId === toBriefId) return { paths: {}, created: new Set() };
     const [fromId, toId] = await Promise.all([
       this.resolveCampaignId(fromBriefId),
@@ -405,7 +427,6 @@ export class ObjectAssetStore implements AssetStorePort {
     if (sources.length === 0) return { paths: {}, created: new Set() };
 
     const pathMap: Record<string, string> = {};
-    const created = new Set<string>();
     for (const source of sources) {
       const destination = await this.destination(toId, fromBriefId, source);
       // FIRST, so all three entries can name it: a reused asset already has an
