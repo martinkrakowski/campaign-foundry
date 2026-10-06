@@ -149,9 +149,20 @@ jobs:
           # about $0.07. It is a fourth model family, beside the implementer's (Poolside) and the
           # pre-merge reviewer's (Anthropic). A "preview" id can be withdrawn without notice, so
           # the fallbacks matter: GPT-6.1 Sol ($2/$10) first, then Luna, then Haiku.
-          config.model: "openrouter/tencent/hy4-preview"
-          config.fallback_models: '["openrouter/openai/gpt-6.1-sol", "openrouter/openai/gpt-6-luna", "openrouter/anthropic/claude-haiku-4.5"]'
-          # Hy4's window per OpenRouter is 1048576, Sol's and Luna's 1050000. 128000 is declared (Haiku's capacity
+          # Swapped 2026-10-06, the same evening (owner: "Let's try ~deepseek/deepseek-flash-latest
+          # as the pr-agent"), Hy4 preview → DeepSeek Flash, on trial. Over #700–#714 Hy4 opened
+          # 15 threads against Qodo's 26 and CodeRabbit's 8; all five on #713 were refused with a
+          # reason (two would have regressed accessibility), no fix round that day started from
+          # one of its findings, and its comments often opened with prompt text ("layer-rules.yaml
+          # permits this import;"). The id is OpenRouter's ALIAS for the newest DeepSeek Flash
+          # (the leading "~" is part of the id; today it resolves to deepseek-v4.1-flash, about
+          # $0.02/$1.20 per M tokens, window 1048576), so the model behind it changes without a
+          # commit here: a sudden change in review quality is a reason to look at what the alias
+          # points to. Hy4 preview moves to first fallback; a fifth model family, still neither
+          # the implementer's (Poolside) nor the pre-merge reviewer's (Anthropic).
+          config.model: "openrouter/~deepseek/deepseek-flash-latest"
+          config.fallback_models: '["openrouter/tencent/hy4-preview", "openrouter/openai/gpt-6.1-sol", "openrouter/openai/gpt-6-luna", "openrouter/anthropic/claude-haiku-4.5"]'
+          # DeepSeek Flash's and Hy4's window per OpenRouter is 1048576, Sol's and Luna's 1050000. 128000 is declared (Haiku's capacity
           # bounds the fallback), and max_model_tokens below caps actual spend.
           config.custom_model_max_tokens: "128000"
           # custom_model_max_tokens declares the model's capacity; max_model_tokens caps
