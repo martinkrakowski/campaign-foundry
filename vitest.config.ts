@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { resolveMaxWorkers } from "./tools/gate/lib/max-workers.js";
+import { resolveTestTimeout } from "./tools/gate/lib/test-timeout.js";
 
 const webSrc = fileURLToPath(new URL("./apps/web/src", import.meta.url));
 
@@ -23,6 +24,11 @@ export default defineConfig({
     // `undefined` unless the HOST sets CF_TEST_MAX_WORKERS, which is what leaves
     // CI and the Mac on vitest's own default (see tools/gate/lib/max-workers.ts).
     maxWorkers: resolveMaxWorkers(),
+    // `undefined` unless the HOST sets CF_TEST_TIMEOUT_MS (a slow lane host; see
+    // tools/gate/lib/test-timeout.ts). CI and the Mac set nothing and keep vitest's
+    // own 5 s and 10 s, which is what notices a test that became slow.
+    testTimeout: resolveTestTimeout(),
+    hookTimeout: resolveTestTimeout(),
     tags: [
       {
         name: "golden-bytes",
@@ -96,7 +102,8 @@ export default defineConfig({
           // Owner approved this calibration on 2026-09-16. A slowdown is still
           // never answered by raising this number: the next person who finds a test
           // near the limit should look for the cost, as X30/X32/X34 did.
-          testTimeout: 15000,
+          // A slow host's CF_TEST_TIMEOUT_MS may lift this too, never lower it.
+          testTimeout: Math.max(15000, resolveTestTimeout() ?? 0),
         },
       },
       {

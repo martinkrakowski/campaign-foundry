@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "lane": "PT-9j3-save-compensation",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/briefs.post.ts",
+      "before": "            await getAssetStore(scope).freeUnreferencedAssets(brief.id, createdIds);",
+      "after": "            await Promise.resolve(createdIds);",
+      "because": "The free is gone: the original error is still thrown, every status and body is today's, so only the state assertion catches it (the created rows and objects stay in the target).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/save-compensation.test.ts",
+        "-t",
+        "save route frees exactly the ids it created when the first Save fails after the copy under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs.post.ts",
+      "before": "            await getAssetStore(scope).freeUnreferencedAssets(brief.id, createdIds);",
+      "after": "            await getAssetStore(scope).deleteAssets(brief.id);",
+      "because": "The whole campaign instead of createdIds (the plan row's own mutation, in a shape that compiles): under s3 `deleteAssets` takes no campaign-row lock and no version check, so the winning Save's version-named row and object, and the target's own, are removed.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/save-compensation.test.ts",
+        "-t",
+        "save route keeps what a winning Save reused and named and frees the rest when it loses the slug under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs.post.ts",
+      "before": "          createdIds = copied.createdIds;",
+      "after": "          void copied.createdIds;",
+      "because": "The ids copyBriefRefs RETURNS are dropped again, so the post-copy refusals and a failed write free nothing.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/save-compensation.test.ts",
+        "-t",
+        "save route frees exactly the ids it created when a replace loses a revision race after the copy under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs.post.ts",
+      "before": "          assertRefsCopied(brief, resolved.foreignIds, brief.id);",
+      "after": "          await getAssetStore(scope).freeUnreferencedAssets(brief.id, createdIds);\n          assertRefsCopied(brief, resolved.foreignIds, brief.id);",
+      "because": "Freeing before the failure is known: on success the copies are freed, then the version check refuses a version naming ids that no longer exist, so a request that must answer 201 does not.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/save-compensation.test.ts",
+        "-t",
+        "save route keeps every copy when the write succeeds under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs.post.ts",
+      "before": "        if (createdIds.length > 0) {",
+      "after": "        if (createdIds.length >= 0) {",
+      "because": "The guard stops skipping an empty createdIds: a failure that copied nothing now calls the free, which the 'free never called' assertion sees.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/save-compensation.test.ts",
+        "-t",
+        "save route does not call the free when nothing was copied under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id].put.ts",
+      "before": "            await getAssetStore(scope).freeUnreferencedAssets(slug, createdIds);",
+      "after": "            await Promise.resolve(createdIds);",
+      "because": "The free is gone: the 409/500 answers are unchanged, so only the state assertion (created rows and objects still in the target) catches it.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/put-compensation.test.ts",
+        "-t",
+        "put route frees exactly the ids it created when rewriteBrief fails after the copy under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id].put.ts",
+      "before": "            createdIds = copied.createdIds;",
+      "after": "            void copied.createdIds;",
+      "because": "The returned ids are dropped, so the forced 409 after the copy leaves the created rows: the plan row's own PUT test.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/put-compensation.test.ts",
+        "-t",
+        "put route with a forced 409 after the copy leaves no created row under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id].put.ts",
+      "before": "        if (createdIds.length > 0) {",
+      "after": "        if (createdIds.length >= 0) {",
+      "because": "The guard stops skipping an empty createdIds, so PUT off s3 (which never copies) now calls the free on every failed write.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/put-compensation.test.ts",
+        "-t",
+        "put route off s3 never copies and never calls the free when the write fails"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
