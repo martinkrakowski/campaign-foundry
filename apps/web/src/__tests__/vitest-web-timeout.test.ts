@@ -5,9 +5,7 @@
  *
  * @vitest-environment node
  */
-import { describe, expect, test } from "vitest";
-import config from "../../../../vitest.config";
-import { resolveTestTimeout } from "../../../../tools/gate/lib/test-timeout";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 /**
  * X36 calibrates the web project's testTimeout to 15000ms. The pin reads the
@@ -17,14 +15,6 @@ import { resolveTestTimeout } from "../../../../tools/gate/lib/test-timeout";
  */
 const WEB_TEST_TIMEOUT_MS = 15_000;
 
-/**
- * What THIS host lifts the limits to: `undefined` on CI and the Mac, a number on a
- * slow lane host that sets CF_TEST_TIMEOUT_MS. The root block may carry exactly
- * that and nothing else, so 15000 moved onto the root still fails here on every
- * host that sets nothing, and this test still passes on the host that sets one.
- */
-const HOST_TEST_TIMEOUT_MS = resolveTestTimeout();
-
 type ProjectBlock = {
   readonly test?: {
     readonly name?: string;
@@ -32,10 +22,12 @@ type ProjectBlock = {
   };
 };
 
+type Config = { readonly test?: { readonly testTimeout?: number; readonly projects?: unknown[] } };
+
 const isProjectBlock = (value: unknown): value is ProjectBlock =>
   typeof value === "object" && value !== null && "test" in value;
 
-const project = (name: string): ProjectBlock => {
+const project = (config: Config, name: string): ProjectBlock => {
   const found = (config.test?.projects ?? []).find(
     (entry) => isProjectBlock(entry) && entry.test?.name === name,
   );
@@ -46,13 +38,25 @@ const project = (name: string): ProjectBlock => {
 };
 
 describe("web project testTimeout (X36)", () => {
-  test("is 15000ms and the other projects do not inherit it", () => {
-    expect(config.test?.testTimeout).toBe(HOST_TEST_TIMEOUT_MS);
-    expect(project("web").test?.testTimeout).toBe(
-      Math.max(WEB_TEST_TIMEOUT_MS, HOST_TEST_TIMEOUT_MS ?? 0),
-    );
-    expect(project("node").test?.testTimeout).toBeUndefined();
-    expect(project("api").test?.testTimeout).toBeUndefined();
-    expect(project("tools").test?.testTimeout).toBeUndefined();
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  test("is 15000ms and the other projects do not inherit it", async () => {
+    // The config is imported with CF_TEST_TIMEOUT_MS stubbed to UNSET, so this pins the
+    // COMMITTED numbers on every host. A slow lane host sets that variable to lift the
+    // limits (tools/gate/lib/test-timeout.ts), and read through the host's own value the
+    // 15000 below would be invisible there: with 30000 set, a web floor of 15000 and one
+    // of 5000 both answer 30000, and this file's mutation would survive on that host.
+    // The lift itself is pinned in tools/gate/__tests__/test-timeout.test.ts.
+    vi.stubEnv("CF_TEST_TIMEOUT_MS", undefined);
+    vi.resetModules();
+    const { default: config } = (await import("../../../../vitest.config")) as { default: Config };
+    expect(config.test?.testTimeout).toBeUndefined();
+    expect(project(config, "web").test?.testTimeout).toBe(WEB_TEST_TIMEOUT_MS);
+    expect(project(config, "node").test?.testTimeout).toBeUndefined();
+    expect(project(config, "api").test?.testTimeout).toBeUndefined();
+    expect(project(config, "tools").test?.testTimeout).toBeUndefined();
   });
 });
