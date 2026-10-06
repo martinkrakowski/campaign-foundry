@@ -1853,3 +1853,39 @@ export function assetPreviewUnavailableLabel(assetLabel: string): string {
 
 /** An export row whose download URL the server did not supply (PT-4g2). */
 export const downloadUnavailable = "Unavailable";
+
+/* ── Deleting a campaign from the picker (PT-9p; D234, D235) ── */
+
+/** The row button's visible word. */
+export const deleteCampaignAction = "Delete";
+/** The row button's accessible name: it contains the visible word (WCAG 2.5.3). */
+export function deleteCampaignRowLabel(name: string): string {
+  return `Delete ${name}`;
+}
+/** The dialog's accessible name and heading. */
+export const deleteCampaignTitle = "Delete campaign";
+/** What the delete removes. Linked to the field with `aria-describedby`. */
+export function deleteCampaignWarning(name: string): string {
+  return `This permanently removes ${name}, its saved versions, drafts and uploaded images. It cannot be undone.`;
+}
+/** The field's label: names the exact text the user must type. */
+export function deleteCampaignTypeLabel(name: string): string {
+  return `Type ${name} to confirm`;
+}
+export const deleteCampaignConfirm = "Delete campaign";
+/** The confirm button's label while the request is in flight (the name stays readable). */
+export const deleteCampaignPending = "Deleting…";
+/** 409: a run holds the campaign. Never offers to cancel the run (Q3). */
+export const deleteCampaignRunInProgress =
+  "A run is in progress for this campaign — wait for it to finish, then delete it.";
+/** 403: the caller can see the campaign but may not delete it (D234, Q2). */
+export const deleteCampaignForbidden =
+  "You may not delete this campaign — ask an owner or admin of your organisation.";
+/** 404: hidden, absent or already deleted (one answer for all, D233). */
+export const deleteCampaignGone =
+  "This campaign is already deleted, or you can no longer see it. It has been removed from the list.";
+/** 501: the server runs on the file store, which cannot delete yet (PT-9n retires this). */
+export const deleteCampaignUnsupported =
+  "This server cannot delete campaigns — ask whoever runs it.";
+/** Any other failure that carries no message of its own. */
+export const deleteCampaignFailed = "Could not delete the campaign — try again.";
