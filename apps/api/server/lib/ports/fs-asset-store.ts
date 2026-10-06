@@ -140,6 +140,35 @@ export class FsAssetStore implements AssetStorePort {
   }
 
   async copyAssets(fromBriefId: string, toBriefId: string): Promise<AssetCopyResult> {
+    // PT-9j0 (D237): `created` is owned by THIS frame and handed to the body, so a
+    // throw part-way through still knows what the call had already made. The files
+    // written before the failing one are removed (they were minted by this call with
+    // `wx`) before the error is rethrown.
+    // Accepted residual: a `wx` write whose open succeeded and whose write then
+    // failed (ENOSPC, EIO) leaves a partial file that is not in `created`, so it
+    // is not freed here; adding the path on an arbitrary write error could name a
+    // file this call did not create.
+    const created = new Set<string>();
+    try {
+      return await this.copyAssetsInto(fromBriefId, toBriefId, created);
+    } catch (error) {
+      try {
+        await this.freeUnreferencedAssets(toBriefId, [...created]);
+      } catch {
+        // Best-effort: the copy's own error is what the caller must hear, and a failed free
+        // here leaves the files in place: nothing sweeps `assets/inputs/<slug>/` on the
+        // file store, so only a route's own release takes them.
+      }
+      throw error;
+    }
+  }
+
+  /** The body of {@link copyAssets}; every id it mints is added to `created` the moment it is minted. */
+  private async copyAssetsInto(
+    fromBriefId: string,
+    toBriefId: string,
+    created: Set<string>,
+  ): Promise<AssetCopyResult> {
     if (fromBriefId === toBriefId) return { paths: {}, created: new Set() };
     let sourceDir: string;
     let targetDir: string;
@@ -174,7 +203,6 @@ export class FsAssetStore implements AssetStorePort {
 
     await mkdir(targetDir, { recursive: true });
     const pathMap: Record<string, string> = {};
-    const created = new Set<string>();
 
     for (const relPath of sourceFiles) {
       const srcPath = resolveConfined(sourceDir, relPath);
