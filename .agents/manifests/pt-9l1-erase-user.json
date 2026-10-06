@@ -1,0 +1,158 @@
+{
+  "version": 1,
+  "lane": "PT-9l1-erase-user",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "lower(identifier) = lower($1)",
+      "after": "false",
+      "because": "the identifier clause is what deletes a magic-link row whose identifier IS the email (v-1). Replaced with `false` it survives, so the `expect(rows).toEqual([])` read of v-1 fails. It also leaves the email on the identifier column, so the whole-database scan (test 26) finds it too.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/erase-user.test.ts",
+        "-t",
+        "eraseUser deletes verification rows whose identifier is the email",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "or position(lower('\"email\":' || to_json($1::text)::text) in lower(value)) > 0",
+      "after": "or false",
+      "because": "the value clause is the only half that reaches a magic-link row, whose identifier is a random token (v-2). With it replaced by `false` the row survives and the count assertion fails; this is the row's own 'skip verification -> the scan finds the email' mutation, since v-2's value holds the target email and name.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/erase-user.test.ts",
+        "-t",
+        "eraseUser deletes magic-link verification rows whose value holds the email",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "const INVITEE_MATCH = \"lower(email) = lower($1)\";",
+      "after": "const INVITEE_MATCH = \"false\";",
+      "because": "the invitee delete is driven by INVITEE_MATCH; replacing it with `false` is the only statement that deletes an invitation addressed to the user, so inv-1 (Target@Example.COM) survives and the toEqual([]) read fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/erase-user.test.ts",
+        "-t",
+        "eraseUser deletes invitations sent to the email in any letter case",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "where m.user_id = $1 and string_to_array(replace(m.role, ' ', ''), ',') @> array['owner']",
+      "after": "where m.user_id = $1 and string_to_array(replace(m.role, ' ', ''), ',') @> array['admin']",
+      "because": "the sole-owner guard reads owners, so retargeting it at admins makes the REAL sole owner (LOCAL_OWNER, an owner not an admin) invisible and the erase proceeds. The refusal test then sees outcome `erased` instead of `sole-owner`, so the toEqual fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/erase-user.test.ts",
+        "-t",
+        "eraseUser refuses the only owner of an org and writes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "where id = any($1::text[])",
+      "after": "where id = any($1::text[]) and false",
+      "because": "the memberCount recompute is a no-op under this mutant, so team-a stays at the seeded 2 instead of dropping to 1 and the receded count assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/erase-user.test.ts",
+        "-t",
+        "eraseUser recounts memberCount for the teams the user left",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "return db.transaction((tx) => run(tx, ref, apply));",
+      "after": "return run(db, ref, apply);",
+      "because": "without a transaction, steps 3-7 commit on the caller's connection before step 8 throws, so the failed-erase dump no longer equals the pre-call dump; the toEqual on the post-failure dump fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/erase-user.test.ts",
+        "-t",
+        "eraseUser rolls back every earlier step when the last step fails",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "update brief_version set actor = $2 where actor = $1",
+      "after": "update brief_version set actor = $2 where actor = $1 and false",
+      "because": "the actor rewrite is a no-op under this mutant, so the target's brief_version row keeps `u-target` instead of the token and the ordered actor read fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/erase-user.test.ts",
+        "-t",
+        "eraseUser replaces brief_version actor with the token and leaves another user untouched",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "if (!apply) return { outcome: \"planned\", counts };",
+      "after": "if (false) return { outcome: \"planned\", counts };",
+      "because": "the dry-run guard is removed, so a dry run (apply: false) falls through and performs the erase, answering `erased` instead of `planned`; the planned toEqual fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/erase-user.test.ts",
+        "-t",
+        "eraseUser dry run reports counts and changes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
