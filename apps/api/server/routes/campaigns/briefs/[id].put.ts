@@ -8,7 +8,7 @@ import {
 import { isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { objectStore } from "../../../lib/config.js";
 import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
-import { getBriefStore, TeamsNotSupportedError } from "../../../lib/ports/index.js";
+import { getAssetStore, getBriefStore, TeamsNotSupportedError } from "../../../lib/ports/index.js";
 import {
   CampaignNotFoundError,
   canAssignTeam,
@@ -118,43 +118,61 @@ export default defineEventHandler(async (event) => {
   try {
     const stored = await store.withBriefLock(slug, async () => {
       let toSave = briefToSave;
-      // Gated on `s3`, not on `supportsTeams` (PT-4k2b, D210 b): off s3 the non-s3
-      // `save` branch of the resolve would add a visibility check this route has never
-      // made and change nothing else, so PUT must not call the helper at all there.
-      if (objectStore() === "s3") {
-        const resolved = await resolveBriefAssetRefs(scope, briefToSave, {
-          target: slug,
-          mode: "save",
-        });
-        // **`resolved.brief` is what gets written even when nothing is copied** (r2):
-        // under s3 a path ref to the TARGET'S OWN asset has just been rewritten to its
-        // id, and saving `briefToSave` would store the path — so this is not the same
-        // body any more.
-        toSave = resolved.brief;
-        if (resolved.copyFrom.length > 0) {
-          // **Both refusals come BEFORE the copy** (D211 c), and the revision one is the
-          // reason the guard exists at all here: `rewriteBrief` ENOENTs a versionless
-          // campaign and 409s a stale one itself, so a check after it would be a refusal
-          // with the foreign campaign's assets already copied into the target for a write
-          // that was never going to land. Same condition `briefs.post.ts` guards with.
-          const current = await store.getRevision(slug);
-          if (current === undefined) {
-            const absentErr = new Error(`Brief "${slug}" not found.`);
-            (absentErr as { code?: string }).code = "ENOENT";
-            throw absentErr;
+      // What this request itself minted into the target (PT-9j, D237 b); see
+      // `briefs.post.ts`. Empty until `copyBriefRefs` has returned, and always empty off `s3`,
+      // where this route copies nothing.
+      let createdIds: readonly string[] = [];
+      try {
+        // Gated on `s3`, not on `supportsTeams` (PT-4k2b, D210 b): off s3 the non-s3
+        // `save` branch of the resolve would add a visibility check this route has never
+        // made and change nothing else, so PUT must not call the helper at all there.
+        if (objectStore() === "s3") {
+          const resolved = await resolveBriefAssetRefs(scope, briefToSave, {
+            target: slug,
+            mode: "save",
+          });
+          // **`resolved.brief` is what gets written even when nothing is copied** (r2):
+          // under s3 a path ref to the TARGET'S OWN asset has just been rewritten to its
+          // id, and saving `briefToSave` would store the path — so this is not the same
+          // body any more.
+          toSave = resolved.brief;
+          if (resolved.copyFrom.length > 0) {
+            // **Both refusals come BEFORE the copy** (D211 c), and the revision one is the
+            // reason the guard exists at all here: `rewriteBrief` ENOENTs a versionless
+            // campaign and 409s a stale one itself, so a check after it would be a refusal
+            // with the foreign campaign's assets already copied into the target for a write
+            // that was never going to land. Same condition `briefs.post.ts` guards with.
+            const current = await store.getRevision(slug);
+            if (current === undefined) {
+              const absentErr = new Error(`Brief "${slug}" not found.`);
+              (absentErr as { code?: string }).code = "ENOENT";
+              throw absentErr;
+            }
+            if (expectedRevision !== undefined && current !== expectedRevision) {
+              const conflictErr = new Error("Brief was modified by another user.");
+              (conflictErr as { code?: string; revision?: string }).code = "ECONFLICT";
+              (conflictErr as { revision?: string }).revision = current;
+              throw conflictErr;
+            }
+            const copied = await copyBriefRefs(scope, resolved.brief, resolved.copyFrom, slug);
+            toSave = copied.brief;
+            createdIds = copied.createdIds;
+            // The row could have gone between the resolve and the copy; see `assertRefsCopied`.
+            assertRefsCopied(toSave, resolved.foreignIds, slug);
           }
-          if (expectedRevision !== undefined && current !== expectedRevision) {
-            const conflictErr = new Error("Brief was modified by another user.");
-            (conflictErr as { code?: string; revision?: string }).code = "ECONFLICT";
-            (conflictErr as { revision?: string }).revision = current;
-            throw conflictErr;
-          }
-          ({ brief: toSave } = await copyBriefRefs(scope, resolved.brief, resolved.copyFrom, slug));
-          // The row could have gone between the resolve and the copy; see `assertRefsCopied`.
-          assertRefsCopied(toSave, resolved.foreignIds, slug);
         }
+        return await store.rewriteBrief(toSave, { expectedRevision, teamId });
+      } catch (error) {
+        if (createdIds.length > 0) {
+          try {
+            await getAssetStore(scope).freeUnreferencedAssets(slug, createdIds);
+          } catch {
+            // Best-effort: the answer is already decided and an error here must never replace
+            // it (D237, D239). There is no structured logger in this repo to report it to.
+          }
+        }
+        throw error;
       }
-      return await store.rewriteBrief(toSave, { expectedRevision, teamId });
     });
     // The new revision rides along: the editor dispatches it into its source, so the
     // next save guards conditionally instead of replaying the load-time revision and
