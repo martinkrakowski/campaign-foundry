@@ -101,13 +101,33 @@ jobs:
         id: started
         run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
+      # Reviewer trial (owner, 2026-10-06; reassess after 25 to 30 PRs per arm or two weeks):
+      # even-numbered PRs are reviewed by GPT-6.1 Sol, odd-numbered by mercury-2, with the same
+      # prompt, caps and fallback, so the model is the only difference. Every automatic PR-Agent
+      # thread before this came from mercury-2: the model swaps of 2026-10-04 and 2026-10-06 were
+      # made in pr-agent.yml, which only runs on a /review comment. Each thread is scored for
+      # validity, uniqueness and outcome against Qodo and CodeRabbit on the same PRs. Actions
+      # expressions have no arithmetic, hence a step. The number comes in through env, never
+      # interpolated into the script.
+      - name: "Pick the trial arm"
+        id: arm
+        env:
+          PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          case "$PR" in
+            ''|*[!0-9]*) echo "not a PR number: '$PR'" >&2; exit 1 ;;
+          esac
+          if [ $((PR % 2)) -eq 0 ]; then model="openrouter/openai/gpt-6.1-sol"; else model="openrouter/inception/mercury-2"; fi
+          echo "model=$model" >> "$GITHUB_OUTPUT"
+          echo "PR #$PR -> $model" >> "$GITHUB_STEP_SUMMARY"
+
       - name: "PR Agent"
         uses: docker://pragent/pr-agent@sha256:b81235c3bddc551939a1feca8926f4b6e8abcec2ae5bf4620424f8f56dd9cb93 # 0.42.0-github_action
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENROUTER__KEY: ${{ secrets.OPENROUTER_KEY }}
           config.restricted_mode: "true"
-          config.model: "openrouter/inception/mercury-2"
+          config.model: ${{ steps.arm.outputs.model }}
           config.fallback_models: '["openrouter/anthropic/claude-haiku-4.5"]'
           config.custom_model_max_tokens: "128000"
           config.max_model_tokens: "70000"
