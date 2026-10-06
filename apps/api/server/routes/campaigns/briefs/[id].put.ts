@@ -149,7 +149,7 @@ export default defineEventHandler(async (event) => {
             (conflictErr as { revision?: string }).revision = current;
             throw conflictErr;
           }
-          toSave = await copyBriefRefs(scope, resolved.brief, resolved.copyFrom, slug);
+          ({ brief: toSave } = await copyBriefRefs(scope, resolved.brief, resolved.copyFrom, slug));
           // The row could have gone between the resolve and the copy; see `assertRefsCopied`.
           assertRefsCopied(toSave, resolved.foreignIds, slug);
         }
