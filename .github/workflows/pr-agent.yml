@@ -141,9 +141,17 @@ jobs:
           # outgrew its plan. Qwen is now on trial as an implementer, and a reviewer should not
           # be the seat that wrote the code. Luna is $0.10/$0.50 per M tokens on OpenRouter, so
           # one review costs well under a cent. Haiku stays as the paid fallback.
-          config.model: "openrouter/openai/gpt-6-luna"
-          config.fallback_models: '["openrouter/anthropic/claude-haiku-4.5"]'
-          # Luna's window per OpenRouter is 1050000. 128000 is declared (Haiku's capacity
+          # Swapped 2026-10-06 (owner: "let's run a stronger model on pr-agent"; his pick: Tencent
+          # Hy4 preview), Luna → Hy4 preview, on trial. Over #696–#699 Luna raised two threads and
+          # neither named a real defect, while Qodo (about to hit its monthly quota) and CodeRabbit
+          # (rate-limited) each found one. Hy4 preview is $0.83/$2.50 per M tokens on OpenRouter,
+          # built for coding agents: with max_model_tokens 70000 below, one review is at most
+          # about $0.07. It is a fourth model family, beside the implementer's (Poolside) and the
+          # pre-merge reviewer's (Anthropic). A "preview" id can be withdrawn without notice, so
+          # the fallbacks matter: GPT-6.1 Sol ($2/$10) first, then Luna, then Haiku.
+          config.model: "openrouter/tencent/hy4-preview"
+          config.fallback_models: '["openrouter/openai/gpt-6.1-sol", "openrouter/openai/gpt-6-luna", "openrouter/anthropic/claude-haiku-4.5"]'
+          # Hy4's window per OpenRouter is 1048576, Sol's and Luna's 1050000. 128000 is declared (Haiku's capacity
           # bounds the fallback), and max_model_tokens below caps actual spend.
           config.custom_model_max_tokens: "128000"
           # custom_model_max_tokens declares the model's capacity; max_model_tokens caps
