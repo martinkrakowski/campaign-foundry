@@ -24,8 +24,8 @@
     },
     {
       "file": "apps/api/server/routes/campaigns/index.post.ts",
-      "before": "({ brief } = await copyBriefRefs(scope, brief, resolved.copyFrom, targetSlug));",
-      "after": "({ brief } = await copyBriefRefs(scope, brief, [], targetSlug));",
+      "before": "        const copied = await copyBriefRefs(scope, brief, resolved.copyFrom, targetSlug);",
+      "after": "        const copied = await copyBriefRefs(scope, brief, [], targetSlug);",
       "because": "The same link on the SECOND copy route, which is a separate call site and a separate defect. index.post mints its slug through its own reservation and its own rollback, so nothing about duplicate.post copyBriefRefs being correct implies anything here: dropping the copy leaves a sourced create sharing a third campaign asset id, still answering 201, and the ref surviving only as long as that third campaign does. Both are worth having because the two routes were copied from one another in PT-5b2 and a fix that lands on one of them is the expected outcome - so the tests have to be able to say WHICH half regressed.",
       "command": [
         "env",

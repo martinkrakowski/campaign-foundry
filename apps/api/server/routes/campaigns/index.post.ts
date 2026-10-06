@@ -14,6 +14,7 @@ import {
   type ResolvedBriefRefs,
 } from "../../lib/brief-asset-refs.js";
 import { isErrno, isExistsError, SYMLINK_WRITE_ERROR } from "../../lib/brief-files.js";
+import { objectStore } from "../../lib/config.js";
 import { parseBrief } from "../../lib/load-brief.js";
 import {
   copyPool,
@@ -121,10 +122,12 @@ async function withDerivedSlug<T>(name: string, attempt: (slug: string) => Promi
  * PT-5b2 fix-round items 2/3: `readPool` and that ref resolve run once, before any
  * slug is ever reserved — a malformed pool or a hidden reference answers 422/404
  * without minting anything. Once a candidate IS reserved (`createCampaign`), a later
- * failure (asset copy, the first-version `createBrief`, the pool write) frees the
- * copied assets and then releases that reservation (`deleteAssets`,
- * `releaseCampaign` — in THAT order, PT-4b, because the slug both frees by has to be
- * resolved before the row goes) and propagates as-is — never retried
+ * failure (asset copy, the first-version `createBrief`, the pool write) frees exactly
+ * the assets THIS request created (`freeUnreferencedAssets(targetSlug, createdIds)`,
+ * by slug, while the campaign has no version on a non-`s3` store) and then releases
+ * that reservation (`releaseCampaign` — in THAT order, PT-4b, because the slug has to
+ * be resolved into its campaign row before the row goes) and propagates as-is — never
+ * retried
  * onto a different suffix, even when the failure is itself EEXIST-shaped
  * (a concurrent writer's own Save racing this exact slug).
  *
@@ -408,17 +411,35 @@ export default defineEventHandler(async (event) => {
         if (isExistsError(error)) throw new SlugTakenError();
         throw error;
       }
+      // Every id this request itself minted into `targetSlug`, in the order it minted them
+      // (PT-9j, D237 a): the source's own copy first, then `copyBriefRefs`' (which frees its
+      // own ids when it fails and so never hands them back from a throw). The rollback below
+      // frees exactly these and nothing else: never a sha-deduped reuse, never an asset an
+      // uploader or a concurrent Save put into this slug, never the source's own.
+      const createdIds: string[] = [];
       try {
         // `resolved.brief` and not `template`: under `s3` every ref the source carried is
         // already the id of a row the caller can see, and `template` still carries the
         // paths (or the source's own ids) the copy below would then have nothing to map.
         let brief: CampaignBrief = { ...resolved.brief, id: targetSlug };
-        const { paths: sourceMap } = await getAssetStore(scope).copyAssets(sourceSlug, targetSlug);
-        brief = rewriteAssetPaths(brief, sourceSlug, targetSlug, sourceMap);
+        const sourceCopy = await getAssetStore(scope).copyAssets(sourceSlug, targetSlug);
+        createdIds.push(...sourceCopy.created);
+        brief = rewriteAssetPaths(brief, sourceSlug, targetSlug, sourceCopy.paths);
         // Every OTHER campaign the source named, in the order the resolve found them.
         // Under `s3` this is what carries a THIRD campaign's id over (carry item 2); off
         // it is the loop this line replaces, remapping paths prefix for prefix.
-        ({ brief } = await copyBriefRefs(scope, brief, resolved.copyFrom, targetSlug));
+        const copied = await copyBriefRefs(scope, brief, resolved.copyFrom, targetSlug);
+        createdIds.push(...copied.createdIds);
+        brief = copied.brief;
+        // PT-9j (D237 c, PT-9i residual E): the SOURCE's own copy above was gated before it ran
+        // and is re-checked here, after EVERY copy of this request, the way `copyBriefRefs`
+        // re-checks its own sources. The source was a real campaign the caller could see when
+        // the route resolved it, so anything but "visible" now (reassigned to a team the caller
+        // is outside, tombstoned, gone) refuses with the route's one 404; the rollback below frees
+        // what was created. fs has no teams and makes no call.
+        if (store.supportsTeams && (await store.campaignVisibility(sourceSlug)) !== "visible") {
+          throw new BriefRefNotFoundError(source);
+        }
         // **The source's own ids are in this set too.** From the fresh target's point of
         // view the SOURCE's assets are foreign as well, and every one of them had to come
         // back from `sourceMap` — so a source id that survived it (a row deleted between
@@ -445,49 +466,31 @@ export default defineEventHandler(async (event) => {
         // ever written), or `releaseCampaign`'s own `rmdir` would refuse a
         // non-empty directory and answer false for no reason.
         await withPoolLock(scope, targetSlug, () => deletePool(scope, targetSlug));
-        // The assets go BEFORE the release, by SLUG, and only while this slug
-        // still has no version (PT-4b).
+        // The assets go BEFORE the release, by SLUG (PT-4b).
         //
-        // Before, because the slug is what each backend can actually act on:
-        // `FsAssetStore` stores a copied asset under
-        // `assets/inputs/<slug>/` — a uuid is a directory it never wrote — and
-        // `ObjectAssetStore` resolves the slug into the uuid its prefix is built
-        // from, which it can only do while the campaign row exists. Released
-        // first, the row is gone and neither can free anything: on staging
-        // (`STORE_BACKEND=postgres`, `OBJECT_STORE=fs`) a failed create then
-        // deleted a non-existent uuid directory and left every copied file
-        // behind for good.
-        //
-        // The `hasVersion` guard is what keeps this from eating someone else's
-        // work, and the route's own docstring names the race it closes:
-        // `withBriefLock` is IN-PROCESS, so a SECOND API instance can write
-        // version 1 under this slug between this request's `createCampaign` and
-        // its `createBrief`. That campaign is a real, versioned one now, and
-        // emptying its assets would delete the WINNER's uploads — while the
-        // release below goes on to refuse, correctly, because a version exists.
-        // So the free asks first, and `campaignMeta`'s `hasVersion` is exactly
-        // the "any version yet" test `releaseCampaign` guards on: `exists(
-        // select 1 from brief_version …)` on pg, a brief FILE for the id on fs.
-        // One question, asked once, instead of inferred afterwards.
-        //
-        // Best-effort, and NOT freeing is the safe direction: the release is
-        // what makes the campaign go away, so a failure here must not stand in
-        // its way, and on S3 the release's cascade takes any rows the failed
-        // prefix-delete left — objects without rows are unreachable, rows
-        // without objects are a re-upload. The original error is what propagates
-        // below either way, which is also why a `campaignMeta` that THROWS (a
-        // malformed `campaign.json` on fs) is caught here rather than allowed to
-        // replace it: not knowing whether freeing is safe must never be the thing
-        // that destroys a real campaign's assets.
-        try {
-          const meta = await store.campaignMeta(targetSlug);
-          if (meta !== undefined && !meta.hasVersion) {
-            await getAssetStore(scope).deleteAssets(targetSlug);
+        // Only the ids THIS request created are freed (PT-9j, D237 a), never the
+        // whole campaign: under `s3` `freeUnreferencedAssets` locks the campaign
+        // row and keeps every id a committed version names, so a Save that won
+        // this slug keeps what it references and the rest of this request's
+        // copies still go. `FsAssetStore` cannot check that, so off `s3` the
+        // `hasVersion` question PT-4b introduced is still asked first: a second
+        // writer that has already versioned this slug owns its files, and NOT
+        // freeing is the safe direction. `campaignMeta` that throws or answers
+        // `undefined` is "not known to be safe" and frees nothing, and neither it
+        // nor the free may replace the original error.
+        if (createdIds.length > 0) {
+          try {
+            if (
+              objectStore() === "s3" ||
+              (await store.campaignMeta(targetSlug))?.hasVersion === false
+            ) {
+              await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);
+            }
+          } catch (cleanup) {
+            console.warn(
+              `[campaigns] could not free the assets of "${targetSlug}" after a failed create: ${errorMessage(cleanup)}`,
+            );
           }
-        } catch (cleanup) {
-          console.warn(
-            `[campaigns] could not free the assets of "${targetSlug}" after a failed create: ${errorMessage(cleanup)}`,
-          );
         }
         // `releaseCampaign` carries the same guard, independently: it refuses
         // once a real, versioned brief exists for the slug (a concurrent Save
