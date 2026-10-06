@@ -420,6 +420,38 @@ describe("put route compensation (s3 on pg)", () => {
     expect((await counts(harness.db)).versions).toBe(snapshot.versions + 1);
   });
 
+  test("put route frees by the slug and only the ids it created when a uuid router id's write fails under s3", async () => {
+    // The uuid arrangement of the uuid-success test above, against the slug-id
+    // rollback test's failure (rewriteBrief rejects after the copy). The free is
+    // still handed the SLUG (resolved before the copy), not the router id, so a
+    // uuid router id must not reach the adapter as a campaign name.
+    const target = await freshTarget(true);
+    const source = await seedSource();
+    const targetUuid = await uuidOf(target.slug);
+    const snapshot = await counts(harness.db);
+    const { seen, free, del } = watch();
+    vi.spyOn(PgBriefStore.prototype, "rewriteBrief").mockRejectedValueOnce(new Error("boom"));
+
+    const res = await put(ONLY_T1, targetUuid, allForeignId(targetUuid, source.ids.alt));
+    expect(res.status).toBe(500);
+
+    expect(free).toHaveBeenCalledTimes(1);
+    expect(free.mock.calls[0][0]).toBe(target.slug);
+    expect(free.mock.calls[0][0]).not.toBe(targetUuid);
+    const freeIds = [...(free.mock.calls[0][1] as readonly string[])];
+    expect(freeIds.sort()).toEqual([...(seen.get(source.slug) ?? new Set<string>())].sort());
+    // Every freed id is a row THIS request minted into the target, never the
+    // target's own pre-existing logo and never one of the source's ids.
+    expect(freeIds).not.toContain(target.ownId);
+    expect(freeIds).not.toContain(source.ids.logo);
+    expect(freeIds).not.toContain(source.ids.alt);
+    expect(freeIds).not.toContain(source.ids.bg);
+    expect(del).not.toHaveBeenCalled();
+    expect(await rowsOf(target.slug)).toEqual([{ id: target.ownId, name: "logo.png" }]);
+    expect((await keysOf(target.slug)).length).toBe(1);
+    expect((await counts(harness.db)).versions).toBe(snapshot.versions);
+  });
+
   test("put route surfaces a non-CampaignNotFoundError from resolveCampaignRef as 500", async () => {
     const target = await freshTarget(true);
     vi.spyOn(PgBriefStore.prototype, "resolveCampaign").mockRejectedValueOnce(new Error("boom"));

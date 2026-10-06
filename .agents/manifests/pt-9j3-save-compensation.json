@@ -161,6 +161,26 @@
         "put route off s3 never copies and never calls the free when the write fails"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id].put.ts",
+      "before": "            await getAssetStore(scope).freeUnreferencedAssets(slug, createdIds);",
+      "after": "            await getAssetStore(scope).freeUnreferencedAssets(id, createdIds);",
+      "because": "The free is handed the router id instead of the slug. With a slug router id the two are the same string, so the other PUT tests cannot see it; with a uuid router id the adapter's slug lookup finds no campaign and frees nothing, so the created rows and objects stay and the first-argument assertion fails.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/put-compensation.test.ts",
+        "-t",
+        "put route frees by the slug and only the ids it created when a uuid router id's write fails under s3"
+      ],
+      "verdict": "caught"
     }
   ]
 }
