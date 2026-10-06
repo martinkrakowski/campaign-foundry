@@ -21,6 +21,7 @@ import {
   databaseSettings,
   kafkaSettings,
   keyEncryptionSettings,
+  MAX_PURGE_GRACE_HOURS,
   objectStore,
   objectStoreSettings,
   outputRoot,
@@ -789,6 +790,18 @@ describe("purgeGraceHours (D231, Q1)", () => {
       process.env.PURGE_GRACE_HOURS = value;
       expect(() => purgeGraceHours()).toThrow(/Malformed PURGE_GRACE_HOURS/);
     }
+  });
+
+  test("purgeGraceHours accepts the ten-year cap and rejects one hour more", () => {
+    process.env.PURGE_GRACE_HOURS = String(MAX_PURGE_GRACE_HOURS);
+    expect(purgeGraceHours()).toBe(87_600);
+
+    process.env.PURGE_GRACE_HOURS = String(MAX_PURGE_GRACE_HOURS + 1);
+    expect(() => purgeGraceHours()).toThrow(/from 0 to 87600, got "87601"/);
+
+    // A safe integer Postgres cannot hold as an interval of hours.
+    process.env.PURGE_GRACE_HOURS = "9007199254740991";
+    expect(() => purgeGraceHours()).toThrow(/Malformed PURGE_GRACE_HOURS/);
   });
 });
 
