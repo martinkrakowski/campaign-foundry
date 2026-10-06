@@ -314,6 +314,11 @@ describe("cache CLI (bin/purge.ts)", () => {
     expect(parseCacheArgs(["--org", "acme", "--apply"])).toEqual({ apply: true, org: "acme" });
     expect(parseCacheArgs(["--dry-run"])).toEqual({ apply: false, org: undefined });
     expect(() => parseCacheArgs(["--apply"])).toThrow(USAGE_CACHE);
+    // Two orgs are ambiguous, and with --apply the last one would be deleted in: refused.
+    expect(() => parseCacheArgs(["--org", "acme", "--org", "local", "--apply"])).toThrow(
+      USAGE_CACHE,
+    );
+    expect(() => parseReconcileArgs(["--org", "acme", "--org", "local"])).toThrow(USAGE_RECONCILE);
 
     await expect(runCache(["--bogus"])).rejects.toThrow(USAGE_CACHE);
   });

@@ -161,7 +161,9 @@ function parseOrgArgs(args: readonly string[], usage: string): { apply: boolean;
     const arg = args[i];
     if (arg === "--apply") apply = true;
     else if (arg === "--dry-run") dryRun = true;
-    else if (arg === "--org" && args[i + 1] !== undefined) org = args[++i];
+    // A second `--org` is refused, never "last one wins": with `--apply` that would delete
+    // in an org the operator may not have meant.
+    else if (arg === "--org" && org === undefined && args[i + 1] !== undefined) org = args[++i];
     else throw new Error(usage);
   }
   if (apply && dryRun) throw new Error(usage);
