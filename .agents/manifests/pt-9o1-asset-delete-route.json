@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "lane": "PT-9o1-asset-delete-route",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/assets.delete.ts",
+      "before": "collectRefs(stored.brief).some(names)",
+      "after": "false",
+      "because": "Dropping the latest-version reference check lets the route free an asset the saved brief still names: on fs there is no store-side check, so deleting camp's logo.png (which the brief names by path) proceeds to 200 and removes the file. FAILS ON: expect(res.status).toBe(409);",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.delete.test.ts",
+        "-t",
+        "DELETE /campaigns/assets on the file store answers 409 when the saved brief names the asset by path"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/assets.delete.ts",
+      "before": "namesAsset(draft.state, names)",
+      "after": "false",
+      "because": "Skipping the caller's-draft check lets a draft that names the asset be deleted anyway: the brief now names only other.png and the draft names logo.png, so the route frees logo.png and answers 200 instead of 409. FAILS ON: expect(a.status).toBe(409);",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.delete.test.ts",
+        "-t",
+        "DELETE /campaigns/assets on the file store answers 409 when the callers own draft names the asset"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/assets.delete.ts",
+      "before": "if (briefs.supportsTeams && resolved === undefined) return notFound();",
+      "after": "if (false) return notFound();",
+      "because": "Bypassing the resolveCampaign 404 lets a team-hidden campaign's asset be deleted: t2Member on the t1 campaign by name proceeds past the gate (the id branch still 404s on fs because an id never matches a file-store entry) and frees the file (200) instead of answering the one 404. FAILS ON: expect(byNameHidden.status).toBe(404);",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.delete.pgfs.test.ts",
+        "-t",
+        "DELETE /campaigns/assets answers the same 404 for a hidden campaign, an absent campaign and an unknown asset"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/assets.delete.ts",
+      "before": "[entry.id ?? entry.name]",
+      "after": "entries.map((candidate) => candidate.id ?? candidate.name)",
+      "because": "Freeing every listed entry instead of one removes the neighbour too: deleting other.png from camp also removes logo.png, so listAssets('camp') is [] not [logo.png] and the logo.png byte assertion fails. FAILS ON: expect((await store.listAssets('camp')).map((e) => e.name)).toEqual(['logo.png']);",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.delete.test.ts",
+        "-t",
+        "DELETE /campaigns/assets on the file store removes the named file and nothing else"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/assets.delete.ts",
+      "before": "await assetStore.freeUnreferencedAssets(slug, [entry.id ?? entry.name]);",
+      "after": "await assetStore.deleteAssets(slug);",
+      "because": "deleteAssets(slug) frees the whole campaign library under s3, so the neighbour other.png is gone and rows is [] not [other.png]; the row/object existence assertions fail. FAILS ON: expect((await rows('local', 'camp')).map((r) => r.name)).toEqual(['other.png']);",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.delete.s3.test.ts",
+        "-t",
+        "DELETE /campaigns/assets under s3 deletes by id and removes the row and the object but not the neighbour"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/assets.delete.ts",
+      "before": "if ((await assetStore.listAssets(slug)).some(same)) return inUse();",
+      "after": "if (false) return inUse();",
+      "because": "Trusting the free's void return instead of re-listing makes an s3 delete answer 200 when the store kept the row (an older version names it): the response is wrong and the asset survives. FAILS ON: expect(res.status).toBe(409);",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.delete.s3.test.ts",
+        "-t",
+        "DELETE /campaigns/assets under s3 answers 409 when only an older version names the id and keeps the row and the object"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/assets.delete.ts",
+      "before": "return briefs.withBriefLock(slug, async () => {",
+      "after": "return (<T,>(_slug: string, fn: () => Promise<T>) => fn())(slug, async () => {",
+      "because": "Replacing the brief lock with a no-op wrapper means the route never calls getBriefStore(local).withBriefLock, so the spy is not invoked. FAILS ON: expect(spy).toHaveBeenCalledOnce();",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.delete.test.ts",
+        "-t",
+        "DELETE /campaigns/assets takes the brief lock for the campaign slug"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/assets.delete.ts",
+      "before": "if ((id === undefined) === (name === undefined)) {",
+      "after": "if (id === undefined && name === undefined) {",
+      "because": "Treating 'both given' as 'neither given' lets a request carrying id and name both proceed past validation: the id never matches a file-store entry, so the route answers 404 instead of 400. FAILS ON: expect(res.status).toBe(400);",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.delete.test.ts",
+        "-t",
+        "DELETE /campaigns/assets answers 400 when both id and name are given and removes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/assets.delete.ts",
+      "before": "(await briefs.findBriefFile(slug)) !== undefined",
+      "after": "false",
+      "because": "Bypassing the findBriefFile guard makes a corrupt brief read as 'no brief' (undefined), so the route proceeds past the 500 throw and frees the asset (200) instead of failing closed. FAILS ON: expect(res.status).toBe(500);",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.delete.test.ts",
+        "-t",
+        "DELETE /campaigns/assets on the file store answers 500 and frees nothing when the saved brief no longer parses"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/assets.delete.ts",
+      "before": "parsed.slug === slug && ",
+      "after": "true && ",
+      "because": "Dropping the slug comparison from parseStoredInputRef's result makes a brief that names another campaign's same-named file block this campaign's delete: step (c) expects 200 but gets 409. FAILS ON: expect(c.status).toBe(200);",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.delete.test.ts",
+        "-t",
+        "DELETE /campaigns/assets on the file store answers 409 when the saved brief names the asset by a non-canonical path"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
