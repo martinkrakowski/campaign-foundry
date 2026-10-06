@@ -55,9 +55,9 @@
     },
     {
       "file": "apps/api/server/routes/campaigns/index.post.ts",
-      "before": "            await getAssetStore(scope).deleteAssets(targetSlug);",
-      "after": "            await getAssetStore(scope).deleteAssets(meta.campaignId);",
-      "because": "The free is handed the campaign UUID (meta.campaignId) instead of the slug. On STORE_BACKEND=postgres + OBJECT_STORE=fs (staging today) FsAssetStore keeps copied files under the SLUG directory, so freeing by uuid removes a directory that was never written and the copied files survive a failed create; the pg+fs rollback test sees the file still on disk. (pg+s3 is blind to this mutant: ObjectAssetStore accepts a uuid too.)",
+      "before": "              await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);",
+      "after": "              await getAssetStore(scope).freeUnreferencedAssets(\"00000000-0000-4000-8000-000000000000\", createdIds);",
+      "because": "The free is handed a uuid instead of the slug. `meta.campaignId` no longer exists in the rollback (nothing keeps createCampaign's result), so the mutant uses a literal uuid: the free resolves no campaign by slug on s3 and names a directory that was never written on fs, so the copied files survive a failed create; the pg+fs rollback test sees the file still on disk (witness unchanged).",
       "command": [
         "yarn",
         "vitest",
@@ -157,27 +157,33 @@
     },
     {
       "file": "apps/api/server/routes/campaigns/index.post.ts",
-      "before": "          const meta = await store.campaignMeta(targetSlug);\n          if (meta !== undefined && !meta.hasVersion) {",
-      "after": "          const meta = await store.campaignMeta(targetSlug);\n          if (meta !== undefined) {",
-      "because": "the free stops asking whether the campaign is real (fix round 3, MEDIUM). `withBriefLock` is IN-PROCESS, so a second API instance can write version 1 under the target slug between this request's `createCampaign` and its `createBrief`; the campaign is then a real, versioned one, and the free empties the WINNER's uploads — s3 through `deletePrefix` plus the row delete, fs through `rm -rf` — while the release below goes on to refuse, correctly, because a version exists. That is data loss rather than the leak this rollback exists to prevent, and it is why the order is free-then-release but the GUARD is still required: `campaignMeta`'s `hasVersion` is the same \"any version yet\" test `releaseCampaign` guards on, so asking it first asks the one question that can still change what happens. The test simulates the other instance by writing version 1 through a second `PgBriefStore` before raising an EEXIST-coded error, then asserts the campaign row, its asset row, its object and its `brief_version` all survive. The same line in `briefs/[id]/duplicate.post.ts` is the identical defect on the second of the two routes that make this sequence; the duplicate's own test drives it.",
+      "before": "              (await store.campaignMeta(targetSlug))?.hasVersion === false",
+      "after": "              true",
+      "because": "The off-s3 hasVersion guard is gone (decision 8): FsAssetStore.freeUnreferencedAssets has no reference check, so a winning Save's version-named file is freed. The old witness (an s3 test) can no longer see this line, because under s3 the adapter's own check guards; the new witness is the pg plus fs winner test, which asserts the free was never called.",
       "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
         "yarn",
         "vitest",
         "run",
         "--project",
         "api",
-        "apps/api/server/routes/campaigns/__tests__/assets.postgres.test.ts",
+        "apps/api/server/routes/campaigns/__tests__/create-compensation.test.ts",
         "-t",
-        "the create rollback leaves the winner's campaign and its assets alone"
+        "create route on pg plus fs keeps the files of a winning Save and frees nothing"
       ],
       "verdict": "caught"
     },
     {
       "file": "apps/api/server/routes/campaigns/index.post.ts",
-      "before": "        try {\n          const meta = await store.campaignMeta(targetSlug);",
-      "after": "        await store.releaseCampaign(targetSlug);\n        try {\n          const meta = await store.campaignMeta(targetSlug);",
-      "because": "The campaign is released BEFORE its assets are freed. The release cascade removes the asset rows and the slug stops resolving, so campaignMeta answers undefined, the free is skipped, and the objects are left with no rows naming them; the pg+s3 rollback test sees objects still under the minted campaign prefix.",
+      "before": "        if (createdIds.length > 0) {",
+      "after": "        await store.releaseCampaign(targetSlug);\n        if (createdIds.length > 0) {",
+      "because": "The campaign is released BEFORE its assets are freed. The release cascade removes the asset rows and the slug stops resolving, so the free finds no campaign and does nothing, and the objects are left with no rows naming them; the pg+s3 rollback test sees objects still under the minted campaign prefix (witness unchanged).",
       "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
         "yarn",
         "vitest",
         "run",

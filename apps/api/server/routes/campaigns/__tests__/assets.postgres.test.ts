@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   BRIEF_SCHEMA_VERSION,
@@ -524,11 +524,11 @@ describe("the create rollback frees the copied assets (PT-4b)", () => {
     expect(failing).toHaveBeenCalledTimes(1);
 
     // The uuid `createCampaign` minted, which is the campaign whose prefix the
-    // copy wrote under — not, any more, what `deleteAssets` is given.
+    // copy wrote under — not, any more, what `freeUnreferencedAssets` is given.
     const minted = (await mint.mock.results[0]!.value) as ResolvedCampaign;
     expect(minted.slug).toBe("copy");
 
-    // Nothing of the copy's survives: `deleteAssets(<slug>)` resolved the slug to
+    // Nothing of the copy's survives: `freeUnreferencedAssets(<slug>, createdIds)` resolved the slug to
     // that uuid while the row still existed, so it removed the rows AND the
     // objects. Scoped to the minted campaign, because the SOURCE's row is
     // supposed to be here — the global count is asserted next, and it is 1 for
@@ -605,7 +605,7 @@ describe("the create rollback frees the copied assets (PT-4b)", () => {
 
     const real = Object.assign(new Error("the real failure"), { code: "EEXIST" });
     vi.spyOn(PgBriefStore.prototype, "createBrief").mockRejectedValueOnce(real);
-    vi.spyOn(ObjectAssetStore.prototype, "deleteAssets").mockRejectedValue(
+    vi.spyOn(ObjectAssetStore.prototype, "freeUnreferencedAssets").mockRejectedValue(
       new Error("the cleanup exploded"),
     );
 
@@ -814,9 +814,10 @@ describe("the create rollback frees the copied assets (PT-4b)", () => {
         }),
       );
       expect(res.status).toBe(500);
-      // The whole copy is gone, directory and all…
+      // The whole copy is gone, file and all… the empty directory is left (D237).
       expect(existsSync(copied())).toBe(false);
-      expect(existsSync(join(harness.projectRoot, "assets", "inputs", "copy"))).toBe(false);
+      const left = join(harness.projectRoot, "assets", "inputs", "copy");
+      expect(existsSync(left) ? readdirSync(left, { recursive: true }) : []).toEqual([]);
       // …and the source's own file is untouched.
       expect(existsSync(original())).toBe(true);
       // No `asset` row either: on this backend there never was one, and the
