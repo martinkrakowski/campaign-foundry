@@ -178,9 +178,9 @@ async function deleteLocked(tenant: TenantContext, slug: string): Promise<FsDele
  * Remove every filesystem location that holds data for ONE campaign (fs backend).
  *
  * This is the file-store half of PT-9n: `deleteCampaignOnFileStore` deletes one
- * campaign under the store's locks and nothing else. It is NOT wired to any route
- * (PT-9n2 hangs `DELETE /campaigns/:id`'s fs branch off it); the route still
- * answers 501 until then.
+ * campaign under the store's locks and nothing else. The route's `DELETE /campaigns/:id`
+ * file-store branch calls it (PT-9n2), answering 200 `{ deleted: true }`, 403, 404,
+ * 409, 400 for a symlinked path, and 500 on any other error.
  *
  * The nine locations planted for a campaign, with their removal rules:
  *   1. `briefs/<slug>/` (campaign.json, pools.json, drafts/<user>.json, *.tmp) — whole directory, symlink-refused, removed LAST of all as the marker.

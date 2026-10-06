@@ -3,7 +3,6 @@ import type { SqlClient } from "../../../lib/db/sql-client.js";
 import deleteHandler from "../[id].delete.js";
 import {
   mountTenantRoute,
-  setupFsHarness,
   setupPgHarness,
   type TenantContext,
   type WebCaller,
@@ -378,26 +377,6 @@ describe("DELETE /campaigns/:id — postgres store", () => {
       expect(await deletionCount(harness.db)).toBe(0);
     } finally {
       await harness.cleanup();
-    }
-  });
-});
-
-describe("DELETE /campaigns/:id — file store", () => {
-  test("DELETE /campaigns/:id answers 501 under the file store and touches nothing", async () => {
-    const harness = setupFsHarness();
-    try {
-      const res = await del(
-        mountTenantRoute(deleteHandler, {
-          method: "delete",
-          path: "/campaigns/:id",
-        }),
-        "untouched",
-      );
-      expect(res.status).toBe(501);
-      const body = (await res.json()) as { error: string };
-      expect(body).toEqual({ error: "Deleting a campaign needs STORE_BACKEND=postgres." });
-    } finally {
-      harness.cleanup();
     }
   });
 });
