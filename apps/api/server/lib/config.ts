@@ -65,16 +65,22 @@ export function objectStore(): ObjectStoreMode {
 /**
  * `PURGE_GRACE_HOURS` (D231, Q1): how long after a DELETE the sweeper may purge
  * the campaign. Default 0 = the next sweep. A whole number of hours, never
- * negative: `deletion.not_before = now() + this`.
+ * negative: `deletion.not_before = now() + this`. Capped at ten years: Postgres
+ * cannot hold the interval a larger safe integer asks for, and the DELETE that
+ * computes `not_before` would answer 500.
  */
+export const MAX_PURGE_GRACE_HOURS = 87_600;
+
 export function purgeGraceHours(): number {
   loadEnv();
   const raw = process.env.PURGE_GRACE_HOURS;
   if (raw === undefined || raw.trim() === "") return 0;
   const trimmed = raw.trim();
   const parsed = Number(trimmed);
-  if (!/^\d+$/.test(trimmed) || !Number.isSafeInteger(parsed)) {
-    throw new Error(`Malformed PURGE_GRACE_HOURS: must be a non-negative integer, got "${raw}".`);
+  if (!/^\d+$/.test(trimmed) || parsed > MAX_PURGE_GRACE_HOURS) {
+    throw new Error(
+      `Malformed PURGE_GRACE_HOURS: must be a whole number of hours from 0 to ${MAX_PURGE_GRACE_HOURS}, got "${raw}".`,
+    );
   }
   return parsed;
 }
