@@ -354,6 +354,20 @@ export async function duplicateCampaign(id: string, name: string): Promise<Brief
   );
 }
 
+/**
+ * DELETE /campaigns/:id (PT-9f, D234). `id` is a campaign uuid or slug. ANY 2xx is
+ * success and the body is ignored: 202 `{ deletionId }` today, and the file-store delete
+ * (PT-9n) answers its own shape, so nothing here validates one. Failures throw
+ * `BriefsApiError` carrying the status: 400 (unsafe id), 403 (visible, not yours to
+ * delete), 404 (hidden, absent or already deleted), 409 (a run is in progress; the
+ * `jobId` in its body is dropped on purpose, there is no cancel path, Q3), 501 (file store,
+ * until PT-9n). A 403 with `code: "no_membership"` throws `NoMembershipError` instead
+ * (`handleAuthError`), and a 401 redirects to sign-in.
+ */
+export async function deleteCampaign(id: string): Promise<void> {
+  await requestJson(`${API}/campaigns/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 /** Body for `createCampaign` — `POST /campaigns` (D177, D178). */
 export interface CreateCampaignBody {
   readonly name: string;
