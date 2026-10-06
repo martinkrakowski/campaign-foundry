@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { projectRoot } from "@campaignfoundry/shared";
-import { databaseSettings } from "../server/lib/config.js";
+import type { ObjectStorePort } from "@campaignfoundry/CampaignOrchestration";
+import { databaseSettings, objectStore } from "../server/lib/config.js";
 import { databaseConfig, type DatabaseConfig } from "../server/lib/db/database-config.js";
 import { pgClient } from "../server/lib/db/pg-client.js";
 import type { SqlClient } from "../server/lib/db/sql-client.js";
@@ -13,7 +14,10 @@ import {
   recordFailure,
   type DeletionRow,
 } from "../server/lib/deletion/deletion-store.js";
+import { reconcileOrgs } from "../server/lib/deletion/reconcile.js";
 import { purgeCampaign } from "../server/lib/deletion/purge-campaign.js";
+import { objectStoreClient } from "../server/lib/object-store/index.js";
+import { campaignPrefix, inputKey } from "../server/lib/object-store/object-keys.js";
 
 export const USAGE = "usage: yarn purge:sweep [-- --dry-run]";
 
@@ -140,9 +144,84 @@ export async function main(
   }
 }
 
+export const USAGE_RECONCILE =
+  "usage: yarn tsx apps/api/bin/purge.ts reconcile [--org <id>] [--org <id> --apply]";
+
+/** `--apply` deletes and REQUIRES `--org`: one org per run here; the all-orgs apply is PT-9h2's. Without `--apply` nothing is deleted (D239). `--dry-run` is the default spelled out. */
+export function parseReconcileArgs(args: readonly string[]): { apply: boolean; org?: string } {
+  let apply = false;
+  let dryRun = false;
+  let org: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--apply") apply = true;
+    else if (arg === "--dry-run") dryRun = true;
+    else if (arg === "--org" && args[i + 1] !== undefined) org = args[++i];
+    else throw new Error(USAGE_RECONCILE);
+  }
+  if (apply && dryRun) throw new Error(USAGE_RECONCILE);
+  if (apply && org === undefined) throw new Error(USAGE_RECONCILE);
+  return { apply, org };
+}
+
+export function reconcileStore(): ObjectStorePort {
+  if (objectStore() !== "s3") {
+    throw new Error(
+      "reconcile needs OBJECT_STORE=s3: the file store has no object store to reconcile.",
+    );
+  }
+  return objectStoreClient();
+}
+
+export async function runReconcile(
+  args: readonly string[],
+  open: () => SqlClient = connect,
+  log: (line: string) => void = console.log,
+  store: () => ObjectStorePort = reconcileStore,
+  now: () => number = Date.now,
+): Promise<void> {
+  const { apply, org } = parseReconcileArgs(args);
+  const objects = store();
+  const db = open();
+  try {
+    const { rows } = await db.query<{ id: string }>(`select id from org order by id`);
+    const known = rows.map((row) => row.id);
+    if (org !== undefined && !known.includes(org))
+      throw new Error(`reconcile: unknown org "${org}"`);
+    const { plans, applied } = await reconcileOrgs(db, objects, org === undefined ? known : [org], {
+      apply,
+      now,
+    });
+    for (const plan of plans) {
+      log(
+        `  org ${plan.orgId}: ${plan.prefixes.length} orphan prefix(es), ${plan.inputs.length} orphan input(s)`,
+      );
+      for (const prefix of plan.prefixes) {
+        log(
+          `    prefix ${campaignPrefix(plan.orgId, prefix.campaignId)} (${prefix.objects} object(s))`,
+        );
+      }
+      for (const input of plan.inputs) {
+        log(`    input ${inputKey(plan.orgId, input.campaignId, input.assetId)}`);
+      }
+    }
+    log(
+      apply
+        ? `  Deleted ${applied.prefixes} prefix(es) and ${applied.inputs} input(s); skipped ${applied.skipped}.`
+        : "  Dry run: nothing deleted. Re-run with --apply to delete.",
+    );
+  } finally {
+    await db.end();
+  }
+}
+
 /* istanbul ignore next -- CLI entry guard; main() is covered directly in tests */
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main(process.argv[2], process.argv.includes("--dry-run")).catch((error: unknown) => {
+  const run =
+    process.argv[2] === "reconcile"
+      ? runReconcile(process.argv.slice(3))
+      : main(process.argv[2], process.argv.includes("--dry-run"));
+  run.catch((error: unknown) => {
     console.error(`  x  ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
   });

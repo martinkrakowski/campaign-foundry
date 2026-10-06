@@ -1,0 +1,177 @@
+{
+  "version": 1,
+  "lane": "PT-9h-reconciler",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "if (group.every(({ object }) => isOld(object))) {",
+      "after": "if (true) {",
+      "because": "the plan's own mutation: with the age check dropped, an orphan prefix written minutes ago (a late writer that is still writing) is planned and deleted. The fresh-orphan test plants one at half an hour and asserts plan.prefixes is empty, so expect(plan.prefixes).toEqual([]) fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile keeps a fresh orphan prefix",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "!assetRefs.has(`${campaignId}/${assetId}`) && isOld(object)",
+      "after": "!assetRefs.has(`${campaignId}/${assetId}`)",
+      "because": "without the age check on inputs, an upload whose object is written but whose asset row is not yet committed is planned for deletion. The test writes such an input half an hour ago and asserts plan.inputs is empty.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile keeps a fresh input with no asset row",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "if (state === undefined) {",
+      "after": "if (state !== true) {",
+      "because": "a LIVE campaign (state false) is treated as having no row: its old renders and packages, which have no rows by design, become an orphan prefix and apply would empty a customer's campaign. The test seeds a live campaign with old objects and asserts the plan is empty.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile keeps every object of a live campaign even when old",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "if (state) continue;",
+      "after": "if (state) void state;",
+      "because": "a tombstoned campaign falls through to the input loop, so the reconciler second-guesses a campaign the purge owns (D232 step 4). The test plants an old input with no asset row under a tombstoned campaign and asserts the plan is empty.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile keeps every object of a tombstoned campaign for the purge",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "if (!options.apply) return {",
+      "after": "if (false) return {",
+      "because": "the dry-run guard removed: reconcileOrgs deletes even though apply is false. The test asserts applied is all zeros and the store key list is unchanged after a dry run.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile dry run deletes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "const UUID_LOWER = \"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\";",
+      "after": "const UUID_LOWER = \"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\";",
+      "because": "the alphabet is widened so an upper-case campaign uuid parses: one odd key no longer aborts the run and is planned as an orphan prefix instead. The test feeds each bad key to its own fresh store and asserts the run rejects with the alphabet message, so the upper-case case fails the rejects assertion.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile aborts on a key outside the alphabet and deletes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "if (await campaignExists(db, plan.orgId, prefix.campaignId)) {",
+      "after": "if (false) {",
+      "because": "the apply-time re-check is removed: a campaign row inserted after the plan no longer stops the delete of its prefix. The test inserts the row between plan and apply and asserts skipped is 1 and prefixes is 0; the mutant answers prefixes 1.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile apply skips an orphan prefix whose campaign row appeared after the plan",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "    if (await assetExists(db, plan.orgId, input.campaignId, input.assetId)) {",
+      "after": "    if (false) {",
+      "because": "the apply-time re-check for an input is removed, so an asset row inserted after the plan no longer stops the delete; the test asserts skipped 1 and inputs 0, the mutant answers inputs 1.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile apply skips an input whose asset row appeared after the plan",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "    await store.deletePrefix(campaignPrefix(plan.orgId, prefix.campaignId));",
+      "after": "    await store.deletePrefix(campaignPrefix(\"local\", prefix.campaignId));",
+      "because": "the delete is hardcoded to \"local\" instead of the plan's own org, so an orphan prefix under a different org is not deleted; the second half of the test asserts store.list(campaignPrefix(\"acme\", C3)) is empty, which fails because the delete targets local.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile apply rechecks the row in the plans own org",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
