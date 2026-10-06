@@ -4,8 +4,8 @@
   "mutations": [
     {
       "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
-      "before": "({ brief } = await copyBriefRefs(scope, brief, resolved.copyFrom, targetSlug));",
-      "after": "({ brief } = await copyBriefRefs(scope, brief, [], targetSlug));",
+      "before": "        const copied = await copyBriefRefs(scope, brief, resolved.copyFrom, targetSlug);",
+      "after": "        const copied = await copyBriefRefs(scope, brief, [], targetSlug);",
       "because": "Carry item 2 on duplicate: the copy step is what turns a THIRD campaign asset id into one the new campaign owns. Emptying the copy-source list leaves every check intact - the resolve still refused what the caller may not use, the source campaign is still copied wholesale, and the write still answers 201 - but the stored brief keeps naming the third campaign id verbatim. It stays readable while that campaign lives, and a shared reference is exactly what D208(D) and D211(b) exist to prevent: the moment the third campaign is deleted its asset rows go and this copy logo ENOENTs with nothing in any campaign to name it. Status code and ref SHAPE are both unchanged by the mutation, so the test has to assert that the stored ref is a NEW id whose owner is the new slug, and that it still reads after the third campaign is deleted.",
       "command": [
         "env",
