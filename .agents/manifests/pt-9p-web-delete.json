@@ -89,9 +89,9 @@
     },
     {
       "file": "apps/web/src/components/shell/BriefPicker.tsx",
-      "before": "    void refreshList(entry.file);",
+      "before": "    void refreshList();",
       "after": "    void refreshList;",
-      "because": "PT-9p mutation 6 (fix-round re-point: the call now passes the dropped file): the refetch is replaced by a bare reference, so it is never invoked and the post-delete list never refreshes; the row that only the refetch can supply never appears. FAILS ON: await screen.findByText('fresh.yaml')",
+      "because": "PT-9p mutation 6 (fix-round-2 re-point: refreshList now takes no argument and reads the shared dropped-files ref): the refetch call is replaced by a bare reference, so it is never invoked and the post-delete list never refreshes; the row that only the refetch supplies never appears. FAILS ON: await screen.findByText('fresh.yaml')",
       "command": [
         "yarn",
         "vitest",
@@ -106,9 +106,9 @@
     },
     {
       "file": "apps/web/src/components/shell/BriefPicker.tsx",
-      "before": "      setEntries((await listBriefs()).filter((e) => e.file !== droppedFile));",
+      "before": "      setEntries((await listBriefs()).filter((e) => !droppedFilesRef.current.has(e.file)));",
       "after": "      setEntries((await listBriefs()).filter(() => true));",
-      "because": "PT-9p mutation 7: the refetched listing is adopted with a keep-everything filter, so the deleted campaign's row is re-added and the queryByText assertion fails. FAILS ON: expect(screen.queryByText('demo.yaml')).toBeNull()",
+      "because": "PT-9p mutation 7 (fix-round-2 re-point: the filter now reads the shared dropped-files ref instead of one passed-in file): the refetched listing is adopted with a keep-everything filter, so a deleted campaign's row is re-added and the queryByText assertion fails. FAILS ON: expect(screen.queryByText('demo.yaml')).toBeNull()",
       "command": [
         "yarn",
         "vitest",
@@ -118,6 +118,23 @@
         "apps/web/src/components/shell/__tests__/BriefPicker.delete.test.tsx",
         "-t",
         "a refetch that still lists the deleted campaign does not bring its row back"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/BriefPicker.tsx",
+      "before": "    droppedFilesRef.current.add(entry.file);",
+      "after": "    void entry.file;",
+      "because": "PT-9p mutation 8: a second delete is not remembered, so the older refetch's snapshot still carries it and restores its row. FAILS ON: expect(screen.queryByText('other.yaml')).toBeNull()",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/BriefPicker.delete.test.tsx",
+        "-t",
+        "an older refetch that lands last does not bring back a campaign deleted after it"
       ],
       "verdict": "caught"
     }

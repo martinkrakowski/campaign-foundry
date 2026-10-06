@@ -41,6 +41,8 @@ export function BriefPicker() {
   const [actionError, setActionError] = useState<string | undefined>();
   const [duplicateTarget, setDuplicateTarget] = useState<BriefEntry | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<BriefEntry | null>(null);
+  /** Files deleted while the picker is open: kept until it reopens so a stale refetch can't restore a row (D233). */
+  const droppedFilesRef = useRef<Set<string>>(new Set());
   const [duplicateName, setDuplicateName] = useState("");
   const [duplicating, setDuplicating] = useState(false);
   // mscyu — a synchronous latch `confirmDuplicate` checks and sets before its
@@ -60,6 +62,7 @@ export function BriefPicker() {
     setActionError(undefined);
     setDuplicateTarget(null);
     setDeleteTarget(null);
+    droppedFilesRef.current.clear();
     (async () => {
       try {
         const briefs = await listBriefs();
@@ -162,9 +165,9 @@ export function BriefPicker() {
   };
 
   /** Best-effort: a failed refetch leaves the list as it is (the row was already removed). */
-  const refreshList = async (droppedFile: string) => {
+  const refreshList = async () => {
     try {
-      setEntries((await listBriefs()).filter((e) => e.file !== droppedFile));
+      setEntries((await listBriefs()).filter((e) => !droppedFilesRef.current.has(e.file)));
     } catch {
       /* the next open of the picker reloads it */
     }
@@ -173,11 +176,14 @@ export function BriefPicker() {
   /**
    * The campaign is gone server-side (deleted by us, or already gone). Remove its row at
    * once (a delete is only reachable from a rendered row, so `entries` is loaded), then
-   * refetch so the list is the server's.
+   * refetch so the list is the server's. A refetch that resolves late — taken before a
+   * second delete — is still filtered by every file deleted in the meantime, so it can
+   * never restore a row that was deleted after its snapshot.
    */
   const forget = (entry: BriefEntry) => {
+    droppedFilesRef.current.add(entry.file);
     setEntries((prev) => (prev as BriefEntry[]).filter((e) => e.file !== entry.file));
-    void refreshList(entry.file);
+    void refreshList();
   };
 
   /**

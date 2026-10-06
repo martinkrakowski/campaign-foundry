@@ -56,6 +56,8 @@ interface Route {
   afterDelete?: unknown[];
   failReload?: boolean;
   del?: () => Response | Promise<Response>;
+  /** Returned for each list request after the first, by 1-based index; may be a deferred promise. */
+  listAfterFirst?: (index: number) => Response | Promise<Response>;
 }
 const deletes: string[] = [];
 const route = (r: Route = {}) => {
@@ -70,6 +72,7 @@ const route = (r: Route = {}) => {
       if (url.includes("/campaigns/briefs")) {
         lists += 1;
         if (lists > 1 && r.failReload) return json({ error: "fail" }, 500);
+        if (lists > 1 && r.listAfterFirst) return r.listAfterFirst(lists);
         return json({
           briefs: lists > 1 && r.afterDelete ? r.afterDelete : (r.briefs ?? [demo, other]),
         });
@@ -241,7 +244,7 @@ describe("BriefPicker delete", () => {
 
   test("a 2xx other than 202 is a success too", async () => {
     const user = userEvent.setup();
-    route({ del: () => new Response(null, { status: 204 }), afterDelete: [other] });
+    route({ del: () => new Response(null, { status: 204 }) });
     renderWithRun(<BriefPicker />);
     const { dialog } = await openDelete(user);
     await user.type(field(dialog), "demo");
@@ -251,6 +254,61 @@ describe("BriefPicker delete", () => {
     );
     expect(screen.queryByText("demo.yaml")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  test("an older refetch that lands last does not bring back a campaign deleted after it", async () => {
+    const user = userEvent.setup();
+    const third = {
+      file: "third.yaml",
+      brief: { id: "third", targetRegion: "DE", products: [{ id: "a" }] },
+    };
+    let resolveOlder!: (v: Response) => void;
+    let resolveNewer!: (v: Response) => void;
+    const olderRefetch = new Promise<Response>((resolve) => {
+      resolveOlder = resolve;
+    });
+    const newerRefetch = new Promise<Response>((resolve) => {
+      resolveNewer = resolve;
+    });
+    const r = route({
+      briefs: [demo, other, third],
+      listAfterFirst: (index) => (index === 2 ? olderRefetch : newerRefetch),
+    });
+    renderWithRun(<BriefPicker />);
+    await screen.findByText("demo.yaml");
+
+    // Delete demo: its refetch (lists=2) hangs on the older deferred promise.
+    const { dialog: d1 } = await openDelete(user);
+    await user.type(field(d1, "demo"), "demo");
+    fireEvent.click(confirm(d1));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.deleteCampaignTitle })).toBeNull(),
+    );
+
+    // Delete other before demo's refetch answered: its refetch (lists=3) hangs on the newer one.
+    await screen.findByText("other.yaml");
+    const trigger2 = screen.getByRole("button", { name: "Delete other" });
+    await user.click(trigger2);
+    const d2 = await screen.findByRole("dialog", { name: messages.deleteCampaignTitle });
+    await user.type(
+      await within(d2).findByLabelText(messages.deleteCampaignTypeLabel("other")),
+      "other",
+    );
+    fireEvent.click(confirm(d2));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.deleteCampaignTitle })).toBeNull(),
+    );
+
+    // Resolve the NEWER snapshot first ([third]), then the OLDER one that still lists `other`.
+    resolveNewer(json({ briefs: [third] }, 200));
+    resolveOlder(json({ briefs: [other, third] }, 200));
+
+    await waitFor(() => expect(r.lists()).toBe(3));
+    await waitFor(() => {
+      expect(screen.queryByText("demo.yaml")).toBeNull();
+      expect(screen.queryByText("other.yaml")).toBeNull();
+      expect(screen.getByText("third.yaml")).toBeTruthy();
+    });
   });
 
   test("a failed refetch after a delete still removes the row", async () => {
