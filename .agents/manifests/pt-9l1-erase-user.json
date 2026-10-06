@@ -6,7 +6,7 @@
       "file": "apps/api/server/lib/deletion/erase-user.ts",
       "before": "lower(identifier) = lower($1)",
       "after": "false",
-      "because": "the identifier clause is what deletes a magic-link row whose identifier IS the email (v-1). Replaced with `false` it survives, so the `expect(rows).toEqual([])` read of v-1 fails. It also leaves the email on the identifier column, so the whole-database scan (test 26) finds it too.",
+      "because": "the identifier clause is defensive: no enabled Better Auth writer stores the email as identifier (magic-link stores a random token there), so only the planted v-1 row kills this. Replaced with `false`, v-1 survives and `expect(v1).toEqual([])` fails; the whole-database scan also finds the email on the identifier column.",
       "command": [
         "yarn",
         "vitest",
@@ -25,7 +25,7 @@
       "file": "apps/api/server/lib/deletion/erase-user.ts",
       "before": "or position(lower('\"email\":' || to_json($1::text)::text) in lower(value)) > 0",
       "after": "or false",
-      "because": "the value clause is the only half that reaches a magic-link row, whose identifier is a random token (v-2). With it replaced by `false` the row survives and the count assertion fails; this is the row's own 'skip verification -> the scan finds the email' mutation, since v-2's value holds the target email and name.",
+      "because": "the value clause is the only half that reaches a magic-link row, whose identifier is a random token (v-2). With it replaced by `false` the row survives and `expect(v2).toEqual([])` fails; this is the row's own 'skip verification -> the scan finds the email' mutation, since v-2's value holds the target email and name.",
       "command": [
         "yarn",
         "vitest",
