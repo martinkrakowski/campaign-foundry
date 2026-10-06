@@ -1,0 +1,142 @@
+{
+  "version": 1,
+  "lane": "PT-9o2-asset-picker-delete",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "onClick={() => setConfirmTarget(asset)}",
+      "after": "onClick={() => runDelete(asset)}",
+      "because": "PT-9o2 mutation 1: wiring the row's Delete button straight to runDelete skips the confirmation, so clicking it sends a DELETE immediately and opens no dialog. FAILS ON: expect(deletes()).toHaveLength(0)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "Delete opens a named confirmation and sends nothing until it is confirmed"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "if (deletingRef.current) return;",
+      "after": "if (false) return;",
+      "because": "PT-9o2 mutation 2: dropping the synchronous double-submit latch lets a second rapid confirmation through before state disables the buttons, so two DELETEs are dispatched. FAILS ON: expect(deletes()).toHaveLength(1)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "a double click on Delete asset sends exactly one request"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "setAssets(next.assets.filter((asset) => !droppedRef.current.has(keyOf(asset))));",
+      "after": "setAssets(next.assets);",
+      "because": "PT-9o2 mutation 3: adopting the refetched list without re-filtering it through the dropped set lets a row the server still lists come back. FAILS ON: expect(screen.queryByText(\"logo.png\")).toBeNull()",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "a refetch that still lists the deleted asset never brings it back"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "if (err.status === 409) return messages.assetDeleteInUse(name);",
+      "after": "if (err.status === 409) return messages.assetDeleteFailed;",
+      "because": "PT-9o2 mutation 4: the 409 arm serves the generic failure copy instead of the in-use message, so the picker words a conflict as a generic error. FAILS ON: expect(alert.textContent).toBe(messages.assetDeleteInUse(\"logo.png\"))",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "a 409 says the asset is still used and keeps the row"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/briefs-api.ts",
+      "before": "await requestJson(url, { method: \"DELETE\" });",
+      "after": "await requestJson(url, { method: \"POST\" });",
+      "because": "PT-9o2 mutation 5: sending the delete as a POST means no request is recorded as a DELETE, so the recorded request method is POST. FAILS ON: expect(deletes()).toEqual([{ method: \"DELETE\", url: `${API}/campaigns/assets?briefId=camp-1&id=${ID_LOGO}` }])",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "confirming sends exactly one DELETE with the asset id and removes the row"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/briefs-api.ts",
+      "before": "asset.id !== undefined && isAssetId(asset.id)",
+      "after": "false",
+      "because": "PT-9o2 mutation 6: never send the id (always the name), so the URL carries name= and not id=. FAILS ON: expect(seenUrl).toBe(`${API}/campaigns/assets?briefId=camp-1&id=${ID}`)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/briefs-api.delete-asset.test.ts",
+        "-t",
+        "deleteAsset sends DELETE with the briefId and the asset id when the entry has one"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "if (epoch !== epochRef.current) return;",
+      "after": "if (false) return;",
+      "because": "PT-9o2 mutation 7: dropping the epoch guard lets a refetch begun before the drawer reopened land and overwrite the reopened list with its stale snapshot. FAILS ON: expect(screen.queryByText(\"ghost.png\")).toBeNull()",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "a refetch that began before the drawer was reopened is ignored"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "const canDelete = !isSelected;",
+      "after": "const canDelete = true;",
+      "because": "PT-9o2 mutation 8: always offer Delete on the selected row, so the hint never appears and the button is offered where the brief forbids it (the selected asset cannot be cleared). FAILS ON: expect(screen.queryByRole(\"button\", { name: messages.assetDeleteRowLabel(\"logo.png\") })).toBeNull()",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "the selected asset has no Delete button and says why"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
