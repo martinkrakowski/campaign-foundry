@@ -44,4 +44,39 @@ describe("Sidebar Project Bin delete", () => {
     await waitFor(() => expect(screen.getByText("1 asset")).toBeTruthy());
     expect(screen.queryByText("logo.png")).toBeNull();
   });
+
+  test("deleting a name-only asset (the fs shape) updates the count and removes its preview", async () => {
+    const user = userEvent.setup();
+    // No `id`: the fs store answers name-only entries, so the Sidebar's
+    // `a.id ?? a.name` and `gone.id ?? gone.name` filters both fall to the name.
+    const onlyLogo = {
+      name: "logo.png",
+      type: "image/png",
+      size: 2048,
+      thumbnailUrl: "",
+    } as unknown as Asset;
+    const onlyBanner = {
+      name: "banner.png",
+      type: "image/png",
+      size: 512,
+      thumbnailUrl: "",
+    } as unknown as Asset;
+    seedPersistedRun([onlyLogo, onlyBanner]);
+    renderWithRun(createElement(Sidebar));
+    await screen.findByText("logo.png");
+    expect(screen.getByText("2 assets")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Browse" }));
+    const drawer = await screen.findByRole("dialog", { name: "Asset Bin" });
+    await user.click(
+      within(drawer).getByRole("button", { name: messages.assetDeleteRowLabel("logo.png") }),
+    );
+    const confirmDialog = await screen.findByRole("dialog", { name: messages.assetDeleteTitle });
+    await user.click(
+      within(confirmDialog).getByRole("button", { name: messages.assetDeleteConfirm }),
+    );
+
+    await waitFor(() => expect(screen.getByText("1 asset")).toBeTruthy());
+    expect(screen.queryByText("logo.png")).toBeNull();
+  });
 });

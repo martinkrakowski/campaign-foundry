@@ -897,4 +897,119 @@ describe("AssetPickerDrawer delete", () => {
     rerender(<AssetPickerDrawer briefId="camp-1" open onClose={() => {}} />);
     expect(await screen.findByText("logo.png")).toBeTruthy();
   });
+
+  test("a refused delete that finishes after the campaign changed shows nothing in the new campaign", async () => {
+    const user = userEvent.setup();
+    let release: (() => void) | undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = () => resolve(json({ error: 'Asset "logo.png" is in use.' }, 409));
+    });
+    const alpha = {
+      id: "55555555-5555-5555-5555-555555555555",
+      name: "alpha.png",
+      type: "image/png",
+      size: 256,
+      thumbnailUrl: "",
+    };
+    const reqs: { method: string; url: string }[] = [];
+    mockPipelineApi({
+      result: (url, req) => {
+        const method = req?.method ?? "GET";
+        if (!url.includes("/campaigns/assets")) return json(EMPTY_REPORT);
+        reqs.push({ method, url });
+        if (method === "DELETE") return gate;
+        const assets = url.includes("briefId=camp-1") ? [logo, banner] : [alpha];
+        return json({ assets });
+      },
+    });
+    const { rerender } = renderDrawer();
+    await screen.findByText("logo.png");
+
+    const { dialog } = await openDelete(user);
+    await user.click(confirm(dialog));
+
+    rerender(<AssetPickerDrawer briefId="camp-1" open={false} onClose={() => {}} />);
+    rerender(<AssetPickerDrawer briefId="camp-2" open onClose={() => {}} />);
+    await screen.findByText("alpha.png");
+
+    await act(async () => {
+      release!();
+      await gate;
+    });
+    const alphaBtn = await screen.findByRole("button", {
+      name: messages.assetDeleteRowLabel("alpha.png"),
+    });
+    await waitFor(() => expect(alphaBtn.hasAttribute("disabled")).toBe(false));
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText("logo.png")).toBeNull();
+    expect(screen.queryByText("alpha.png")).toBeTruthy();
+  });
+
+  test("a refused delete that finishes after the drawer was closed shows no alert on reopen", async () => {
+    const user = userEvent.setup();
+    let release: (() => void) | undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = () => resolve(json({ error: 'Asset "logo.png" is in use.' }, 409));
+    });
+    route({
+      lists: [
+        [logo, banner],
+        [logo, banner],
+      ],
+      del: () => gate,
+    });
+    const { rerender } = renderDrawer();
+    await screen.findByText("logo.png");
+
+    const { dialog } = await openDelete(user);
+    await user.click(confirm(dialog));
+    rerender(<AssetPickerDrawer briefId="camp-1" open={false} onClose={() => {}} />);
+    rerender(<AssetPickerDrawer briefId="camp-1" open onClose={() => {}} />);
+    await screen.findByText("logo.png");
+
+    await act(async () => {
+      release!();
+      await gate;
+    });
+    const bannerBtn = await screen.findByRole("button", {
+      name: messages.assetDeleteRowLabel("banner.png"),
+    });
+    await waitFor(() => expect(bannerBtn.hasAttribute("disabled")).toBe(false));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText("logo.png")).toBeTruthy();
+  });
+
+  test("an already gone answer that arrives after the drawer was closed still removes the row", async () => {
+    const user = userEvent.setup();
+    const onDeleted = vi.fn();
+    let release: (() => void) | undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = () => resolve(json({ error: "x" }, 404));
+    });
+    route({
+      lists: [[logo, banner], [logo, banner], [banner]],
+      del: () => gate,
+    });
+    const { rerender } = renderDrawer({ onDeleted });
+    await screen.findByText("logo.png");
+
+    const { dialog } = await openDelete(user);
+    await user.click(confirm(dialog));
+    rerender(<AssetPickerDrawer briefId="camp-1" open={false} onClose={() => {}} />);
+    rerender(<AssetPickerDrawer briefId="camp-1" open onClose={() => {}} onDeleted={onDeleted} />);
+    await screen.findByText("logo.png");
+
+    await act(async () => {
+      release!();
+      await gate;
+    });
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
+    expect(onDeleted).toHaveBeenCalledWith(logo);
+    await screen.findByText("Assets (1)");
+    expect(screen.queryByText("logo.png")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(document.activeElement).not.toBe(screen.getByText("Assets (1)").parentElement);
+  });
 });
