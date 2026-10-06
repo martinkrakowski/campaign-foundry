@@ -13,6 +13,8 @@
     "db:ping": "tsx apps/api/bin/db.ts ping",
     "db:migrate": "tsx apps/api/bin/db.ts migrate",
     "purge:sweep": "tsx apps/api/bin/purge.ts sweep",
+    "purge:reconcile": "tsx apps/api/bin/purge.ts reconcile",
+    "purge:cache": "tsx apps/api/bin/purge.ts cache",
     "auth:bootstrap": "tsx apps/api/bin/auth-cli.ts",
     "import": "tsx apps/api/bin/import.ts",
     "deploy:staging": "sh deploy/staging/deploy.sh",
