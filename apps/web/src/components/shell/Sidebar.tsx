@@ -260,6 +260,9 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         briefId={brief.id}
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
+        onDeleted={(gone) =>
+          setAssets((prev) => prev.filter((a) => (a.id ?? a.name) !== (gone.id ?? gone.name)))
+        }
       />
 
       {/* Editor sections the brief page places here — the variation policy. */}

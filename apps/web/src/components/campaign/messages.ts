@@ -1889,3 +1889,37 @@ export const deleteCampaignUnsupported =
   "This server cannot delete campaigns — ask whoever runs it.";
 /** Any other failure that carries no message of its own. */
 export const deleteCampaignFailed = "Could not delete the campaign — try again.";
+
+/* ── Deleting an asset from the Asset Bin (PT-9o) ── */
+
+/** The row button's visible word. */
+export const assetDeleteAction = "Delete";
+/** The row button's accessible name: it contains the visible word (WCAG 2.5.3). */
+export function assetDeleteRowLabel(name: string): string {
+  return `Delete ${name}`;
+}
+/** The row button's text while its request is in flight. */
+export const assetDeletePending = "Deleting…";
+/** The confirmation's accessible name and heading. */
+export const assetDeleteTitle = "Delete asset";
+export function assetDeleteMessage(name: string): string {
+  return `This permanently removes ${name} from this campaign. It cannot be undone.`;
+}
+export const assetDeleteConfirm = "Delete asset";
+/** The status line after a successful delete. */
+export function assetDeleted(name: string): string {
+  return `Deleted ${name}.`;
+}
+/** 409: a saved version or a draft still names the asset (PT-9o1). */
+export function assetDeleteInUse(name: string): string {
+  return `${name} is still used by this campaign, so it cannot be deleted — remove it from the brief and save first. An earlier saved version may also be using it.`;
+}
+/** 404: hidden, absent or already gone (one answer for all). */
+export function assetDeleteGone(name: string): string {
+  return `${name} is already gone, or you can no longer see it — the list is being refreshed.`;
+}
+/** Any other failure that carries no message of its own. */
+export const assetDeleteFailed = "Could not delete the asset — try again.";
+/** Shown in place of Delete on the asset the form currently holds. */
+export const assetDeleteSelectedHint =
+  "Selected in the form — choose another asset to delete this one.";
