@@ -581,6 +581,27 @@ export async function listAssets(
   return data as { assets: AssetEntry[] };
 }
 
+/**
+ * DELETE /campaigns/assets (PT-9o). Sends the asset's `id` when the entry carries a real
+ * one (the object-store backend) and its `name` otherwise, never both: the route answers
+ * 400 for two. ANY 2xy is success and the body is ignored. Failures throw
+ * `BriefsApiError` carrying the status — 404 included, unlike `listAssets`, which reads a
+ * 404 as an empty list: 404 (hidden, absent or already gone) and 409 (a version or draft
+ * still names it) are the two the picker words itself. A 403 with `code: "no_membership"`
+ * throws `NoMembershipError` instead (`handleAuthError`), and a 401 redirects to sign-in.
+ */
+export async function deleteAsset(
+  briefId: string,
+  asset: Pick<AssetEntry, "id" | "name">,
+): Promise<void> {
+  const target =
+    asset.id !== undefined && isAssetId(asset.id)
+      ? `id=${encodeURIComponent(asset.id)}`
+      : `name=${encodeURIComponent(asset.name)}`;
+  const url = `${API}/campaigns/assets?briefId=${encodeURIComponent(briefId)}&${target}`;
+  await requestJson(url, { method: "DELETE" });
+}
+
 function isEstimate(value: unknown): value is PlanEstimate {
   if (typeof value !== "object" || value === null) return false;
   const rec = value as Record<string, unknown>;
