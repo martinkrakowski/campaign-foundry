@@ -1,0 +1,24 @@
+-- The org tombstone (PT-9m1, D241, OD1).
+--
+-- `org.deleted_at` HIDES the org at once: `memberTenant` (this lane) joins the
+-- `org` table and filters `deleted_at is null`, so once the column is set every
+-- member of that org resolves no tenant and answers 403 `no_membership`.
+-- Nothing writes the column until PT-9m2 (the purge), so after this migration
+-- every org still reads live and no user sees a change — the lane branches off
+-- `main`'s current max + 1 and is safe to ship alone.
+--
+-- No backfill: a `null` on every existing row is a null-to-null change, so the
+-- column means "live" simply because nobody has written a tombstone yet.
+--
+-- No DEFAULT on purpose. A default of `now()` would make every org ever inserted
+-- already deleted; a default of `null` would be a default that says nothing the
+-- absence of a clause does not.
+--
+-- No `deleted_by`. The actor that set the tombstone lives on the `deletion` row,
+-- which PT-9m2 anonymises to `erased:<uuid>` (D241); an org column naming an
+-- operator would outlive that anonymisation and keep PII past the org's purge
+-- window. The org row stays only as far as the 13-month retention sweep in 9m4.
+--
+-- No index: the only readers filter a single org's row by primary key or join by
+-- it, and the 13-month sweep scans the small `org` table (D241, 9m4).
+alter table org add column deleted_at timestamptz;

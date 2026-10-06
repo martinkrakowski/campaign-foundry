@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "lane": "PT-9m1-org-tombstone",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/auth/membership.ts",
+      "before": "where m.user_id = $1 and o.deleted_at is null",
+      "after": "where m.user_id = $1 and true",
+      "because": "Dropping the tombstone filter lets a deleted org's member row satisfy the query, so memberTenant answers that org instead of undefined. The witness test seeds a user whose only org is deleted and asserts undefined with and without an active id; under this mutant the tenant is the deleted org and the toEqual/toBeUndefined assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/auth/__tests__/membership.org-deleted.test.ts",
+        "-t",
+        "memberTenant answers undefined when the only org of the user is deleted"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/auth/membership.ts",
+      "before": "where m.user_id = $1 and o.deleted_at is null",
+      "after": "where m.user_id = $1 and true",
+      "because": "Same defect witnessed through the tenant middleware: a member of a deleted org would resolve a tenant and reach the protected route. The witness test posts a session scoped to the deleted org and asserts 403 no_membership with the handler's body absent; under this mutant the route answers 200 and the status/body assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/middleware/__tests__/tenant.org-deleted.test.ts",
+        "-t",
+        "a member of a deleted org is 403 no_membership and the route never runs"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/auth/membership.ts",
+      "before": "join org o on o.id = m.org_id",
+      "after": "join org o on true",
+      "because": "A join that is always true no longer excludes the deleted org's row, so a deleted active org resolves for a member of one deleted and two live orgs. The witness test asserts orgId is the first live org by id (beta); under this mutant it resolves to the deleted alpha and the assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/auth/__tests__/membership.org-deleted.test.ts",
+        "-t",
+        "memberTenant skips a deleted active org and answers the first live org by id"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/auth/membership.ts",
+      "before": "order by m.org_id",
+      "after": "order by m.org_id desc",
+      "because": "Reversing the fallback order makes the highest-sorted live org win instead of the lowest, so a skipped deleted active org resolves to gamma rather than beta. The witness test asserts orgId is beta; under this mutant it is gamma and the assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/auth/__tests__/membership.org-deleted.test.ts",
+        "-t",
+        "memberTenant skips a deleted active org and answers the first live org by id"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/db/migrations/0018_org_deleted_at.sql",
+      "before": "alter table org add column deleted_at timestamptz;",
+      "after": "alter table org add column deleted_at timestamptz default now();",
+      "because": "A default of now() backfills every existing org as deleted at migration time, defeating the null-means-live invariant. The witness test asserts column_default is null and that every org still reads null after the migration; under this mutant column_default is now() and the shape assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/org-deleted-migration.test.ts",
+        "-t",
+        "org deleted_at migration adds a nullable timestamptz column with no default"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/db/migrations/0018_org_deleted_at.sql",
+      "before": "alter table org add column deleted_at timestamptz;",
+      "after": "alter table org add column deleted_at timestamp;",
+      "because": "Dropping the time zone from the column changes its data_type from 'timestamp with time zone' to 'timestamp without time zone'. The witness test asserts the exact data_type; under this mutant the shape assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/org-deleted-migration.test.ts",
+        "-t",
+        "org deleted_at migration adds a nullable timestamptz column with no default"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
