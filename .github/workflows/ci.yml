@@ -4,19 +4,19 @@ name: CI
 # (the package manager the generator and its templates use); npm/pnpm users
 # should adjust the install/run commands (e.g. `npm ci`, `npm run <script>`).
 # Choices recorded at install time:
-#   triggers:        push-all-branches,pull-request,push-main-only
+#   triggers:        push-main-only,pull-request
 #   run tests:       true
 #   cache strategy:  turbo-cache
 #   deploy target:   none
 #   preview deploys: true
 #   docker image:    false
 #
-# The `on:` block below covers every branch push + PRs to main. Narrow it to
-# match your triggers — e.g. push-main-only -> `branches: [main]`, or drop the
-# `push:` key entirely to run on pull_request only.
+# The `on:` block below pushes only on main and opens one run per PR commit
+# (pull_request to main, on the merge ref), plus a workflow_dispatch entrypoint
+# for golden recording; a branch push with no PR runs nothing.
 on:
   push:
-    branches: ["**"]
+    branches: ["main"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -33,41 +33,38 @@ on:
           - audio
         default: all
 
-# Concurrency is per-job, not per-workflow. A workflow_dispatch that records
-# goldens used to share `ci-${{ github.ref }}` with the push Build, and the two
-# cancelled each other (runs 34182560608 / 34182554160). The recorder has its
-# own group below; the Build group includes event_name so a dispatch's CI job
-# does not cancel a push's.
+# Concurrency is one workflow-level group so the whole of a superseded run
+# cancels together — a per-job group cannot do that without jobs of one run
+# finishing each other's work. (1) A workflow_dispatch that records goldens
+# used to share `ci-${{ github.ref }}` with the push Build, and the two
+# cancelled each other (runs 34182560608 / 34182554160): `github.event_name`
+# is in the group, so a dispatch and a push never share one. (2) On main every
+# commit gets its own group (D182), so a push never cancels or replaces the run
+# verifying the merge before it (98ac160d was cancelled by a docs push,
+# 2026-09-29): the `-sha` suffix on `refs/heads/main` is byte-for-byte the old
+# one; `cancel-in-progress: false` alone would not do — a group keeps one
+# pending run and a third push replaces it — so other refs still cancel
+# superseded runs. (3) The recorder must never be cancelled: a dispatch with
+# `record_goldens == 'true'` gains a run-id suffix
+# (`format('-record-{0}', github.run_id)`) so a second dispatch or any push
+# cannot cancel the run that contains it; `record-goldens` keeps its own
+# job-level group with `cancel-in-progress: false`.
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name }}${{ github.ref == 'refs/heads/main' && format('-{0}', github.sha) || '' }}${{ github.event.inputs.record_goldens == 'true' && format('-record-{0}', github.run_id) || '' }}
+  cancel-in-progress: true
+# Eight parallel lanes plus one aggregate, each independent so a slow or red
+# lane cannot block the others: `static` (arch, bytes, build, typecheck, lint,
+# format), `test` (8 shards of the suite, coverage collected), `coverage`
+# (merge the shards and re-apply the 100% thresholds), `mutations` (anchor +
+# replay), `postgres` (real PG backend), `s3` (real SeaweedFS), and `ci` — the
+# single job `scripts/merge-prs.sh` waits for (REQUIRED_CHECK='^Build'); it
+# names every other job and fails closed if any did not succeed. `record-goldens`
+# below is dispatch-only and excluded from the aggregate.
 jobs:
-  ci:
-    name: Build, Typecheck, Lint & Test
+  static:
+    name: Static checks (arch, bytes, build, typecheck, lint, format)
     runs-on: ubuntu-latest
-    concurrency:
-      # On main every commit gets its own group (D182), so a push never cancels or
-      # replaces the run verifying the merge before it (98ac160d was cancelled by a
-      # docs push, 2026-09-29). `cancel-in-progress: false` alone would not do: a
-      # group keeps one pending run, and a third push replaces it. Other refs still
-      # cancel superseded runs.
-      group: ci-${{ github.ref }}-${{ github.event_name }}${{ github.ref == 'refs/heads/main' && format('-{0}', github.sha) || '' }}
-      cancel-in-progress: true
-    # A real Postgres for the PT-6a concurrency proof: PGlite is one connection,
-    # so it cannot show two workers racing a claim (TEST_DATABASE_URL below).
-    # Every other database test still runs on PGlite — this service exists for
-    # that one gated test file, not as a second way to run the suite.
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
         with:
@@ -78,7 +75,7 @@ jobs:
       # Corepack ships with the runner's pre-installed Node and must be enabled
       # BEFORE setup-node: the `cache: yarn` step below probes the cache folder
       # with whatever `yarn` is on PATH, and without Corepack that's Yarn Classic
-      # — which reports the wrong folder and fails the cache step. Enabling here
+      # – which reports the wrong folder and fails the cache step. Enabling here
       # installs the Yarn-4 shim (version read from package.json `packageManager`)
       # so the probe resolves Berry's cache folder. See SETUP.md.
       - name: Enable Corepack
@@ -152,47 +149,6 @@ jobs:
       - name: Verify manifest inventories (yarn arch:inventory)
         run: "yarn arch:inventory"
 
-      # ubuntu-latest ships no zsh at all. scripts/merge-prs.sh is zsh
-      # (D184), and its own tests (tools/merge-prs/__tests__) run only
-      # `describe.skipIf(!hasZsh())` — without this, the merge gate's only
-      # wiring test silently skips everywhere it actually matters (S3, the
-      # HX4 fix round). Every other suite in this repo is POSIX sh or
-      # TypeScript and needs nothing here.
-      #
-      # It sits BEFORE the manifest step below, and not with the Test step it
-      # used to sit above, because that step REPLAYS mutation manifests — and a
-      # replay that cannot run its command is not a skipped test but a failed
-      # claim. With zsh installed only later, tools/merge-prs registered no tests
-      # at all here, every `-t` pattern in its manifest matched nothing, and
-      # verify-manifests reported each one UNCHECKABLE COMMAND and failed the
-      # build. A test that skips itself where its interpreter is missing is
-      # right for a suite; for a manifest it is indistinguishable from a lie.
-      - name: Install zsh (for D184's merge-prs.sh wiring tests)
-        run: sudo apt-get update && sudo apt-get install -y zsh
-
-      # A mutation manifest records the mutations a lane claims its tests catch.
-      # Replaying it is what makes the claim evidence rather than a report: two
-      # seats this week stated verdicts they had never observed, one quoting
-      # failure messages from a suite whose own log showed it had not started.
-      # Only manifests this change touches are REPLAYED — each mutation runs a
-      # real test command, so replaying all of them every time would grow
-      # without bound. A claim is checked when it is made.
-      #
-      # That scoping left a hole, and the same script now closes it: before any
-      # replay it checks the ANCHORS of every manifest in the directory, touched
-      # or not. A mutation's before-text must still appear exactly once in its
-      # file, because `runMutation` refuses anything else (Rule 2) — so an
-      # anchor broken by someone else's reformat makes that claim permanently
-      # unrunnable, and being diff-scoped is exactly why nothing ever said so.
-      # It is a string count over ~93 files: under a second, no build, no suite.
-      - name: Check every anchor, replay changed mutation manifests
-        env:
-          # On a push, origin/main IS the pushed commit, so diffing against it
-          # finds nothing and every manifest is skipped in silence. The pre-push
-          # SHA is what "what this push changed" actually means.
-          MANIFEST_DIFF_BASE: ${{ github.event.before }}
-        run: "sh scripts/verify-manifests.sh"
-
       # Turbo caches task outputs keyed by input hash, so unchanged packages are
       # skipped on warm runs (cache_strategy = turbo-cache). Set TURBO_TOKEN
       # and TURBO_TEAM below for the cross-run remote cache.
@@ -239,6 +195,309 @@ jobs:
       - name: Lint
         run: "yarn lint"
 
+      # Tests live in __tests__/ next to their modules, but Nitro scans apps/api/server/
+      # recursively. A *.test.ts file landing there gets registered as a route and crashes
+      # `yarn dev` at boot — a runtime fault the build and coverage gate don't catch. Fail
+      # the build if the Nitro route manifest ever references a test file.
+      - name: Guard the API route scan against test files
+        run: |
+          MANIFEST="apps/api/.nitro/types/nitro-routes.d.ts"
+          yarn workspace @campaignfoundry/api exec nitro prepare
+          # Fail closed: a missing manifest means the guard can't validate anything.
+          if [ ! -f "$MANIFEST" ]; then
+            echo "::error::Nitro route manifest not found at $MANIFEST"
+            exit 1
+          fi
+          # `\.test\b` is robust to Nitro's quoting/extension (matches .test', .test.ts, .test/, …).
+          if grep -Eq '__tests__|\.test\b' "$MANIFEST"; then
+            echo "::error::A test file was scanned as a Nitro route. Keep tests out of the server scan (see apps/api/nitro.config.ts `ignore`)."
+            exit 1
+          fi
+          echo "Nitro route manifest is free of test files."
+  test:
+    name: Test shard ${{ matrix.shard }}/${{ strategy.job-total }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      # SETUP (steps 1-5), then:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      # Same setup as static; see the comments there.
+      - name: Enable Corepack
+        run: corepack enable
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "yarn"
+      - name: Prepare package manager
+        run: |
+          corepack prepare "$(node -p 'require("./package.json").packageManager')" --activate
+      - name: Install dependencies
+        run: "yarn install --immutable"
+
+      # ubuntu-latest ships no zsh at all. scripts/merge-prs.sh is zsh
+      # (D184), and its own tests (tools/merge-prs/__tests__) run only
+      # `describe.skipIf(!hasZsh())` — without this, the merge gate's only
+      # wiring test silently skips everywhere it actually matters (S3, the
+      # HX4 fix round). Every other suite in this repo is POSIX sh or
+      # TypeScript and needs nothing here.
+      #
+      # It sits BEFORE the manifest step below, and not with the Test step it
+      # used to sit above, because that step REPLAYS mutation manifests — and a
+      # replay that cannot run its command is not a skipped test but a failed
+      # claim. With zsh installed only later, tools/merge-prs registered no tests
+      # at all here, every `-t` pattern in its manifest matched nothing, and
+      # verify-manifests reported each one UNCHECKABLE COMMAND and failed the
+      # build. A test that skips itself where its interpreter is missing is
+      # right for a suite; for a manifest it is indistinguishable from a lie.
+      - name: Install zsh (for D184's merge-prs.sh wiring tests)
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
+      # `test` is the only Test in CI, sharded so each runner pays a sixth of
+      # the suite's wall time. yarn test:cov is `vitest run --coverage`, the
+      # single definition — `yarn test:cov <args>` appends args (Yarn Berry).
+      #
+      # The thresholds are applied by the `coverage` job on the MERGED map, so a
+      # shard only needs to stop itself from failing on its own slice — the four
+      # zero-threshold flags do that (the config stays at 100/100/100/100 and
+      # is unchanged). `--reporter=default` is kept so a failing test prints in
+      # this log; `github-actions` is listed because naming any reporter
+      # removes Vitest's implicit one, and today's run annotates failing tests
+      # on the PR.
+      - name: Test (shard ${{ matrix.shard }}/${{ strategy.job-total }}, coverage collected)
+        run: >-
+          yarn test:cov
+          --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --reporter=default
+          --reporter=blob
+          --reporter=github-actions
+          --coverage.reporter=text-summary
+          --coverage.thresholds.lines=0
+          --coverage.thresholds.functions=0
+          --coverage.thresholds.branches=0
+          --coverage.thresholds.statements=0
+        env:
+          NODE_ENV: test
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+      # Measures R1 (blob size); a missing file here means the blob reporter
+      # did not write, which fails the shard loudly so the merge job does not hang.
+      - name: Size of this shard's report
+        run: ls -la .vitest-reports
+
+      # `.vitest-reports` starts with a dot: upload-artifact v4.4+ skips any path
+      # that has a dot-segment unless this flag is set.
+      - name: Upload this shard's report
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-blob-${{ matrix.shard }}
+          path: .vitest-reports/blob-${{ matrix.shard }}-${{ strategy.job-total }}.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  coverage:
+    name: Coverage (merge the shards, 100% thresholds)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # SETUP (steps 1-5), then:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      # Same setup as static; see the comments there.
+      - name: Enable Corepack
+        run: corepack enable
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "yarn"
+      - name: Prepare package manager
+        run: |
+          corepack prepare "$(node -p 'require("./package.json").packageManager')" --activate
+      - name: Install dependencies
+        run: "yarn install --immutable"
+
+      - name: Download every shard's report
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vitest-blob-*
+          merge-multiple: true
+          path: .vitest-reports
+
+      - name: Every shard's report arrived
+        run: |
+          set -eu
+          ls -la .vitest-reports
+          total=$(ls .vitest-reports/blob-*-*.json | head -n 1 | sed -E 's/.*blob-[0-9]+-([0-9]+)\.json/\1/')
+          for i in $(seq 1 "$total"); do
+            test -f ".vitest-reports/blob-$i-$total.json" || { echo "::error::missing shard report $i/$total"; exit 1; }
+          done
+          [ "$(ls .vitest-reports | wc -l)" -eq "$total" ] || { echo "::error::.vitest-reports holds files that are not the $total shard reports"; exit 1; }
+
+      # run_tests = true; delete this step to skip tests in CI.
+      # test:cov enforces the 100% coverage gate (vitest.config.ts thresholds);
+      # here it is run on the MERGED shard reports, so the thresholds are applied
+      # to the union of the shards over the config's include set.
+      - name: Merge the shard reports and apply the 100% thresholds
+        run: "yarn vitest run --merge-reports --coverage"
+        env:
+          NODE_ENV: test
+
+  mutations:
+    name: Mutations (anchors, replay of changed manifests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # SETUP (steps 1-5), then:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      # Same setup as static; see the comments there.
+      - name: Enable Corepack
+        run: corepack enable
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "yarn"
+      - name: Prepare package manager
+        run: |
+          corepack prepare "$(node -p 'require("./package.json").packageManager')" --activate
+      - name: Install dependencies
+        run: "yarn install --immutable"
+
+      # ubuntu-latest ships no zsh at all. scripts/merge-prs.sh is zsh
+      # (D184), and its own tests (tools/merge-prs/__tests__) run only
+      # `describe.skipIf(!hasZsh())` — without this, the merge gate's only
+      # wiring test silently skips everywhere it actually matters (S3, the
+      # HX4 fix round). Every other suite in this repo is POSIX sh or
+      # TypeScript and needs nothing here.
+      #
+      # It sits BEFORE the manifest step below, and not with the Test step it
+      # used to sit above, because that step REPLAYS mutation manifests — and a
+      # replay that cannot run its command is not a skipped test but a failed
+      # claim. With zsh installed only later, tools/merge-prs registered no tests
+      # at all here, every `-t` pattern in its manifest matched nothing, and
+      # verify-manifests reported each one UNCHECKABLE COMMAND and failed the
+      # build. A test that skips itself where its interpreter is missing is
+      # right for a suite; for a manifest it is indistinguishable from a lie.
+      - name: Install zsh (for D184's merge-prs.sh wiring tests)
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
+      # A mutation manifest records the mutations a lane claims its tests catch.
+      # Replaying it is what makes the claim evidence rather than a report: two
+      # seats this week stated verdicts they had never observed, one quoting
+      # failure messages from a suite whose own log showed it had not started.
+      # Only manifests this change touches are REPLAYED — each mutation runs a
+      # real test command, so replaying all of them every time would grow
+      # without bound. A claim is checked when it is made.
+      #
+      # That scoping left a hole, and the same script now closes it: before any
+      # replay it checks the ANCHORS of every manifest in the directory, touched
+      # or not. A mutation's before-text must still appear exactly once in its
+      # file, because `runMutation` refuses anything else (Rule 2) — so an
+      # anchor broken by someone else's reformat makes that claim permanently
+      # unrunnable, and being diff-scoped is exactly why nothing ever said so.
+      # It is a string count over ~93 files: under a second, no build, no suite.
+      - name: Check every anchor, replay changed mutation manifests
+        env:
+          # On a push, origin/main IS the pushed commit, so diffing against it
+          # finds nothing and every manifest is skipped in silence. The pre-push
+          # SHA is what "what this push changed" actually means.
+          MANIFEST_DIFF_BASE: ${{ github.event.before }}
+        run: "sh scripts/verify-manifests.sh"
+
+  postgres:
+    name: Postgres backend (api project against a real server)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      # SETUP (steps 1-5), then:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      # Same setup as static; see the comments there.
+      - name: Enable Corepack
+        run: corepack enable
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "yarn"
+      - name: Prepare package manager
+        run: |
+          corepack prepare "$(node -p 'require("./package.json").packageManager')" --activate
+      - name: Install dependencies
+        run: "yarn install --immutable"
+
+      # D186: the same API project, with TEST_PG_URL set, so every database test
+      # runs against a real server instead of PGlite. PGlite is a real Postgres
+      # compiled to WebAssembly, but it is one connection and 5.2-6.5s to start
+      # on an older host, where 245 of 8,308 tests time out. The `test` shards
+      # stay the coverage gate, on PGlite; this job is the
+      # evidence that the server path works, and has no --coverage because the
+      # 100% thresholds are the full run's.
+      - name: Test (real Postgres backend)
+        run: "yarn vitest run --project api"
+        env:
+          NODE_ENV: test
+          TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+  s3:
+    name: S3 conformance (real SeaweedFS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # SETUP (steps 1-5), then:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      # Same setup as static; see the comments there.
+      - name: Enable Corepack
+        run: corepack enable
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "yarn"
+      - name: Prepare package manager
+        run: |
+          corepack prepare "$(node -p 'require("./package.json").packageManager')" --activate
+      - name: Install dependencies
+        run: "yarn install --immutable"
+
       # An S3-compatible store for the ObjectStorePort conformance suite (PT-4a,
       # D201): SeaweedFS is the store staging runs (D201), and of the three
       # candidates in the 2026-10-02 spike it is the only one that honours
@@ -250,8 +509,8 @@ jobs:
       # bucket which the tests use. There is no anonymous identity, so a test that
       # forgets to sign is refused rather than served.
       #
-      # It sits here, after the manifest replay and before the Test step, so the
-      # replay keeps running without `TEST_S3_*` (every mutation must be caught
+      # It is its own job, so the manifest replay (the `mutations` job) and the
+      # coverage shards run without `TEST_S3_*` (every mutation must be caught
       # OFFLINE) and the store is up before the first step that needs it.
       # `-master.dir` is created first: `weed` does not.
       - name: SeaweedFS 4.48 (S3 conformance)
@@ -311,50 +570,35 @@ jobs:
         if: always()
         run: docker rm -f seaweedfs || true
 
-      # run_tests = true; delete this step to skip tests in CI.
-      # test:cov enforces the 100% coverage gate (vitest.config.ts thresholds).
-      - name: Test
-        run: "yarn test:cov"
+  # `ci` is the one name `scripts/merge-prs.sh` waits for (REQUIRED_CHECK='^Build',
+  # pinned to this key and name by tools/gate/__tests__/required-check.test.ts)
+  # and, since the single job was split, the only place that notices a job that
+  # did not succeed. required-check.test.ts walks from `  ci:` forward and breaks
+  # on the first two-space comment after it, so this comment sits ABOVE the key
+  # (with the other job separators) and `name:` must be the line directly after
+  # `  ci:` — no two-space comment in between.
+  ci:
+    name: Build, Typecheck, Lint & Test
+    if: ${{ !cancelled() }}
+    needs: [static, test, coverage, mutations, postgres, s3]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Every needed job succeeded
         env:
-          NODE_ENV: test
-          # The PT-6a concurrency tests are skipped unless this is set. Nothing
-          # else reads it: TEST_PG_URL is the harness's variable, and the step
-          # below is the only one that sets it. This run is on PGlite.
-          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-
-      # D186: the same API project, with TEST_PG_URL set, so every database test
-      # runs against a real server instead of PGlite. PGlite is a real Postgres
-      # compiled to WebAssembly, but it is one connection and 5.2-6.5s to start
-      # on an older host, where 245 of 8,308 tests time out. The Test step above
-      # stays the coverage gate, unchanged and on PGlite; this step is the
-      # evidence that the server path works, and has no --coverage because the
-      # 100% thresholds are the full run's.
-
-      - name: Test (real Postgres backend)
-        run: "yarn vitest run --project api"
-        env:
-          NODE_ENV: test
-          TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
-
-      # Tests live in __tests__/ next to their modules, but Nitro scans apps/api/server/
-      # recursively. A *.test.ts file landing there gets registered as a route and crashes
-      # `yarn dev` at boot — a runtime fault the build and coverage gate don't catch. Fail
-      # the build if the Nitro route manifest ever references a test file.
-      - name: Guard the API route scan against test files
+          NEEDS: ${{ toJSON(needs) }}
         run: |
-          MANIFEST="apps/api/.nitro/types/nitro-routes.d.ts"
-          yarn workspace @campaignfoundry/api exec nitro prepare
-          # Fail closed: a missing manifest means the guard can't validate anything.
-          if [ ! -f "$MANIFEST" ]; then
-            echo "::error::Nitro route manifest not found at $MANIFEST"
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          count=$(echo "$NEEDS" | jq 'length')
+          bad=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(",")')
+          if [ "$count" -ne 6 ]; then
+            echo "::error::expected 6 needed jobs, the needs context holds $count"
             exit 1
           fi
-          # `\.test\b` is robust to Nitro's quoting/extension (matches .test', .test.ts, .test/, …).
-          if grep -Eq '__tests__|\.test\b' "$MANIFEST"; then
-            echo "::error::A test file was scanned as a Nitro route. Keep tests out of the server scan (see apps/api/nitro.config.ts \`ignore\`)."
+          if [ -n "$bad" ]; then
+            echo "::error::not green: $bad"
             exit 1
           fi
-          echo "Nitro route manifest is free of test files."
 
   # Dispatch entry for record-goldens.yml: GitHub 404s a workflow_dispatch
   # that is not on the default branch. This job is a no-op on push/PR.
