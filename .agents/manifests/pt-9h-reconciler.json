@@ -134,6 +134,44 @@
         "!golden-bytes && !cpu-bound"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "    if (await assetExists(db, plan.orgId, input.campaignId, input.assetId)) {",
+      "after": "    if (false) {",
+      "because": "the apply-time re-check for an input is removed, so an asset row inserted after the plan no longer stops the delete; the test asserts skipped 1 and inputs 0, the mutant answers inputs 1.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile apply skips an input whose asset row appeared after the plan",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "    await store.deletePrefix(campaignPrefix(plan.orgId, prefix.campaignId));",
+      "after": "    await store.deletePrefix(campaignPrefix(\"local\", prefix.campaignId));",
+      "because": "the delete is hardcoded to \"local\" instead of the plan's own org, so an orphan prefix under a different org is not deleted; the second half of the test asserts store.list(campaignPrefix(\"acme\", C3)) is empty, which fails because the delete targets local.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile apply rechecks the row in the plans own org",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
     }
   ]
 }

@@ -216,6 +216,37 @@ describe("reconcile (D239)", () => {
     expect(result.applied.prefixes).toBe(2);
     expect(result.applied.inputs).toBe(0);
     expect(await store.list("org/ghost/campaign/")).toHaveLength(1);
+    expect(await store.list("org/acme/campaign/")).toHaveLength(0);
+    expect(await store.list("org/local/campaign/")).toHaveLength(0);
+  });
+
+  test("reconcile apply rechecks the row in the plans own org", async () => {
+    const prefix = campaignPrefix("acme", C2);
+    await putAt(`${prefix}inputs/${A1}`, NOW - 5 * HOUR);
+    await putAt(`${prefix}renders/alpha/1x1/v1.png`, NOW - 5 * HOUR);
+
+    const plan = await planReconcile(db, store, "acme", NOW);
+    expect(plan.prefixes).toEqual([{ campaignId: C2, objects: 2 }]);
+
+    await seedCampaign(db, "acme", "late-acme", { id: C2 });
+
+    const result = await applyReconcilePlan(db, store, plan);
+    expect(result).toEqual({ prefixes: 0, inputs: 0, skipped: 1 });
+    expect((await store.list("org/acme/campaign/")).map((o) => o.key).sort()).toEqual([
+      `${prefix}inputs/${A1}`,
+      `${prefix}renders/alpha/1x1/v1.png`,
+    ]);
+
+    // Second half: the delete goes to the plan's own org, not a hardcoded one.
+    // Clear the first half's objects so only C3 is visible to the plan.
+    await store.deletePrefix(campaignPrefix("acme", C2));
+    const prefix2 = campaignPrefix("acme", C3);
+    await putAt(`${prefix2}inputs/${A1}`, NOW - 5 * HOUR);
+    const plan2 = await planReconcile(db, store, "acme", NOW);
+    expect(plan2.prefixes).toEqual([{ campaignId: C3, objects: 1 }]);
+    const result2 = await applyReconcilePlan(db, store, plan2);
+    expect(result2).toEqual({ prefixes: 1, inputs: 0, skipped: 0 });
+    expect(await store.list(campaignPrefix("acme", C3))).toHaveLength(0);
   });
 
   test("reconcile aborts on a key outside the alphabet and deletes nothing", async () => {
