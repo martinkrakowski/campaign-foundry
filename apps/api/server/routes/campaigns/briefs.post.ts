@@ -7,7 +7,7 @@ import {
 } from "../../lib/brief-asset-refs.js";
 import { isExistsError, isErrno, SYMLINK_WRITE_ERROR } from "../../lib/brief-files.js";
 import { parseBrief } from "../../lib/load-brief.js";
-import { getBriefStore, TeamsNotSupportedError } from "../../lib/ports/index.js";
+import { getAssetStore, getBriefStore, TeamsNotSupportedError } from "../../lib/ports/index.js";
 import { CampaignNotFoundError, canAssignTeam } from "../../lib/ownership.js";
 
 import { requestTenant } from "../../lib/tenant.js";
@@ -158,33 +158,57 @@ export default defineEventHandler(async (event) => {
         mode: "save",
       });
       brief = resolved.brief;
-      if (resolved.copyFrom.length > 0) {
-        // D166 item 2 / PT-4k2b: between the resolve and the copy, never after it. A
-        // request whose revision is stale must not leave a foreign campaign's assets
-        // copied into the target for a write that is about to 409 — the same ordering
-        // `copyAssets`' own compensation note depends on.
-        if (replace && expectedRevision !== undefined) {
-          const currentRev = await store.getRevision(brief.id);
-          if (currentRev !== expectedRevision) {
-            const conflictErr = new Error("Brief was modified by another user.");
-            (conflictErr as { code?: string; revision?: string }).code = "ECONFLICT";
-            (conflictErr as { revision?: string }).revision = currentRev;
-            throw conflictErr;
+      // What this request itself minted into the target (PT-9j, D237 b): `copyBriefRefs` frees
+      // its own ids when it fails, so this holds them only once it has RETURNED. From there
+      // every failure (the post-copy ref check, a lost revision race, a write error) frees
+      // exactly these and nothing else, then rethrows the original error unchanged.
+      let createdIds: readonly string[] = [];
+      try {
+        if (resolved.copyFrom.length > 0) {
+          // D166 item 2 / PT-4k2b: between the resolve and the copy, never after it. A
+          // request whose revision is stale must not leave a foreign campaign's assets
+          // copied into the target for a write that is about to 409 — the same ordering
+          // `copyAssets`' own compensation note depends on.
+          if (replace && expectedRevision !== undefined) {
+            const currentRev = await store.getRevision(brief.id);
+            if (currentRev !== expectedRevision) {
+              const conflictErr = new Error("Brief was modified by another user.");
+              (conflictErr as { code?: string; revision?: string }).code = "ECONFLICT";
+              (conflictErr as { revision?: string }).revision = currentRev;
+              throw conflictErr;
+            }
+          }
+          const copied = await copyBriefRefs(scope, brief, resolved.copyFrom, brief.id);
+          brief = copied.brief;
+          createdIds = copied.createdIds;
+          // The row could have gone between the resolve and the copy; see `assertRefsCopied`.
+          assertRefsCopied(brief, resolved.foreignIds, brief.id);
+        }
+
+        if (replace) {
+          // teamId undefined here means "leave the campaign's team as it is" —
+          // never `?? null`, which would reset an already-assigned team to
+          // org-wide on every plain re-save. The fs backend throws
+          // TeamsNotSupportedError if teamId is anything but undefined.
+          return await store.replaceBrief(brief, { expectedRevision, teamId });
+        }
+        return await store.createBrief(brief, { teamId });
+      } catch (error) {
+        // Residual F (record-only): on Postgres with file assets a COMMIT whose
+        // acknowledgement was lost makes `createBrief`/`replaceBrief` reject with the
+        // version already stored, and the file store's free has no reference check,
+        // so the created files that that version names are removed. The object store's
+        // adapter version check covers it. Out of scope.
+        if (createdIds.length > 0) {
+          try {
+            await getAssetStore(scope).freeUnreferencedAssets(brief.id, createdIds);
+          } catch {
+            // Best-effort: the answer is already decided and an error here must never replace
+            // it (D237, D239). There is no structured logger in this repo to report it to.
           }
         }
-        ({ brief } = await copyBriefRefs(scope, brief, resolved.copyFrom, brief.id));
-        // The row could have gone between the resolve and the copy; see `assertRefsCopied`.
-        assertRefsCopied(brief, resolved.foreignIds, brief.id);
+        throw error;
       }
-
-      if (replace) {
-        // teamId undefined here means "leave the campaign's team as it is" —
-        // never `?? null`, which would reset an already-assigned team to
-        // org-wide on every plain re-save. The fs backend throws
-        // TeamsNotSupportedError if teamId is anything but undefined.
-        return await store.replaceBrief(brief, { expectedRevision, teamId });
-      }
-      return await store.createBrief(brief, { teamId });
     });
     setResponseStatus(event, 201);
     // The stored revision rides along: the editor dispatches it into its source so the
