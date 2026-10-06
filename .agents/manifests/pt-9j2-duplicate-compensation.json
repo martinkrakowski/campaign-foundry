@@ -6,7 +6,7 @@
       "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
       "before": "              await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);",
       "after": "              await Promise.resolve(createdIds);",
-      "because": "The free is gone but the error is still thrown, the status and body are still today's and the release still runs, so only the state assertion catches it: the objects under the minted campaign prefix survive (the row cascade at release hides the rows, which is why the test lists OBJECTS).",
+      "because": "The free is gone but the error is still thrown, the status and body are still today's and the release still runs, so the test fails on its count of free calls first, and the state assertion behind it would catch it too: the objects under the minted campaign prefix survive (the row cascade at release hides the rows, which is why the test lists OBJECTS).",
       "command": [
         "env",
         "-u",

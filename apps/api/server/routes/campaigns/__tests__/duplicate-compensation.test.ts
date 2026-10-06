@@ -798,6 +798,9 @@ describe("duplicate compensation on pg plus fs", () => {
     const said = warned.mock.calls.map((args) => args.join(" ")).join("\n");
     expect(said).toContain(`could not free the assets of "${m.slug}" after a failed duplicate`);
     expect(said).toContain("meta failed");
+    // The skipped free is a recorded residual, not a clean-up: the copied files stay under the
+    // released slug (the old by-campaign rollback skipped its delete here too).
+    expect(filesOf(m.slug)).toEqual(["extra.png", "logo.png"]);
   });
 
   test("duplicate route on pg plus fs still releases the campaign when campaignMeta answers undefined", async () => {
@@ -818,6 +821,9 @@ describe("duplicate compensation on pg plus fs", () => {
     expect(free).not.toHaveBeenCalled();
     expect(await counts(harness.db)).toEqual(snapshot);
     expect(warned).not.toHaveBeenCalled();
+    // The skipped free is a recorded residual, not a clean-up: the copied files stay under the
+    // released slug (the old by-campaign rollback skipped its delete here too).
+    expect(filesOf((await minted()).slug)).toEqual(["extra.png", "logo.png"]);
   });
 });
 
