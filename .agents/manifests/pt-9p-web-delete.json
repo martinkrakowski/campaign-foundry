@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "lane": "PT-9p-web-delete",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/shell/DeleteCampaignDialog.tsx",
+      "before": "  const matches = typed === slug;",
+      "after": "  const matches = true;",
+      "because": "PT-9p mutation 1: forcing the typed-name check to always match removes the gate that disables the destructive button, so a near-miss name leaves it enabled. FAILS ON: expect(confirm(dialog).hasAttribute('disabled')).toBe(true)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/BriefPicker.delete.test.tsx",
+        "-t",
+        "the confirm button stays disabled for a near-miss name and enables only on the exact name"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/briefs-api.ts",
+      "before": "  await requestJson(`${API}/campaigns/${encodeURIComponent(id)}`, { method: \"DELETE\" });",
+      "after": "  await requestJson(`${API}/campaigns/${encodeURIComponent(id)}`, { method: \"POST\" });",
+      "because": "PT-9p mutation 2: sending a DELETE as a POST misses the mock's DELETE branch, so no DELETE url is recorded and the method check finds none. FAILS ON: expect(deletes).toEqual([`${API}/campaigns/${UUID}`])",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/BriefPicker.delete.test.tsx",
+        "-t",
+        "a 202 sends one DELETE to the campaign uuid and refetches the list"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/DeleteCampaignDialog.tsx",
+      "before": "    if (!matches || pendingRef.current) return;",
+      "after": "    if (!matches) return;",
+      "because": "PT-9p mutation 3: dropping the pendingRef latch lets a second rapid submit through, so a double action dispatches two DELETEs; the single-submission guard fails. FAILS ON: expect(deletes).toHaveLength(1)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/BriefPicker.delete.test.tsx",
+        "-t",
+        "a double click on Delete campaign sends exactly one request"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/DeleteCampaignDialog.tsx",
+      "before": "    if (err.status === 409) return messages.deleteCampaignRunInProgress;",
+      "after": "    if (err.status === 409) return messages.deleteCampaignFailed;",
+      "because": "PT-9p mutation 4: the 409 arm serves the generic failure copy instead of the run-in-progress message, so the positive lookup never renders. FAILS ON: await screen.findByText(messages.deleteCampaignRunInProgress)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/BriefPicker.delete.test.tsx",
+        "-t",
+        "a 409 says a run is in progress and offers no way to cancel it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/BriefPicker.tsx",
+      "before": "    if (entry.brief.id === current.id) router.push(\"/brief\");",
+      "after": "    if (false) router.push(\"/brief\");",
+      "because": "PT-9p mutation 5: the open-campaign route-away is short-circuited, so the bare-route navigation never happens. FAILS ON: await waitFor(() => expect(nextMock().router.push).toHaveBeenCalledWith('/brief'))",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/BriefPicker.delete.test.tsx",
+        "-t",
+        "deleting the open campaign routes to the bare brief page"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/BriefPicker.tsx",
+      "before": "    void refreshList();",
+      "after": "    void refreshList;",
+      "because": "PT-9p mutation 6: the refetch is referenced but never invoked, so the post-delete list never refreshes and the row that only the refetch can supply never appears. FAILS ON: await screen.findByText('fresh.yaml')",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/BriefPicker.delete.test.tsx",
+        "-t",
+        "a 202 sends one DELETE to the campaign uuid and refetches the list"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

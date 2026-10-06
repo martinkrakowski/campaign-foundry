@@ -22,6 +22,8 @@ import { useRun } from "@/lib/run-context";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import { campaignTypeOf, typeDisplayName } from "@/components/campaign/display-names";
+import { DeleteCampaignDialog } from "./DeleteCampaignDialog";
+import * as messages from "@/components/campaign/messages";
 
 /**
  * Modal that lists the briefs in the project's `briefs/` folder so a reviewer can
@@ -38,6 +40,7 @@ export function BriefPicker() {
   const [error, setError] = useState(false);
   const [actionError, setActionError] = useState<string | undefined>();
   const [duplicateTarget, setDuplicateTarget] = useState<BriefEntry | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<BriefEntry | null>(null);
   const [duplicateName, setDuplicateName] = useState("");
   const [duplicating, setDuplicating] = useState(false);
   // mscyu — a synchronous latch `confirmDuplicate` checks and sets before its
@@ -56,6 +59,7 @@ export function BriefPicker() {
     setError(false);
     setActionError(undefined);
     setDuplicateTarget(null);
+    setDeleteTarget(null);
     (async () => {
       try {
         const briefs = await listBriefs();
@@ -157,127 +161,177 @@ export function BriefPicker() {
     });
   };
 
-  return (
-    <DialogShell
-      open={briefPickerOpen}
-      onClose={closeBriefPicker}
-      ariaLabel="Load a campaign brief"
-    >
-      <DialogHead
-        title="Load a campaign brief"
-        description={
-          <>
-            From the project&apos;s <span className="font-mono">briefs/</span> folder — pick one to
-            load it into the workspace.
-          </>
-        }
-        onClose={closeBriefPicker}
-      />
+  /** Best-effort: a failed refetch leaves the list as it is (the row was already removed). */
+  const refreshList = async () => {
+    try {
+      setEntries(await listBriefs());
+    } catch {
+      /* the next open of the picker reloads it */
+    }
+  };
 
-      <DialogBody className="divide-y divide-border">
-        <button
-          type="button"
-          onClick={createNew}
-          className="flex w-full items-center gap-2 px-4 py-3 text-left text-[13px] font-medium text-text-primary transition-colors hover:bg-surface-2"
-        >
-          Create new
-        </button>
-        {error ? (
-          <p className="p-4 text-[13px] text-error">Could not load briefs. Is the API running?</p>
-        ) : entries === null ? (
-          <p className="p-4 text-[13px] text-text-muted">Loading briefs…</p>
-        ) : entries.length === 0 ? (
-          <p className="p-4 text-[13px] text-text-muted">
-            No briefs found in <span className="font-mono">briefs/</span>.
-          </p>
-        ) : (
-          entries.map((entry) => {
-            const productCount = entry.brief.products.length;
-            const treatmentCount = entry.brief.treatments?.length ?? 1;
-            const isCurrent = entry.brief.id === current.id;
-            return (
-              <div key={entry.file} className="flex items-stretch hover:bg-surface-2">
-                <button
-                  type="button"
-                  onClick={() => select(entry)}
-                  className="flex min-w-0 flex-1 flex-col items-start gap-0.5 px-4 py-3 text-left"
-                >
-                  <span className="flex w-full items-center justify-between gap-2">
-                    <span className="font-mono text-[13px] text-text-primary">{entry.file}</span>
-                    <span className="flex shrink-0 items-center gap-1">
-                      <MiniChip tone="neutral" className="shrink-0">
-                        {typeDisplayName(campaignTypeOf(entry.brief))}
-                      </MiniChip>
-                      {isCurrent && (
+  /**
+   * The campaign is gone server-side (deleted by us, or already gone). Remove its row at
+   * once (a delete is only reachable from a rendered row, so `entries` is loaded), then
+   * refetch so the list is the server's.
+   */
+  const forget = (entry: BriefEntry) => {
+    setEntries((prev) => (prev as BriefEntry[]).filter((e) => e.file !== entry.file));
+    void refreshList();
+  };
+
+  /**
+   * 2xx. No `guardedAction` (Decision 4): the typed name is the confirmation. When the
+   * deleted campaign is the one the shell has open, go to the bare route: it holds no
+   * campaign, the last-opened pointer is gone, and `useLastOpenedRedirect` lands on the
+   * grid with the picker open. The picker itself stays open.
+   */
+  const deleted = (entry: BriefEntry) => {
+    setDeleteTarget(null);
+    forget(entry);
+    if (entry.brief.id === current.id) router.push("/brief");
+  };
+
+  return (
+    <>
+      <DialogShell
+        open={briefPickerOpen}
+        onClose={closeBriefPicker}
+        ariaLabel="Load a campaign brief"
+      >
+        <DialogHead
+          title="Load a campaign brief"
+          description={
+            <>
+              From the project&apos;s <span className="font-mono">briefs/</span> folder — pick one
+              to load it into the workspace.
+            </>
+          }
+          onClose={closeBriefPicker}
+        />
+
+        <DialogBody className="divide-y divide-border">
+          <button
+            type="button"
+            onClick={createNew}
+            className="flex w-full items-center gap-2 px-4 py-3 text-left text-[13px] font-medium text-text-primary transition-colors hover:bg-surface-2"
+          >
+            Create new
+          </button>
+          {error ? (
+            <p className="p-4 text-[13px] text-error">Could not load briefs. Is the API running?</p>
+          ) : entries === null ? (
+            <p className="p-4 text-[13px] text-text-muted">Loading briefs…</p>
+          ) : entries.length === 0 ? (
+            <p className="p-4 text-[13px] text-text-muted">
+              No briefs found in <span className="font-mono">briefs/</span>.
+            </p>
+          ) : (
+            entries.map((entry) => {
+              const productCount = entry.brief.products.length;
+              const treatmentCount = entry.brief.treatments?.length ?? 1;
+              const isCurrent = entry.brief.id === current.id;
+              return (
+                <div key={entry.file} className="flex items-stretch hover:bg-surface-2">
+                  <button
+                    type="button"
+                    onClick={() => select(entry)}
+                    className="flex min-w-0 flex-1 flex-col items-start gap-0.5 px-4 py-3 text-left"
+                  >
+                    <span className="flex w-full items-center justify-between gap-2">
+                      <span className="font-mono text-[13px] text-text-primary">{entry.file}</span>
+                      <span className="flex shrink-0 items-center gap-1">
                         <MiniChip tone="neutral" className="shrink-0">
-                          current
+                          {typeDisplayName(campaignTypeOf(entry.brief))}
                         </MiniChip>
-                      )}
+                        {isCurrent && (
+                          <MiniChip tone="neutral" className="shrink-0">
+                            current
+                          </MiniChip>
+                        )}
+                      </span>
                     </span>
-                  </span>
-                  <span className="text-[11px] text-text-muted">
-                    {entry.brief.id} · {productCount} product{productCount === 1 ? "" : "s"} ·{" "}
-                    {treatmentCount} treatment{treatmentCount === 1 ? "" : "s"} ·{" "}
-                    {entry.brief.targetRegion}
-                  </span>
-                </button>
-                <button
+                    <span className="text-[11px] text-text-muted">
+                      {entry.brief.id} · {productCount} product{productCount === 1 ? "" : "s"} ·{" "}
+                      {treatmentCount} treatment{treatmentCount === 1 ? "" : "s"} ·{" "}
+                      {entry.brief.targetRegion}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="shrink-0 px-3 text-[11px] font-medium text-text-muted hover:text-text-emphasis"
+                    onClick={() => {
+                      setDuplicateTarget(entry);
+                      setDuplicateName("");
+                      setActionError(undefined);
+                    }}
+                  >
+                    Duplicate
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={messages.deleteCampaignRowLabel(entry.brief.id)}
+                    className="shrink-0 px-3 text-[11px] font-medium text-text-muted hover:text-error focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary"
+                    onClick={() => setDeleteTarget(entry)}
+                  >
+                    {messages.deleteCampaignAction}
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </DialogBody>
+
+        {duplicateTarget ? (
+          <DialogFoot>
+            <form
+              className="space-y-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void confirmDuplicate();
+              }}
+            >
+              <p className="text-[12px] text-text-muted">
+                Duplicate{" "}
+                <span className="font-mono text-text-primary">{duplicateTarget.brief.id}</span> as
+              </p>
+              <Input
+                value={duplicateName}
+                onChange={(e) => setDuplicateName(e.target.value)}
+                aria-label="New campaign name"
+                placeholder="e.g. Summer Spark copy"
+                invalid={Boolean(actionError)}
+              />
+              {actionError ? <p className="text-[11px] text-error">{actionError}</p> : null}
+              <div className="flex gap-2">
+                <Button type="submit" size="sm" disabled={duplicating} isLoading={duplicating}>
+                  Duplicate
+                </Button>
+                <Button
                   type="button"
-                  className="shrink-0 px-3 text-[11px] font-medium text-text-muted hover:text-text-emphasis"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => {
-                    setDuplicateTarget(entry);
-                    setDuplicateName("");
+                    setDuplicateTarget(null);
                     setActionError(undefined);
                   }}
                 >
-                  Duplicate
-                </button>
+                  Cancel
+                </Button>
               </div>
-            );
-          })
-        )}
-      </DialogBody>
-
-      {duplicateTarget ? (
-        <DialogFoot>
-          <form
-            className="space-y-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void confirmDuplicate();
-            }}
-          >
-            <p className="text-[12px] text-text-muted">
-              Duplicate{" "}
-              <span className="font-mono text-text-primary">{duplicateTarget.brief.id}</span> as
-            </p>
-            <Input
-              value={duplicateName}
-              onChange={(e) => setDuplicateName(e.target.value)}
-              aria-label="New campaign name"
-              placeholder="e.g. Summer Spark copy"
-              invalid={Boolean(actionError)}
-            />
-            {actionError ? <p className="text-[11px] text-error">{actionError}</p> : null}
-            <div className="flex gap-2">
-              <Button type="submit" size="sm" disabled={duplicating} isLoading={duplicating}>
-                Duplicate
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setDuplicateTarget(null);
-                  setActionError(undefined);
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
-          </form>
-        </DialogFoot>
+            </form>
+          </DialogFoot>
+        ) : null}
+      </DialogShell>
+      {deleteTarget ? (
+        <DeleteCampaignDialog
+          key={deleteTarget.file}
+          entry={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={deleted}
+          onGone={forget}
+        />
       ) : null}
-    </DialogShell>
+    </>
   );
 }
