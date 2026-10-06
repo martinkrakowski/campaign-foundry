@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "lane": "PT-9h2a-cache-expiry",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/deletion/expire-cache.ts",
+      "before": "const age = now - object.lastModified.getTime();",
+      "after": "const age = Infinity;",
+      "because": "with the age measured as infinite every cache entry is old, so one written yesterday is planned for deletion. The test plants entries at 29 days and at one hour and asserts plan.expired is empty and kept is 2, so expect(plan.expired).toEqual([]) fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/expire-cache.test.ts",
+        "-t",
+        "cache expiry keeps a cache object younger than thirty days",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/expire-cache.ts",
+      "before": "return age > CACHE_TTL_MS;",
+      "after": "return age >= CACHE_TTL_MS;",
+      "because": "the boundary moves by one millisecond: an entry exactly 30 days old becomes expired. D242 says older than 30 days, so exactly 30 days is young; the test plants one at exactly 30 days and one at 30 days plus a millisecond and asserts only the second is expired.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/expire-cache.test.ts",
+        "-t",
+        "cache expiry treats exactly thirty days as young and thirty days plus one millisecond as old",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/expire-cache.ts",
+      "before": "if (!CACHE_KEY_TAIL.test(tail)) {",
+      "after": "if (false) {",
+      "because": "the shape check dropped: an old stray under the cache prefix (a nested path, an upper-case digest, a .jpg, the folder marker) is planned as an expired entry. The test plants six such keys, all old, and asserts the plan has no expired entry and six unrecognised, so expect(plan).toEqual(...) fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/expire-cache.test.ts",
+        "-t",
+        "cache expiry never deletes a key it does not recognise",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/expire-cache.ts",
+      "before": "if (options.apply) {",
+      "after": "if (true) {",
+      "because": "the dry-run guard removed: expireCache deletes even though apply is false. The test asserts deleted is 0 and the store's key list is byte-for-byte the same after a dry run.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/expire-cache.test.ts",
+        "-t",
+        "cache expiry dry run deletes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/expire-cache.ts",
+      "before": "return `${cachePrefix(orgId)}${digest}.png`;",
+      "after": "return `${cachePrefix(\"local\")}${digest}.png`;",
+      "because": "the delete key is built from a fixed org instead of the plan's own: an expired entry of acme is deleted under local, so acme's old entry stays and local's FRESH entry with the same digest is removed. The test plants the same digest in both orgs and asserts the fresh local entry is the one left.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/expire-cache.test.ts",
+        "-t",
+        "cache expiry deletes each entry under its own org",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "if (apply && org === undefined) throw new Error(usage);",
+      "after": "if (false) throw new Error(usage);",
+      "because": "the guard that makes --apply require --org is dropped, so the cache command could be applied to every org from the command line. The test calls runCache with --apply and no org and asserts it rejects with the usage text, so expect(...).rejects.toThrow(USAGE_CACHE) fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "cache CLI refuses unknown flags and apply without an org before opening anything",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
