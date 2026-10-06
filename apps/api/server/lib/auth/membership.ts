@@ -7,7 +7,14 @@ import type { TenantContext } from "../tenant.js";
  * Only the user's own membership rows are searched, so an active org the user
  * does not belong to can never be selected; it falls back instead.
  *
- * `undefined` means no membership at all — the caller's 403.
+ * A tombstoned org (PT-9m1, D241 — its `org.deleted_at` is set) is never
+ * selected: it is absent from `members.rows`, so an active org the user was a
+ * member of but which is now deleted simply falls back to the first live
+ * membership by org id, or `undefined` when that was the user's only org. The
+ * caller answers 403 `no_membership` for the missing tenant.
+ *
+ * `undefined` means no membership at all (or only among deleted orgs) — the
+ * caller's 403.
  */
 export async function memberTenant(
   db: SqlClient,
@@ -15,7 +22,10 @@ export async function memberTenant(
   activeOrganizationId?: string | null,
 ): Promise<TenantContext | undefined> {
   const members = await db.query<{ org_id: string; role: string }>(
-    "select org_id, role from member where user_id = $1 order by org_id",
+    `select m.org_id, m.role from member m
+       join org o on o.id = m.org_id
+      where m.user_id = $1 and o.deleted_at is null
+      order by m.org_id`,
     [userId],
   );
   if (members.rows.length === 0) return undefined;
