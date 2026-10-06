@@ -15,6 +15,7 @@ import {
   type DeletionRow,
 } from "../server/lib/deletion/deletion-store.js";
 import { reconcileOrgs } from "../server/lib/deletion/reconcile.js";
+import { describeCachePlan, expireCache } from "../server/lib/deletion/expire-cache.js";
 import { purgeCampaign } from "../server/lib/deletion/purge-campaign.js";
 import { objectStoreClient } from "../server/lib/object-store/index.js";
 import { campaignPrefix, inputKey } from "../server/lib/object-store/object-keys.js";
@@ -144,11 +145,15 @@ export async function main(
   }
 }
 
-export const USAGE_RECONCILE =
-  "usage: yarn tsx apps/api/bin/purge.ts reconcile [--org <id>] [--org <id> --apply]";
+export const USAGE_RECONCILE = "usage: yarn purge:reconcile [--org <id>] [--org <id> --apply]";
+export const USAGE_CACHE = "usage: yarn purge:cache [--org <id>] [--org <id> --apply]";
 
-/** `--apply` deletes and REQUIRES `--org`: one org per run here; the all-orgs apply is PT-9h2's. Without `--apply` nothing is deleted (D239). `--dry-run` is the default spelled out. */
-export function parseReconcileArgs(args: readonly string[]): { apply: boolean; org?: string } {
+/**
+ * `--apply` deletes and REQUIRES `--org`: one org per operator run; the
+ * all-orgs apply is the sweep's. Without `--apply` nothing is deleted (D239,
+ * D242). `--dry-run` is the default spelled out.
+ */
+function parseOrgArgs(args: readonly string[], usage: string): { apply: boolean; org?: string } {
   let apply = false;
   let dryRun = false;
   let org: string | undefined;
@@ -157,20 +162,34 @@ export function parseReconcileArgs(args: readonly string[]): { apply: boolean; o
     if (arg === "--apply") apply = true;
     else if (arg === "--dry-run") dryRun = true;
     else if (arg === "--org" && args[i + 1] !== undefined) org = args[++i];
-    else throw new Error(USAGE_RECONCILE);
+    else throw new Error(usage);
   }
-  if (apply && dryRun) throw new Error(USAGE_RECONCILE);
-  if (apply && org === undefined) throw new Error(USAGE_RECONCILE);
+  if (apply && dryRun) throw new Error(usage);
+  if (apply && org === undefined) throw new Error(usage);
   return { apply, org };
 }
 
-export function reconcileStore(): ObjectStorePort {
-  if (objectStore() !== "s3") {
-    throw new Error(
-      "reconcile needs OBJECT_STORE=s3: the file store has no object store to reconcile.",
-    );
-  }
+export function parseReconcileArgs(args: readonly string[]): { apply: boolean; org?: string } {
+  return parseOrgArgs(args, USAGE_RECONCILE);
+}
+
+export function parseCacheArgs(args: readonly string[]): { apply: boolean; org?: string } {
+  return parseOrgArgs(args, USAGE_CACHE);
+}
+
+function s3Store(refusal: string): ObjectStorePort {
+  if (objectStore() !== "s3") throw new Error(refusal);
   return objectStoreClient();
+}
+
+export function reconcileStore(): ObjectStorePort {
+  return s3Store(
+    "reconcile needs OBJECT_STORE=s3: the file store has no object store to reconcile.",
+  );
+}
+
+export function cacheStore(): ObjectStorePort {
+  return s3Store("cache needs OBJECT_STORE=s3: the file store has no object store to expire.");
 }
 
 export async function runReconcile(
@@ -215,12 +234,57 @@ export async function runReconcile(
   }
 }
 
+/** The orgs of the `org` table, or exactly `org` when it is one of them (an unknown id is refused). */
+async function orgsToVisit(
+  db: SqlClient,
+  org: string | undefined,
+  command: string,
+): Promise<string[]> {
+  const { rows } = await db.query<{ id: string }>(`select id from org order by id`);
+  const known = rows.map((row) => row.id);
+  if (org === undefined) return known;
+  if (!known.includes(org)) throw new Error(`${command}: unknown org "${org}"`);
+  return [org];
+}
+
+export async function runCache(
+  args: readonly string[],
+  open: () => SqlClient = connect,
+  log: (line: string) => void = console.log,
+  store: () => ObjectStorePort = cacheStore,
+  now: () => number = Date.now,
+): Promise<void> {
+  const { apply, org } = parseCacheArgs(args);
+  const objects = store();
+  const db = open();
+  try {
+    const { deleted } = await expireCache(objects, await orgsToVisit(db, org, "cache"), {
+      apply,
+      now,
+      onPlan: (plan) => {
+        for (const line of describeCachePlan(plan)) log(line);
+      },
+    });
+    log(
+      apply
+        ? `  Cache expiry: deleted ${deleted} object(s).`
+        : "  Dry run: nothing deleted. Re-run with --org <id> --apply to delete.",
+    );
+  } finally {
+    await db.end();
+  }
+}
+
 /* istanbul ignore next -- CLI entry guard; main() is covered directly in tests */
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const command = process.argv[2];
+  const rest = process.argv.slice(3);
   const run =
-    process.argv[2] === "reconcile"
-      ? runReconcile(process.argv.slice(3))
-      : main(process.argv[2], process.argv.includes("--dry-run"));
+    command === "reconcile"
+      ? runReconcile(rest)
+      : command === "cache"
+        ? runCache(rest)
+        : main(command, process.argv.includes("--dry-run"));
   run.catch((error: unknown) => {
     console.error(`  x  ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
