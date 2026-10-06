@@ -66,7 +66,7 @@
       "file": "apps/api/server/lib/brief-asset-refs.ts",
       "before": "    if (strict ? answer !== \"visible\" : answer === \"hidden\") {\n      throw new BriefRefNotFoundError(briefId);",
       "after": "    if (strict ? answer !== \"visible\" : answer === \"hidden\") {\n      throw new CampaignNotFoundError(briefId);",
-      "because": "Throws the superclass instead of BriefRefNotFoundError. `briefs.post` still maps the superclass to the same 404, so the route body/status are unchanged; only `the re-check refusal is a BriefRefNotFoundError naming the callers brief id and never the source slug` catches it via its `instanceof BriefRefNotFoundError` assertion (and the route tests would 500).",
+      "because": "Throws the superclass `CampaignNotFoundError` instead of `BriefRefNotFoundError`. `briefs.post` still maps the superclass to the same 404, so its body/status are unchanged; the PUT/duplicate/index route tests answer 404 too, but with h3's default body (`{ statusCode, stack }`) instead of the route's `Brief \"<id>\" not found.` mapping — a DIFFERENT 404 body, not a 500. The manifest command runs only the lib witness, so only `the re-check refusal is a BriefRefNotFoundError naming the callers brief id and never the source slug` catches the class change, via its `instanceof BriefRefNotFoundError` assertion.",
       "command": [
         "env",
         "-u",
@@ -119,6 +119,26 @@
         "apps/api/server/lib/__tests__/brief-asset-refs.copy-recheck.test.ts",
         "-t",
         "copyBriefRefs frees the first source created assets too when only the second source is hidden under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "  for (const slug of from) {\n    const answer = await briefs.campaignVisibility(slug);",
+      "after": "  for (const slug of from.slice(-1)) {\n    const answer = await briefs.campaignVisibility(slug);",
+      "because": "Iterates only the LAST source (`from.slice(-1)`). A FIRST source that became hidden after its copy is never re-checked, so `a first source hidden after copy refuses and frees the second sources created ids too under s3` resolves instead of rejecting — failing its `rejects.toBeInstanceOf(BriefRefNotFoundError)` assertion, and leaving the second source's copy behind. This is the gap the new test closes: every source, not only the last, is re-checked.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.copy-recheck.test.ts",
+        "-t",
+        "a first source hidden after copy refuses and frees the second sources created ids too under s3"
       ],
       "verdict": "caught"
     }

@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import {
   BRIEF_SCHEMA_VERSION,
   DEFAULT_CAMPAIGN_TYPE,
@@ -10,7 +10,6 @@ import { setCapabilities } from "../../../lib/capabilities.js";
 import { inputKey, inputPrefix } from "../../../lib/object-store/object-keys.js";
 import { resetObjectStoreClient, setObjectStoreClient } from "../../../lib/object-store/index.js";
 import { getAssetStore, resetAssetStore } from "../../../lib/ports/index.js";
-import { FsBriefStore } from "../../../lib/ports/fs-brief-store.js";
 import { FsAssetStore } from "../../../lib/ports/fs-asset-store.js";
 import { ObjectAssetStore } from "../../../lib/ports/object-asset-store.js";
 import { PgBriefStore } from "../../../lib/ports/pg-brief-store.js";
@@ -357,7 +356,7 @@ describe("the write routes re-check their copy sources after copying (PT-9i, D23
 
   test("duplicate answers the one 404 and leaves no campaign when the third campaign is reassigned mid-request", async () => {
     const third = await freshSource();
-    const { slug: srcSlug, campaignId } = await seedSourceBrief(third.id, "src-recheck-dup");
+    const { campaignId } = await seedSourceBrief(third.id, "src-recheck-dup");
     const snapshot = await counts(harness.db);
 
     // The copy runs (the source's own assets AND the third's via copyBriefRefs), then the
@@ -412,7 +411,7 @@ describe("the write routes re-check their copy sources after copying (PT-9i, D23
 
   test("briefs.post with a source that stays visible still answers 201 and keeps its copies", async () => {
     // Control: no reassignment, so the re-check is clean and nothing is freed.
-    const { slug, ownId } = await freshTarget(false);
+    const { slug } = await freshTarget(false);
     const { slug: srcSlug, id: srcId } = await freshSource();
 
     const res = await post(ONLY_T1, allForeignId(slug, srcId));

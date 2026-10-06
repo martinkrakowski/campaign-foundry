@@ -42,8 +42,6 @@ const S1 = "s1";
 const S2 = "s2";
 
 const CALLER: TenantContext = { orgId: "local", userId: "u1", roles: [], teamIds: ["t1"] };
-/** Minting campaigns/briefs as `owner` bypasses team membership on `createCampaign`. */
-const OWNER: TenantContext = { orgId: "local", userId: "owner", roles: ["owner"], teamIds: [] };
 
 /** The root-level demo ref the editor's own default brief carries (`run-context.tsx:553`). */
 const DEMO_REF = "assets/inputs/hydra-logo.png";
@@ -234,6 +232,24 @@ describe("copyBriefRefs — re-checks each copy source after copying (PT-9i, D23
     expect(await keysOf(store, runId)).toEqual([inputKey("local", runId, logoId)]);
   });
 
+  test("a first source hidden after copy refuses and frees the second sources created ids too under s3", async () => {
+    const { runId, logoId } = await seedTarget();
+    const s1Id = await seedSource(S1, [{ name: "s1.png", bytes: PNG_ALT }]);
+    const s2Id = await seedSource(S2, [{ name: "s2.png", bytes: PNG_ALT2 }]);
+    // The FIRST source is reassigned, after its own copy — the re-check must reach it too,
+    // not only the last source.
+    reassignAfter(S1);
+
+    await expect(copy([S1, S2])).rejects.toBeInstanceOf(BriefRefNotFoundError);
+
+    // Both copies are freed (createdIds holds both, in copy order); neither source's own
+    // rows are touched, even though S2 stayed visible the whole time.
+    expect((await rowsOf(db, runId)).map((r) => r.name)).toEqual(["logo.png"]);
+    expect(await keysOf(store, runId)).toEqual([inputKey("local", runId, logoId)]);
+    expect((await rowsOf(db, s1Id)).map((r) => r.name)).toEqual(["s1.png"]);
+    expect((await rowsOf(db, s2Id)).map((r) => r.name)).toEqual(["s2.png"]);
+  });
+
   test("a copyAssets failure on the second source frees the first source created ids and rethrows the original error under s3", async () => {
     const { runId } = await seedTarget();
     await seedSource(S1, [{ name: "s1.png", bytes: PNG_ALT }]);
@@ -323,7 +339,7 @@ describe("copyBriefRefs — re-checks each copy source after copying (PT-9i, D23
   });
 
   test("the re-check refusal is a BriefRefNotFoundError naming the callers brief id and never the source slug", async () => {
-    const { runId } = await seedTarget();
+    await seedTarget();
     await seedSource(SRC, [
       { name: "logo.png", bytes: PNG },
       { name: "alt.png", bytes: PNG_ALT },
@@ -420,7 +436,7 @@ describe("copyBriefRefs — re-checks each copy source after copying (PT-9i, D23
   });
 
   test("copyBriefRefs with no sources makes no visibility call and frees nothing", async () => {
-    const { runId } = await seedTarget();
+    await seedTarget();
     const visibility = vi.spyOn(PgBriefStore.prototype, "campaignVisibility");
     const copyAssets = vi.spyOn(ObjectAssetStore.prototype, "copyAssets");
     const free = vi.spyOn(ObjectAssetStore.prototype, "freeUnreferencedAssets");
@@ -518,7 +534,7 @@ describe("copyBriefRefs on pg plus fs re-checks by team and frees by path (PT-9i
   };
 
   test("copyBriefRefs on pg plus fs frees the created files and refuses when the source is reassigned mid-copy", async () => {
-    const { runId } = await seedTarget();
+    await seedTarget();
     await seedSource(SRC, [
       { name: "alt.png", bytes: PNG_ALT },
       { name: "bg.png", bytes: PNG_ALT2 },
@@ -540,7 +556,7 @@ describe("copyBriefRefs on pg plus fs re-checks by team and frees by path (PT-9i
   });
 
   test("copyBriefRefs on pg plus fs keeps a reused file when the re-check fails", async () => {
-    const { runId } = await seedTarget();
+    await seedTarget();
     // SRC's logo.png carries the SAME bytes as the target's own — it is reused, never created.
     await seedSource(SRC, [
       { name: "logo.png", bytes: PNG },
@@ -560,7 +576,7 @@ describe("copyBriefRefs on pg plus fs re-checks by team and frees by path (PT-9i
   });
 
   test("copyBriefRefs on pg plus fs lets an absent source through and keeps its copies", async () => {
-    const { runId } = await seedTarget();
+    await seedTarget();
     // A slug with files but NO campaign row: pg answers "absent", and off s3 only
     // "hidden" refuses (decision 1), so the re-check lets it through.
     await getAssetStore(CALLER).writeAsset(SRC, "alt.png", PNG_ALT);
