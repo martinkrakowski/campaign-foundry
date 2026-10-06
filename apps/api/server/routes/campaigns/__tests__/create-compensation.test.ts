@@ -492,6 +492,39 @@ describe("create compensation under s3 on pg", () => {
     expect(await counts(harness.db)).toEqual(snapshot);
   });
 
+  test("create route makes no free call of its own and leaves no object when the source copy itself throws part-way under s3", async () => {
+    // Failure point 1: the SOURCE copy throws on its second asset, after the first asset's
+    // object and row exist. `copyAssets` frees what it created itself (PT-9j0) and hands
+    // nothing back from a throw, so the route's own `createdIds` is empty on this path and
+    // the route must add no free of its own: the one call seen is the asset store's.
+    const source = await seedSource(unique("src"));
+    const snapshot = await counts(harness.db);
+    watch();
+    const realObjectCopy = objectStore.copy.bind(objectStore);
+    vi.spyOn(objectStore, "copy")
+      .mockImplementationOnce(async (...args) => realObjectCopy(...args))
+      .mockRejectedValueOnce(new Error("s3 dropped"));
+
+    const res = await createFrom(ONLY_T1, { name: unique("copy"), source: source.campaignId });
+    expect(res.status).toBe(500);
+
+    const m = await minted();
+    expect(seen.has(source.slug)).toBe(false);
+    expect(free).toHaveBeenCalledTimes(1);
+    expect(free.mock.calls[0]![0]).toBe(m.slug);
+    // That one call carries BOTH ids the copy minted: the store records an id before it copies
+    // the object, so the failed asset is in the list too and matches no row. What matters here
+    // is the count of calls: a second one would be the route freeing on its own.
+    expect(free.mock.calls[0]![1] as string[]).toHaveLength(2);
+    expect(await objectStore.list(inputPrefix("local", m.campaignId))).toEqual([]);
+    expect(await counts(harness.db)).toEqual(snapshot);
+    await expectSourcesUntouched({
+      slug: source.slug,
+      rows: ["extra.png", "logo.png"],
+      objects: 2,
+    });
+  });
+
   test("create route still releases the campaign and answers the original error when the free fails under s3", async () => {
     const source = await seedSource(unique("src"));
     const snapshot = await counts(harness.db);
