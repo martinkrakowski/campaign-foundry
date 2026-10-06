@@ -24,8 +24,8 @@
     },
     {
       "file": "apps/api/server/lib/ports/object-asset-store.ts",
-      "before": "      return await this.copyAssetsInto(fromBriefId, toBriefId, created);",
-      "after": "      return await this.copyAssetsInto(fromBriefId, toBriefId, new Set<string>());",
+      "before": "      return await this.copyAssetsInto(fromBriefId, toBriefId, created, options?.only);",
+      "after": "      return await this.copyAssetsInto(fromBriefId, toBriefId, new Set<string>(), options?.only);",
       "because": "The body gets a private set instead of the wrapper's, so the wrapper's created is always empty and nothing is freed: the exact bug (the set dies with the frame).",
       "command": [
         "env",
@@ -144,8 +144,8 @@
     },
     {
       "file": "apps/api/server/lib/ports/fs-asset-store.ts",
-      "before": "      return await this.copyAssetsInto(fromBriefId, toBriefId, created);",
-      "after": "      return await this.copyAssetsInto(fromBriefId, toBriefId, new Set<string>());",
+      "before": "      return await this.copyAssetsInto(fromBriefId, toBriefId, created, options?.only);",
+      "after": "      return await this.copyAssetsInto(fromBriefId, toBriefId, new Set<string>(), options?.only);",
       "because": "Private set again: the wrapper never learns what the body wrote.",
       "command": [
         "env",

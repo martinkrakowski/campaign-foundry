@@ -12,6 +12,7 @@ import { resetObjectStoreClient, setObjectStoreClient } from "../../../lib/objec
 import { getAssetStore, resetAssetStore } from "../../../lib/ports/index.js";
 import { FsAssetStore } from "../../../lib/ports/fs-asset-store.js";
 import { ObjectAssetStore } from "../../../lib/ports/object-asset-store.js";
+import type { CopyAssetsOptions } from "../../../lib/ports/asset-store.port.js";
 import { PgBriefStore } from "../../../lib/ports/pg-brief-store.js";
 import type { SqlClient } from "../../../lib/db/sql-client.js";
 import type { TenantContext } from "../../../lib/tenant.js";
@@ -148,8 +149,13 @@ describe("put route compensation (s3 on pg)", () => {
     const real = ObjectAssetStore.prototype.copyAssets;
     const copy = vi
       .spyOn(ObjectAssetStore.prototype, "copyAssets")
-      .mockImplementation(async function (this: ObjectAssetStore, from: string, to: string) {
-        const result = await real.call(this, from, to);
+      .mockImplementation(async function (
+        this: ObjectAssetStore,
+        from: string,
+        to: string,
+        options?: CopyAssetsOptions,
+      ) {
+        const result = await real.call(this, from, to, options);
         if (!seen.has(from)) seen.set(from, result.created);
         return result;
       });
@@ -221,7 +227,7 @@ describe("put route compensation (s3 on pg)", () => {
     const res = await put(ONLY_T1, target.slug, allForeignId(target.slug, source.ids.alt));
     expect(res.status).toBe(500);
 
-    expect(seen.get(source.slug)?.size).toBe(2);
+    expect(seen.get(source.slug)?.size).toBe(1);
     expect(free).toHaveBeenCalledTimes(1);
     expect(free.mock.calls[0][0]).toBe(target.slug);
     expect([...(free.mock.calls[0][1] as readonly string[])].sort()).toEqual(
@@ -296,6 +302,7 @@ describe("put route compensation (s3 on pg)", () => {
       const reused = await new ObjectAssetStore(harness.db, objectStore, "local").copyAssets(
         source.slug,
         target.slug,
+        { only: ["alt.png"] },
       );
       expect([...reused.created]).toEqual([]);
       const other = new PgBriefStore(harness.db, "local", "other-instance", ["owner"], [], true);
@@ -338,17 +345,25 @@ describe("put route compensation (s3 on pg)", () => {
     const snapshot = await counts(harness.db);
     const real = ObjectAssetStore.prototype.copyAssets;
     const { copy, seen, free, del } = watch();
-    copy.mockImplementationOnce(async function (this: ObjectAssetStore, from: string, to: string) {
+    copy.mockImplementationOnce(async function (
+      this: ObjectAssetStore,
+      from: string,
+      to: string,
+      options?: CopyAssetsOptions,
+    ) {
       await harness.db.query(
         `delete from asset where org_id = 'local' and campaign_id = $1 and name = $2`,
         [srcUuid, "alt.png"],
       );
-      const r = await real.call(this, from, to);
+      const r = await real.call(this, from, to, options);
       seen.set(from, r.created);
       return r;
     });
 
-    const res = await put(ONLY_T1, target.slug, allForeignId(target.slug, source.ids.alt));
+    const res = await put(ONLY_T1, target.slug, {
+      ...allForeignId(target.slug, source.ids.alt),
+      audio: { path: source.ids.bg, rights: { licenceId: "lic-1", source: "library" } },
+    });
     expect(res.status).toBe(404);
     expect((await res.json()) as { error: string }).toEqual({
       error: `Brief "${target.slug}" not found.`,
@@ -393,11 +408,7 @@ describe("put route compensation (s3 on pg)", () => {
 
     expect(free).toHaveBeenCalledTimes(1);
     expect(del).not.toHaveBeenCalled();
-    expect((await rowsOf(target.slug)).map((r) => r.name).sort()).toEqual([
-      "alt.png",
-      "bg.png",
-      "logo.png",
-    ]);
+    expect((await rowsOf(target.slug)).map((r) => r.name).sort()).toEqual(["alt.png", "logo.png"]);
     expect(warned).not.toHaveBeenCalled();
     expect(errored).not.toHaveBeenCalled();
   });
@@ -416,7 +427,7 @@ describe("put route compensation (s3 on pg)", () => {
     expect(free).not.toHaveBeenCalled();
     expect(del).not.toHaveBeenCalled();
     expect(seen.has(source.slug)).toBe(true);
-    expect((await rowsOf(target.slug)).length).toBe(3);
+    expect((await rowsOf(target.slug)).length).toBe(2);
     expect((await counts(harness.db)).versions).toBe(snapshot.versions + 1);
   });
 

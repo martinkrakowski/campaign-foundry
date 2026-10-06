@@ -1,0 +1,206 @@
+{
+  "version": 1,
+  "lane": "PT-9k-copy-referenced-only",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "    const sources = wanted === undefined ? all : all.filter((source) => wanted.has(source.name));",
+      "after": "    const sources = wanted === undefined ? all : all;",
+      "because": "The name filter is gone: only=[\"scene.png\"] copies every row of the source, so three rows and three objects land in the target and the single-id created assertion fails (M1).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/copy-assets-only.test.ts",
+        "-t",
+        "copyAssets with only copies exactly the named rows and objects under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-asset-store.ts",
+      "before": "    const sourceFiles =\n      wanted === undefined ? allFiles : allFiles.filter((relPath) => wanted.has(relPath));",
+      "after": "    const sourceFiles =\n      wanted === undefined ? allFiles : allFiles;",
+      "because": "The fs name filter is gone: only=[\"logo.png\",\"sub/dir/nested.png\"] copies bg.jpg too, so the bg absence and the created set assertions fail (M2).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/copy-assets-only.test.ts",
+        "-t",
+        "copyAssets with only copies exactly the named files including a nested one under fs"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "          : await assets.copyAssets(slug, target, { only: names });",
+      "after": "          : await assets.copyAssets(slug, target);",
+      "because": "A source that HAS an entry in only is copied whole again (three-arg call becomes two-argument), so the per-source spy assertions in test 9 fail (M3).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.copy-only.test.ts",
+        "-t",
+        "copyBriefRefs passes only to the sources that have an entry and copies the rest whole under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "        noteCopyName(copyOnly, opts.target, owner.slug, owner.name);",
+      "after": "        noteCopyName(copyOnly, opts.target, owner.slug, \"\");",
+      "because": "The id ref's name is lost: copyOnly[FRIEND] names \"\" instead of \"alt.png\", so test 6's per-source name array assertion fails (M4).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.copy-only.test.ts",
+        "-t",
+        "resolveBriefAssetRefs records the referenced names per foreign source under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "    noteCopyName(copyOnly, opts.target, stored.slug, stored.name);",
+      "after": "    noteCopyName(copyOnly, opts.target, stored.slug, stored.name.toUpperCase());",
+      "because": "The path ref's name is upper-cased: copyOnly[FRIEND] names \"LOGO.PNG\" instead of \"logo.png\", so test 6's name array assertion fails (M5).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.copy-only.test.ts",
+        "-t",
+        "resolveBriefAssetRefs records the referenced names per foreign source under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "  if (slug === target) return;",
+      "after": "  if (slug === \"\") return;",
+      "because": "The target's own path ref is no longer refused: a RUN path ref gains an entry, so test 7's 'no target key' assertion fails (M6).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.copy-only.test.ts",
+        "-t",
+        "resolveBriefAssetRefs gives each foreign source its own names and none for the target under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "posix.normalize(match[2] as string)",
+      "after": "(match[2] as string)",
+      "because": "The path name is no longer normalised: copyOnly[FRIEND] names \"./logo.png\" and \"sub/../bed.mp3\" instead of \"logo.png\" and \"bed.mp3\", so test 8's name array assertion fails (M7).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.copy-only.test.ts",
+        "-t",
+        "resolveBriefAssetRefs derives the names off s3 from the path refs and normalises them"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "        names === undefined",
+      "after": "        only === undefined",
+      "because": "A source absent from a given map is called with { only: undefined } (three-argument) instead of two-argument, so test 9's two-argument `calls[1]` length and `toHaveBeenCalledWith` assertions fail (M8).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.copy-only.test.ts",
+        "-t",
+        "copyBriefRefs passes only to the sources that have an entry and copies the rest whole under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs.post.ts",
+      "before": "resolved.copyOnly",
+      "after": "undefined",
+      "because": "The Save-as copy forgets only: the whole library is copied, so test 10's rows/keys and the { only: [\"alt.png\"] } call assertion fail (M9).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/copy-referenced-only.test.ts",
+        "-t",
+        "save route copies only the referenced asset of a three-row source under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id].put.ts",
+      "before": "resolved.copyOnly",
+      "after": "undefined",
+      "because": "The PUT copy forgets only: the whole library is copied, so test 11's rows/keys and the { only: [\"alt.png\"] } call assertion fail (M10).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/copy-referenced-only.test.ts",
+        "-t",
+        "put route copies only the referenced asset of a three-row source under s3"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -8,6 +8,7 @@ import type {
   AssetEntry,
   AssetOwner,
   AssetStorePort,
+  CopyAssetsOptions,
 } from "./asset-store.port.js";
 
 /**
@@ -139,7 +140,11 @@ export class FsAssetStore implements AssetStorePort {
     return assets.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  async copyAssets(fromBriefId: string, toBriefId: string): Promise<AssetCopyResult> {
+  async copyAssets(
+    fromBriefId: string,
+    toBriefId: string,
+    options?: CopyAssetsOptions,
+  ): Promise<AssetCopyResult> {
     // PT-9j0 (D237): `created` is owned by THIS frame and handed to the body, so a
     // throw part-way through still knows what the call had already made. The files
     // written before the failing one are removed (they were minted by this call with
@@ -150,7 +155,7 @@ export class FsAssetStore implements AssetStorePort {
     // file this call did not create.
     const created = new Set<string>();
     try {
-      return await this.copyAssetsInto(fromBriefId, toBriefId, created);
+      return await this.copyAssetsInto(fromBriefId, toBriefId, created, options?.only);
     } catch (error) {
       try {
         await this.freeUnreferencedAssets(toBriefId, [...created]);
@@ -168,6 +173,7 @@ export class FsAssetStore implements AssetStorePort {
     fromBriefId: string,
     toBriefId: string,
     created: Set<string>,
+    only: readonly string[] | undefined,
   ): Promise<AssetCopyResult> {
     if (fromBriefId === toBriefId) return { paths: {}, created: new Set() };
     let sourceDir: string;
@@ -198,7 +204,10 @@ export class FsAssetStore implements AssetStorePort {
       return files;
     };
 
-    const sourceFiles = await collectFiles(sourceDir);
+    const allFiles = await collectFiles(sourceDir);
+    const wanted = only === undefined ? undefined : new Set(only);
+    const sourceFiles =
+      wanted === undefined ? allFiles : allFiles.filter((relPath) => wanted.has(relPath));
     if (sourceFiles.length === 0) return { paths: {}, created: new Set() };
 
     await mkdir(targetDir, { recursive: true });

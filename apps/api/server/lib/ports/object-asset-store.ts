@@ -15,6 +15,7 @@ import {
   type AssetEntry,
   type AssetOwner,
   type AssetStorePort,
+  type CopyAssetsOptions,
 } from "./asset-store.port.js";
 
 /** `error.code`, when `error` has one (pg and PGlite both attach the SQLSTATE as a string). */
@@ -394,14 +395,18 @@ export class ObjectAssetStore implements AssetStorePort {
    * only, is now seen by all four write routes (`briefs.post`, `briefs/[id].put`,
    * `duplicate.post`, `index.post`), and off `s3` the path-derived rule is unchanged.
    */
-  async copyAssets(fromBriefId: string, toBriefId: string): Promise<AssetCopyResult> {
+  async copyAssets(
+    fromBriefId: string,
+    toBriefId: string,
+    options?: CopyAssetsOptions,
+  ): Promise<AssetCopyResult> {
     // PT-9j0 (D237): `created` is owned by THIS frame and handed to the body, so a
     // throw part-way through still knows what the call had already made. Rows 1..N-1
     // of a source whose asset N failed are freed (version-checked) before the error is
     // rethrown; the failed asset's own object was already discarded.
     const created = new Set<string>();
     try {
-      return await this.copyAssetsInto(fromBriefId, toBriefId, created);
+      return await this.copyAssetsInto(fromBriefId, toBriefId, created, options?.only);
     } catch (error) {
       try {
         await this.freeUnreferencedAssets(toBriefId, [...created]);
@@ -418,6 +423,7 @@ export class ObjectAssetStore implements AssetStorePort {
     fromBriefId: string,
     toBriefId: string,
     created: Set<string>,
+    only: readonly string[] | undefined,
   ): Promise<AssetCopyResult> {
     if (fromBriefId === toBriefId) return { paths: {}, created: new Set() };
     const [fromId, toId] = await Promise.all([
@@ -425,7 +431,9 @@ export class ObjectAssetStore implements AssetStorePort {
       this.resolveCampaignId(toBriefId),
     ]);
     if (fromId === undefined || toId === undefined) return { paths: {}, created: new Set() };
-    const sources = await this.campaignAssets(fromId);
+    const all = await this.campaignAssets(fromId);
+    const wanted = only === undefined ? undefined : new Set(only);
+    const sources = wanted === undefined ? all : all.filter((source) => wanted.has(source.name));
     if (sources.length === 0) return { paths: {}, created: new Set() };
 
     const pathMap: Record<string, string> = {};

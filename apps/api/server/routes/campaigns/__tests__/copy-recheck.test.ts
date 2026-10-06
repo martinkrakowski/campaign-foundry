@@ -12,6 +12,7 @@ import { resetObjectStoreClient, setObjectStoreClient } from "../../../lib/objec
 import { getAssetStore, resetAssetStore } from "../../../lib/ports/index.js";
 import { FsAssetStore } from "../../../lib/ports/fs-asset-store.js";
 import { ObjectAssetStore } from "../../../lib/ports/object-asset-store.js";
+import type { CopyAssetsOptions } from "../../../lib/ports/asset-store.port.js";
 import { PgBriefStore } from "../../../lib/ports/pg-brief-store.js";
 import type { SqlClient } from "../../../lib/db/sql-client.js";
 import type { TenantContext } from "../../../lib/tenant.js";
@@ -219,8 +220,9 @@ describe("the write routes re-check their copy sources after copying (PT-9i, D23
       this: ObjectAssetStore,
       from: string,
       to: string,
+      options?: CopyAssetsOptions,
     ) {
-      const result = await real.call(this, from, to);
+      const result = await real.call(this, from, to, options);
       if (from === hiddenSlug) {
         await harness.db.query(
           `update campaign set team_id = 't2' where org_id = 'local' and slug = $1`,
@@ -480,8 +482,9 @@ describe("copyBriefRefs on pg plus fs re-checks by team and frees by path (PT-9i
       this: FsAssetStore,
       from: string,
       to: string,
+      options?: CopyAssetsOptions,
     ) {
-      const result = await real.call(this, from, to);
+      const result = await real.call(this, from, to, options);
       if (from === hiddenSlug) {
         await harness.db.query(
           `update campaign set team_id = 't2' where org_id = 'local' and slug = $1`,

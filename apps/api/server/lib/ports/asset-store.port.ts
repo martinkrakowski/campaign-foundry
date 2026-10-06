@@ -77,6 +77,17 @@ export interface AssetCopyResult {
   readonly created: ReadonlySet<string>;
 }
 
+/** Options for {@link AssetStorePort.copyAssets} (PT-9k, D238). */
+export interface CopyAssetsOptions {
+  /**
+   * The asset NAMES to copy, as the source campaign knows them (`AssetEntry.name`; the
+   * relative path on fs, nested names included). Absent: the whole library, which is what
+   * `duplicate` and `create` rely on (Q8). An empty list copies nothing. A name the source
+   * does not hold is ignored.
+   */
+  readonly only?: readonly string[] | undefined;
+}
+
 /**
  * Port for storing, retrieving, listing, and copying assets.
  *
@@ -151,13 +162,18 @@ export interface AssetStorePort {
   listAssets(briefId: string): Promise<readonly AssetEntry[]>;
 
   /**
-   * Copy all brief-scoped assets from one brief to another (`fromBriefId` -> `toBriefId`).
+   * Copy all brief-scoped assets from one brief to another (`fromBriefId` -> `toBriefId`),
+   * unless `options.only` names the assets to copy.
    * Creates the target asset directory/prefix if missing. Preserves nested paths and disambiguates collisions.
    * Returns `{ paths, created }` — `paths` is the map of relative source path / id to destination path or id
    * (unchanged shape); `created` holds the ids (pg) or relative paths (fs) this call actually minted,
    * never a sha-deduped reuse.
    */
-  copyAssets(fromBriefId: string, toBriefId: string): Promise<AssetCopyResult>;
+  copyAssets(
+    fromBriefId: string,
+    toBriefId: string,
+    options?: CopyAssetsOptions,
+  ): Promise<AssetCopyResult>;
 
   /**
    * Delete every asset stored under a brief (PT-5b2 fix-round item 2: undoing
