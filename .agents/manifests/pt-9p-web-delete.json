@@ -89,9 +89,9 @@
     },
     {
       "file": "apps/web/src/components/shell/BriefPicker.tsx",
-      "before": "    void refreshList();",
+      "before": "    void refreshList(entry.file);",
       "after": "    void refreshList;",
-      "because": "PT-9p mutation 6: the refetch is referenced but never invoked, so the post-delete list never refreshes and the row that only the refetch can supply never appears. FAILS ON: await screen.findByText('fresh.yaml')",
+      "because": "PT-9p mutation 6 (fix-round re-point: the call now passes the dropped file): the refetch is replaced by a bare reference, so it is never invoked and the post-delete list never refreshes; the row that only the refetch can supply never appears. FAILS ON: await screen.findByText('fresh.yaml')",
       "command": [
         "yarn",
         "vitest",
@@ -101,6 +101,23 @@
         "apps/web/src/components/shell/__tests__/BriefPicker.delete.test.tsx",
         "-t",
         "a 202 sends one DELETE to the campaign uuid and refetches the list"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/BriefPicker.tsx",
+      "before": "      setEntries((await listBriefs()).filter((e) => e.file !== droppedFile));",
+      "after": "      setEntries((await listBriefs()).filter(() => true));",
+      "because": "PT-9p mutation 7: the refetched listing is adopted with a keep-everything filter, so the deleted campaign's row is re-added and the queryByText assertion fails. FAILS ON: expect(screen.queryByText('demo.yaml')).toBeNull()",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/BriefPicker.delete.test.tsx",
+        "-t",
+        "a refetch that still lists the deleted campaign does not bring its row back"
       ],
       "verdict": "caught"
     }

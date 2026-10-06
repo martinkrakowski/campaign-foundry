@@ -209,9 +209,21 @@ describe("BriefPicker delete", () => {
     expect(r.lists()).toBe(2);
   });
 
+  test("a refetch that still lists the deleted campaign does not bring its row back", async () => {
+    const user = userEvent.setup();
+    const r = route({ afterDelete: [demo, other] });
+    renderWithRun(<BriefPicker />);
+    const { dialog } = await openDelete(user);
+    await user.type(field(dialog), "demo");
+    fireEvent.click(confirm(dialog));
+    await waitFor(() => expect(r.lists()).toBe(2));
+    expect(screen.queryByText("demo.yaml")).toBeNull();
+    expect(screen.getByText("other.yaml")).toBeTruthy();
+  });
+
   test("without a campaign id in the listing the DELETE goes to the slug", async () => {
     const user = userEvent.setup();
-    route();
+    const r = route();
     renderWithRun(<BriefPicker />);
     const { dialog } = await openDelete(user, "Delete other");
     await user.type(
@@ -223,6 +235,8 @@ describe("BriefPicker delete", () => {
       expect(screen.queryByRole("dialog", { name: messages.deleteCampaignTitle })).toBeNull(),
     );
     expect(deletes).toEqual([`${API}/campaigns/other`]);
+    await waitFor(() => expect(r.lists()).toBe(2));
+    expect(screen.queryByText("other.yaml")).toBeNull();
   });
 
   test("a 2xx other than 202 is a success too", async () => {
@@ -273,7 +287,7 @@ describe("BriefPicker delete", () => {
 
   test("deleting another campaign does not navigate", async () => {
     const user = userEvent.setup();
-    route({ briefs: [open, other] });
+    const r = route({ briefs: [open, other] });
     renderWithRun(<BriefPicker />);
     await screen.findByText("summer.yaml");
 
@@ -289,6 +303,8 @@ describe("BriefPicker delete", () => {
       expect(screen.queryByRole("dialog", { name: messages.deleteCampaignTitle })).toBeNull(),
     );
     expect(nextMock().router.push).not.toHaveBeenCalled();
+    await waitFor(() => expect(r.lists()).toBe(2));
+    expect(screen.queryByText("other.yaml")).toBeNull();
   });
 
   test("a 409 says a run is in progress and offers no way to cancel it", async () => {
@@ -301,7 +317,9 @@ describe("BriefPicker delete", () => {
     await user.type(field(dialog), "demo");
     fireEvent.click(confirm(dialog));
 
-    expect(await screen.findByText(messages.deleteCampaignRunInProgress)).toBeTruthy();
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(
+      messages.deleteCampaignRunInProgress,
+    );
     expect(screen.getByRole("dialog", { name: messages.deleteCampaignTitle })).toBeTruthy();
     expect(screen.getByText("demo.yaml")).toBeTruthy();
     expect(within(dialog).queryByRole("button", { name: /cancel (the )?run|stop/i })).toBeNull();

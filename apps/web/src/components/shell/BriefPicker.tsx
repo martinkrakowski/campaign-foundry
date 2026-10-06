@@ -162,9 +162,9 @@ export function BriefPicker() {
   };
 
   /** Best-effort: a failed refetch leaves the list as it is (the row was already removed). */
-  const refreshList = async () => {
+  const refreshList = async (droppedFile: string) => {
     try {
-      setEntries(await listBriefs());
+      setEntries((await listBriefs()).filter((e) => e.file !== droppedFile));
     } catch {
       /* the next open of the picker reloads it */
     }
@@ -177,7 +177,7 @@ export function BriefPicker() {
    */
   const forget = (entry: BriefEntry) => {
     setEntries((prev) => (prev as BriefEntry[]).filter((e) => e.file !== entry.file));
-    void refreshList();
+    void refreshList(entry.file);
   };
 
   /**

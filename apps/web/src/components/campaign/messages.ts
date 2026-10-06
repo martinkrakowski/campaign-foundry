@@ -1883,7 +1883,7 @@ export const deleteCampaignForbidden =
   "You may not delete this campaign — ask an owner or admin of your organisation.";
 /** 404: hidden, absent or already deleted (one answer for all, D233). */
 export const deleteCampaignGone =
-  "This campaign is already deleted, or you can no longer see it — the list has been refreshed.";
+  "This campaign is already deleted, or you can no longer see it. It has been removed from the list.";
 /** 501: the server runs on the file store, which cannot delete yet (PT-9n retires this). */
 export const deleteCampaignUnsupported =
   "This server cannot delete campaigns — ask whoever runs it.";
