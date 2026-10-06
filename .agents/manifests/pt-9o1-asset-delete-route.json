@@ -40,7 +40,7 @@
       "file": "apps/api/server/routes/campaigns/assets.delete.ts",
       "before": "if (briefs.supportsTeams && resolved === undefined) return notFound();",
       "after": "if (false) return notFound();",
-      "because": "Bypassing the resolveCampaign 404 lets a team-hidden campaign's asset be deleted: t2Member on the t1 campaign by name proceeds past the gate (the id branch still 404s on fs because an id never matches a file-store entry) and frees the file (200) instead of answering the one 404. FAILS ON: expect(byNameHidden.status).toBe(404);",
+      "because": "With the resolveCampaign gate bypassed, an unresolved ref leaves resolved undefined, so both slug and campaignId collapse to the raw briefId (\"camp\"); that slug reaches the Postgres draft lookup as campaign_id, a uuid column, whose cast of the text 'camp' throws 22P02 — a 500 — before any free, instead of the 404 a hidden campaign owes. FAILS ON: expect(hidden.status).toBe(404);",
       "command": [
         "yarn",
         "vitest",
@@ -57,7 +57,7 @@
       "file": "apps/api/server/routes/campaigns/assets.delete.ts",
       "before": "[entry.id ?? entry.name]",
       "after": "entries.map((candidate) => candidate.id ?? candidate.name)",
-      "because": "Freeing every listed entry instead of one removes the neighbour too: deleting other.png from camp also removes logo.png, so listAssets('camp') is [] not [logo.png] and the logo.png byte assertion fails. FAILS ON: expect((await store.listAssets('camp')).map((e) => e.name)).toEqual(['logo.png']);",
+      "because": "Freeing every listed entry instead of one removes the neighbour too: deleting other.png from camp also frees logo.png, so listAssets(\"camp\") reads [] rather than [\"logo.png\"] and the listing assertion is the first to fail. FAILS ON: expect((await store.listAssets(\"camp\")).map((e) => e.name)).toEqual([\"logo.png\"]);",
       "command": [
         "yarn",
         "vitest",
@@ -74,7 +74,7 @@
       "file": "apps/api/server/routes/campaigns/assets.delete.ts",
       "before": "await assetStore.freeUnreferencedAssets(slug, [entry.id ?? entry.name]);",
       "after": "await assetStore.deleteAssets(slug);",
-      "because": "deleteAssets(slug) frees the whole campaign library under s3, so the neighbour other.png is gone and rows is [] not [other.png]; the row/object existence assertions fail. FAILS ON: expect((await rows('local', 'camp')).map((r) => r.name)).toEqual(['other.png']);",
+      "because": "deleteAssets(slug) frees the whole campaign library under s3, so the neighbour other.png is gone too: rows(\"local\", \"camp\") reads [] rather than [\"other.png\"], and the rows assertion is the first to fail (the row/object existence checks that follow fail as well). FAILS ON: expect((await rows(\"local\", \"camp\")).map((r) => r.name)).toEqual([\"other.png\"]);",
       "command": [
         "yarn",
         "vitest",
@@ -108,7 +108,7 @@
       "file": "apps/api/server/routes/campaigns/assets.delete.ts",
       "before": "return briefs.withBriefLock(slug, async () => {",
       "after": "return (<T,>(_slug: string, fn: () => Promise<T>) => fn())(slug, async () => {",
-      "because": "Replacing the brief lock with a no-op wrapper means the route never calls getBriefStore(local).withBriefLock, so the spy is not invoked. FAILS ON: expect(spy).toHaveBeenCalledOnce();",
+      "because": "Replacing the brief lock with a no-op wrapper lets the free run while another holder still has the lock: the route frees other.png during the wait, so the first readAsset assert sees it gone. FAILS ON: expect(await getAssetStore(local).readAsset(\"camp\", \"other.png\")).toEqual(PNG_ALT);",
       "command": [
         "yarn",
         "vitest",
@@ -117,7 +117,7 @@
         "api",
         "apps/api/server/routes/campaigns/__tests__/assets.delete.test.ts",
         "-t",
-        "DELETE /campaigns/assets takes the brief lock for the campaign slug"
+        "DELETE /campaigns/assets waits for a held brief lock before it frees"
       ],
       "verdict": "caught"
     },

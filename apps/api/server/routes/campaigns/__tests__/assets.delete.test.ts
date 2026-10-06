@@ -271,8 +271,17 @@ describe("DELETE /campaigns/assets", () => {
       [ACME_TENANT, "camp"],
     ] as const;
 
+    // The stored ref keeps its exact spelling through each save (proving the 409
+    // comes from the route's path normalisation, not a normalise-on-write store):
+    expect((await getBriefStore(local).findBriefById("camp"))!.brief.products[0]!.logoPath).toBe(
+      "assets/inputs/camp/logo.png",
+    );
+
     // (a) ./ prefix -> normalised to camp -> 409
     await getBriefStore(local).rewriteBrief(brief("camp", "./assets/inputs/camp/logo.png"));
+    expect((await getBriefStore(local).findBriefById("camp"))!.brief.products[0]!.logoPath).toBe(
+      "./assets/inputs/camp/logo.png",
+    );
     const beforeA = await state(pairs);
     const a = await del(local, "briefId=camp&name=logo.png");
     expect(a.status).toBe(409);
@@ -281,6 +290,9 @@ describe("DELETE /campaigns/assets", () => {
 
     // (b) camp2/../camp -> normalised to camp -> 409
     await getBriefStore(local).rewriteBrief(brief("camp", "assets/inputs/camp2/../camp/logo.png"));
+    expect((await getBriefStore(local).findBriefById("camp"))!.brief.products[0]!.logoPath).toBe(
+      "assets/inputs/camp2/../camp/logo.png",
+    );
     const beforeB = await state(pairs);
     const b = await del(local, "briefId=camp&name=logo.png");
     expect(b.status).toBe(409);
@@ -289,6 +301,9 @@ describe("DELETE /campaigns/assets", () => {
 
     // (c) camp2/logo.png -> resolves to ANOTHER campaign -> not this one -> 200
     await getBriefStore(local).rewriteBrief(brief("camp", "assets/inputs/camp2/logo.png"));
+    expect((await getBriefStore(local).findBriefById("camp"))!.brief.products[0]!.logoPath).toBe(
+      "assets/inputs/camp2/logo.png",
+    );
     const c = await del(local, "briefId=camp&name=logo.png");
     expect(c.status).toBe(200);
     expect(await c.json()).toEqual({ deleted: true });
@@ -346,5 +361,37 @@ describe("DELETE /campaigns/assets", () => {
     expect(res.status).toBe(200);
     expect(spy).toHaveBeenCalledOnce();
     expect(spy).toHaveBeenCalledWith("camp", expect.any(Function));
+  });
+
+  test("DELETE /campaigns/assets waits for a held brief lock before it frees", async () => {
+    // camp's brief names logo.png; we delete other.png (not named by it), so the
+    // only thing that can free it is the route taking the slug's lock — which
+    // must chain behind a holder that already has it.
+    const briefs = getBriefStore(local);
+    let release!: () => void;
+    const held = briefs.withBriefLock(
+      "camp",
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    const pending = del(local, "briefId=camp&name=other.png");
+    // Let the route run as far as it can without the lock. Under a REAL lock it
+    // is stuck here on `held`, so other.png must still be present; without the
+    // lock the route races on and frees it, making the next expect fail.
+    // Wait long enough for an UNLOCKED route to race on and free other.png
+    // (a handful of setImmediate ticks is not always enough for the route's
+    // async fs chain to reach the free). Under a REAL lock the route is still
+    // stuck on `held`, so other.png must still be present here.
+    const until = Date.now() + 200;
+    while (Date.now() < until) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(await getAssetStore(local).readAsset("camp", "other.png")).toEqual(PNG_ALT);
+
+    release();
+    await held;
+    const res = await pending;
+    expect(res.status).toBe(200);
+    // And now it is gone — the file store's read miss is undefined.
+    expect(await getAssetStore(local).readAsset("camp", "other.png")).toBeUndefined();
   });
 });
