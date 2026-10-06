@@ -96,6 +96,44 @@
         "!golden-bytes && !cpu-bound"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/[id].delete.ts",
+      "before": "        case \"not-found\":\n          return notFound();",
+      "after": "        case \"not-found\":\n          return { deleted: true };",
+      "because": "the lost-race arm answers success instead of 404, so the not-found assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.delete.fs.test.ts",
+        "-t",
+        "DELETE /campaigns/:id answers 404 on the file store when the campaign vanishes between the check and the lock",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/[id].delete.ts",
+      "before": "    if ((await getBriefStore(tenant).campaignMeta(id)) === undefined) return notFound();",
+      "after": "    if (false) return notFound();",
+      "because": "the existence check is skipped, so a member asking for an unknown campaign is told 403 instead of 404.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.delete.fs.test.ts",
+        "-t",
+        "DELETE /campaigns/:id answers 404 on the file store for a member and an unknown campaign",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
     }
   ]
 }

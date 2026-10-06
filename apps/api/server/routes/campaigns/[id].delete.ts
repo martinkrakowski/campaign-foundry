@@ -57,6 +57,10 @@ export default defineEventHandler(async (event) => {
           return { error: `Campaign "${id}" has a run in progress.`, jobId: outcome.jobId };
         case "not-found":
           return notFound();
+        default:
+          throw new Error(
+            `Unexpected file-store delete outcome: ${String((outcome as { outcome: string }).outcome)}`,
+          );
       }
     } catch (error) {
       if (error instanceof UnsafeCampaignPathError) {

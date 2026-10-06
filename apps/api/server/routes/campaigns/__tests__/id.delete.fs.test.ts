@@ -280,6 +280,21 @@ describe("DELETE /campaigns/:id — file store", () => {
     }
   });
 
+  test("DELETE /campaigns/:id answers 404 on the file store for a member and an unknown campaign", async () => {
+    const harness = setupFsHarness();
+    try {
+      const before = snapshotTree(harness.tmpDir);
+      const res = await del(mount(member), "ghost");
+      expect(res.status).toBe(404);
+      expect((await res.json()) as { error: string }).toEqual({
+        error: 'Campaign "ghost" not found.',
+      });
+      expect(snapshotTree(harness.tmpDir)).toEqual(before);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
   test("DELETE /campaigns/:id answers 404 on the file store the second time", async () => {
     const harness = setupFsHarness();
     try {
@@ -294,7 +309,7 @@ describe("DELETE /campaigns/:id — file store", () => {
   test("DELETE /campaigns/:id answers 404 on the file store when the campaign vanishes between the check and the lock", async () => {
     const harness = setupFsHarness();
     try {
-      await createCampaign("sale");
+      await plantCampaign(LOCAL_TENANT, harness.localRoots, "sale", "u-sale");
       const before = snapshotTree(harness.tmpDir);
       deleteSpy.mockResolvedValueOnce({ outcome: "not-found" });
       const res = await del(mount(LOCAL_TENANT), "sale");
@@ -412,6 +427,21 @@ describe("DELETE /campaigns/:id — file store", () => {
       expect(res2.status).toBe(200);
       expect(await res2.json()).toEqual({ deleted: true });
       expect(pathsNaming(harness.tmpDir, "sale")).toEqual([]);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("DELETE /campaigns/:id answers 500 on the file store for an outcome the route does not know", async () => {
+    const harness = setupFsHarness();
+    try {
+      await plantCampaign(LOCAL_TENANT, harness.localRoots, "sale", "u-sale");
+      const before = snapshotTree(harness.tmpDir);
+      deleteSpy.mockResolvedValueOnce({ outcome: "mystery" } as never);
+      const res = await del(mount(LOCAL_TENANT), "sale");
+      expect(res.status).toBe(500);
+      expect(deleteSpy).toHaveBeenCalledTimes(1);
+      expect(snapshotTree(harness.tmpDir)).toEqual(before);
     } finally {
       harness.cleanup();
     }
@@ -568,12 +598,12 @@ test("DELETE /campaigns/:id then removes every location a real run wrote on the 
       expect((await api.pools("sale")).status).toBe(404);
       expect(await getAssetStore(LOCAL_TENANT).listAssets("sale")).toEqual([]);
     } finally {
+      await resetJobs();
       harness.cleanup();
     }
   } finally {
     setCapabilities({ motion: false, reason: "not probed" });
     vi.restoreAllMocks();
-    await resetJobs();
     for (const key of PROVIDER_KEYS) {
       if (savedProviderKeys[key] === undefined) delete process.env[key];
       else process.env[key] = savedProviderKeys[key];
