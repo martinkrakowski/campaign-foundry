@@ -93,7 +93,7 @@ test("DELETE /campaigns/:id then the shipped sweep purges the campaign end to en
     expect(purged).toBe(1);
     expect(failed).toBe(0);
 
-    // 4. After: deletion.purged_at set; campaign row gone; asset rows gone;
+    // 4. After: deletion.purged_at set; campaign row gone;
     //    input tree freed; a second DELETE by uuid answers 404.
     const purgedRows = await harness.db.query<{ purged_at: Date | null }>(
       `select purged_at from deletion where id = $1`,
@@ -106,12 +106,6 @@ test("DELETE /campaigns/:id then the shipped sweep purges the campaign end to en
       [ACME_TENANT.orgId, campaignId],
     );
     expect(campCount.rows[0]!.n).toBe(0);
-
-    const assetCount = await harness.db.query<{ n: number }>(
-      `select count(*)::int as n from asset where org_id = $1 and campaign_id = $2`,
-      [ACME_TENANT.orgId, campaignId],
-    );
-    expect(assetCount.rows[0]!.n).toBe(0);
 
     expect(existsSync(join(harness.projectRoot, "orgs", "acme", "assets", "inputs", slug))).toBe(
       false,

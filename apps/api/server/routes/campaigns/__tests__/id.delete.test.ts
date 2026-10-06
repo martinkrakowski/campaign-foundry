@@ -369,6 +369,8 @@ describe("DELETE /campaigns/:id — postgres store", () => {
       const campaign = await seedCampaign(harness.db, "race-lost");
       requestSpy.mockResolvedValueOnce({ outcome: "gone" });
       const res = await del(mount(owner), "race-lost");
+      // The 404 must come from the transaction's answer, not from an earlier miss.
+      expect(requestSpy).toHaveBeenCalledTimes(1);
       expect(res.status).toBe(404);
       const body = (await res.json()) as { error: string };
       expect(body).toEqual({ error: 'Campaign "race-lost" not found.' });
