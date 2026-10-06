@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
-import { hashBytes } from "../../brief-files.js";
 import { resetDatabase, setDatabase } from "../../db/database.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import type { SqlClient } from "../../db/sql-client.js";
@@ -130,12 +129,17 @@ describe("ObjectAssetStore.copyAssets frees on failure (PT-9j0)", () => {
 
   test("copyAssets never frees a reused target row when a later asset fails", async () => {
     const targetId = await seed(db, "target");
-    // The target already holds a.png = PNG, the SAME bytes as the source's, so the copy
-    // REUSES it.
+    // The target already holds a.png = PNG, the SAME bytes as the source's, so the
+    // copy REUSES it. Also give the target an UNRELATED asset under a name the source
+    // does not carry.
     await assets.writeAsset("target", "a.png", PNG);
+    await assets.writeAsset("target", "mine.png", JPEG2);
     const held = await rowNamed(db, targetId, "a.png");
     const heldKey = inputKey(ORG, targetId, held.id);
-    expect(await keysUnder(store, targetId)).toEqual([heldKey]);
+    const mine = await rowNamed(db, targetId, "mine.png");
+    const mineKey = inputKey(ORG, targetId, mine.id);
+    // Read BOTH pre-existing rows (id and key) before the copy.
+    expect(await keysUnder(store, targetId)).toEqual([heldKey, mineKey].sort());
 
     const failing = failingInsertOn(db, "c.png");
     const freeSpy = vi.spyOn(ObjectAssetStore.prototype, "freeUnreferencedAssets");
@@ -144,19 +148,17 @@ describe("ObjectAssetStore.copyAssets frees on failure (PT-9j0)", () => {
       new ObjectAssetStore(failing, store, ORG).copyAssets(SOURCE, "target"),
     ).rejects.toBe(boom);
 
-    // The target's rows are exactly the original a.png row (same id) and its
-    // object key is still present; b.png's row and object are gone.
+    // The target's rows are exactly the two original rows (same ids, length 2),
+    // both object keys are still present under the target prefix and no other key
+    // is, and the free spy's ids contain neither of the two ids.
     const after = await rowsOf(db, targetId);
-    expect(after).toHaveLength(1);
-    expect(after[0]!.id).toBe(held.id);
-    expect(after[0]!.name).toBe("a.png");
-    expect(after[0]!.sha256).toBe(hashBytes(PNG));
-    expect(await keysUnder(store, targetId)).toEqual([heldKey]);
+    expect(after).toHaveLength(2);
+    expect(after.map((r) => r.id).sort()).toEqual([held.id, mine.id].sort());
+    expect(await keysUnder(store, targetId)).toEqual([heldKey, mineKey].sort());
 
-    // The free ids do NOT contain the original a.png id.
     const freeIds = freeSpy.mock.calls[0]![1] as string[];
     expect(freeIds).not.toContain(held.id);
-    expect(freeIds).toHaveLength(2);
+    expect(freeIds).not.toContain(mine.id);
   });
 
   test("copyAssets rethrows the original error when its own free also fails", async () => {

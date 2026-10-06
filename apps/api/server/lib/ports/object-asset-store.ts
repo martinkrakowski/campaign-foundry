@@ -395,8 +395,10 @@ export class ObjectAssetStore implements AssetStorePort {
    * `duplicate.post`, `index.post`), and off `s3` the path-derived rule is unchanged.
    */
   async copyAssets(fromBriefId: string, toBriefId: string): Promise<AssetCopyResult> {
-    // PT-9j0 (D237): `created` is owned by THIS frame and handed to the body, so a throw
-    // part-way through still knows what the call had already made. Rows 1..N-1 of a source whose asset N failed are freed (version-checked) before the error is rethrown; the failed asset's own object was already discarded.
+    // PT-9j0 (D237): `created` is owned by THIS frame and handed to the body, so a
+    // throw part-way through still knows what the call had already made. Rows 1..N-1
+    // of a source whose asset N failed are freed (version-checked) before the error is
+    // rethrown; the failed asset's own object was already discarded.
     const created = new Set<string>();
     try {
       return await this.copyAssetsInto(fromBriefId, toBriefId, created);
