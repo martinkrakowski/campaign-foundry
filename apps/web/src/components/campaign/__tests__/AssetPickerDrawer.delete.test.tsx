@@ -130,7 +130,7 @@ describe("AssetPickerDrawer delete", () => {
     route({ lists: [[logo, banner]] });
     renderDrawer({ onClose });
 
-    const { dialog } = await openDelete(user);
+    await openDelete(user);
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: messages.assetDeleteTitle })).toBeNull();
     expect(screen.getByRole("dialog", { name: "Asset Bin" })).toBeTruthy();
@@ -152,7 +152,7 @@ describe("AssetPickerDrawer delete", () => {
 
   test("confirming sends exactly one DELETE with the asset id and removes the row", async () => {
     const user = userEvent.setup();
-    const r = route({ lists: [[logo, banner], [banner]] });
+    route({ lists: [[logo, banner], [banner]] });
     renderDrawer();
     await screen.findByText("logo.png");
 
@@ -169,7 +169,7 @@ describe("AssetPickerDrawer delete", () => {
 
   test("an entry with no id is deleted by name", async () => {
     const user = userEvent.setup();
-    const r = route({ lists: [[plain, banner], [banner]] });
+    route({ lists: [[plain, banner], [banner]] });
     renderDrawer();
     await screen.findByText("plain.png");
 
@@ -188,7 +188,7 @@ describe("AssetPickerDrawer delete", () => {
     const gate = new Promise<Response>((resolve) => {
       release = () => resolve(json({ deleted: true }));
     });
-    const r = route({ lists: [[logo, banner], [banner]], del: () => gate });
+    route({ lists: [[logo, banner], [banner]], del: () => gate });
     renderDrawer();
     await screen.findByText("logo.png");
 
@@ -212,7 +212,7 @@ describe("AssetPickerDrawer delete", () => {
     const gate = new Promise<Response>((resolve) => {
       release = () => resolve(json({ deleted: true }));
     });
-    const r = route({ lists: [[logo, banner], [banner]], del: () => gate });
+    route({ lists: [[logo, banner], [banner]], del: () => gate });
     renderDrawer();
     await screen.findByText("logo.png");
 
@@ -235,9 +235,143 @@ describe("AssetPickerDrawer delete", () => {
     expect(bannerAfter.hasAttribute("disabled")).toBe(false);
   });
 
+  test("the Choose button on the row being deleted is disabled while its delete is in flight", async () => {
+    const user = userEvent.setup();
+    let release: (() => void) | undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = () => resolve(json({ deleted: true }));
+    });
+    route({
+      lists: [
+        [logo, banner, plain],
+        [banner, plain],
+      ],
+      del: () => gate,
+    });
+    renderDrawer({ onSelect: vi.fn() });
+    await screen.findByText("logo.png");
+
+    const { dialog } = await openDelete(user);
+    await user.click(confirm(dialog));
+
+    // The row whose asset is being deleted loses its Choose; other rows keep it enabled.
+    const logoChoose = screen.getByRole("button", { name: "Choose logo.png" });
+    expect(logoChoose.hasAttribute("disabled")).toBe(true);
+    const bannerChoose = screen.getByRole("button", { name: "Choose banner.png" });
+    expect(bannerChoose.hasAttribute("disabled")).toBe(false);
+
+    release!();
+    await waitFor(() => expect(screen.queryByText("logo.png")).toBeNull());
+    expect(screen.getByRole("button", { name: "Choose banner.png" }).hasAttribute("disabled")).toBe(
+      false,
+    );
+  });
+
+  test("onDeleted is called once with the asset when the delete succeeds", async () => {
+    const user = userEvent.setup();
+    const onDeleted = vi.fn();
+    route({ lists: [[logo, banner], [banner]] });
+    renderDrawer({ onDeleted });
+    await screen.findByText("logo.png");
+
+    const { dialog } = await openDelete(user);
+    await user.click(confirm(dialog));
+
+    await waitFor(() => expect(screen.queryByText("logo.png")).toBeNull());
+    expect(onDeleted).toHaveBeenCalledTimes(1);
+    expect(onDeleted).toHaveBeenCalledWith(logo);
+  });
+
+  test("onDeleted is called once with the asset on a 404", async () => {
+    const user = userEvent.setup();
+    const onDeleted = vi.fn();
+    route({ lists: [[logo, banner], [banner]], del: () => json({ error: "x" }, 404) });
+    renderDrawer({ onDeleted });
+    await screen.findByText("logo.png");
+
+    const { dialog } = await openDelete(user);
+    await user.click(confirm(dialog));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe(messages.assetDeleteGone("logo.png"));
+    expect(onDeleted).toHaveBeenCalledTimes(1);
+    expect(onDeleted).toHaveBeenCalledWith(logo);
+  });
+
+  test("onDeleted is not called for a 409", async () => {
+    const user = userEvent.setup();
+    const onDeleted = vi.fn();
+    route({
+      lists: [
+        [logo, banner],
+        [logo, banner],
+      ],
+      del: () => json({ error: 'Asset "logo.png" is in use.' }, 409),
+    });
+    renderDrawer({ onDeleted });
+    await screen.findByText("logo.png");
+
+    const { dialog } = await openDelete(user);
+    await user.click(confirm(dialog));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe(messages.assetDeleteInUse("logo.png"));
+    expect(onDeleted).not.toHaveBeenCalled();
+    expect(screen.getByText("logo.png")).toBeTruthy();
+  });
+
+  test("onDeleted is not called when the delete resolves after a campaign switch", async () => {
+    const user = userEvent.setup();
+    const onDeleted = vi.fn();
+    let release: (() => void) | undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = () => resolve(json({ deleted: true }));
+    });
+    const alpha = {
+      id: "55555555-5555-5555-5555-555555555555",
+      name: "alpha.png",
+      type: "image/png",
+      size: 256,
+      thumbnailUrl: "",
+    };
+    const reqs: { method: string; url: string }[] = [];
+    mockPipelineApi({
+      result: (url, req) => {
+        const method = req?.method ?? "GET";
+        if (!url.includes("/campaigns/assets")) return json(EMPTY_REPORT);
+        reqs.push({ method, url });
+        if (method === "DELETE") return gate;
+        const assets = url.includes("briefId=camp-1") ? [logo, banner] : [alpha];
+        return json({ assets });
+      },
+    });
+    const { rerender } = renderDrawer({ onDeleted });
+    await screen.findByText("logo.png");
+
+    const { dialog } = await openDelete(user);
+    await user.click(confirm(dialog));
+    rerender(
+      <AssetPickerDrawer briefId="camp-1" open={false} onClose={() => {}} onDeleted={onDeleted} />,
+    );
+    rerender(<AssetPickerDrawer briefId="camp-2" open onClose={() => {}} onDeleted={onDeleted} />);
+    await screen.findByText("alpha.png");
+
+    await act(async () => {
+      release!();
+      await gate;
+    });
+    await waitFor(() =>
+      expect(reqs.filter((r) => r.url.includes("briefId=camp-1") && r.method === "GET")).toEqual([
+        { method: "GET", url: `${API}/campaigns/assets?briefId=camp-1` },
+      ]),
+    );
+    expect(onDeleted).not.toHaveBeenCalled();
+    expect(screen.queryByText("logo.png")).toBeNull();
+  });
+
   test("after a delete focus moves to the list header and the deletion is announced", async () => {
     const user = userEvent.setup();
-    const r = route({ lists: [[logo, banner], [banner]] });
+    route({ lists: [[logo, banner], [banner]] });
     renderDrawer();
     await screen.findByText("logo.png");
 
@@ -253,10 +387,10 @@ describe("AssetPickerDrawer delete", () => {
 
   test("a refetch that still lists the deleted asset never brings it back", async () => {
     const user = userEvent.setup();
-    const r = route({
+    route({
       lists: [
         [logo, banner],
-        [logo, banner],
+        [logo, banner, ghost],
       ],
     });
     renderDrawer();
@@ -265,7 +399,10 @@ describe("AssetPickerDrawer delete", () => {
     const { dialog } = await openDelete(user);
     await user.click(confirm(dialog));
 
-    await waitFor(() => expect(r.gets()).toBe(2));
+    // Wait for the stale refetch to LAND — `ghost` only exists in lists[1] — before
+    // trusting the deleted row stayed gone. (gets() counts the GET when issued,
+    // not answered, so asserting on it alone is caught by timing, not by mutation 3.)
+    await screen.findByText("ghost.png");
     expect(screen.queryByText("logo.png")).toBeNull();
     expect(screen.getByText("banner.png")).toBeTruthy();
   });
@@ -276,27 +413,31 @@ describe("AssetPickerDrawer delete", () => {
     const user = userEvent.setup();
     const r = route({
       lists: [[logo, banner, ghost], [banner, ghost, late], [ghost]],
-      hold: [1],
+      hold: [1, 2],
     });
     renderDrawer();
     await screen.findByText("logo.png");
 
-    // delete logo.png: its refetch (list GET 1) is held.
+    // delete logo.png: its refetch (GET 1) is held.
     const { dialog: d1 } = await openDelete(user);
     await user.click(confirm(d1));
     await waitFor(() => expect(screen.queryByText("logo.png")).toBeNull());
 
-    // delete banner.png: its refetch (GET 2) answers [ghost].
+    // delete banner.png: its refetch (GET 2) is held.
     const { dialog: d2 } = await openDelete(user, "banner.png");
     await user.click(confirm(d2));
+    await waitFor(() => expect(screen.queryByText("banner.png")).toBeNull());
+
+    // The NEWER refetch (GET 2) lands first: only ghost.png remains.
+    r.release(2);
     await screen.findByText("ghost.png");
 
-    // the OLD refetch (GET 1) lands with [banner, ghost, late]; `late` proves the
-    // held response arrived, `banner`'s absence proves it was filtered.
+    // The OLDER refetch (GET 1) lands last: its `late.png` marker must NOT appear.
     await act(async () => {
       r.release(1);
     });
-    await screen.findByText("late.png");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByText("late.png")).toBeNull();
     expect(screen.queryByText("banner.png")).toBeNull();
     expect(screen.queryByText("logo.png")).toBeNull();
     expect(screen.getByText("ghost.png")).toBeTruthy();
@@ -358,12 +499,16 @@ describe("AssetPickerDrawer delete", () => {
     rerender(<AssetPickerDrawer briefId="camp-1" open={false} onClose={() => {}} />);
 
     // let the held DELETE resolve: forget() runs and issues its refetch (GET 1, still
-    // held), and focusTick fires on a closed drawer (headingRef is null) — must not
-    // throw or log.
+    // held). focusTick is NOT bumped on this path (the interaction that started
+    // here is closed), so headingRef's null is never focused and nothing logs.
     await act(async () => {
       release!();
       await gate;
     });
+    // The handler only proceeds after `release` resolves the gate; wait for its
+    // observable effect (the post-delete refetch GET was issued) before trusting the
+    // error spy did not fire.
+    await waitFor(() => expect(r.gets()).toBe(2));
     expect(settled).toBe(true);
     expect(consoleError).not.toHaveBeenCalled();
 
@@ -381,7 +526,7 @@ describe("AssetPickerDrawer delete", () => {
 
   test("the whole flow works from the keyboard alone", async () => {
     const user = userEvent.setup();
-    const r = route({ lists: [[logo, banner], [banner]] });
+    route({ lists: [[logo, banner], [banner]] });
     renderDrawer();
     await screen.findByText("logo.png");
 
@@ -408,7 +553,7 @@ describe("AssetPickerDrawer delete", () => {
 
   test("a 409 says the asset is still used and keeps the row", async () => {
     const user = userEvent.setup();
-    const r = route({
+    route({
       lists: [[logo, banner], [banner]],
       del: () => json({ error: 'Asset "logo.png" is in use.' }, 409),
     });
@@ -434,7 +579,7 @@ describe("AssetPickerDrawer delete", () => {
 
   test("a 404 removes the row and says the asset is already gone", async () => {
     const user = userEvent.setup();
-    const r = route({
+    route({
       lists: [[logo, banner], [banner]],
       del: () => json({ error: "x" }, 404),
     });
@@ -448,12 +593,17 @@ describe("AssetPickerDrawer delete", () => {
     expect(alert.textContent).toBe(messages.assetDeleteGone("logo.png"));
     expect(screen.queryByText("logo.png")).toBeNull();
     expect(screen.getByText("banner.png")).toBeTruthy();
+    // The 404 removes the row holding focus, so focus moves to the list header — as on
+    // success — even though the row was filtered out rather than deleted here.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByText("Assets (1)").parentElement),
+    );
   });
 
   test("any other failure shows the server message and allows a retry", async () => {
     const user = userEvent.setup();
     let calls = 0;
-    const r = route({
+    route({
       lists: [[logo, banner], [banner]],
       del: () => {
         const res = calls === 0 ? json({ error: "boom" }, 500) : json({ deleted: true });
@@ -488,7 +638,7 @@ describe("AssetPickerDrawer delete", () => {
 
   test("a failure with no message shows the request failed text", async () => {
     const user = userEvent.setup();
-    const r = route({
+    route({
       lists: [[logo, banner], [banner]],
       del: () => new Response("", { status: 500 }),
     });
@@ -505,7 +655,7 @@ describe("AssetPickerDrawer delete", () => {
 
   test("a 403 with no_membership shows the organisation message", async () => {
     const user = userEvent.setup();
-    const r = route({
+    route({
       lists: [[logo, banner], [banner]],
       del: () => json({ error: NO_ORGANISATION_YET_MESSAGE, code: "no_membership" }, 403),
     });
@@ -528,7 +678,10 @@ describe("AssetPickerDrawer delete", () => {
     const { dialog } = await openDelete(user);
     await user.click(confirm(dialog));
 
-    await waitFor(() => expect(screen.queryByText("logo.png")).toBeNull());
+    // The delete's own refetch (GET 1) answers a 500 and must be ANSWERED, not merely
+    // issued, before claiming there is no error alert from it.
+    await waitFor(() => expect(r.gets()).toBe(2));
+    expect(screen.queryByText("logo.png")).toBeNull();
     expect(screen.getByText("banner.png")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
   });
@@ -560,7 +713,7 @@ describe("AssetPickerDrawer delete", () => {
 
   test("the Sidebar drawer without onSelect can delete too", async () => {
     const user = userEvent.setup();
-    const r = route({ lists: [[logo, banner], [banner]] });
+    route({ lists: [[logo, banner], [banner]] });
     renderDrawer();
     await screen.findByText("logo.png");
 
@@ -577,5 +730,171 @@ describe("AssetPickerDrawer delete", () => {
     await waitFor(() => expect(screen.queryByText("logo.png")).toBeNull());
     expect(deletes()).toHaveLength(1);
     expect(deletes()[0].url).toBe(`${API}/campaigns/assets?briefId=camp-1&id=${ID_LOGO}`);
+  });
+
+  test("a delete that finishes after the campaign changed leaves the new campaign list alone", async () => {
+    const user = userEvent.setup();
+    let release: (() => void) | undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = () => resolve(json({ deleted: true }));
+    });
+    const alpha = {
+      id: "55555555-5555-5555-5555-555555555555",
+      name: "alpha.png",
+      type: "image/png",
+      size: 256,
+      thumbnailUrl: "",
+    };
+    const beta = { name: "beta.png", type: "image/png", size: 128, thumbnailUrl: "" };
+    const reqs: { method: string; url: string }[] = [];
+    mockPipelineApi({
+      result: (url, req) => {
+        const method = req?.method ?? "GET";
+        if (!url.includes("/campaigns/assets")) return json(EMPTY_REPORT);
+        reqs.push({ method, url });
+        if (method === "DELETE") return gate;
+        const assets = url.includes("briefId=camp-1") ? [logo, banner] : [alpha, beta];
+        return json({ assets });
+      },
+    });
+    const { rerender } = renderDrawer();
+    await screen.findByText("logo.png");
+
+    const { dialog } = await openDelete(user);
+    await user.click(confirm(dialog));
+
+    rerender(<AssetPickerDrawer briefId="camp-1" open={false} onClose={() => {}} />);
+    rerender(<AssetPickerDrawer briefId="camp-2" open onClose={() => {}} />);
+    await screen.findByText("alpha.png");
+
+    await act(async () => {
+      release!();
+      await gate;
+    });
+    // Positive landing signal that is NOT a list GET: the finally re-enabled camp-2's buttons.
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: messages.assetDeleteRowLabel("alpha.png") })
+          .hasAttribute("disabled"),
+      ).toBe(false),
+    );
+
+    expect(screen.queryByText("logo.png")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(reqs.filter((r) => r.url.includes("briefId=camp-1") && r.method === "GET")).toEqual([
+      { method: "GET", url: `${API}/campaigns/assets?briefId=camp-1` },
+    ]);
+  });
+
+  test("a delete that finishes after a reopen of the same campaign removes the row without a notice", async () => {
+    const user = userEvent.setup();
+    let release: (() => void) | undefined;
+    const gate = new Promise<Response>((resolve) => {
+      release = () => resolve(json({ deleted: true }));
+    });
+    route({
+      lists: [
+        [logo, banner],
+        [logo, banner],
+      ],
+      del: () => gate,
+    });
+    const { rerender } = renderDrawer();
+    await screen.findByText("logo.png");
+
+    // delete logo.png: its refetch (list GET 1) is held.
+    const { dialog } = await openDelete(user);
+    await user.click(confirm(dialog));
+
+    rerender(<AssetPickerDrawer briefId="camp-1" open={false} onClose={() => {}} />);
+    rerender(<AssetPickerDrawer briefId="camp-1" open onClose={() => {}} />);
+    await screen.findByText("logo.png");
+
+    await act(async () => {
+      release!();
+      await gate;
+    });
+    await waitFor(() => expect(screen.queryByText("logo.png")).toBeNull());
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  test("an entry with an invalid id is deleted by name and a refetch that lists it does not bring it back", async () => {
+    const user = userEvent.setup();
+    const weird = {
+      // lowercase with hex letters so the UPPERCASE form fails `isAssetId` (the
+      // brief's ID_LOGO is all-digits and would not exercise the rejection).
+      id: "11111111-aaaa-4333-8444-5bbb55555555".toUpperCase(),
+      name: "weird.png",
+      type: "image/png",
+      size: 32,
+      thumbnailUrl: "",
+    };
+    route({
+      lists: [
+        [weird, banner],
+        [weird, banner],
+      ],
+    });
+    renderDrawer();
+    await screen.findByText("weird.png");
+
+    const { dialog } = await openDelete(user, "weird.png");
+    await user.click(confirm(dialog));
+
+    await waitFor(() => expect(screen.queryByText("weird.png")).toBeNull());
+    expect(deletes()[0].url).toBe(`${API}/campaigns/assets?briefId=camp-1&name=weird.png`);
+    expect(deletes()[0].url).not.toContain("id=");
+    expect(screen.getByText("banner.png")).toBeTruthy();
+  });
+
+  test("a success notice is cleared before a refused delete shows its alert", async () => {
+    const user = userEvent.setup();
+    let calls = 0;
+    route({
+      lists: [[logo, banner], [banner]],
+      del: () => {
+        const res =
+          calls === 0
+            ? json({ deleted: true })
+            : json({ error: 'Asset "banner.png" is in use.' }, 409);
+        calls += 1;
+        return res;
+      },
+    });
+    renderDrawer();
+    await screen.findByText("logo.png");
+
+    const { dialog: d1 } = await openDelete(user);
+    await user.click(confirm(d1));
+    expect(await screen.findByText("Deleted logo.png.")).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe(messages.assetDeleted("logo.png"));
+
+    const { dialog: d2 } = await openDelete(user, "banner.png");
+    await user.click(confirm(d2));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe(messages.assetDeleteInUse("banner.png"));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  test("a reopen whose load still lists the deleted asset shows it again", async () => {
+    const user = userEvent.setup();
+    route({
+      lists: [
+        [logo, banner],
+        [logo, banner],
+      ],
+    });
+    const { rerender } = renderDrawer();
+    await screen.findByText("logo.png");
+
+    const { dialog } = await openDelete(user);
+    await user.click(confirm(dialog));
+    await waitFor(() => expect(screen.queryByText("logo.png")).toBeNull());
+
+    rerender(<AssetPickerDrawer briefId="camp-1" open={false} onClose={() => {}} />);
+    rerender(<AssetPickerDrawer briefId="camp-1" open onClose={() => {}} />);
+    expect(await screen.findByText("logo.png")).toBeTruthy();
   });
 });

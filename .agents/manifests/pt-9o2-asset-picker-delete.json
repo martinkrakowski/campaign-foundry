@@ -106,9 +106,9 @@
     },
     {
       "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
-      "before": "if (epoch !== epochRef.current) return;",
-      "after": "if (false) return;",
-      "because": "PT-9o2 mutation 7: dropping the epoch guard lets a refetch begun before the drawer reopened land and overwrite the reopened list with its stale snapshot. FAILS ON: expect(screen.queryByText(\"ghost.png\")).toBeNull()",
+      "before": "      const next = await listAssets(briefId);\n      if (epoch !== epochRef.current || seq !== seqRef.current) return;",
+      "after": "      const next = await listAssets(briefId);\n      if (seq !== seqRef.current) return;",
+      "because": "PT-9o2 mutation 7 (fix round 1): dropping the epoch part of the refetch guard lets a refetch begun before the drawer reopened land and overwrite the reopened list with its stale snapshot. FAILS ON: expect(screen.queryByText(\"ghost.png\")).toBeNull()",
       "command": [
         "yarn",
         "vitest",
@@ -118,6 +118,23 @@
         "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
         "-t",
         "a refetch that began before the drawer was reopened is ignored"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "if (epoch !== epochRef.current || seq !== seqRef.current) return;",
+      "after": "if (epoch !== epochRef.current) return;",
+      "because": "PT-9o2 mutation 10 (fix round 1): dropping the seq part of the refetch guard lets an OLDER refetch landing last overwrite a NEWER one in the same open. FAILS ON: expect(screen.queryByText(\"late.png\")).toBeNull()",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "a refetch that lands after a second delete never restores either row"
       ],
       "verdict": "caught"
     },
@@ -135,6 +152,72 @@
         "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
         "-t",
         "the selected asset has no Delete button and says why"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "        await deleteAsset(briefId, asset);\n        if (briefIdRef.current !== briefId) return;",
+      "after": "        await deleteAsset(briefId, asset);\n        if (false) return;",
+      "because": "PT-9o2 mutation 9 (fix round 1): removing the campaign-switch guard lets forget()/refetch() run against the old briefId after a briefId change, issuing a list GET and writing the old campaign's rows into the new bin. FAILS ON: expect(reqs.filter((r) => r.url.includes(\"briefId=camp-1\") && r.method === \"GET\")).toEqual([{ method: \"GET\", url: `${API}/campaigns/assets?briefId=camp-1` }])",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "a delete that finishes after the campaign changed leaves the new campaign list alone"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "                        disabled={deletingName === asset.name}",
+      "after": "                        disabled={false}",
+      "because": "PT-9o2 mutation 11 (fix round 1): clearing the per-row in-flight disable on Choose lets the row being deleted be chosen mid-flight. FAILS ON: expect(logoChoose.hasAttribute(\"disabled\")).toBe(true)",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "the Choose button on the row being deleted is disabled while its delete is in flight"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/shell/Sidebar.tsx",
+      "before": "        onDeleted={(gone) =>\n          setAssets((prev) => prev.filter((a) => (a.id ?? a.name) !== (gone.id ?? gone.name)))\n        }",
+      "after": "        onDeleted={undefined}",
+      "because": "PT-9o2 mutation 12 (fix round 1): dropping the onDeleted wiring leaves the Project Bin counting the deleted asset. FAILS ON: await waitFor(() => expect(screen.getByText(\"1 asset\")).toBeTruthy())",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/sidebar-project-bin-delete.test.tsx"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "    epochRef.current += 1; // a refetch issued while closed must not write into this open",
+      "after": "    epochRef.current += 0; // a refetch issued while closed must not write into this open",
+      "because": "PT-9o2 mutation 13 (fix round 1): removing the open-time epoch bump lets a refetch begun before the drawer reopened land into the reopened bin. FAILS ON: expect(screen.queryByText(\"ghost.png\")).toBeNull()",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "a delete that finishes after the drawer was closed does not throw"
       ],
       "verdict": "caught"
     }

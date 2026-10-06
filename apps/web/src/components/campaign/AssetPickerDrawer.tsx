@@ -11,13 +11,13 @@ import {
   unknownErrorMessage,
   type AssetEntry,
 } from "@/lib/briefs-api";
-import { refMatchesAsset } from "@/lib/asset-refs";
+import { refMatchesAsset, isAssetId } from "@/lib/asset-refs";
 import * as messages from "@/components/campaign/messages";
 export { formatBytes };
 
 /** What a deleted row is remembered by: the id where the backend has one, else the name. */
 function keyOf(asset: AssetEntry): string {
-  return asset.id ?? asset.name;
+  return asset.id !== undefined && isAssetId(asset.id) ? asset.id : asset.name;
 }
 
 /** One message per status the delete route answers that the picker words itself. */
@@ -44,6 +44,13 @@ export interface AssetPickerDrawerProps {
    * place that decides what "already chosen" means.
    */
   selectedRef?: string;
+  /**
+   * Called once when the server confirmed the asset is gone — deleted by this request,
+   * or answered already gone (404) — and only while the drawer still belongs to the
+   * campaign the delete was sent for. Lets a caller (the Sidebar's Project Bin) drop the
+   * row from its own list without refetching.
+   */
+  onDeleted?: (asset: AssetEntry) => void;
 }
 
 export function AssetPickerDrawer({
@@ -52,6 +59,7 @@ export function AssetPickerDrawer({
   onClose,
   onSelect,
   selectedRef,
+  onDeleted,
 }: AssetPickerDrawerProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
@@ -70,6 +78,13 @@ export function AssetPickerDrawer({
   // Bumped when the load effect cleans up (close, or another campaign): a refetch that began
   // before then must not write into the list of the next open.
   const epochRef = useRef(0);
+  // A monotonic generation per refetch: a newer refetch superseding an older one in the
+  // same open must not be overwritten when the older one lands last.
+  const seqRef = useRef(0);
+  // The campaign this delete was issued against, read live so a delete that resolves after a
+  // campaign switch cannot write the old campaign's rows into the new bin.
+  const briefIdRef = useRef(briefId);
+  briefIdRef.current = briefId;
   const headingRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -111,9 +126,10 @@ export function AssetPickerDrawer({
   /** Best-effort: a failed refetch leaves the list as it is (the row was already removed). */
   const refetch = async () => {
     const epoch = epochRef.current;
+    const seq = ++seqRef.current;
     try {
       const next = await listAssets(briefId);
-      if (epoch !== epochRef.current) return;
+      if (epoch !== epochRef.current || seq !== seqRef.current) return;
       setAssets(next.assets.filter((asset) => !droppedRef.current.has(keyOf(asset))));
     } catch {
       /* the next open of the drawer reloads it */
@@ -134,18 +150,31 @@ export function AssetPickerDrawer({
     deletingRef.current = true;
     setDeletingName(asset.name);
     setDeleteError(undefined);
+    setNotice("");
+    const epoch = epochRef.current;
     void (async () => {
       try {
         await deleteAsset(briefId, asset);
+        if (briefIdRef.current !== briefId) return;
         forget(asset);
+        onDeleted?.(asset);
+        if (epoch !== epochRef.current) return;
         setNotice(messages.assetDeleted(asset.name));
         setFocusTick((tick) => tick + 1);
       } catch (err) {
-        if (isBriefsApiError(err) && err.status === 404) forget(asset);
+        if (briefIdRef.current !== briefId) return;
+        const gone = isBriefsApiError(err) && err.status === 404;
+        if (gone) {
+          forget(asset);
+          onDeleted?.(asset);
+        }
+        if (epoch !== epochRef.current) return;
+        if (gone) setFocusTick((tick) => tick + 1);
         setDeleteError(deleteFailureMessage(err, asset.name));
+      } finally {
+        deletingRef.current = false;
+        setDeletingName(undefined);
       }
-      deletingRef.current = false;
-      setDeletingName(undefined);
     })();
   };
 
@@ -247,6 +276,7 @@ export function AssetPickerDrawer({
                         variant={isSelected ? "primary" : "secondary"}
                         size="sm"
                         aria-label={`Choose ${asset.name}`}
+                        disabled={deletingName === asset.name}
                         onClick={() => {
                           onSelect(asset);
                           onClose();
