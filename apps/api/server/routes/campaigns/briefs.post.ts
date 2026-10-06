@@ -172,7 +172,7 @@ export default defineEventHandler(async (event) => {
             throw conflictErr;
           }
         }
-        brief = await copyBriefRefs(scope, brief, resolved.copyFrom, brief.id);
+        ({ brief } = await copyBriefRefs(scope, brief, resolved.copyFrom, brief.id));
         // The row could have gone between the resolve and the copy; see `assertRefsCopied`.
         assertRefsCopied(brief, resolved.foreignIds, brief.id);
       }
