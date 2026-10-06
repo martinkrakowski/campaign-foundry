@@ -1,4 +1,4 @@
-import type { SqlClient } from "../db/sql-client.js";
+import type { SqlClient, SqlQuery } from "../db/sql-client.js";
 
 /** How long a sweeper's claim on a `deletion` row lasts without the row being
  * finished. Long enough to cover an S3 `deletePrefix` over a large campaign's
@@ -103,4 +103,27 @@ export async function listDue(db: SqlClient): Promise<readonly DeletionRow[]> {
       order by not_before`,
   );
   return rows.map(mapRow);
+}
+
+export interface CampaignDeletionInsert {
+  readonly orgId: string;
+  /** The campaign's uuid, lower-case: the row's `subject` (D231) — never a slug. */
+  readonly campaignId: string;
+  readonly requestedBy: string;
+  /** A Postgres interval literal, e.g. `"0 hours"`; `not_before = now() + this`. */
+  readonly grace: string;
+}
+
+/** The queue half of D235's tombstone transaction; the caller owns the transaction. */
+export async function insertCampaignDeletion(
+  db: SqlQuery,
+  input: CampaignDeletionInsert,
+): Promise<string> {
+  const { rows } = await db.query<{ id: string }>(
+    `insert into deletion (org_id, kind, subject, requested_by, not_before)
+       values ($1, 'campaign', $2, $3, now() + $4::interval)
+     returning id`,
+    [input.orgId, input.campaignId, input.requestedBy, input.grace],
+  );
+  return rows[0]!.id;
 }

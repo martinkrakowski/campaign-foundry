@@ -14,6 +14,26 @@ function asInterval(ms: number): string {
   return `${ms} milliseconds`;
 }
 
+/** D232 step 1 / D235: the id of an active job for either key (D246), if any. */
+export async function activeJobId(
+  db: SqlQuery,
+  orgId: string,
+  slug: string,
+  campaignId: string,
+): Promise<string | undefined> {
+  const { rows } = await db.query<{ id: string }>(
+    `select id from job where org_id = $1 and campaign_id in ($2, $3)
+       and (
+         (status = 'running' and lease_expires_at > now())
+         or (status = 'queued' and created_at > now() - $4::interval)
+       )
+     order by seq desc
+     limit 1`,
+    [orgId, slug, campaignId, asInterval(QUEUED_TTL_MS)],
+  );
+  return rows[0]?.id;
+}
+
 /** D232 step 1: refuse while an active job row exists for either key (D246). */
 export async function hasActiveJob(
   db: SqlQuery,
@@ -21,16 +41,7 @@ export async function hasActiveJob(
   slug: string,
   campaignId: string,
 ): Promise<boolean> {
-  const { rows } = await db.query(
-    `select 1 from job where org_id = $1 and campaign_id in ($2, $3)
-       and (
-         (status = 'running' and lease_expires_at > now())
-         or (status = 'queued' and created_at > now() - $4::interval)
-       )
-     limit 1`,
-    [orgId, slug, campaignId, asInterval(QUEUED_TTL_MS)],
-  );
-  return rows.length > 0;
+  return (await activeJobId(db, orgId, slug, campaignId)) !== undefined;
 }
 
 /**
