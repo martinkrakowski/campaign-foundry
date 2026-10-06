@@ -229,6 +229,24 @@ export function campaignPrefix(orgId: string, campaignId: string): ObjectKey {
 }
 
 /**
+ * The level ABOVE one campaign: `org/<orgId>/campaign/`, where every campaign
+ * prefix of one org lives (PT-9h, D239).
+ *
+ * It has ONE caller, the orphan reconciler, which lists under it to find
+ * campaign prefixes that have no row. **No request-path code may call it**
+ * (D243): it names every campaign of an org at once, so a `deletePrefix` on it
+ * would empty the org's whole campaign tree. It is not `orgPrefix` (9m's
+ * `org/<orgId>/`, which also holds the cache), and it is not a slice of
+ * `campaignPrefix`, for the reason that file gives. The trailing `/` is
+ * load-bearing: without it the prefix would also match `org/<orgId>/campaigns-x/`.
+ */
+export function orgCampaignsPrefix(orgId: string): ObjectKey {
+  const prefix = ["org", segment("the org id", orgId, ORG_ID_PATTERN), "campaign", ""].join("/");
+  assertObjectKey(prefix);
+  return prefix;
+}
+
+/**
  * Where one org's background cache lives (PT-4e, D203): `org/<orgId>/cache/`.
  *
  * It is deliberately OUTSIDE C7's campaign shape and deliberately still

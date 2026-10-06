@@ -4,6 +4,7 @@ import {
   campaignPrefix,
   inputKey,
   inputPrefix,
+  orgCampaignsPrefix,
   packagePrefix,
   renderPrefix,
 } from "../object-keys.js";
@@ -346,6 +347,21 @@ describe("the whole-campaign prefix (PT-9b, D243)", () => {
   test("an org id of the shapes Better Auth mints is accepted here too", () => {
     for (const orgId of ["local", "Acme", "acme_1", "a-b-C_9"]) {
       expect(campaignPrefix(orgId, CAMPAIGN)).toBe(`org/${orgId}/campaign/${CAMPAIGN}/`);
+    }
+  });
+});
+
+describe("the org-wide campaign prefix (PT-9h, D239)", () => {
+  test("orgCampaignsPrefix is org/<org>/campaign/ and stops there", () => {
+    expect(orgCampaignsPrefix(ORG)).toBe(`org/${ORG}/campaign/`);
+    expect(campaignPrefix(ORG, CAMPAIGN).startsWith(orgCampaignsPrefix(ORG))).toBe(true);
+    expect(orgCampaignsPrefix("acme")).not.toBe(orgCampaignsPrefix("acme-two"));
+    expect(campaignPrefix("acme-two", CAMPAIGN).startsWith(orgCampaignsPrefix("acme"))).toBe(false);
+  });
+
+  test("orgCampaignsPrefix refuses a malformed org id", () => {
+    for (const bad of ["", "acme/x", "..x", "acme x"]) {
+      expect(() => orgCampaignsPrefix(bad)).toThrow("not a well-formed id");
     }
   });
 });
