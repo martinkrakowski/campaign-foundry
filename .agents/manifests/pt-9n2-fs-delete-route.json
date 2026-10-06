@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "lane": "PT-9n2-fs-delete-route",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/[id].delete.ts",
+      "before": "    if ((await getBriefStore(tenant).campaignMeta(id)) === undefined) return notFound();",
+      "after": "    if ((await getBriefStore(tenant).resolveCampaign(id)) === undefined) return notFound();",
+      "because": "fs existence check wired wrong: campaignMeta is swapped for resolveCampaign, which answers only from brief files, so a versionless campaign answers 404 and the file-store delete never runs.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.delete.fs.test.ts",
+        "-t",
+        "DELETE /campaigns/:id deletes a campaign that has no saved version on the file store",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/[id].delete.ts",
+      "before": "    if (!canAssignTeam(tenant, null)) {",
+      "after": "    if (false) {",
+      "because": "fs authorisation unwired: canAssignTeam(tenant, null) is replaced by false, so a member is no longer refused (403) and instead deletes the campaign.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.delete.fs.test.ts",
+        "-t",
+        "DELETE /campaigns/:id answers 403 on the file store for a member and removes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/[id].delete.ts",
+      "before": "          return { error: `Campaign \"${id}\" has a run in progress.`, jobId: outcome.jobId };",
+      "after": "          return { error: `Campaign \"${id}\" has a run in progress.` };",
+      "because": "fs 409 without the job: outcome.jobId is dropped, so the jobId assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.delete.fs.test.ts",
+        "-t",
+        "DELETE /campaigns/:id answers 409 on the file store with the running jobId and removes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/[id].delete.ts",
+      "before": "      if (error instanceof UnsafeCampaignPathError) {",
+      "after": "      if (false) {",
+      "because": "symlink not mapped to 400: the UnsafeCampaignPathError guard is disabled, so a symlinked path rethrows as 500 instead of 400.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.delete.fs.test.ts",
+        "-t",
+        "DELETE /campaigns/:id answers 400 on the file store when a tree is a symlink and removes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/[id].delete.ts",
+      "before": "          return { deleted: true };",
+      "after": "          return { deleted: false };",
+      "because": "success body wrong: the file-store delete answers { deleted: false }, so the body assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.delete.fs.test.ts",
+        "-t",
+        "DELETE /campaigns/:id deletes a campaign on the file store and removes every tree that names its slug",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/[id].delete.ts",
+      "before": "        case \"not-found\":\n          return notFound();",
+      "after": "        case \"not-found\":\n          return { deleted: true };",
+      "because": "the lost-race arm answers success instead of 404, so the not-found assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.delete.fs.test.ts",
+        "-t",
+        "DELETE /campaigns/:id answers 404 on the file store when the campaign vanishes between the check and the lock",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/[id].delete.ts",
+      "before": "    if ((await getBriefStore(tenant).campaignMeta(id)) === undefined) return notFound();",
+      "after": "    if (false) return notFound();",
+      "because": "the existence check is skipped, so a member asking for an unknown campaign is told 403 instead of 404.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/id.delete.fs.test.ts",
+        "-t",
+        "DELETE /campaigns/:id answers 404 on the file store for a member and an unknown campaign",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
