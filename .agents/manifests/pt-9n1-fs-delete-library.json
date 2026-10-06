@@ -1,0 +1,158 @@
+{
+  "version": 1,
+  "lane": "PT-9n1-fs-delete-library",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign-fs.ts",
+      "before": "    at(outputRoot, \"decisions\", `${slug}.json`),",
+      "after": "    at(outputRoot, \"decisions\", `${slug}-kept.json`),",
+      "because": "Decision file target skipped: the decision for `sale` survives the delete, so the `agrees with the stores` test still reads a non-null revision.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign-fs.test.ts",
+        "-t",
+        "deleteCampaignOnFileStore agrees with the stores on every path it removes",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign-fs.ts",
+      "before": "    return parsed?.campaignId === slug;",
+      "after": "    return String(parsed?.campaignId).startsWith(slug);",
+      "because": "Pointer match weakened to a prefix: the pointer file for `sale-2` is now matched by a delete of `sale`, so it is removed and `sale-2`'s pointer is lost.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign-fs.test.ts",
+        "-t",
+        "deleteCampaignOnFileStore reads a pointer by exact content and skips what it cannot read",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign-fs.ts",
+      "before": "    listed.filter((brief) => brief.campaignId === slug).map((brief) => brief.file),",
+      "after": "    listed.filter((brief) => brief.campaignId.startsWith(slug)).map((brief) => brief.file),",
+      "because": "Brief id match weakened to a prefix: `sale-2`'s version file is matched and unlinked by a delete of `sale`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign-fs.test.ts",
+        "-t",
+        "deleteCampaignOnFileStore removes every location of one campaign and leaves its neighbour untouched",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign-fs.ts",
+      "before": "  if (jobId !== undefined) return { outcome: \"active-job\", jobId };",
+      "after": "  if (jobId === \"never\") return { outcome: \"active-job\", jobId };",
+      "because": "Running-job guard disabled: the delete proceeds past an active job and removes the campaign's data instead of refusing.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign-fs.test.ts",
+        "-t",
+        "deleteCampaignOnFileStore refuses with the running jobId and removes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign-fs.ts",
+      "before": "    if (st.isSymbolicLink()) throw new UnsafeCampaignPathError(slug);",
+      "after": "    if (st.isSymbolicLink() && slug === \"\") throw new UnsafeCampaignPathError(slug);",
+      "because": "Symlink preflight disabled: a symlinked storage path is not refused and a through-the-link remove erases another campaign's tree.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign-fs.test.ts",
+        "-t",
+        "deleteCampaignOnFileStore refuses a symlink at",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign-fs.ts",
+      "before": "  await removeTargets(plan.data);\n  await removeTargets(plan.markers);",
+      "after": "  await removeTargets(plan.markers);\n  await removeTargets(plan.data);",
+      "because": "Reordering markers before data: a failure mid-data leaves the campaign unresolvable while its data is orphaned.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign-fs.test.ts",
+        "-t",
+        "deleteCampaignOnFileStore leaves the markers in place when a removal fails and a retry completes",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign-fs.ts",
+      "before": "  const { projectRoot, outputRoot } = scopeRoots(tenant);",
+      "after": "  const { projectRoot, outputRoot } = scopeRoots({ ...tenant, orgId: \"local\" });",
+      "because": "Org scope dropped: an ACME_TENANT delete resolves roots as local and removes the local campaign too.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign-fs.test.ts",
+        "-t",
+        "deleteCampaignOnFileStore confines a non-local org to its own tree",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-campaign-fs.ts",
+      "before": "  if (!isSharedOutputName(slug)) data.push(at(outputRoot, slug));",
+      "after": "  if (slug.length > 0) data.push(at(outputRoot, slug));",
+      "because": "Shared-name guard dropped: a campaign named `reports` has its own render tree `output/reports/` removed, deleting another campaign's report file.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-campaign-fs.test.ts",
+        "-t",
+        "deleteCampaignOnFileStore never removes a shared output area named like the slug",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
