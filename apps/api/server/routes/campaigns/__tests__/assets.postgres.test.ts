@@ -749,7 +749,7 @@ describe("the create rollback frees the copied assets (PT-4b)", () => {
       // either. "boom" is not EEXIST, so a 500 carrying "boom" is the only
       // acceptable answer: any other status would mean a different error won.
       vi.spyOn(PgBriefStore.prototype, "createBrief").mockRejectedValueOnce(new Error("boom"));
-      vi.spyOn(ObjectAssetStore.prototype, "deleteAssets").mockRejectedValue(
+      vi.spyOn(ObjectAssetStore.prototype, "freeUnreferencedAssets").mockRejectedValue(
         new Error("the cleanup exploded"),
       );
       const warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);

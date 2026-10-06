@@ -123,9 +123,9 @@
     },
     {
       "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
-      "before": "            await getAssetStore(scope).deleteAssets(targetSlug);",
-      "after": "            await getAssetStore(scope).deleteAssets(meta.campaignId);",
-      "because": "The free is handed the campaign UUID (meta.campaignId) instead of the slug. On STORE_BACKEND=postgres + OBJECT_STORE=fs (staging today) FsAssetStore keeps copied files under the SLUG directory, so freeing by uuid removes a directory that was never written and the copied files survive a failed create; the pg+fs rollback test sees the file still on disk. (pg+s3 is blind to this mutant: ObjectAssetStore accepts a uuid too.)",
+      "before": "              await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);",
+      "after": "              await getAssetStore(scope).freeUnreferencedAssets(\"00000000-0000-4000-8000-000000000000\", createdIds);",
+      "because": "The free is handed a uuid instead of the slug. `meta.campaignId` no longer exists in the rollback (nothing keeps createCampaign's result), so the mutant uses a literal uuid: the free resolves no campaign by slug on s3 and names a directory that was never written on fs, so the copied files survive a failed duplicate; the pg+fs rollback test sees the file still on disk (witness unchanged).",
       "command": [
         "yarn",
         "vitest",
@@ -197,9 +197,9 @@
     },
     {
       "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
-      "before": "        try {\n          const meta = await getBriefStore(scope).campaignMeta(targetSlug);",
-      "after": "        await getBriefStore(scope).releaseCampaign(targetSlug);\n        try {\n          const meta = await getBriefStore(scope).campaignMeta(targetSlug);",
-      "because": "The campaign is released BEFORE its assets are freed. The release cascade removes the asset rows and the slug stops resolving, so campaignMeta answers undefined, the free is skipped, and the objects are left with no rows naming them; the pg+s3 rollback test sees objects still under the minted campaign prefix.",
+      "before": "        if (createdIds.length > 0) {",
+      "after": "        await briefs.releaseCampaign(targetSlug);\n        if (createdIds.length > 0) {",
+      "because": "The campaign is released BEFORE its assets are freed. The release cascade removes the asset rows and the slug stops resolving, so the free finds no campaign and does nothing, and the objects are left with no rows naming them; the pg+s3 rollback test sees objects still under the minted campaign prefix (witness unchanged).",
       "command": [
         "yarn",
         "vitest",

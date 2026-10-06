@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "lane": "PT-9j2-duplicate-compensation",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "              await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);",
+      "after": "              await Promise.resolve(createdIds);",
+      "because": "The free is gone but the error is still thrown, the status and body are still today's and the release still runs, so only the state assertion catches it: the objects under the minted campaign prefix survive (the row cascade at release hides the rows, which is why the test lists OBJECTS).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/duplicate-compensation.test.ts",
+        "-t",
+        "duplicate route frees exactly the ids it created when the write fails after the copy under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "              await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);",
+      "after": "              await getAssetStore(scope).deleteAssets(targetSlug);",
+      "because": "The row's own mutation, in the shape that compiles: the whole campaign instead of createdIds. Under s3 `deleteAssets` takes no campaign-row lock and no version check, so the winning Save's version-named row and object are removed and the version dangles.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/duplicate-compensation.test.ts",
+        "-t",
+        "duplicate route keeps what a winning Save reused and named and frees the rest when it loses the slug under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "        createdIds.push(...sourceCopy.created);",
+      "after": "        void sourceCopy.created;",
+      "because": "The source's own copy ids are never captured, so a failure after the copy frees only the third campaign's ids and leaves the source copy's objects behind (residual E needs them too).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/duplicate-compensation.test.ts",
+        "-t",
+        "duplicate route frees exactly the ids it created when the write fails after the copy under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "        createdIds.push(...copied.createdIds);",
+      "after": "        void copied.createdIds;",
+      "because": "The ids copyBriefRefs RETURNS (#704) are dropped again, so a failure after a successful third-campaign copy leaves that copy's objects behind.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/duplicate-compensation.test.ts",
+        "-t",
+        "duplicate route frees exactly the ids it created when the write fails after the copy under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "        if (briefs.supportsTeams && (await briefs.campaignVisibility(sourceSlug)) !== \"visible\") {\n          throw new BriefRefNotFoundError(id);\n        }",
+      "after": "        await Promise.resolve();",
+      "because": "The post-copy re-check of the SOURCE (PT-9i residual E) is gone: the source is reassigned after its copy and the request still answers 201 with the other team's assets copied into the caller's new campaign.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/duplicate-compensation.test.ts",
+        "-t",
+        "duplicate route refuses and frees the source copy when the source is reassigned after its copy under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "        assertRefsCopied(brief, new Set([...resolved.foreignIds, ...resolved.ownIds]), sourceSlug);",
+      "after": "        await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);\n                assertRefsCopied(brief, new Set([...resolved.foreignIds, ...resolved.ownIds]), sourceSlug);",
+      "because": "Freeing before the failure is known: on success the copies are freed, then createBrief's D236 check refuses a version whose ids no longer exist, so a request that must answer 201 answers 404.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/duplicate-compensation.test.ts",
+        "-t",
+        "duplicate route keeps every copy when the write succeeds under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "        if (createdIds.length > 0) {",
+      "after": "        if (createdIds.length >= 0) {",
+      "because": "The guard no longer skips an empty createdIds: the free is called with nothing to free (a needless store call on every failure that copied nothing), which only the 'free was never called' assertion sees.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/duplicate-compensation.test.ts",
+        "-t",
+        "duplicate route does not call the free when the copy created nothing under s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "              (await briefs.campaignMeta(targetSlug))?.hasVersion === false",
+      "after": "              true",
+      "because": "The off-s3 `hasVersion` guard is gone (decision 8): on pg plus fs a winning Save's version-named file is freed because FsAssetStore.freeUnreferencedAssets has no reference check; the winner test asserts the free was never called.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/duplicate-compensation.test.ts",
+        "-t",
+        "duplicate route on pg plus fs keeps the files of a winning Save and frees nothing"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

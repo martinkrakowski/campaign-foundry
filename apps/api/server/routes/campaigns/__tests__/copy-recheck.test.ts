@@ -377,7 +377,7 @@ describe("the write routes re-check their copy sources after copying (PT-9i, D23
     expect(recheckBody).toEqual({ error: `Brief "${campaignId}" not found.` });
     expect(recheckBody.error).not.toContain(third.slug);
     expect(copied).toHaveBeenCalled();
-    // The existing rollback frees the source's own copy; the new free frees the third's —
+    // `copyBriefRefs` frees the third's own copy and the route frees the source's copy —
     // together they leave zero net rows (no version, no minted campaign, no copied assets).
     await expectNoRows(snapshot);
     const thirdUuid = await uuidOf(third.slug);
@@ -588,8 +588,10 @@ describe("copyBriefRefs on pg plus fs re-checks by team and frees by path (PT-9i
     // The re-check maps to `Brief "<router id>" not found.` — the duplicate's source.
     expect(recheckBody).toEqual({ error: `Brief "${campaignId}" not found.` });
     expect(recheckBody.error).not.toContain(third.slug);
-    expect(free).toHaveBeenCalledTimes(1);
+    expect(free).toHaveBeenCalledTimes(2);
     expect([...free.mock.calls[0]![1]].sort()).toEqual(["alt.png"]);
+    expect([...free.mock.calls[1]![1]].sort()).toEqual(["logo.png"]);
+    expect(free.mock.calls[1]![0]).toBe(free.mock.calls[0]![0]);
 
     // Resolve-time-hidden: pre-hidden third → plain CampaignNotFoundError(third) →
     // `Brief "<third>" not found.`. Differs from the re-check body (decision 4).
