@@ -78,3 +78,27 @@ describe("the ci aggregate job (.github/workflows/ci.yml)", () => {
     expect(matching).toEqual(["ci"]);
   });
 });
+
+/**
+ * A literal `${ … }` is valid YAML and passes actionlint, but GitHub does not evaluate it:
+ * written that way the per-commit suffix on main is plain text, every push to main shares one
+ * group, and a second push cancels the run verifying the merge before it (D182's incident).
+ */
+describe("the workflow-level concurrency group (.github/workflows/ci.yml)", () => {
+  const group = lines.find((line) => /^ {2}group:\s/.test(line));
+
+  test("every expression in it is a real one", () => {
+    expect(group).toBeDefined();
+    expect(group!.match(/\$\{\{/g)).toHaveLength(4);
+    expect(group!.replace(/\$\{\{.*?\}\}/g, "")).not.toMatch(/[${}]/);
+  });
+
+  test("it carries the per-commit suffix on main and the run-id suffix for the recorder", () => {
+    expect(group).toContain(
+      "${{ github.ref == 'refs/heads/main' && format('-{0}', github.sha) || '' }}",
+    );
+    expect(group).toContain(
+      "${{ github.event.inputs.record_goldens == 'true' && format('-record-{0}', github.run_id) || '' }}",
+    );
+  });
+});

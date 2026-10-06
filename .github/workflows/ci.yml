@@ -50,7 +50,7 @@ on:
 # cannot cancel the run that contains it; `record-goldens` keeps its own
 # job-level group with `cancel-in-progress: false`.
 concurrency:
-  group: ci-${{ github.ref }}-${{ github.event_name }}${ github.ref == 'refs/heads/main' && format('-{0}', github.sha) || '' }${ github.event.inputs.record_goldens == 'true' && format('-record-{0}', github.run_id) || '' }
+  group: ci-${{ github.ref }}-${{ github.event_name }}${{ github.ref == 'refs/heads/main' && format('-{0}', github.sha) || '' }}${{ github.event.inputs.record_goldens == 'true' && format('-record-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 # Eight parallel lanes plus one aggregate, each independent so a slow or red
 # lane cannot block the others: `static` (arch, bytes, build, typecheck, lint,
