@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "lane": "PT-9j0-copy-failure-cleanup",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "        await this.freeUnreferencedAssets(toBriefId, [...created]);",
+      "after": "        await Promise.resolve([...created]);",
+      "because": "The wrapper no longer frees: the original error is still rethrown and the status of every caller is unchanged, so only the state assertion (the rows and objects of assets 1..N-1 still in the target) catches it.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store-copy-failure.test.ts",
+        "-t",
+        "copyAssets frees the rows and objects it created when a later asset fails and rethrows the original error"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "      return await this.copyAssetsInto(fromBriefId, toBriefId, created);",
+      "after": "      return await this.copyAssetsInto(fromBriefId, toBriefId, new Set<string>());",
+      "because": "The body gets a private set instead of the wrapper's, so the wrapper's created is always empty and nothing is freed: the exact bug (the set dies with the frame).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store-copy-failure.test.ts",
+        "-t",
+        "copyAssets frees the rows and objects it created when a later asset fails and rethrows the original error"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "        await this.freeUnreferencedAssets(toBriefId, [...created]);",
+      "after": "        await this.deleteAssets(toBriefId);",
+      "because": "Whole-campaign delete instead of the call's own ids: the target's pre-existing (and reused) row and object are removed with the partial copy.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store-copy-failure.test.ts",
+        "-t",
+        "copyAssets never frees a reused target row when a later asset fails"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "      throw error;\n    }\n  }\n\n  /** The body of",
+      "after": "      return { paths: {}, created };\n    }\n  }\n\n  /** The body of",
+      "because": "The copy's error is swallowed: the caller sees a success with an empty map while rows and objects were freed, so the rejects assertion fails.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store-copy-failure.test.ts",
+        "-t",
+        "copyAssets rethrows the original error when its own free also fails"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/object-asset-store.ts",
+      "before": "      } catch {\n        // Best-effort: the copy's own error",
+      "after": "      } catch (inner) {\n        throw inner;\n        // Best-effort: the copy's own error",
+      "because": "A failing free replaces the copy's own error: the caller hears 'free failed' instead of the real cause.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/object-asset-store-copy-failure.test.ts",
+        "-t",
+        "copyAssets rethrows the original error when its own free also fails"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-asset-store.ts",
+      "before": "        await this.freeUnreferencedAssets(toBriefId, [...created]);",
+      "after": "        await Promise.resolve([...created]);",
+      "because": "The fs wrapper no longer removes what it wrote: the files before the failing one stay in the target (no reconciler sweeps fs).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-asset-store-copy-failure.test.ts",
+        "-t",
+        "copyAssets removes the files it wrote when a later file fails and rethrows the original error"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-asset-store.ts",
+      "before": "        await this.freeUnreferencedAssets(toBriefId, [...created]);",
+      "after": "        await this.deleteAssets(toBriefId);",
+      "because": "Whole-directory removal instead of the call's own paths: the target's own file and the reused file are removed with the partial copy.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-asset-store-copy-failure.test.ts",
+        "-t",
+        "copyAssets never removes a reused file or a file the target already had when a later file fails"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-asset-store.ts",
+      "before": "      return await this.copyAssetsInto(fromBriefId, toBriefId, created);",
+      "after": "      return await this.copyAssetsInto(fromBriefId, toBriefId, new Set<string>());",
+      "because": "Private set again: the wrapper never learns what the body wrote.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-asset-store-copy-failure.test.ts",
+        "-t",
+        "copyAssets removes the files it wrote when a later file fails and rethrows the original error"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
