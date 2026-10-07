@@ -126,7 +126,7 @@ describe("the mutation fan-out jobs (.github/workflows/ci.yml)", () => {
         if (/^\s*run:/.test(line)) continue;
         if (bare.test(line)) {
           const msg = key + " has a bare ${...} (not ${{ ... }}): " + line.trim();
-          fail(msg);
+          throw new Error(msg);
         }
       }
     }
