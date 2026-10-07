@@ -317,7 +317,10 @@ describe("put route compensation (s3 on pg)", () => {
     const res = await put(
       ONLY_T1,
       target.slug,
-      allForeignId(target.slug, source.ids.alt),
+      {
+        ...allForeignId(target.slug, source.ids.alt),
+        audio: { path: source.ids.bg, rights: { licenceId: "lic-1", source: "library" } },
+      },
       `?revision=${rev0}`,
     );
     expect(res.status).toBe(409);

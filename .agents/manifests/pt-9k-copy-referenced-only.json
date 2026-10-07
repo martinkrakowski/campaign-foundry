@@ -201,6 +201,26 @@
         "put route copies only the referenced asset of a three-row source under s3"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "      const name = posix.normalize(match[2] as string).replace(/^\\/+|\\/+$/g, \"\");",
+      "after": "      const name = posix.normalize(match[2] as string);",
+      "because": "Without the slash-strip, a `//` or trailing-slash path ref records a name the fs store never holds, so the narrowed copy mints nothing and the saved brief points at a file that was never copied (regression for the doubled/trailing-slash fix, PR #716).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/copy-referenced-only.test.ts",
+        "-t",
+        "save route on pg plus fs copies the file a doubled-slash path ref names"
+      ],
+      "verdict": "caught"
     }
   ]
 }

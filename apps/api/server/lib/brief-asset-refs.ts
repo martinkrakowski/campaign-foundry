@@ -56,7 +56,6 @@ export interface ResolvedBriefRefs {
    * path is not an id, and a render brief is never rewritten. It exists so a copy can
    * tell "the source's own asset, already the target's" from "a third campaign's asset
    * this copy must remap" — from the FRESH target's point of view the source's own ids
-   * `fresh from the FRESH target's point of view the source's own ids
    * are foreign too, which is why a copy that has just minted its target checks
    * `foreignIds ∪ ownIds` rather than `foreignIds`.
    */
@@ -154,7 +153,11 @@ export async function resolveBriefAssetRefs(
       const match = SOURCE_PATH_REF.exec(ref);
       if (match === null) continue;
       // Both groups are mandatory in the pattern, so neither is undefined here.
-      noteCopyName(copyOnly, opts.target, match[1] as string, posix.normalize(match[2] as string));
+      // `posix.normalize` alone leaves a doubled or trailing slash (`//logo.png` ->
+      // `/logo.png`, `logo.png/` -> `logo.png/`), which the fs store never matches — so
+      // strip the slashes and skip a name that collapses to nothing.
+      const name = posix.normalize(match[2] as string).replace(/^\/+|\/+$/g, "");
+      if (name !== "") noteCopyName(copyOnly, opts.target, match[1] as string, name);
     }
     return { brief, copyFrom, copyOnly, foreignIds: new Set(), ownIds: new Set() };
   }

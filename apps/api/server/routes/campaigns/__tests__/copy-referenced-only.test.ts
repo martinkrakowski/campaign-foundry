@@ -439,4 +439,17 @@ describe("copy-referenced-only on pg plus fs (PT-9k, D238)", () => {
     expect(await store().readAsset(targetSlug, "bg.png")).toBeUndefined();
     expect(copy).toHaveBeenCalledWith(sourceSlug, targetSlug, { only: ["alt.png"] });
   });
+
+  test("save route on pg plus fs copies the file a doubled-slash path ref names", async () => {
+    const sourceSlug = unique("source-slash");
+    const targetSlug = unique("target-slash");
+    await ownerStore.createCampaign(sourceSlug, { teamId: "t1" });
+    await store().writeAsset(sourceSlug, "logo.png", PNG);
+    await ownerStore.createCampaign(targetSlug, { teamId: "t1" });
+    // `assets/inputs/<source>//logo.png` — `posix.normalize` leaves `/logo.png`, so only
+    // the slash-strip keeps "logo.png" as the name the copy is narrowed to.
+    const res = await post(ONLY_T1, baseBrief(targetSlug, `assets/inputs/${sourceSlug}//logo.png`));
+    expect(res.status).toBe(201);
+    expect((await namesOf(targetSlug)).sort()).toEqual(["logo.png"]);
+  });
 });

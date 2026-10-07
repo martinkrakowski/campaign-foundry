@@ -338,7 +338,10 @@ describe("save route compensation (s3 on pg)", () => {
       },
     );
 
-    const res = await post(ONLY_T1, allForeignId(target.slug, source.ids.alt));
+    const res = await post(ONLY_T1, {
+      ...allForeignId(target.slug, source.ids.alt),
+      audio: { path: source.ids.bg, rights: { licenceId: "lic-1", source: "library" } },
+    });
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: `Brief "${target.slug}" already exists.` });
 

@@ -297,6 +297,57 @@ describe("resolveBriefAssetRefs copyOnly on pg plus fs (staging: D210 d, r2)", (
     // Off s3 the brief is the input object, unrewritten.
     expect(resolved.brief).toBe(brief);
   });
+
+  test("resolveBriefAssetRefs on pg plus fs records the bare name for a path ref with a doubled or a trailing slash", async () => {
+    // `assets/inputs/<FRIEND>//logo.png` normalises to `/logo.png` and
+    // `assets/inputs/<FRIEND>/alt.png/` normalises to `alt.png/` — neither is the bare
+    // name the fs store filters on, so the slash strip is what keeps the copy alive.
+    const brief: CampaignBrief = {
+      ...storedBrief(RUN),
+      products: [
+        {
+          id: "p1",
+          name: "P1",
+          primaryColor: "#1473E3",
+          logoPath: `assets/inputs/${FRIEND}/alt.png/`,
+          inputAsset: `assets/inputs/${FRIEND}//logo.png`,
+        },
+      ],
+    };
+
+    const resolved = await save(brief);
+
+    // First-seen order: the alt path ref (logoPath) then the logo path ref (inputAsset).
+    expect(resolved.copyOnly).toEqual(new Map([[FRIEND, ["alt.png", "logo.png"]]]));
+    expect(resolved.copyFrom).toEqual([FRIEND]);
+  });
+
+  test("resolveBriefAssetRefs on pg plus fs records no name for a path ref that is only slashes", async () => {
+    // A ref whose name collapses to nothing (`assets/inputs/<FRIEND>//`) contributes no
+    // name; the normal ref to the same campaign still does (covers `name !== ""` false).
+    const brief: CampaignBrief = {
+      ...storedBrief(RUN),
+      products: [
+        {
+          id: "p1",
+          name: "P1",
+          primaryColor: "#1473E3",
+          logoPath: `assets/inputs/${FRIEND}/logo.png`,
+        },
+        {
+          id: "p2",
+          name: "P2",
+          primaryColor: "#1473E3",
+          logoPath: DEMO_REF,
+          inputAsset: `assets/inputs/${FRIEND}//`,
+        },
+      ],
+    };
+
+    const resolved = await save(brief);
+
+    expect(resolved.copyOnly).toEqual(new Map([[FRIEND, ["logo.png"]]]));
+  });
 });
 
 describe("resolveBriefAssetRefs copyOnly on fs (no teams: D210 d)", () => {
