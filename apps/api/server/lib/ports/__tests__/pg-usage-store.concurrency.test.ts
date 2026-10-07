@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
-import { databaseConfig } from "../../db/database-config.js";
+import { testServerConfig } from "../../db/__tests__/test-server-config.js";
 import { pgClient, poolOptions } from "../../db/pg-client.js";
 import { loadMigrations, migrate } from "../../db/migrate.js";
 import type { SqlClient } from "../../db/sql-client.js";
@@ -26,9 +26,7 @@ describe.skipIf(!url)("PgUsageStore.reserve races two real connections (PT-7a2, 
   let db: SqlClient;
 
   beforeAll(async () => {
-    const config = databaseConfig({ url, poolMax: "5" }, () => {
-      throw new Error("a local TEST_DATABASE_URL needs no CA");
-    });
+    const config = testServerConfig({ url, poolMax: "5" }, "TEST_DATABASE_URL");
     db = pgClient(
       config,
       (cfg) => new pg.Pool({ ...poolOptions(cfg), options: `-c search_path=${schema}` }),

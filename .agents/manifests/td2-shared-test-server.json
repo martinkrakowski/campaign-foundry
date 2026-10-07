@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "lane": "TD2-shared-test-server",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/db/__tests__/test-server-config.ts",
+      "before": "    const listed = allowed.has(url.hostname);",
+      "after": "    const listed = true;",
+      "because": "The allow-list IS the gate a listed host bypasses: forcing `listed` true admits a host that is NOT on the list, so test 3's refusal no longer throws.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/test-server-config.test.ts",
+        "-t",
+        "a host that is not listed is refused even with a non-empty allow-list"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/db/__tests__/test-database.ts",
+      "before": "      \" and d.datdba = (select oid from pg_roles where rolname = current_user)\",",
+      "after": "      \"\",",
+      "because": "Deleting the owner predicate from the sweep scan removes the datdba/current_user guard, so test 9's assertion that the scan owns this role's databases fails.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/test-database.test.ts",
+        "-t",
+        "scans only this role's databases"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/db/__tests__/test-server-config.ts",
+      "before": "      return { ...config, host: originalHost };",
+      "after": "      return { ...config, host: originalHost, ssl: { ca: \"\", rejectUnauthorized: true } };",
+      "because": "Forcing TLS on a listed host makes `ssl` a CA object instead of `false`, so test 2's ssl assertion fails — the server has no TLS and an admitted host must connect plaintext.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/test-server-config.test.ts",
+        "-t",
+        "a listed private host connects over loopback with ssl false"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
