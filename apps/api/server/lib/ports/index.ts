@@ -122,11 +122,12 @@ class Registry<T> {
 
 // With STORE_BACKEND=postgres (PT-3d), one store per (org, user): the store's
 // actor is the user, so the registry key must carry both — unlike decisions,
-// where the store never needs to know who is writing. The trade-off this
-// leaves: two users' saves on one brief serialise only through the
-// compare-and-swap in the write's own transaction (the loser gets 409, D82),
-// never through the in-process lock chain — that chain only ever sees its own
-// process's callers, one per (org, user) store.
+// where the store never needs to know who is writing. The in-process lock
+// chain is now shared by every store in this process (see
+// PgBriefStore.withBriefLock), so two users' saves on one brief serialise
+// here in-process — but only within one API process; cross-process safety is
+// still the compare-and-swap in the write's own transaction (the loser gets
+// 409, D82).
 const briefs = new Registry<BriefStorePort>(
   (t) => {
     if (storeBackend() !== "postgres") return join(scopeRoots(t).projectRoot, "briefs");

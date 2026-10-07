@@ -1,10 +1,11 @@
 import { PGlite } from "@electric-sql/pglite";
-import { afterAll } from "vitest";
+import { afterAll, inject } from "vitest";
 import type { DatabaseConfig } from "../database-config.js";
 import { loadMigrations, migrate } from "../migrate.js";
 import { pgClient } from "../pg-client.js";
-import type { SqlClient, SqlQuery, SqlRows } from "../sql-client.js";
+import type { SqlClient } from "../sql-client.js";
 import { pglitePgPool } from "./pglite-pg-pool.js";
+import { snapshotBlob, sqlClientOver } from "./pglite-snapshot.js";
 import {
   authServerDatabase,
   emptyServerDatabase,
@@ -28,26 +29,25 @@ import {
  *
  * Unset or empty, `TEST_PG_URL` is the whole of the difference: the server code
  * is never reached, and PGlite behaves exactly as it always has.
+ *
+ * PGlite starts from a saved data directory when the api project's globalSetup
+ * provided one.
  */
-export function pgliteClient(): SqlClient {
-  const db = new PGlite();
-  const over = (run: Pick<PGlite, "query" | "exec">): SqlQuery => ({
-    query: async <R>(text: string, params?: readonly unknown[]) =>
-      (await run.query<R>(text, params === undefined ? undefined : [...params])) as SqlRows<R>,
-    exec: async (text: string) => {
-      await run.exec(text);
-    },
-  });
-  return {
-    ...over(db),
-    transaction: (work) => db.transaction((tx) => work(over(tx))),
-    end: () => db.close(),
-  };
+function pgliteInstance(snapshot?: "empty" | "migrated"): PGlite {
+  const path = snapshot === undefined ? undefined : inject("pgliteSnapshots")?.[snapshot];
+  const options = path === undefined ? undefined : { loadDataDir: snapshotBlob(path) };
+  return new PGlite(options);
+}
+
+export function pgliteClient(snapshot?: "empty" | "migrated"): SqlClient {
+  return sqlClientOver(pgliteInstance(snapshot));
 }
 
 /** A fresh database with every shipped migration applied. */
 export async function migratedDatabase(): Promise<SqlClient> {
   if (testDatabaseBackend() === "server") return migratedServerDatabase();
+  const provided = inject("pgliteSnapshots");
+  if (provided?.migrated) return pgliteClient("migrated");
   const db = pgliteClient();
   await migrate(db, await loadMigrations());
   return db;
@@ -59,7 +59,7 @@ export async function migratedDatabase(): Promise<SqlClient> {
  */
 export async function emptyDatabase(): Promise<SqlClient> {
   if (testDatabaseBackend() === "server") return emptyServerDatabase();
-  return pgliteClient();
+  return pgliteClient("empty");
 }
 
 /**
@@ -75,7 +75,7 @@ export async function emptyDatabase(): Promise<SqlClient> {
  */
 export async function authDatabase(): Promise<AuthDatabase> {
   if (testDatabaseBackend() === "server") return authServerDatabase();
-  const pool = pglitePgPool(new PGlite());
+  const pool = pglitePgPool(pgliteInstance("empty"));
   return {
     pool,
     sql: pgClient(DUMMY_CONFIG, () => pool),

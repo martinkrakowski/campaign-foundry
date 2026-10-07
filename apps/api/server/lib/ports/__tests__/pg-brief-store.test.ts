@@ -611,6 +611,62 @@ describe("PgBriefStore (PT-3d, D168, D169)", () => {
     await expect(store.withBriefLock("camp", async () => "after")).resolves.toBe("after");
   });
 
+  test("two instances, same org, different actors, same brief id: the second waits for the first", async () => {
+    const order: string[] = [];
+    let unlock: () => void = () => {};
+    const lock = new Promise<void>((r) => (unlock = r));
+    const other = new PgBriefStore(db, "local", "other");
+
+    const p1 = store.withBriefLock("shared-camp", async () => {
+      await lock;
+      order.push("p1");
+    });
+    const p2 = other.withBriefLock("shared-camp", async () => {
+      order.push("p2");
+    });
+    const pOther = other.withBriefLock("shared-other", async () => {
+      order.push("pOther");
+    });
+
+    await pOther;
+    expect(order).toEqual(["pOther"]);
+    unlock();
+    await Promise.all([p1, p2]);
+    expect(order).toEqual(["pOther", "p1", "p2"]);
+  });
+
+  test("two instances, different orgs, same brief id: neither waits for the other", async () => {
+    const order: string[] = [];
+    let unlock: () => void = () => {};
+    const held = new Promise<void>((r) => (unlock = r));
+    const otherOrg = new PgBriefStore(db, "other-org", "local");
+
+    const p1 = store.withBriefLock("cross-org-camp", async () => {
+      await held;
+      order.push("p1");
+    });
+    const p2 = otherOrg.withBriefLock("cross-org-camp", async () => {
+      order.push("p2");
+    });
+
+    await Promise.race([p1, p2]);
+    expect(order).toEqual(["p2"]);
+    unlock();
+    await Promise.all([p1, p2]);
+    expect(order).toEqual(["p2", "p1"]);
+  });
+
+  test("a rejected fn on one instance does not reject the next call on the other instance", async () => {
+    const other = new PgBriefStore(db, "local", "other");
+
+    await expect(
+      store.withBriefLock("shared-poison", async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    await expect(other.withBriefLock("shared-poison", async () => "after")).resolves.toBe("after");
+  });
+
   test.each(["cache", "jobs", "orgs", "packages"] as const)(
     "createBrief and replaceBrief on non-existent brief refuse reserved campaign id %s",
     async (id) => {
