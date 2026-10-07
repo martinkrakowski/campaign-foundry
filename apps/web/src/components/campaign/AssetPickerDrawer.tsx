@@ -236,7 +236,9 @@ export function AssetPickerDrawer({
             <ul className="space-y-2" aria-label="Asset list">
               {assets.map((asset) => {
                 const isSelected = refMatchesAsset(selectedRef, asset, briefId);
-                const isProtected = isSelected || (protectedRefs ?? []).some((ref) => refMatchesAsset(ref, asset, briefId));
+                const isProtected =
+                  isSelected ||
+                  (protectedRefs ?? []).some((ref) => refMatchesAsset(ref, asset, briefId));
                 const canDelete = !isProtected;
                 const displayType = (asset.type ?? "image/png").replace("image/", "").toUpperCase();
 
@@ -317,11 +319,13 @@ export function AssetPickerDrawer({
                           ? messages.assetDeletePending
                           : messages.assetDeleteAction}
                       </Button>
-                     ) : (
-                       <span className="max-w-[9rem] text-[11px] text-text-muted">
-                         {isSelected ? messages.assetDeleteSelectedHint : messages.assetDeleteProtectedHint}
-                       </span>
-                     )}
+                    ) : (
+                      <span className="max-w-[9rem] text-[11px] text-text-muted">
+                        {isSelected
+                          ? messages.assetDeleteSelectedHint
+                          : messages.assetDeleteProtectedHint}
+                      </span>
+                    )}
                   </li>
                 );
               })}

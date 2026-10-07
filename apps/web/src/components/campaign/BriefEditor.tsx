@@ -535,7 +535,8 @@ export function currentAssetRefs(state: EditorState): string[] {
   const refs: string[] = [];
   for (const product of state.products) {
     if (product.logoPath !== undefined && product.logoPath !== "") refs.push(product.logoPath);
-    if (product.inputAsset !== undefined && product.inputAsset !== "") refs.push(product.inputAsset);
+    if (product.inputAsset !== undefined && product.inputAsset !== "")
+      refs.push(product.inputAsset);
   }
   for (const beat of state.timeline.beats) {
     if (beat.background !== undefined && beat.background !== "") refs.push(beat.background);

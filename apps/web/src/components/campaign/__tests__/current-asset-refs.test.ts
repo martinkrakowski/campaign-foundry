@@ -13,10 +13,25 @@ describe("currentAssetRefs", () => {
     const state: EditorState = {
       ...initialEditorState(),
       products: [
-        { key: 1, id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: ID_A, inputAsset: PATH_B, idTouched: false },
+        {
+          key: 1,
+          id: "alpha",
+          name: "Alpha",
+          primaryColor: "#1473E6",
+          logoPath: ID_A,
+          inputAsset: PATH_B,
+          idTouched: false,
+        },
       ],
-      timeline: { beats: [{ key: 1, text: "One", weight: 1, background: ID_B }], transition: "fade", keyBeat: 1 },
-      audio: { path: PATH_A, rights: { licenceId: "lic-1", source: "library" } } as CampaignBrief["audio"],
+      timeline: {
+        beats: [{ key: 1, text: "One", weight: 1, background: ID_B }],
+        transition: "fade",
+        keyBeat: 1,
+      },
+      audio: {
+        path: PATH_A,
+        rights: { licenceId: "lic-1", source: "library" },
+      } as CampaignBrief["audio"],
     };
 
     // Four distinct refs: two ids, two paths, all unique, sorted.
@@ -27,10 +42,25 @@ describe("currentAssetRefs", () => {
     const state: EditorState = {
       ...initialEditorState(),
       products: [
-        { key: 1, id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "", inputAsset: ID_A, idTouched: false },
+        {
+          key: 1,
+          id: "alpha",
+          name: "Alpha",
+          primaryColor: "#1473E6",
+          logoPath: "",
+          inputAsset: ID_A,
+          idTouched: false,
+        },
       ],
-      timeline: { beats: [{ key: 1, text: "One", weight: 1, background: "" }], transition: "fade", keyBeat: 1 },
-      audio: { path: "", rights: { licenceId: "lic-1", source: "library" } } as CampaignBrief["audio"],
+      timeline: {
+        beats: [{ key: 1, text: "One", weight: 1, background: "" }],
+        transition: "fade",
+        keyBeat: 1,
+      },
+      audio: {
+        path: "",
+        rights: { licenceId: "lic-1", source: "library" },
+      } as CampaignBrief["audio"],
     };
 
     expect(currentAssetRefs(state)).toEqual([ID_A]);
@@ -40,10 +70,30 @@ describe("currentAssetRefs", () => {
     const state: EditorState = {
       ...initialEditorState(),
       products: [
-        { key: 1, id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: ID_A, inputAsset: "", idTouched: false },
-        { key: 2, id: "beta", name: "Beta", primaryColor: "#E0218A", logoPath: ID_A, inputAsset: "", idTouched: false },
+        {
+          key: 1,
+          id: "alpha",
+          name: "Alpha",
+          primaryColor: "#1473E6",
+          logoPath: ID_A,
+          inputAsset: "",
+          idTouched: false,
+        },
+        {
+          key: 2,
+          id: "beta",
+          name: "Beta",
+          primaryColor: "#E0218A",
+          logoPath: ID_A,
+          inputAsset: "",
+          idTouched: false,
+        },
       ],
-      timeline: { beats: [{ key: 1, text: "One", weight: 1, background: ID_A }], transition: "fade", keyBeat: 1 },
+      timeline: {
+        beats: [{ key: 1, text: "One", weight: 1, background: ID_A }],
+        transition: "fade",
+        keyBeat: 1,
+      },
     };
 
     expect(currentAssetRefs(state)).toEqual([ID_A]);
@@ -57,13 +107,29 @@ describe("currentAssetRefs", () => {
     const pathState: EditorState = {
       ...initialEditorState(),
       products: [
-        { key: 1, id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: PATH_A, inputAsset: "", idTouched: false },
+        {
+          key: 1,
+          id: "alpha",
+          name: "Alpha",
+          primaryColor: "#1473E6",
+          logoPath: PATH_A,
+          inputAsset: "",
+          idTouched: false,
+        },
       ],
     };
     const idState: EditorState = {
       ...initialEditorState(),
       products: [
-        { key: 1, id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: ID_A, inputAsset: "", idTouched: false },
+        {
+          key: 1,
+          id: "alpha",
+          name: "Alpha",
+          primaryColor: "#1473E6",
+          logoPath: ID_A,
+          inputAsset: "",
+          idTouched: false,
+        },
       ],
     };
     expect(currentAssetRefs(pathState)).toEqual([PATH_A]);
