@@ -52,6 +52,7 @@ export default function ShellLayout({ children }: { children: ReactNode }) {
               <div className="flex h-full flex-col">
                 <Header />
                 <MembershipNotice />
+                <DeletedCampaignNotice />
                 <div className="relative z-0 flex flex-1 gap-4 overflow-hidden bg-background p-4">
                   <Sidebar />
                   <EditorColumns showOrchestrator={showOrchestrator}>{children}</EditorColumns>
@@ -324,6 +325,26 @@ function MembershipNotice() {
       className="shrink-0 border-b border-border bg-surface-2 px-4 py-2 text-center text-[12px] text-error"
     >
       {membershipError}
+    </p>
+  );
+}
+
+/**
+ * PT-9p2 — the open campaign was deleted by another member while this page held it.
+ * Patterned on {@link MembershipNotice}: a one-line `role="alert"` banner, but a
+ * SEPARATE state field (`deletedCampaign`, never `membershipError`) — a deletion is
+ * not a membership denial, and folding it into the same slot would let a healed
+ * membership error un-hide a stale deletion notice.
+ */
+function DeletedCampaignNotice() {
+  const { deletedCampaign } = useRun();
+  if (deletedCampaign === null) return null;
+  return (
+    <p
+      role="alert"
+      className="shrink-0 border-b border-border bg-surface-2 px-4 py-2 text-center text-[12px] text-error"
+    >
+      {deletedCampaign}
     </p>
   );
 }
