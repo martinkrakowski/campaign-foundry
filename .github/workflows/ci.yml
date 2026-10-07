@@ -270,7 +270,19 @@ jobs:
       # build. A test that skips itself where its interpreter is missing is
       # right for a suite; for a manifest it is indistinguishable from a lie.
       - name: Install zsh (for D184's merge-prs.sh wiring tests)
-        run: sudo apt-get update && sudo apt-get install -y zsh
+        # apt hangs on a slow mirror now and then, and the job timeout is the
+        # only thing that used to end it. Two attempts of 80 s each fit inside
+        # the three minutes; `timeout` runs under sudo so it can signal apt.
+        timeout-minutes: 3
+        run: |
+          for attempt in 1 2; do
+            if sudo timeout 80 sh -c "apt-get update && apt-get install -y zsh"; then
+              exit 0
+            fi
+            echo "::warning::Install zsh: attempt $attempt failed or timed out"
+            sleep 5
+          done
+          exit 1
 
       # `test` is the only Test in CI, sharded so each runner pays a sixth of
       # the suite's wall time. yarn test:cov is `vitest run --coverage`, the
@@ -448,7 +460,19 @@ jobs:
       # build. A test that skips itself where its interpreter is missing is
       # right for a suite; for a manifest it is indistinguishable from a lie.
       - name: Install zsh (for D184's merge-prs.sh wiring tests)
-        run: sudo apt-get update && sudo apt-get install -y zsh
+        # apt hangs on a slow mirror now and then, and the job timeout is the
+        # only thing that used to end it. Two attempts of 80 s each fit inside
+        # the three minutes; `timeout` runs under sudo so it can signal apt.
+        timeout-minutes: 3
+        run: |
+          for attempt in 1 2; do
+            if sudo timeout 80 sh -c "apt-get update && apt-get install -y zsh"; then
+              exit 0
+            fi
+            echo "::warning::Install zsh: attempt $attempt failed or timed out"
+            sleep 5
+          done
+          exit 1
 
       - name: Check every anchor in every manifest
         run: "sh scripts/verify-manifests.sh --anchors"
@@ -485,7 +509,19 @@ jobs:
         run: "yarn install --immutable"
       - name: Install zsh (for D184's merge-prs.sh wiring tests)
         if: ${{ matrix.manifests != '' }}
-        run: sudo apt-get update && sudo apt-get install -y zsh
+        # apt hangs on a slow mirror now and then, and the job timeout is the
+        # only thing that used to end it. Two attempts of 80 s each fit inside
+        # the three minutes; `timeout` runs under sudo so it can signal apt.
+        timeout-minutes: 3
+        run: |
+          for attempt in 1 2; do
+            if sudo timeout 80 sh -c "apt-get update && apt-get install -y zsh"; then
+              exit 0
+            fi
+            echo "::warning::Install zsh: attempt $attempt failed or timed out"
+            sleep 5
+          done
+          exit 1
       # A mutation manifest records the mutations a lane claims its tests catch.
       # Replaying it is what makes the claim evidence rather than a report: two
       # seats this week stated verdicts they had never observed, one quoting

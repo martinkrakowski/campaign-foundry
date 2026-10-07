@@ -84,7 +84,19 @@ jobs:
         run: "yarn install --immutable"
       - name: Install zsh
         if: ${{ matrix.manifests != '' }}
-        run: sudo apt-get update && sudo apt-get install -y zsh
+        # apt hangs on a slow mirror now and then, and the job timeout is the
+        # only thing that used to end it. Two attempts of 80 s each fit inside
+        # the three minutes; `timeout` runs under sudo so it can signal apt.
+        timeout-minutes: 3
+        run: |
+          for attempt in 1 2; do
+            if sudo timeout 80 sh -c "apt-get update && apt-get install -y zsh"; then
+              exit 0
+            fi
+            echo "::warning::Install zsh: attempt $attempt failed or timed out"
+            sleep 5
+          done
+          exit 1
       - name: Nothing to replay
         if: ${{ matrix.manifests == '' }}
         env:
