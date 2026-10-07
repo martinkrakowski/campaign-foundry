@@ -45,6 +45,12 @@ export interface AssetPickerDrawerProps {
    */
   selectedRef?: string;
   /**
+   * Refs held by other fields of the open draft — none of them may be deleted from
+   * the bin, because the route only removes the row and the editor would keep a
+   * broken ref with nothing that could resolve it.
+   */
+  protectedRefs?: readonly string[];
+  /**
    * Called once when the server confirmed the asset is gone — deleted by this request,
    * or answered already gone (404) — and only while the drawer still belongs to the
    * campaign the delete was sent for. Lets a caller (the Sidebar's Project Bin) drop the
@@ -59,6 +65,7 @@ export function AssetPickerDrawer({
   onClose,
   onSelect,
   selectedRef,
+  protectedRefs,
   onDeleted,
 }: AssetPickerDrawerProps) {
   const [loading, setLoading] = useState(true);
@@ -229,7 +236,8 @@ export function AssetPickerDrawer({
             <ul className="space-y-2" aria-label="Asset list">
               {assets.map((asset) => {
                 const isSelected = refMatchesAsset(selectedRef, asset, briefId);
-                const canDelete = !isSelected;
+                const isProtected = isSelected || (protectedRefs ?? []).some((ref) => refMatchesAsset(ref, asset, briefId));
+                const canDelete = !isProtected;
                 const displayType = (asset.type ?? "image/png").replace("image/", "").toUpperCase();
 
                 return (
@@ -309,11 +317,11 @@ export function AssetPickerDrawer({
                           ? messages.assetDeletePending
                           : messages.assetDeleteAction}
                       </Button>
-                    ) : (
-                      <span className="max-w-[9rem] text-[11px] text-text-muted">
-                        {messages.assetDeleteSelectedHint}
-                      </span>
-                    )}
+                     ) : (
+                       <span className="max-w-[9rem] text-[11px] text-text-muted">
+                         {isSelected ? messages.assetDeleteSelectedHint : messages.assetDeleteProtectedHint}
+                       </span>
+                     )}
                   </li>
                 );
               })}
