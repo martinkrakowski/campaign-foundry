@@ -33,6 +33,21 @@ function jobs(): Array<[string, string[]]> {
 
 const byKey = new Map(jobs().map(([key, block]) => [key, block]));
 
+/** The steps of a job, in order, each as its array of lines. */
+function stepsFor(jobKey: string): string[][] {
+  const block = byKey.get(jobKey);
+  if (block === undefined) throw new Error(`no job ${jobKey} in mutation-sweep.yml`);
+  const steps: string[][] = [];
+  for (const line of block) {
+    if (/^ {6}- /.test(line)) {
+      steps.push([line]);
+    } else if (steps.length > 0) {
+      steps[steps.length - 1].push(line);
+    }
+  }
+  return steps;
+}
+
 describe("the mutation sweep workflow (.github/workflows/mutation-sweep.yml)", () => {
   test("the workflow file .github/workflows/mutation-sweep.yml exists", () => {
     expect(text.length).toBeGreaterThan(0);
@@ -58,8 +73,11 @@ describe("the mutation sweep workflow (.github/workflows/mutation-sweep.yml)", (
     expect(text).toContain("scripts/mutation-matrix.sh");
   });
 
-  test("the file lists every manifest and never calls verify-manifests.sh --list", () => {
-    expect(text).toContain("find .agents/manifests -name '*.json' -type f");
+  test("the plan job lists every manifest with a non-commented find command", () => {
+    const plan = byKey.get("plan");
+    expect(plan).toBeDefined();
+    const code = plan!.filter((l) => !/^\s*#/.test(l));
+    expect(code.some((l) => l.includes("find .agents/manifests -name '*.json' -type f"))).toBe(true);
     expect(text).not.toContain("verify-manifests.sh --list");
   });
 
@@ -125,7 +143,11 @@ describe("the sweep jobs", () => {
         t === "if: ${{ matrix.manifests != '' }}" || t === "if: ${{ matrix.manifests == '' }}",
       ).toBe(true);
     }
-    expect(text).toContain("if: always()");
+    const uploadSteps = stepsFor("replay").filter((s) =>
+      s.some((l) => l.includes("uses: actions/upload-artifact@v4")),
+    );
+    expect(uploadSteps).toHaveLength(1);
+    expect(uploadSteps[0].some((l) => l.trim() === "if: always()")).toBe(true);
   });
 
   test("the upload and download steps use v4 with the one-file-per-leg shape", () => {
@@ -134,6 +156,11 @@ describe("the sweep jobs", () => {
     expect(text).not.toContain("sweep-failures/leg.txt");
     expect(text).toContain("actions/download-artifact@v4");
     expect(text).toContain("merge-multiple: true");
-    expect(text).toContain("continue-on-error: true");
+    const downloadSteps = stepsFor("summary").filter((s) =>
+      s.some((l) => l.includes("uses: actions/download-artifact@v4")),
+    );
+    expect(downloadSteps).toHaveLength(1);
+    expect(downloadSteps[0].some((l) => /^ {8}continue-on-error: true\s*$/.test(l))).toBe(true);
+    expect(downloadSteps[0].some((l) => /^ {10}continue-on-error: true\s*$/.test(l))).toBe(false);
   });
 });

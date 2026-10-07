@@ -176,6 +176,9 @@ jobs:
               printed=1
             done < "$f"
           done
+          if [ "$REPLAY_RESULT" != "success" ]; then
+            echo "::error::the replay job ended $REPLAY_RESULT"
+          fi
           if [ "$missing" = "1" ] || [ -n "$printed" ] || [ "$REPLAY_RESULT" != "success" ]; then
             exit 1
           fi
