@@ -47,7 +47,7 @@ export async function main(
   );
   if (!all) {
     log(
-      "A database younger than an hour was left, if there was one: it may be a run in flight. `yarn test:pg-clean --all` drops those too.",
+      "A database younger than an hour was left, if there was one: it may be a run in flight. `yarn test:pg-clean --all` drops those too: never run it while another run is using this server.",
     );
   }
 }
