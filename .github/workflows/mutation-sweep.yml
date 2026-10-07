@@ -1,0 +1,184 @@
+name: Mutation sweep
+
+# Nightly replay of every mutation manifest, not only the ones a change
+# touches. CI replays only the manifests a change touches; a manifest that rots
+# on an untouched file is therefore never replayed. This workflow lists every
+# manifest with `find .agents/manifests -name '*.json' -type f` and replays all
+# of them. It is NOT part of the merge gate.
+
+on:
+  schedule:
+    # 06:00 UTC nightly
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-sweep-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Sweep plan (every manifest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: List every manifest and group them into legs
+        id: plan
+        env:
+          MAX_LEGS: "6"
+        shell: bash
+        run: |
+          set -euo pipefail
+          find .agents/manifests -name '*.json' -type f | LC_ALL=C sort > "$RUNNER_TEMP/listed.txt"
+          count=$(wc -l < "$RUNNER_TEMP/listed.txt" | tr -d ' ')
+          matrix=$(MAX_LEGS="$MAX_LEGS" sh scripts/mutation-matrix.sh < "$RUNNER_TEMP/listed.txt")
+          echo "manifests: $count"
+          cat "$RUNNER_TEMP/listed.txt"
+          printf '%s\n' "$matrix" | jq -r '.include[].manifests | select(. != "")' | LC_ALL=C sort > "$RUNNER_TEMP/planned.txt"
+          if ! cmp -s "$RUNNER_TEMP/listed.txt" "$RUNNER_TEMP/planned.txt"; then
+            echo "::error::the matrix does not cover the manifest list exactly"
+            diff "$RUNNER_TEMP/listed.txt" "$RUNNER_TEMP/planned.txt" || true
+            exit 1
+          fi
+          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
+          printf 'count=%s\n' "$count" >> "$GITHUB_OUTPUT"
+
+  replay:
+    name: Sweep replay (${{ matrix.name }})
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        if: ${{ matrix.manifests != '' }}
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Enable Corepack
+        if: ${{ matrix.manifests != '' }}
+        run: corepack enable
+      - name: Set up Node
+        if: ${{ matrix.manifests != '' }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "yarn"
+      - name: Prepare package manager
+        if: ${{ matrix.manifests != '' }}
+        run: |
+          corepack prepare "$(node -p 'require("./package.json").packageManager')" --activate
+      - name: Install dependencies
+        if: ${{ matrix.manifests != '' }}
+        run: "yarn install --immutable"
+      - name: Install zsh
+        if: ${{ matrix.manifests != '' }}
+        run: sudo apt-get update && sudo apt-get install -y zsh
+      - name: Nothing to replay
+        if: ${{ matrix.manifests == '' }}
+        env:
+          LEG: ${{ matrix.name }}
+          PLAN_COUNT: ${{ needs.plan.outputs.count }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p sweep-failures
+          : > "sweep-failures/$LEG.txt"
+          if [ "$PLAN_COUNT" != "0" ]; then
+            echo "::error::this leg has no manifest but the plan listed '$PLAN_COUNT'"
+            exit 1
+          fi
+          echo "no manifest files; the plan job reported 0"
+      - name: Replay this leg's manifests
+        if: ${{ matrix.manifests != '' }}
+        env:
+          MANIFESTS: ${{ matrix.manifests }}
+          LEG: ${{ matrix.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p sweep-failures
+          out="sweep-failures/$LEG.txt"
+          printf 'leg %s did not finish\n' "$LEG" > "$out"
+          set +e
+          printf '%s\n' "$MANIFESTS" | sh scripts/verify-manifests.sh --replay > sweep-failures/log.txt 2>&1
+          status=$?
+          set -e
+          : > "$out"
+          cat sweep-failures/log.txt
+          grep 'did not reproduce' sweep-failures/log.txt >> "$out" || true
+          if [ "$status" -ne 0 ] && [ ! -s "$out" ]; then
+            echo "LEG_FAILED without a named manifest" >> "$out"
+          fi
+          exit "$status"
+      - name: Upload failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweep-${{ matrix.name }}
+          path: sweep-failures/${{ matrix.name }}.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  summary:
+    name: Sweep summary
+    needs: [plan, replay]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download all legs' failures
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: sweep-*
+          merge-multiple: true
+          path: sweep-failures
+      - name: Report
+        if: always()
+        env:
+          PLAN_MATRIX: ${{ needs.plan.outputs.matrix }}
+          REPLAY_RESULT: ${{ needs.replay.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$REPLAY_RESULT" = "skipped" ] || [ "$REPLAY_RESULT" = "cancelled" ]; then
+            echo "::error::the replay job was $REPLAY_RESULT"
+            exit 1
+          fi
+          printf '%s\n' "$PLAN_MATRIX" | jq -r '.include[].name' > sweep-names.txt
+          missing=
+          while IFS= read -r name; do
+            [ -n "$name" ] || continue
+            if [ ! -f "sweep-failures/$name.txt" ]; then
+              echo "::error::leg $name uploaded no result"
+              missing=1
+            fi
+          done < sweep-names.txt
+          printed=
+          for f in sweep-failures/*.txt; do
+            [ -e "$f" ] || continue
+            bn=$(basename "$f")
+            while IFS= read -r line || [ -n "$line" ]; do
+              [ -n "$line" ] || continue
+              echo "$bn: $line"
+              printed=1
+            done < "$f"
+          done
+          if [ "$REPLAY_RESULT" != "success" ]; then
+            echo "::error::the replay job ended $REPLAY_RESULT"
+          fi
+          if [ "$missing" = "1" ] || [ -n "$printed" ] || [ "$REPLAY_RESULT" != "success" ]; then
+            exit 1
+          fi
