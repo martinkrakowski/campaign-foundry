@@ -6933,3 +6933,28 @@ Recorded from `git log` on `9ff48d29`. Subjects are the merge commits. No review
 | #717 | f0614418 | fix(assets): a copy that fails after the exclusive open frees its partial file |
 | #718 | 9ff48d29 | perf(ci): fan the mutation replay out to one runner per changed manifest |
 
+
+---
+
+## 2026-10-07 — origin/main from #719 through #728
+
+Recorded from `git log` on `c29da509`. Subjects are the merge commits. No review findings or test counts are added here. Lane ids and stage times for #725, #727 and #728 are from the wave event log (`platform-and-tenancy-w06`), in UTC.
+
+| PR | Merge SHA | Subject |
+|---|---|---|
+| #719 | e5838ac9 | docs: record the session log for #696 through #718 |
+| #721 | 2e9cb198 | fix(preview): restore the new-draft frame identity pin |
+| #720 | 51219eee | feat(ci): replay every mutation manifest on a nightly sweep |
+| #722 | 369308f0 | fix(web): protect unsaved asset refs from the bin delete |
+| #723 | d0d9c91e | fix(api): a tombstoned campaign's asset delete answers 404 |
+| #724 | 9c9fd7fd | fix(web): leave a campaign someone else deleted |
+| #726 | cbd211b1 | fix(api): share the brief lock across PgBriefStore instances |
+| #725 | 1f4e3a3c | test(db): start PGlite test databases from a saved data directory |
+| #727 | 0f4fd369 | test(web): restore the four mutation pins that stopped reproducing (sg9, x32, cc1, cc4) |
+| #728 | c29da509 | test(db): let the API test harness reach a listed private test server |
+
+| Lane | PR | Dispatch started | Merge settled | Notes from the event log |
+|---|---|---|---|---|
+| TD1-snapshot-start | #725 | 14:13 | 16:37 | one remediate round (15:37 to 16:00) before the gate |
+| MF1-stale-manifests | #727 | 14:13 | 18:42 | implement settled 18:12; no remediate round recorded |
+| TD2-shared-test-server | #728 | 17:30 | 19:22 | the merge stage reported `failed` at 19:09 and was started again at 19:19 |
