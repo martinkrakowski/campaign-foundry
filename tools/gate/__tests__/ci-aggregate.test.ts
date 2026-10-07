@@ -80,10 +80,80 @@ describe("the ci aggregate job (.github/workflows/ci.yml)", () => {
 });
 
 /**
- * A literal `${ … }` is valid YAML and passes actionlint, but GitHub does not evaluate it:
- * written that way the per-commit suffix on main is plain text, every push to main shares one
- * group, and a second push cancels the run verifying the merge before it (D182's incident).
+ * New describe for the mutation fan-out (CI2-mutation-fanout). The aggregate's
+ * needs already contain the three new job keys via the existing test above; this
+ * pins the new jobs' structure so a regression is caught locally.
  */
+describe("the mutation fan-out jobs (.github/workflows/ci.yml)", () => {
+  const byKey = new Map(all.map(([key, block]) => [key, block]));
+
+  test("the ci aggregate needs mutations-plan, mutations-anchors and mutations", () => {
+    expect(aggregate).toBeDefined();
+    const needsLine = aggregate![1].find((l) => /^ {4}needs:\s*\[/.test(l));
+    expect(needsLine).toBeDefined();
+    for (const name of ["mutations-plan", "mutations-anchors", "mutations"]) {
+      expect(needsLine!).toContain(name);
+    }
+  });
+
+  test("the mutations job has no job-level if: (would skip on empty list)", () => {
+    const block = byKey.get("mutations");
+    expect(block).toBeDefined();
+    const hasJobLevelIf = block!.some((l) => /^ {4}if:/.test(l));
+    expect(hasJobLevelIf).toBe(false);
+  });
+
+  test("the mutations job takes its matrix from the plan and needs mutations-plan", () => {
+    const block = byKey.get("mutations");
+    expect(block).toBeDefined();
+    expect(block!).toContain("    needs: mutations-plan");
+    expect(block!).toContain("      matrix: ${{ fromJSON(needs.mutations-plan.outputs.matrix) }}");
+  });
+
+  test("the mutations-plan job exposes matrix and count outputs", () => {
+    const block = byKey.get("mutations-plan");
+    expect(block).toBeDefined();
+    expect(block!.some((l) => l.includes("matrix:"))).toBe(true);
+    expect(block!.some((l) => l.includes("count:"))).toBe(true);
+  });
+
+  test("every expression in the three new jobs is a real ${{ }} one", () => {
+    const bare = /(?<![a-zA-Z_$])\$\{(?!\{)/;
+    for (const key of ["mutations-plan", "mutations-anchors", "mutations"]) {
+      const block = byKey.get(key);
+      expect(block, `no block for ${key}`).toBeDefined();
+      for (const line of block!) {
+        if (/^\s*run:/.test(line)) continue;
+        if (bare.test(line)) {
+          const msg = key + " has a bare ${...} (not ${{ ... }}): " + line.trim();
+          throw new Error(msg);
+        }
+      }
+    }
+  });
+
+  test("the if: lines trimming to ${{ matrix.manifests ... }} are exact", () => {
+    const block = byKey.get("mutations");
+    expect(block).toBeDefined();
+    const ifs = block!.filter((l) => /^\s+if:/.test(l));
+    for (const l of ifs) {
+      const trimmed = l.trim();
+      expect(
+        trimmed === "if: ${{ matrix.manifests != '' }}" ||
+          trimmed === "if: ${{ matrix.manifests == '' }}",
+      ).toBe(true);
+    }
+    const emptyChecks = ifs.filter((l) => l.trim() === "if: ${{ matrix.manifests == '' }}");
+    expect(emptyChecks).toHaveLength(1);
+  });
+
+  test("the mutations job block contains sh scripts/verify-manifests.sh --replay", () => {
+    const block = byKey.get("mutations");
+    expect(block).toBeDefined();
+    expect(block!.some((l) => l.includes("scripts/verify-manifests.sh --replay"))).toBe(true);
+  });
+});
+
 describe("the workflow-level concurrency group (.github/workflows/ci.yml)", () => {
   const group = lines.find((line) => /^ {2}group:\s/.test(line));
 

@@ -23,9 +23,73 @@ set -eu
 
 MANIFEST_DIR=".agents/manifests"
 
-if [ ! -d "$MANIFEST_DIR" ]; then
+case "${1:-}" in
+  "") MODE="all" ;;
+  --anchors) MODE="anchors" ;;
+  --list) MODE="list" ;;
+  --replay) MODE="replay" ;;
+  *)
+    echo "verify-manifests: usage: $0 [--anchors|--list|--replay]" >&2
+    exit 2
+    ;;
+esac
+
+if [ "$MODE" = "list" ]; then
+  exec 3>&1 1>&2
+fi
+
+# --replay is handed an explicit list, so "no manifests directory" is not "nothing to do" there:
+# it falls through and every listed path is reported as missing. Exiting 0 here would be a replay
+# that silently did not happen.
+if [ ! -d "$MANIFEST_DIR" ] && [ "$MODE" != "replay" ]; then
   echo "verify-manifests: no $MANIFEST_DIR directory; nothing to replay"
   exit 0
+fi
+
+if [ "$MODE" = "anchors" ]; then
+  if ! yarn mutate:anchors "$MANIFEST_DIR"; then
+    echo "verify-manifests: a mutation anchor no longer resolves — see above." >&2
+    echo "verify-manifests: re-anchor it if the code moved, or retire it with a reason" >&2
+    echo "verify-manifests: (\"retired\": \"<why>\") if the code is gone. Never re-point a" >&2
+    echo "verify-manifests: mutation at different code to make a replay pass." >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+if [ "$MODE" = "replay" ]; then
+  CHANGED_LIST=$(mktemp)
+  trap 'rm -f "$CHANGED_LIST"' EXIT
+  cat > "$CHANGED_LIST"
+  GIVEN=$(grep -c . "$CHANGED_LIST" || true)
+  if [ "$GIVEN" -eq 0 ]; then
+    echo "verify-manifests: --replay was given no manifest" >&2
+    exit 2
+  fi
+  STATUS=0
+  REPLAYED=0
+  SEEN=0
+  while IFS= read -r manifest; do
+    [ -n "$manifest" ] || continue
+    SEEN=$((SEEN + 1))
+    if [ ! -f "$manifest" ]; then
+      echo "verify-manifests: $manifest does not exist" >&2
+      STATUS=1
+      continue
+    fi
+    REPLAYED=$((REPLAYED + 1))
+    echo "verify-manifests: replaying $manifest"
+    if ! yarn mutate:verify "$manifest"; then
+      echo "verify-manifests: $manifest did not reproduce" >&2
+      STATUS=1
+    fi
+  done < "$CHANGED_LIST"
+  echo "verify-manifests: replayed $REPLAYED of $GIVEN listed manifests"
+  if [ "$SEEN" -ne "$GIVEN" ]; then
+    echo "verify-manifests: the loop read $SEEN of $GIVEN listed manifests — refusing to call that a replay" >&2
+    exit 2
+  fi
+  exit "$STATUS"
 fi
 
 # ---------------------------------------------------------------------------
@@ -47,12 +111,14 @@ fi
 # Explicit `if !` rather than leaning on `set -e`: every failure in this file
 # is loud and named, because a gate that fails quietly has stopped being one.
 # ---------------------------------------------------------------------------
-if ! yarn mutate:anchors "$MANIFEST_DIR"; then
-  echo "verify-manifests: a mutation anchor no longer resolves — see above." >&2
-  echo "verify-manifests: re-anchor it if the code moved, or retire it with a reason" >&2
-  echo "verify-manifests: (\"retired\": \"<why>\") if the code is gone. Never re-point a" >&2
-  echo "verify-manifests: mutation at different code to make a replay pass." >&2
-  exit 1
+if [ "$MODE" = "all" ]; then
+  if ! yarn mutate:anchors "$MANIFEST_DIR"; then
+    echo "verify-manifests: a mutation anchor no longer resolves — see above." >&2
+    echo "verify-manifests: re-anchor it if the code moved, or retire it with a reason" >&2
+    echo "verify-manifests: (\"retired\": \"<why>\") if the code is gone. Never re-point a" >&2
+    echo "verify-manifests: mutation at different code to make a replay pass." >&2
+    exit 1
+  fi
 fi
 
 # The base to diff against, in order of how well it describes "what this change
@@ -124,6 +190,18 @@ fi
 # glob character must not be word-split or expanded. A name containing a newline
 # is the one case this cannot carry; git quotes those, so they arrive visibly
 # wrong rather than silently skipped.
+if [ "$MODE" = "list" ]; then
+  while IFS= read -r m; do
+    [ -n "$m" ] || continue
+    if [ ! -f "$m" ]; then
+      echo "verify-manifests: git listed '$m' but it is not a file (a quoted name?) — refusing to skip it" >&2
+      exit 2
+    fi
+    printf '%s\n' "$m" >&3
+  done < "$CHANGED_LIST"
+  exit 0
+fi
+
 STATUS=0
 REPLAYED=0
 while IFS= read -r manifest; do

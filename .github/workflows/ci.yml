@@ -364,10 +364,56 @@ jobs:
         env:
           NODE_ENV: test
 
-  mutations:
-    name: Mutations (anchors, replay of changed manifests)
+  # The mutation phase: plan which manifests changed, check every anchor in
+  # parallel with the replay legs, then replay each group on its own runner.
+  # One checkout per leg, one leg per changed manifest, grouped above 6 (see
+  # the mutation fan-out decision in .agents/briefs/CI2-mutation-fanout.md).
+  mutations-plan:
+    name: Mutations plan (which manifests changed)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      # The base logic (pull_request base, push `before`, force-push fallback) lives in
+      # scripts/verify-manifests.sh and nowhere else; --list prints the changed manifests.
+      - name: List the changed manifests and group them into legs
+        id: plan
+        env:
+          # On a push, origin/main IS the pushed commit; the pre-push SHA is what the
+          # push changed (same variable, same reason, as the old replay step).
+          MANIFEST_DIFF_BASE: ${{ github.event.before }}
+          MAX_LEGS: "6"
+        # bash named explicitly, for pipefail: a failed command inside a pipeline must fail this
+        # step, never shorten the list that the replay legs are built from.
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh scripts/verify-manifests.sh --list > "$RUNNER_TEMP/changed.txt"
+          count=$(wc -l < "$RUNNER_TEMP/changed.txt" | tr -d ' ')
+          matrix=$(sh scripts/mutation-matrix.sh < "$RUNNER_TEMP/changed.txt")
+          echo "changed manifests: $count"
+          cat "$RUNNER_TEMP/changed.txt"
+          printf '%s\n' "$matrix" | jq -r '.include[].manifests | select(. != "")' | LC_ALL=C sort > "$RUNNER_TEMP/planned.txt"
+          LC_ALL=C sort "$RUNNER_TEMP/changed.txt" > "$RUNNER_TEMP/listed.txt"
+          if ! cmp -s "$RUNNER_TEMP/listed.txt" "$RUNNER_TEMP/planned.txt"; then
+            echo "::error::the matrix does not cover the changed manifests exactly"
+            diff "$RUNNER_TEMP/listed.txt" "$RUNNER_TEMP/planned.txt" || true
+            exit 1
+          fi
+          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
+          printf 'count=%s\n' "$count" >> "$GITHUB_OUTPUT"
+      # set -eu without pipefail is fine: no pipe whose left side may fail silently;
+      # a failing --list (exit 2) fails the step and the job.
+
+  mutations-anchors:
+    name: Mutation anchors (every manifest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       # SETUP (steps 1-5), then:
       - uses: actions/checkout@v5
@@ -404,6 +450,42 @@ jobs:
       - name: Install zsh (for D184's merge-prs.sh wiring tests)
         run: sudo apt-get update && sudo apt-get install -y zsh
 
+      - name: Check every anchor in every manifest
+        run: "sh scripts/verify-manifests.sh --anchors"
+
+  mutations:
+    name: Mutations replay (${{ matrix.name }})
+    needs: mutations-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.mutations-plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+        if: ${{ matrix.manifests != '' }}
+        with:
+          fetch-depth: 0
+      # Corepack, setup-node, Prepare package manager, Install dependencies, Install zsh:
+      # the same five steps as mutations-anchors, each with if: ${{ matrix.manifests != '' }}
+      - name: Enable Corepack
+        if: ${{ matrix.manifests != '' }}
+        run: corepack enable
+      - uses: actions/setup-node@v5
+        if: ${{ matrix.manifests != '' }}
+        with:
+          node-version: "22"
+          cache: "yarn"
+      - name: Prepare package manager
+        if: ${{ matrix.manifests != '' }}
+        run: |
+          corepack prepare "$(node -p 'require("./package.json").packageManager')" --activate
+      - name: Install dependencies
+        if: ${{ matrix.manifests != '' }}
+        run: "yarn install --immutable"
+      - name: Install zsh (for D184's merge-prs.sh wiring tests)
+        if: ${{ matrix.manifests != '' }}
+        run: sudo apt-get update && sudo apt-get install -y zsh
       # A mutation manifest records the mutations a lane claims its tests catch.
       # Replaying it is what makes the claim evidence rather than a report: two
       # seats this week stated verdicts they had never observed, one quoting
@@ -411,21 +493,21 @@ jobs:
       # Only manifests this change touches are REPLAYED — each mutation runs a
       # real test command, so replaying all of them every time would grow
       # without bound. A claim is checked when it is made.
-      #
-      # That scoping left a hole, and the same script now closes it: before any
-      # replay it checks the ANCHORS of every manifest in the directory, touched
-      # or not. A mutation's before-text must still appear exactly once in its
-      # file, because `runMutation` refuses anything else (Rule 2) — so an
-      # anchor broken by someone else's reformat makes that claim permanently
-      # unrunnable, and being diff-scoped is exactly why nothing ever said so.
-      # It is a string count over ~93 files: under a second, no build, no suite.
-      - name: Check every anchor, replay changed mutation manifests
+      - name: Replay this leg's manifests
+        if: ${{ matrix.manifests != '' }}
         env:
-          # On a push, origin/main IS the pushed commit, so diffing against it
-          # finds nothing and every manifest is skipped in silence. The pre-push
-          # SHA is what "what this push changed" actually means.
-          MANIFEST_DIFF_BASE: ${{ github.event.before }}
-        run: "sh scripts/verify-manifests.sh"
+          MANIFESTS: ${{ matrix.manifests }}
+        run: printf '%s\n' "$MANIFESTS" | sh scripts/verify-manifests.sh --replay
+      - name: Nothing to replay (no manifest changed)
+        if: ${{ matrix.manifests == '' }}
+        env:
+          PLAN_COUNT: ${{ needs.mutations-plan.outputs.count }}
+        run: |
+          if [ "$PLAN_COUNT" != "0" ]; then
+            echo "::error::this leg has no manifest but the plan listed '$PLAN_COUNT'"
+            exit 1
+          fi
+          echo "no manifest changed against the base; the plan job reported 0"
 
   postgres:
     name: Postgres backend (api project against a real server)
@@ -580,7 +662,7 @@ jobs:
   ci:
     name: Build, Typecheck, Lint & Test
     if: ${{ !cancelled() }}
-    needs: [static, test, coverage, mutations, postgres, s3]
+    needs: [static, test, coverage, mutations-plan, mutations-anchors, mutations, postgres, s3]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -591,8 +673,8 @@ jobs:
           echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
           count=$(echo "$NEEDS" | jq 'length')
           bad=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(",")')
-          if [ "$count" -ne 6 ]; then
-            echo "::error::expected 6 needed jobs, the needs context holds $count"
+          if [ "$count" -ne 8 ]; then
+            echo "::error::expected 8 needed jobs, the needs context holds $count"
             exit 1
           fi
           if [ -n "$bad" ]; then
