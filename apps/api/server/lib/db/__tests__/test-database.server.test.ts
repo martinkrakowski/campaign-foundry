@@ -6,6 +6,8 @@ import { pgClient } from "../pg-client.js";
 import { authDatabase, emptyDatabase, migratedDatabase } from "./pglite-client.js";
 import {
   cloneConfig,
+  drop,
+  dropEveryTestDatabase,
   dropHarnessDatabase,
   dropOrphans,
   ensureTemplate,
@@ -389,6 +391,26 @@ describe.skipIf(!server)("orphan cleanup (D186)", () => {
     const name = await ensureTemplate();
     expect(await dropOrphans(name)).not.toContain(name);
     expect(await names()).toContain(name);
+  });
+
+  test("dropEveryTestDatabase leaves a same-role cf_ name this harness did not build", async () => {
+    // `cf_test` owns it, so the sweep's owner filter includes it — but its name
+    // matches neither clone nor template pattern, so the name guard skips it. A
+    // foreign-owner case cannot be planted here (`cf_test` lacks CREATEROLE);
+    // that path is covered only by the server-free fake in `test-database.test.ts`.
+    //
+    // `--every-clone` drops every cf_t_* the role owns, so this is run against the
+    // isolated CI postgres and only locally when the host's lane set is clear.
+    const name = `cf_keepme_${process.pid}`;
+    await createDatabase(name);
+    try {
+      await dropEveryTestDatabase();
+      expect(await names()).toContain(name);
+    } finally {
+      await drop(name).catch((error: unknown) => {
+        if ((error as { code?: string }).code !== "3D000") throw error;
+      });
+    }
   });
 });
 

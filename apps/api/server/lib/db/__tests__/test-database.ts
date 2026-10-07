@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import pg from "pg";
-import { databaseConfig, type DatabaseConfig } from "../database-config.js";
+import { type DatabaseConfig } from "../database-config.js";
+import { testServerConfig } from "./test-server-config.js";
 import { checksum, loadMigrations, migrate, type Migration } from "../migrate.js";
 import { pgClient, poolOptions, type PgPool } from "../pg-client.js";
 import type { SqlClient } from "../sql-client.js";
@@ -120,25 +121,12 @@ function identifier(name: string): string {
  * advice about certificates.
  */
 export function maintenanceConfig(): DatabaseConfig {
-  let config: DatabaseConfig;
-  try {
-    config = databaseConfig({ url: process.env["TEST_PG_URL"] }, () => {
-      throw new Error("a local TEST_PG_URL needs no CA");
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      REMOTE_HOST.test(message)
-        ? "TEST_PG_URL names a remote database, and the test harness only reaches a local test server."
-        : message.replaceAll("DATABASE_URL", "TEST_PG_URL"),
-      { cause: error },
-    );
-  }
-  return config;
+  // Delegates to `testServerConfig`, which re-points `databaseConfig`'s
+  // `DATABASE_URL`-worded refusal at `TEST_PG_URL` (the REMOTE message branch the
+  // server test pins), and admits a listed private host by running
+  // `databaseConfig` against 127.0.0.1 with the real host restored afterwards.
+  return testServerConfig({ url: process.env["TEST_PG_URL"] }, "TEST_PG_URL");
 }
-
-/** `databaseConfig`'s own way of saying the URL named a host it will not reach. */
-const REMOTE_HOST = /^DATABASE_CA_PATH is not set/;
 
 /** The same server, pointed at one named database, over one connection. */
 export function cloneConfig(database: string): DatabaseConfig {
@@ -289,7 +277,7 @@ async function dropHarnessDatabases(
 }
 
 /** The scan and the drops, on a session that already holds `TEMPLATE_LOCK`. */
-async function sweep(
+export async function sweep(
   session: pg.Client,
   currentTemplate: string,
   everyClone: boolean,
@@ -298,7 +286,8 @@ async function sweep(
   const { rows } = await session.query<{ datname: string; description: string | null }>(
     "select d.datname, s.description from pg_database d left join pg_shdescription s" +
       " on s.objoid = d.oid and s.classoid = 'pg_database'::regclass" +
-      ` where d.datname like 'cf\\_%'`,
+      ` where d.datname like 'cf\\_%'` +
+      " and d.datdba = (select oid from pg_roles where rolname = current_user)",
   );
   const now = epochSeconds();
   for (const { datname, description } of rows) {
@@ -348,7 +337,14 @@ async function sweep(
     } catch (error) {
       // Somebody without this lock has it, and what they are doing is the drop
       // this sweep wanted. Not reported as this sweep's own — it did not do it.
-      if (!isGoneOrGoing(error)) throw error;
+      if (isGoneOrGoing(error)) continue;
+      // A `cf_` database this role does NOT own (another lane's clutter) refuses
+      // the untemplate's ALTER or the drop with 42501 and is then skipped rather
+      // than taken down with this run. The owner filter on the scan is the
+      // primary guard; this is the second line of defence, and only on this row —
+      // never on a test's own `drop`/`dropHarnessDatabase` teardown.
+      if ((error as { code?: string }).code === "42501") continue;
+      throw error;
     }
   }
   return dropped;

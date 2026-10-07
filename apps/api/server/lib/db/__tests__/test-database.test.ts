@@ -1,10 +1,12 @@
 import { describe, test, expect, afterEach } from "vitest";
+import pg from "pg";
 import type { Migration } from "../migrate.js";
 import { main as pgClean } from "./pg-clean.js";
 import {
   dropDatabase,
   processAlive,
   probeServer,
+  sweep,
   templateName,
   testDatabaseBackend,
 } from "./test-database.js";
@@ -231,5 +233,89 @@ describe("yarn test:pg-clean", () => {
     expect(lines).toEqual([
       "TEST_PG_URL is not set — nothing to clean. Set it to the test server to drop its databases.",
     ]);
+  });
+});
+
+/**
+ * A `pg.Client`-shaped fake: the first `query` is the scan and returns the rows
+ * planted here; every later `query` is an untemplate or drop, answered by `refuse`.
+ * Driven in-process because a foreign-owned 42501 cannot be produced on a role
+ * without CREATEROLE, and the 42501 branch is a question about which row throws,
+ * not about the server.
+ */
+type FakeRow = { datname: string; description: string | null };
+function fakeSession(
+  rows: FakeRow[],
+  refuse: (text: string) => Error | undefined,
+): { statements: string[]; query: (text: string) => Promise<unknown> } {
+  const statements: string[] = [];
+  let scanned = false;
+  return {
+    statements,
+    query: async (text: string): Promise<unknown> => {
+      statements.push(text);
+      if (!scanned) {
+        scanned = true;
+        return { rows };
+      }
+      const refused = refuse(text);
+      if (refused) throw refused;
+      return { rows: [] };
+    },
+  };
+}
+
+/** A `pg` error carrying the code the wire would set. */
+function pgError(message: string, code: string): Error {
+  return Object.assign(new Error(message), { code });
+}
+
+describe("sweep", () => {
+  test("skips a database whose name this harness did not build, and scans only this role's databases", async () => {
+    const rows: FakeRow[] = [
+      { datname: "cf_home", description: null },
+      { datname: "cf_conc", description: null },
+      { datname: `cf_keepme_${process.pid}`, description: null },
+    ];
+    const session = fakeSession(rows, () => undefined);
+
+    const dropped = await sweep(session as unknown as pg.Client, "cf_tpl_dummy", false);
+
+    expect(dropped).toEqual([]);
+    const scan = session.statements[0]!;
+    expect(scan).toContain("datdba");
+    expect(scan).toContain("current_user");
+    expect(
+      session.statements.filter(
+        (s) => s.startsWith("drop database") || s.startsWith("alter database"),
+      ),
+    ).toEqual([]);
+  });
+
+  test("survives a 42501 on one row and still visits the next", async () => {
+    // everyClone = true makes the clone eligible without the age/pid guards, so the
+    // drop runs and the refused-then-plain pair both answer 42501.
+    const epoch = Math.floor(Date.now() / 1000) - 4_000;
+    const rows: FakeRow[] = [
+      { datname: `cf_t_999999998_${epoch}_0`, description: null },
+      { datname: `cf_t_999999998_${epoch}_1`, description: null },
+    ];
+    const session = fakeSession(rows, (text) =>
+      text.startsWith("drop database")
+        ? pgError("permission denied to terminate process", "42501")
+        : undefined,
+    );
+
+    const dropped = await sweep(session as unknown as pg.Client, "cf_tpl_dummy", true);
+
+    expect(dropped).toEqual([]);
+    const attempted = session.statements
+      .filter((s) => s.startsWith("drop database"))
+      .map((s) => s.match(/"(cf_t_\d+_\d+_\d+)"/)?.[1])
+      .filter(Boolean) as string[];
+    // Both rows were visited: each clone earned a forced and a plain drop.
+    expect(new Set(attempted)).toEqual(
+      new Set([`cf_t_999999998_${epoch}_0`, `cf_t_999999998_${epoch}_1`]),
+    );
   });
 });

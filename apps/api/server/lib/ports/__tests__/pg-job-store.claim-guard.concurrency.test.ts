@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import pg from "pg";
-import { databaseConfig } from "../../db/database-config.js";
+import { testServerConfig } from "../../db/__tests__/test-server-config.js";
 import { pgClient, poolOptions } from "../../db/pg-client.js";
 import { loadMigrations, migrate } from "../../db/migrate.js";
 import type { SqlClient, SqlQuery } from "../../db/sql-client.js";
@@ -41,9 +41,7 @@ describe.skipIf(!url)(
     let db: SqlClient;
 
     beforeAll(async () => {
-      const config = databaseConfig({ url, poolMax: "2" }, () => {
-        throw new Error("a local TEST_DATABASE_URL needs no CA");
-      });
+      const config = testServerConfig({ url, poolMax: "2" }, "TEST_DATABASE_URL");
       // `poolMax: "2"` is the binding constraint, not a tuning choice: one
       // connection is held by the claim (or tombstone) transaction for the whole
       // of the interleaving, so the other connection is the only other actor that
@@ -240,9 +238,7 @@ describe.skipIf(!url)(
       // over that pool would stall on connection acquisition (not on the row
       // lock) and prove nothing.
       const probe = pgClient(
-        databaseConfig({ url, poolMax: "1" }, () => {
-          throw new Error("a local TEST_DATABASE_URL needs no CA");
-        }),
+        testServerConfig({ url, poolMax: "1" }, "TEST_DATABASE_URL"),
         (cfg) => new pg.Pool({ ...poolOptions(cfg), options: `-c search_path=${schema}` }),
       );
 
