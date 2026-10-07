@@ -388,8 +388,11 @@ jobs:
           # push changed (same variable, same reason, as the old replay step).
           MANIFEST_DIFF_BASE: ${{ github.event.before }}
           MAX_LEGS: "6"
+        # bash named explicitly, for pipefail: a failed command inside a pipeline must fail this
+        # step, never shorten the list that the replay legs are built from.
+        shell: bash
         run: |
-          set -eu
+          set -euo pipefail
           sh scripts/verify-manifests.sh --list > "$RUNNER_TEMP/changed.txt"
           count=$(wc -l < "$RUNNER_TEMP/changed.txt" | tr -d ' ')
           matrix=$(sh scripts/mutation-matrix.sh < "$RUNNER_TEMP/changed.txt")
