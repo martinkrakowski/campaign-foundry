@@ -2,8 +2,13 @@ import { describe, test, expect, beforeEach, vi } from "vitest";
 import { useEffect } from "react";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { nextMock, mockPipelineApi, json } from "@/__tests__/helpers";
+import { nextMock, mockPipelineApi, json, EMPTY_REPORT } from "@/__tests__/helpers";
 import { NO_ORGANISATION_YET_MESSAGE } from "@/lib/auth-errors";
+import {
+  usePageCampaignParam,
+  DELETED_CAMPAIGN_MESSAGE,
+  API,
+} from "@/lib/run-context";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import ShellLayout from "../layout";
 
@@ -129,5 +134,66 @@ describe("ShellLayout", () => {
     });
 
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  test("a 404 on the open campaign's result read shows the deleted-campaign notice and leaves for /brief", async () => {
+    // PT-9p2: the campaign the page's `?campaign=` resolved is deleted between its
+    // meta read and its result read — `campaignKnown` rejected 404. The notice must
+    // show (a distinct field from membershipError), and the shell must leave for
+    // `/brief`.
+    const UUID = "018f6d2a-9c3e-7b4a-8d21-3f9e2a5b6c7d";
+    const SLUG = "autumn-launch";
+    const storedBrief = {
+      id: SLUG,
+      template: undefined,
+      targetRegion: "DE",
+      targetAudience: "a",
+      campaignMessage: "m",
+      products: [{ id: "p1", name: "P1", primaryColor: "#1473E6", logoPath: "a.png" }],
+    };
+    nextMock().nav.pathname = "/grid";
+    window.history.replaceState(null, "", `/grid?campaign=${UUID}`);
+
+    const WirePageCampaign = () => {
+      usePageCampaignParam();
+      return null;
+    };
+
+    mockPipelineApi({
+      result: (url) => {
+        if (url === `${API}/campaigns/${UUID}`) {
+          return Promise.resolve(
+            json({ campaignId: UUID, slug: SLUG, name: "Autumn Launch", type: "social-post", hasVersion: true }),
+          );
+        }
+        if (url.includes("/campaigns/briefs")) {
+          return Promise.resolve(
+            json({ briefs: [{ file: `${SLUG}.yaml`, campaignId: UUID, brief: storedBrief }] }),
+          );
+        }
+        if (url.includes("/campaigns/jobs")) {
+          return Promise.resolve(json({}));
+        }
+        if (url.includes("/campaigns/result")) {
+          // The result read for the OPEN campaign: 404 means deleted.
+          if (url.includes(`campaignId=${UUID}`)) {
+            return Promise.resolve(json({ error: "Campaign not found" }, 404));
+          }
+          return Promise.resolve(json(EMPTY_REPORT));
+        }
+        return Promise.resolve(json(EMPTY_REPORT));
+      },
+    });
+
+    render(
+      <ShellLayout>
+        <WirePageCampaign />
+        <div>workspace</div>
+      </ShellLayout>,
+    );
+
+    const notice = await screen.findByRole("alert");
+    expect(notice.textContent).toBe(DELETED_CAMPAIGN_MESSAGE);
+    expect(nextMock().router.replace).toHaveBeenCalledWith("/brief");
   });
 });

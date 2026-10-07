@@ -12,6 +12,8 @@ import {
   usePageCampaignParam,
   API,
   DEFAULT_BRIEF,
+  DELETED_CAMPAIGN_MESSAGE,
+  DeletedCampaignError,
   assetKey,
   assetCanvas,
   assetLabel,
@@ -45,6 +47,7 @@ import {
   s3Urls,
   FS_REVISION,
 } from "@/__tests__/helpers";
+import { nextMock } from "@/__tests__/helpers";
 import { CommandBar } from "@/components/shell/CommandBar";
 
 const wrapper = ({ children }: { children: ReactNode }) =>
@@ -145,9 +148,9 @@ describe("fetchPersistedRun — could not ask vs there is nothing (D83/F6)", () 
     await expect(fetchPersistedRun("seed")).resolves.toBeNull();
   });
 
-  test("a 404 from the server resolves as an absent run (PT-2b)", async () => {
+  test("a 404 from the server throws DeletedCampaignError (PT-9p2)", async () => {
     mockPipelineApi({ result: () => json({ error: "Campaign not found" }, 404) });
-    await expect(fetchPersistedRun("seed")).resolves.toBeNull();
+    await expect(fetchPersistedRun("seed")).rejects.toThrow(DeletedCampaignError);
   });
 
   test("a 200 carrying the campaign's own run resolves with it", async () => {
@@ -7049,5 +7052,102 @@ describe("RunProvider — signed URL refresh (PT-4g3)", () => {
     const reads = readsFor("seed");
     await advance(60 * 60_000);
     expect(readsFor("seed")).toBe(reads);
+  });
+
+  test("a 404 on a refresh navigates to /brief and shows the deleted-campaign notice", async () => {
+    // PT-9p2: a 404 from result.read means campaignKnown rejected the campaign — it was
+    // deleted while it was open. The screen must leave, /brief must be shown, and the
+    // notice must appear — not a "no run on disk" silence, and not a pipeline error.
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    let deleted = false;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        return deleted
+          ? json({ error: "Campaign not found" }, 404)
+          : onDisk("seed", [signed(first, "rev-1")]);
+      },
+    });
+
+    const { result } = setup();
+    await settle();
+    // The campaign is open on screen with a run.
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.deletedCampaign).toBeNull();
+
+    deleted = true;
+    await advance(URL_REFRESH_MS);
+
+    // Navigated away and the notice is shown.
+    expect(nextMock().router.replace).toHaveBeenCalledWith("/brief");
+    expect(result.current.deletedCampaign).toBe(DELETED_CAMPAIGN_MESSAGE);
+    // The run — and the grid's claim to a campaign — is cleared.
+    expect(result.current.hasRun).toBe(false);
+  });
+
+  test("a 200 empty result on a refresh does not navigate or show the notice", async () => {
+    // A 200 whose body carries no run for this campaign is a LIVE campaign that simply
+    // has not been run — never a deletion. The screen holds.
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    let absent = false;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        return absent ? json(EMPTY_REPORT) : onDisk("seed", [signed(first, "rev-1")]);
+      },
+    });
+
+    const { result } = setup();
+    await settle();
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.deletedCampaign).toBeNull();
+
+    absent = true;
+    await advance(URL_REFRESH_MS);
+    await settle();
+
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+    expect(result.current.deletedCampaign).toBeNull();
+    // The screen held — a live campaign with no run stays on screen.
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+  });
+
+  test("a 500 on a refresh does not navigate or show the notice", async () => {
+    // PT-9p2: only a 404 means deletion. A 500 is a failed read (F6) — the screen
+    // holds and retries on the next tick, exactly as the existing F6 test covers.
+    // This asserts the negative: no navigation, no notice.
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    let broken = false;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        return broken ? json({ error: "boom" }, 500) : onDisk("seed", [signed(first, "rev-1")]);
+      },
+    });
+
+    const { result } = setup();
+    await settle();
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.deletedCampaign).toBeNull();
+
+    broken = true;
+    await advance(URL_REFRESH_MS);
+    await settle();
+
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+    expect(result.current.deletedCampaign).toBeNull();
+    // The screen held — a failed read is not a deletion.
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
   });
 });
