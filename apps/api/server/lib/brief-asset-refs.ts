@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { collectRefs, extractSourceAssetBriefIds, rewriteAssetPaths } from "./asset-files.js";
 import { objectStore } from "./config.js";
@@ -59,6 +60,12 @@ export interface ResolvedBriefRefs {
    * `foreignIds ∪ ownIds` rather than `foreignIds`.
    */
   readonly ownIds: ReadonlySet<string>;
+  /**
+   * Per foreign source slug (the slugs of `copyFrom`), the distinct asset NAMES this brief
+   * refers to, in first-seen order (PT-9k, D238). `copyBriefRefs` hands them to `copyAssets`
+   * as `only`, so a Save-as or a PUT copies the assets it names and not the library.
+   */
+  readonly copyOnly: ReadonlyMap<string, readonly string[]>;
 }
 
 /** Refuse (404) a campaign the caller cannot SEE. `campaignVisibility` never throws to say "not found". */
@@ -66,6 +73,20 @@ async function assertVisible(briefs: BriefStorePort, briefId: string, slug: stri
   if ((await briefs.campaignVisibility(slug)) !== "visible") {
     throw new BriefRefNotFoundError(briefId);
   }
+}
+
+const SOURCE_PATH_REF = /^assets\/inputs\/([^/]+)\/(.+)$/;
+
+function noteCopyName(
+  into: Map<string, string[]>,
+  target: string,
+  slug: string,
+  name: string,
+): void {
+  if (slug === target) return;
+  const names = into.get(slug) ?? [];
+  if (!names.includes(name)) names.push(name);
+  into.set(slug, names);
 }
 
 /**
@@ -127,7 +148,18 @@ export async function resolveBriefAssetRefs(
     for (const fromId of copyFrom) {
       await assertSourceVisible(scope, fromId);
     }
-    return { brief, copyFrom, foreignIds: new Set(), ownIds: new Set() };
+    const copyOnly = new Map<string, string[]>();
+    for (const ref of refs) {
+      const match = SOURCE_PATH_REF.exec(ref);
+      if (match === null) continue;
+      // Both groups are mandatory in the pattern, so neither is undefined here.
+      // `posix.normalize` alone leaves a doubled or trailing slash (`//logo.png` ->
+      // `/logo.png`, `logo.png/` -> `logo.png/`), which the fs store never matches — so
+      // strip the slashes and skip a name that collapses to nothing.
+      const name = posix.normalize(match[2] as string).replace(/^\/+|\/+$/g, "");
+      if (name !== "") noteCopyName(copyOnly, opts.target, match[1] as string, name);
+    }
+    return { brief, copyFrom, copyOnly, foreignIds: new Set(), ownIds: new Set() };
   }
 
   // fs: `supportsTeams` is false, so `campaignVisibility` can never answer "hidden"
@@ -137,7 +169,7 @@ export async function resolveBriefAssetRefs(
   // returned), and under `s3` it cannot fire at all: `config.ts` refuses s3 without
   // postgres, so `s3` is always a backend with teams.
   if (!briefs.supportsTeams) {
-    return { brief, copyFrom: [], foreignIds: new Set(), ownIds: new Set() };
+    return { brief, copyFrom: [], copyOnly: new Map(), foreignIds: new Set(), ownIds: new Set() };
   }
   const underS3 = objectStore() === "s3";
   // Per-call memos, keyed by slug: two distinct refs into one campaign (a logo and a
@@ -166,6 +198,7 @@ export async function resolveBriefAssetRefs(
   const seenOwners = new Set<string>();
   const foreignIds = new Set<string>();
   const ownIds = new Set<string>();
+  const copyOnly = new Map<string, string[]>();
   const noteOwner = (slug: string): void => {
     if (slug === opts.target || seenOwners.has(slug)) return;
     seenOwners.add(slug);
@@ -192,6 +225,7 @@ export async function resolveBriefAssetRefs(
       if (owner.slug !== opts.target) {
         noteOwner(owner.slug);
         foreignIds.add(ref);
+        noteCopyName(copyOnly, opts.target, owner.slug, owner.name);
       } else {
         // The target's OWN row: nothing to copy, and the id is already the thing a save
         // stores (D208 D), so it is recorded as its own rather than as a source.
@@ -228,6 +262,7 @@ export async function resolveBriefAssetRefs(
       }
     }
     noteOwner(stored.slug);
+    noteCopyName(copyOnly, opts.target, stored.slug, stored.name);
   }
 
   // **`save` returns the REWRITTEN brief, `render` the input object.** From = to, so
@@ -238,7 +273,7 @@ export async function resolveBriefAssetRefs(
   // make every caller compare objects instead of passing the body's own brief on.
   const resolved =
     opts.mode === "save" ? rewriteAssetPaths(brief, opts.target, opts.target, refToId) : brief;
-  return { brief: resolved, copyFrom, foreignIds, ownIds };
+  return { brief: resolved, copyFrom, copyOnly, foreignIds, ownIds };
 }
 
 /** What {@link copyBriefRefs} hands back. */
@@ -257,6 +292,8 @@ export interface CopiedBriefRefs {
  * Copy every source campaign's assets into `target` and remap the brief's refs onto the
  * copies (PT-4k2b, D210 a/b) — the whole-campaign copy `AssetStorePort.copyAssets` has
  * always made, shared by every write route so no route branches on the backend to do it.
+ * When `only` holds an entry for a source, that source is copied for those names alone
+ * and not its whole library (PT-9k, D238).
  *
  * **One loop for both backend families, because `copyAssets`' map is what each of them
  * reads.** Under `s3` the map's `<source id> → <target id>` entry
@@ -281,13 +318,18 @@ export async function copyBriefRefs(
   brief: CampaignBrief,
   from: readonly string[],
   target: string,
+  only?: ReadonlyMap<string, readonly string[]>,
 ): Promise<CopiedBriefRefs> {
   const assets = getAssetStore(scope);
   let copied = brief;
   const createdIds: string[] = [];
   try {
     for (const slug of from) {
-      const { paths: map, created } = await assets.copyAssets(slug, target);
+      const names = only?.get(slug);
+      const { paths: map, created } =
+        names === undefined
+          ? await assets.copyAssets(slug, target)
+          : await assets.copyAssets(slug, target, { only: names });
       createdIds.push(...created);
       copied = rewriteAssetPaths(copied, slug, target, map);
     }

@@ -12,6 +12,7 @@ import { resetObjectStoreClient, setObjectStoreClient } from "../../../lib/objec
 import { getAssetStore, getBriefStore, resetAssetStore } from "../../../lib/ports/index.js";
 import { FsAssetStore } from "../../../lib/ports/fs-asset-store.js";
 import { ObjectAssetStore } from "../../../lib/ports/object-asset-store.js";
+import type { CopyAssetsOptions } from "../../../lib/ports/asset-store.port.js";
 import { PgBriefStore } from "../../../lib/ports/pg-brief-store.js";
 import type { SqlClient } from "../../../lib/db/sql-client.js";
 import type { TenantContext } from "../../../lib/tenant.js";
@@ -173,8 +174,13 @@ describe("save route compensation (s3 on pg)", () => {
     const real = ObjectAssetStore.prototype.copyAssets;
     const copy = vi
       .spyOn(ObjectAssetStore.prototype, "copyAssets")
-      .mockImplementation(async function (this: ObjectAssetStore, from: string, to: string) {
-        const result = await real.call(this, from, to);
+      .mockImplementation(async function (
+        this: ObjectAssetStore,
+        from: string,
+        to: string,
+        options?: CopyAssetsOptions,
+      ) {
+        const result = await real.call(this, from, to, options);
         if (!seen.has(from)) seen.set(from, result.created);
         return result;
       });
@@ -254,7 +260,7 @@ describe("save route compensation (s3 on pg)", () => {
     const res = await post(ONLY_T1, allForeignId(slug, source.ids.alt));
     expect(res.status).toBe(500);
 
-    expect(seen.get(source.slug)?.size).toBe(2);
+    expect(seen.get(source.slug)?.size).toBe(1);
     expect(free).toHaveBeenCalledTimes(1);
     expect(free.mock.calls[0][0]).toBe(slug);
     expect([...(free.mock.calls[0][1] as readonly string[])].sort()).toEqual(
@@ -321,6 +327,7 @@ describe("save route compensation (s3 on pg)", () => {
         const reused = await new ObjectAssetStore(harness.db, objectStore, "local").copyAssets(
           source.slug,
           target.slug,
+          { only: ["alt.png"] },
         );
         expect([...reused.created]).toEqual([]);
         const other = new PgBriefStore(harness.db, "local", "other-instance", ["owner"], [], true);
@@ -331,7 +338,10 @@ describe("save route compensation (s3 on pg)", () => {
       },
     );
 
-    const res = await post(ONLY_T1, allForeignId(target.slug, source.ids.alt));
+    const res = await post(ONLY_T1, {
+      ...allForeignId(target.slug, source.ids.alt),
+      audio: { path: source.ids.bg, rights: { licenceId: "lic-1", source: "library" } },
+    });
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: `Brief "${target.slug}" already exists.` });
 
@@ -354,20 +364,28 @@ describe("save route compensation (s3 on pg)", () => {
     const snapshot = await counts(harness.db);
     const real = ObjectAssetStore.prototype.copyAssets;
     const { copy, seen, free, del } = watch();
-    copy.mockImplementationOnce(async function (this: ObjectAssetStore, from: string, to: string) {
-      // Drop the source row the brief names (alt.png) before the real copy, so the
-      // copy brings over only bg.png — the ref the brief carries survives unmapped
-      // and `assertRefsCopied` refuses.
+    copy.mockImplementationOnce(async function (
+      this: ObjectAssetStore,
+      from: string,
+      to: string,
+      options?: CopyAssetsOptions,
+    ) {
+      // The brief names alt and bg; drop the source row the brief names (alt.png)
+      // before the real copy, so the copy brings over only bg.png — the alt ref the
+      // brief carries survives unmapped and `assertRefsCopied` refuses.
       await harness.db.query(
         `delete from asset where org_id = 'local' and campaign_id = $1 and name = $2`,
         [srcUuid, "alt.png"],
       );
-      const r = await real.call(this, from, to);
+      const r = await real.call(this, from, to, options);
       seen.set(from, r.created);
       return r;
     });
 
-    const res = await post(ONLY_T1, allForeignId(slug, source.ids.alt));
+    const res = await post(ONLY_T1, {
+      ...allForeignId(slug, source.ids.alt),
+      audio: { path: source.ids.bg, rights: { licenceId: "lic-1", source: "library" } },
+    });
     expect(res.status).toBe(404);
     expect((await res.json()) as { error: string }).toEqual({
       error: `Campaign "${slug}" not found`,
@@ -400,12 +418,8 @@ describe("save route compensation (s3 on pg)", () => {
 
     expect(free).toHaveBeenCalledTimes(1);
     expect(del).not.toHaveBeenCalled();
-    expect((await rowsOf(slug)).map((r) => r.name).sort()).toEqual([
-      "alt.png",
-      "bg.png",
-      "logo.png",
-    ]);
-    expect((await keysOf(slug)).length).toBe(3);
+    expect((await rowsOf(slug)).map((r) => r.name).sort()).toEqual(["alt.png", "logo.png"]);
+    expect((await keysOf(slug)).length).toBe(2);
     expect(warned).not.toHaveBeenCalled();
     expect(errored).not.toHaveBeenCalled();
   });
@@ -445,8 +459,8 @@ describe("save route compensation (s3 on pg)", () => {
       const owner = await store().assetOwner(ref);
       expect(owner?.slug).toBe(slug);
     }
-    expect((await assetRows(targetUuid)).sort()).toEqual(["alt.png", "bg.png", "logo.png"]);
-    expect((await keysOf(slug)).length).toBe(3);
+    expect((await assetRows(targetUuid)).sort()).toEqual(["alt.png", "logo.png"]);
+    expect((await keysOf(slug)).length).toBe(2);
     expect(free).not.toHaveBeenCalled();
     expect(del).not.toHaveBeenCalled();
     expect((await counts(harness.db)).versions).toBe(snapshot.versions + 1);
@@ -556,7 +570,7 @@ describe("save route compensation on pg plus fs", () => {
 
     expect(free).toHaveBeenCalledTimes(1);
     expect(free.mock.calls[0][0]).toBe(targetSlug);
-    expect([...(free.mock.calls[0][1] as readonly string[])].sort()).toEqual(["alt.png", "bg.png"]);
+    expect([...(free.mock.calls[0][1] as readonly string[])].sort()).toEqual(["alt.png"]);
     expect(del).not.toHaveBeenCalled();
     expect(await filesOf(targetSlug)).toEqual(["logo.png", "mine.png"]);
     expect(await store().readAsset(targetSlug, "logo.png")).toEqual(PNG);
