@@ -24,10 +24,10 @@ const bytesByName: Record<string, Buffer> = {
 };
 
 /**
- * PT-9j0 (D237) accepted residual: a `wx` write whose open succeeded and whose
- * write then failed (ENOSPC, EIO) leaves a partial file that is not in `created`,
- * so it is not freed here. Adding the path on an arbitrary write error could name
- * a file this call did not create.
+ * A path is in `created` from the moment its file exists (PT-9k2), so a `wx`
+ * write that fails after the open is freed too: that case is pinned in
+ * `fs-asset-store.test.ts` (`copyAssets frees a file whose write failed after the
+ * exclusive open`), which plants the failure through the `node:fs/promises` mock.
  */
 
 describe("FsAssetStore.copyAssets frees on failure (PT-9j0)", () => {

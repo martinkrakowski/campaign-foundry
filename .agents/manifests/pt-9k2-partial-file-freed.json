@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "lane": "PT-9k2-partial-file-freed",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/fs-asset-store.ts",
+      "before": "          created.add(destRelPath);\n          try {\n            await handle.writeFile(srcBytes);\n          } finally {\n            await handle.close();\n          }",
+      "after": "          try {\n            await handle.writeFile(srcBytes);\n          } finally {\n            await handle.close();\n          }\n          created.add(destRelPath);",
+      "because": "a path is claimed only after the write returned, so a write that fails after the exclusive open leaves its file out of `created`: the wrapper frees `[]`, the call rethrows ENOSPC, and the partial file stays on disk (the PT-9j0 accepted residual again)",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-asset-store.test.ts",
+        "-t",
+        "copyAssets frees a file whose write failed after the exclusive open"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-asset-store.ts",
+      "before": "          } finally {\n            await handle.close();\n          }",
+      "after": "          } finally {\n            void handle;\n          }",
+      "because": "the handle is no longer closed, on success or on a failed write: the copy still rejects with ENOSPC and the partial file is still freed, so only the count of closes on the planted handle sees the leaked descriptor",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-asset-store.test.ts",
+        "-t",
+        "copyAssets frees a file whose write failed after the exclusive open"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
