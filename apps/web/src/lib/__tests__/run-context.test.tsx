@@ -7153,51 +7153,45 @@ describe("RunProvider — signed URL refresh (PT-4g3)", () => {
 });
 
 describe("RunProvider — deleted campaign notice across adoptJob, regenerateRejected and setBrief (PT-9p2)", () => {
-  test("a lost job whose re-read 404s shows the notice, not LOST_JOB_MESSAGE", async () => {
-    // The job is lost (404 on poll) AND the re-read also 404s — campaignKnown
-    // rejected the campaign, so it was deleted while the run was in flight.
-    // This is NOT an interruption: show the notice and go to /brief.
-    mockPipelineApi({
-      job: () => json({ error: "not found" }, 404),
-      result: () => json({ error: "Campaign not found" }, 404),
-    });
-    const { result } = setup();
-    await act(async () => {
-      await result.current.execute();
-    });
-    expect(result.current.deletedCampaign).toBe(DELETED_CAMPAIGN_MESSAGE);
-    expect(result.current.error).toBeNull();
-    expect(result.current.hasRun).toBe(false);
-    expect(nextMock().router.replace).toHaveBeenCalledWith("/brief");
-  });
-
-  test("a completed job whose re-read 404s shows the notice, not the job's partial payload", async () => {
-    // The job completes normally, but the campaign was deleted between the POST
-    // and the re-read. Show the notice — do NOT commit the job's URL-less payload.
-    mockPipelineApi({
-      job: () =>
-        jobOk({
-          halted: false,
-          assets: [asset()],
-          log: { entries: [], campaignId: DEFAULT_BRIEF.id },
-        }),
-      result: () => json({ error: "Campaign not found" }, 404),
-    });
-    const { result } = setup();
-    await act(async () => {
-      await result.current.execute();
-    });
-    expect(result.current.deletedCampaign).toBe(DELETED_CAMPAIGN_MESSAGE);
-    expect(result.current.error).toBeNull();
-    expect(result.current.hasRun).toBe(false);
-    expect(nextMock().router.replace).toHaveBeenCalledWith("/brief");
-  });
-
-  test("a re-roll whose re-read 404s shows the notice, not the job's partial payload", async () => {
-    // The campaign was alive on mount (run restored), rejected a cell, and was
-    // deleted by the time the re-roll's re-read landed. Show the notice.
+  test("a lost job whose re-read 404s on a versioned page campaign shows the notice, not LOST_JOB_MESSAGE", async () => {
+    // The campaign was opened as a versioned page campaign. The job is lost
+    // (404 on poll) AND the re-read 404s — campaignKnown rejected it, so it was
+    // deleted while the run was in flight. Show the notice, not LOST_JOB_MESSAGE.
+    const seeded = seedPersistedRun([asset()], { id: "page-camp" });
     let deleted = false;
-    const seeded = seedPersistedRun([asset()], { id: "reroll-camp" });
+    mockPipelineApi({
+      opened: seeded,
+      job: () => json({ error: "not found" }, 404),
+      result: (url) => {
+        if (String(url).includes("/campaigns/jobs")) return json({});
+        if (String(url).includes("campaignId=page-camp")) {
+          return deleted
+            ? json({ error: "Campaign not found" }, 404)
+            : json({
+                halted: false,
+                assets: [asset()],
+                log: { entries: [], campaignId: "page-camp" },
+              });
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+    const { result } = setup();
+    // Wait for the versioned page-campaign open to complete (sets the flag).
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    deleted = true; // flip the re-read to 404 before execute()
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.deletedCampaign).toBe(DELETED_CAMPAIGN_MESSAGE);
+    expect(result.current.error).toBeNull();
+    expect(result.current.hasRun).toBe(false);
+    expect(nextMock().router.replace).toHaveBeenCalledWith("/brief");
+  });
+
+  test("a completed job whose re-read 404s on a versioned page campaign shows the notice, not the job's partial payload", async () => {
+    const seeded = seedPersistedRun([asset()], { id: "page-camp" });
+    let deleted = false;
     mockPipelineApi({
       opened: seeded,
       post: () => json({ jobId: "job-1" }, 202),
@@ -7205,16 +7199,17 @@ describe("RunProvider — deleted campaign notice across adoptJob, regenerateRej
         jobOk({
           halted: false,
           assets: [asset({ complianceScore: 0.9 })],
-          log: { entries: [], campaignId: "reroll-camp" },
+          log: { entries: [], campaignId: "page-camp" },
         }),
       result: (url) => {
-        if (String(url).includes("campaignId=reroll-camp")) {
+        if (String(url).includes("/campaigns/jobs")) return json({});
+        if (String(url).includes("campaignId=page-camp")) {
           return deleted
             ? json({ error: "Campaign not found" }, 404)
             : json({
                 halted: false,
                 assets: [asset()],
-                log: { entries: [], campaignId: "reroll-camp" },
+                log: { entries: [], campaignId: "page-camp" },
               });
         }
         return json(EMPTY_REPORT);
@@ -7222,21 +7217,39 @@ describe("RunProvider — deleted campaign notice across adoptJob, regenerateRej
     });
     const { result } = setup();
     await waitFor(() => expect(result.current.assets).toHaveLength(1));
-    await waitFor(() => expect(result.current.decisionsLoaded).toBe(true));
-    act(() => result.current.decide("alpha/1:1/default", "rejected"));
-    deleted = true; // flip the re-read to 404 right before it fires
+    deleted = true;
     await act(async () => {
-      await result.current.regenerateRejected();
+      await result.current.execute();
     });
     expect(result.current.deletedCampaign).toBe(DELETED_CAMPAIGN_MESSAGE);
     expect(result.current.error).toBeNull();
+    expect(result.current.hasRun).toBe(false);
     expect(nextMock().router.replace).toHaveBeenCalledWith("/brief");
+  });
+
+  test("a lost job on the default brief whose re-read 404s still shows LOST_JOB_MESSAGE, not the notice", async () => {
+    // The default brief is never "the one open": a 404 on its result read is an
+    // absent run, not a deletion. The job is lost, so show LOST_JOB_MESSAGE.
+    mockPipelineApi({
+      job: () => json({ error: "not found" }, 404),
+      result: () => json({ error: "Campaign not found" }, 404),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.deletedCampaign).toBeNull();
+    expect(result.current.error).toMatch(/Run was interrupted/);
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
   });
 
   test("setBrief with no page param treats a result 404 as an absent run — no notice, no navigation", async () => {
     // A brief committed from the picker/editor (no page param) that 404s on the
     // result read is a campaign with no run on disk — NOT a deletion. Only a
-    // page-campaign open (page set) shows the notice.
+    // versioned page campaign (page set with hasVersion) shows the notice.
     mockPipelineApi({
       result: () => json({ error: "Campaign not found" }, 404),
     });
@@ -7290,5 +7303,46 @@ describe("RunProvider — deleted campaign notice across adoptJob, regenerateRej
     expect(result.current.deletedCampaign).toBeNull();
     expect(result.current.hasRun).toBe(false);
     expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+  });
+
+  test("after a page-campaign 404 the brief resets to default and a late 200 does not restore the deleted run", async () => {
+    // releaseCampaign() bumps runSeq and resets briefIdRef to the default, so a
+    // persisted-run .then that resolves AFTER the 404 is superseded — its assets
+    // never come back on screen.
+    const seeded = seedPersistedRun([asset()], { id: "page-camp" });
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (String(url).includes("/campaigns/jobs")) return json({});
+        if (String(url).includes("campaignId=page-camp")) {
+          return json({ error: "Campaign not found" }, 404);
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.deletedCampaign).toBe(DELETED_CAMPAIGN_MESSAGE));
+    // releaseCampaign() ran inside the 404 handler:
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
+    expect(result.current.hasRun).toBe(false);
+    expect(nextMock().router.replace).toHaveBeenCalledWith("/brief");
+
+    // A 200 for the deleted campaign's result — a read that resolves now — must
+    // not put the deleted run back: briefIdRef is the default, runSeq was bumped.
+    mockPipelineApi({
+      result: () =>
+        json({
+          halted: false,
+          assets: [asset({ productId: "p-restored" })],
+          log: { entries: [], campaignId: "page-camp" },
+        }),
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // Still on the default brief, still no run, still showing the notice.
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
+    expect(result.current.hasRun).toBe(false);
+    expect(result.current.deletedCampaign).toBe(DELETED_CAMPAIGN_MESSAGE);
   });
 });
