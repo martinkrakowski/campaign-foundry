@@ -256,6 +256,31 @@ describe("yarn test:pg-clean", () => {
     expect(everything).toEqual(["Nothing to drop on that server."]);
   });
 
+  test("reads its flags from the command line, and a bare command line is the bounded one", async () => {
+    process.env["TEST_PG_URL"] = "postgres://cf_test@127.0.0.1:5433/postgres";
+    const argv = process.argv;
+    const asked: string[] = [];
+    const lines: string[] = [];
+    try {
+      process.argv = [argv[0]!, "pg-clean.ts"];
+      await pgClean(
+        (line) => lines.push(line),
+        undefined,
+        async (clones) => {
+          asked.push(clones);
+          return ["cf_t_1_2_0"];
+        },
+      );
+    } finally {
+      process.argv = argv;
+    }
+    expect(asked).toEqual(["aged"]);
+    expect(lines).toEqual([
+      "Dropped 1 database(s):\n  cf_t_1_2_0",
+      "A database younger than an hour was left, if there was one: it may be a run in flight. `yarn test:pg-clean --all` drops those too.",
+    ]);
+  });
+
   test("lists what it dropped", async () => {
     process.env["TEST_PG_URL"] = "postgres://cf_test@127.0.0.1:5433/postgres";
     const lines: string[] = [];

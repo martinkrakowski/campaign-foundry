@@ -61,6 +61,26 @@
         "keeps the one-hour bound unless --all is given"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/db/__tests__/pg-clean.ts",
+      "before": "  args: readonly string[] = process.argv.slice(2),",
+      "after": "  args: readonly string[] = [\"--all\"],",
+      "because": "The default is what `yarn test:pg-clean` actually runs with: if it carried the flag, every bare run would be the unbounded one while each test that passes its own args stayed green.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/test-database.test.ts",
+        "-t",
+        "reads its flags from the command line, and a bare command line is the bounded one"
+      ],
+      "verdict": "caught"
     }
   ]
 }
