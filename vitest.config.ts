@@ -60,6 +60,7 @@ export default defineConfig({
           // Provide Nitro's auto-imported h3 globals (defineEventHandler, …) so route
           // modules load and can be driven as real Request → Response in tests.
           setupFiles: ["./apps/api/vitest.setup.ts"],
+          globalSetup: ["./apps/api/vitest.global-setup.ts"],
         },
       },
       {
