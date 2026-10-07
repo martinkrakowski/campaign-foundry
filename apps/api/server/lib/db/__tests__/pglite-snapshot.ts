@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { checksum, migrate, type Migration } from "../migrate.js";
@@ -34,13 +33,9 @@ export function snapshotKey(migrations: readonly Migration[], engineVersion: str
     .slice(0, 12);
 }
 
-export function snapshotDir(): string {
-  return join(tmpdir(), "cf-pglite-snapshots");
-}
-
 export function snapshotPaths(
   migrations: readonly Migration[],
-  dir = snapshotDir(),
+  dir: string,
   engineVersion = pgliteEngineVersion(),
 ): SnapshotPaths {
   const key = snapshotKey(migrations, engineVersion);
@@ -93,7 +88,7 @@ declare module "vitest" {
 /** Build both snapshots from one initdb; a key whose files exist is not rebuilt. */
 export async function buildSnapshots(
   migrations: readonly Migration[],
-  dir = snapshotDir(),
+  dir: string,
   engineVersion = pgliteEngineVersion(),
 ): Promise<SnapshotPaths> {
   const paths = snapshotPaths(migrations, dir, engineVersion);

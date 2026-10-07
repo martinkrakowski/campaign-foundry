@@ -1,7 +1,7 @@
 import { describe, test, expect, it, inject, afterEach } from "vitest";
 import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { checksum, loadMigrations, migrate, type Migration } from "../migrate.js";
 import { snapshotKey, buildSnapshots } from "./pglite-snapshot.js";
@@ -59,6 +59,20 @@ describe("pglite snapshot harness", () => {
       expect(provided).toHaveProperty("migrated");
       expect(existsSync(provided!.empty)).toBe(true);
       expect(existsSync(provided!.migrated)).toBe(true);
+    },
+  );
+
+  it.skipIf(process.env["TEST_PG_URL"] !== undefined)(
+    "the snapshots live in a directory made for this run",
+    async () => {
+      const provided = inject("pgliteSnapshots");
+      expect(provided).toBeDefined();
+      const emptyDir = basename(dirname(provided!.empty));
+      const migratedDir = basename(dirname(provided!.migrated));
+      expect(emptyDir).toMatch(/^cf-pglite-snap-/);
+      expect(migratedDir).toMatch(/^cf-pglite-snap-/);
+      expect(emptyDir).not.toBe("cf-pglite-snapshots");
+      expect(migratedDir).not.toBe("cf-pglite-snapshots");
     },
   );
 

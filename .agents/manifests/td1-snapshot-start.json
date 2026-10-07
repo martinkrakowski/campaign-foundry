@@ -8,9 +8,17 @@
       "after": "  await Promise.resolve(migrations);",
       "because": "Skipping migrate() in buildSnapshots means the migrated snapshot has no schema_migrations table, so test 2's select from it fails.",
       "command": [
-        "sh",
-        "-c",
-        "rm -rf /tmp/cf-lanes-m1/cf-pglite-snapshots && env -u TEST_PG_URL TMPDIR=/tmp/cf-lanes-m1 yarn vitest run --project api apps/api/server/lib/db/__tests__/pglite-snapshot.test.ts -t 'migratedDatabase has every shipped migration recorded'"
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/pglite-snapshot.test.ts",
+        "-t",
+        "migratedDatabase has every shipped migration recorded"
       ],
       "verdict": "caught"
     },
@@ -91,6 +99,26 @@
         "apps/api/server/lib/db/__tests__/pglite-snapshot.test.ts",
         "-t",
         "snapshotKey changes when a migration's SQL changes but its id does not"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/vitest.global-setup.ts",
+      "before": "mkdtempSync(join(tmpdir(), \"cf-pglite-snap-\"))",
+      "after": "join(tmpdir(), \"cf-pglite-snapshots\")",
+      "because": "Using a shared directory instead of a per-run mkdtempSync means snapshots persist between runs: a mutated globalSetup can leave or pick up snapshots built by different code.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/pglite-snapshot.test.ts",
+        "-t",
+        "the snapshots live in a directory made for this run"
       ],
       "verdict": "caught"
     }
