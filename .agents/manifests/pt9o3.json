@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "lane": "PT-9o3",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "                const isProtected =\n                  isSelected ||\n                  (protectedRefs ?? []).some((ref) => refMatchesAsset(ref, asset, briefId));",
+      "after": "                const isProtected = isSelected;",
+      "because": "An asset referenced only by another field of the open draft becomes deletable, and the new drawer test fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

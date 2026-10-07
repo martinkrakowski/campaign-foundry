@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Accordion } from "./Accordion";
 import { SidebarShell } from "./SidebarShell";
 import { useEditorPanels, usePanelSink } from "@/lib/editor-panels-context";
@@ -129,15 +129,24 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   })();
   const [assets, setAssets] = useState<AssetEntry[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Keys `onDeleted` has dropped while this campaign's list is in flight: a
+  // late listAssets response is filtered through this set so a delete cannot be
+  // undone by a response that was issued before the delete happened.
+  const deletedKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
     setAssets([]);
+    deletedKeysRef.current.clear();
     const requestedId = brief.id;
     listAssets(requestedId, controller.signal)
       .then((res) => {
-        if (!cancelled && brief.id === requestedId) setAssets(res.assets);
+        if (!cancelled && brief.id === requestedId) {
+          setAssets(
+            res.assets.filter((asset) => !deletedKeysRef.current.has(asset.id ?? asset.name)),
+          );
+        }
       })
       .catch(() => {
         if (!cancelled && brief.id === requestedId) setAssets([]);
@@ -260,9 +269,11 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         briefId={brief.id}
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        onDeleted={(gone) =>
-          setAssets((prev) => prev.filter((a) => (a.id ?? a.name) !== (gone.id ?? gone.name)))
-        }
+        // The Sidebar has no editor state, so unsaved refs are not protected here.
+        onDeleted={(gone) => {
+          deletedKeysRef.current.add(gone.id ?? gone.name);
+          setAssets((prev) => prev.filter((a) => (a.id ?? a.name) !== (gone.id ?? gone.name)));
+        }}
       />
 
       {/* Editor sections the brief page places here — the variation policy. */}

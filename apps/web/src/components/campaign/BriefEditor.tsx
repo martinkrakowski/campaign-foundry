@@ -521,6 +521,31 @@ function collectUnresolvedAssetRefs(
     .sort();
 }
 
+/**
+ * Every asset ref the open draft currently holds — path or id, from all four
+ * fields the brief can name — so the Asset Bin can refuse to delete one another
+ * unsaved field is still pointing at.
+ *
+ * Unlike `collectUnresolvedAssetRefs` (which keeps only ids the listing cannot
+ * name, to decide whether to fetch), this keeps every ref: the bin's protection
+ * is keyed on `refMatchesAsset`, which answers for both an id and a path, so a
+ * path ref in one field must hide the same asset's Delete button too.
+ */
+export function currentAssetRefs(state: EditorState): string[] {
+  const refs: string[] = [];
+  for (const product of state.products) {
+    if (product.logoPath !== undefined && product.logoPath !== "") refs.push(product.logoPath);
+    if (product.inputAsset !== undefined && product.inputAsset !== "")
+      refs.push(product.inputAsset);
+  }
+  for (const beat of state.timeline.beats) {
+    if (beat.background !== undefined && beat.background !== "") refs.push(beat.background);
+  }
+  const audioPath = state.audio?.path;
+  if (audioPath !== undefined && audioPath !== "") refs.push(audioPath);
+  return [...new Set(refs)].sort();
+}
+
 export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const blank = routeId === undefined;
   const { setBrief: setRunBrief, execute } = useRun();
@@ -3415,6 +3440,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                 ? state.products.find((p) => p.key === target.key)?.logoPath
                 : state.timeline.beats[target.index]?.background
             }
+            protectedRefs={currentAssetRefs(state)}
             onSelect={(asset) => {
               // No `target === null` guard here: the narrowing is the mount's, so
               // the type says what the render already guaranteed. A guard would be

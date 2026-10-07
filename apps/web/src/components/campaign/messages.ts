@@ -1923,3 +1923,6 @@ export const assetDeleteFailed = "Could not delete the asset — try again.";
 /** Shown in place of Delete on the asset the form currently holds. */
 export const assetDeleteSelectedHint =
   "Selected in the form — choose another asset to delete this one.";
+/** Shown in place of Delete on an asset another field holds. */
+export const assetDeleteProtectedHint =
+  "Used elsewhere in this brief — remove that use before deleting it.";

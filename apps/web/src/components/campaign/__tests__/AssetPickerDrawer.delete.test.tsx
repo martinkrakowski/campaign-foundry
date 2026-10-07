@@ -1012,4 +1012,108 @@ describe("AssetPickerDrawer delete", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(document.activeElement).not.toBe(screen.getByText("Assets (1)").parentElement);
   });
+
+  test("a protected asset referenced by an unsaved field has no Delete button (PROVE DEFECT)", async () => {
+    route({ lists: [[logo, banner, plain]] });
+    renderDrawer({
+      onSelect: vi.fn(),
+      selectedRef: ID_LOGO,
+      protectedRefs: [ID_BANNER],
+    });
+    await screen.findByText("logo.png");
+
+    // The selected row (logo) has no Delete — already the case today.
+    expect(
+      screen.queryByRole("button", { name: messages.assetDeleteRowLabel("logo.png") }),
+    ).toBeNull();
+
+    // The protected row (banner) also has no Delete — it is held by another
+    // unsaved field, so deleting it would leave that field with a broken ref.
+    expect(
+      screen.queryByRole("button", { name: messages.assetDeleteRowLabel("banner.png") }),
+    ).toBeNull();
+
+    // The third asset (plain) is neither selected nor protected: Delete is present.
+    expect(
+      screen.getByRole("button", { name: messages.assetDeleteRowLabel("plain.png") }),
+    ).toBeTruthy();
+  });
+
+  test("a protected row that is not selected shows the protected hint, not the selected hint", async () => {
+    route({ lists: [[logo, banner]] });
+    renderDrawer({
+      onSelect: vi.fn(),
+      selectedRef: ID_LOGO,
+      protectedRefs: [ID_BANNER],
+    });
+    await screen.findByText("logo.png");
+
+    // The banner row: protected but not selected.
+    const bannerRow = screen.getByTitle("banner.png").closest("li")!;
+    expect(
+      within(bannerRow).queryByRole("button", { name: messages.assetDeleteRowLabel("banner.png") }),
+    ).toBeNull();
+    expect(within(bannerRow).getByText(messages.assetDeleteProtectedHint)).toBeTruthy();
+    expect(within(bannerRow).queryByText(messages.assetDeleteSelectedHint)).toBeNull();
+
+    // The logo row: selected, shows the selected hint.
+    const logoRow = screen.getByTitle("logo.png").closest("li")!;
+    expect(within(logoRow).getByText(messages.assetDeleteSelectedHint)).toBeTruthy();
+    expect(within(logoRow).queryByText(messages.assetDeleteProtectedHint)).toBeNull();
+  });
+
+  test("a selected row that is also in protectedRefs still shows the selected hint", async () => {
+    route({ lists: [[logo, banner]] });
+    renderDrawer({
+      onSelect: vi.fn(),
+      selectedRef: ID_LOGO,
+      // The same ref that is selected is also protected — the selected hint wins.
+      protectedRefs: [ID_LOGO, ID_BANNER],
+    });
+    await screen.findByText("logo.png");
+
+    const logoRow = screen.getByTitle("logo.png").closest("li")!;
+    expect(
+      within(logoRow).queryByRole("button", { name: messages.assetDeleteRowLabel("logo.png") }),
+    ).toBeNull();
+    expect(within(logoRow).getByText(messages.assetDeleteSelectedHint)).toBeTruthy();
+    expect(within(logoRow).queryByText(messages.assetDeleteProtectedHint)).toBeNull();
+  });
+
+  test("a path ref in protectedRefs protects the matching row", async () => {
+    route({ lists: [[logo, plain]] });
+    renderDrawer({
+      onSelect: vi.fn(),
+      selectedRef: ID_LOGO,
+      protectedRefs: ["assets/inputs/camp-1/plain.png"],
+    });
+    await screen.findByText("logo.png");
+
+    // plain.png is protected by its path ref — no Delete.
+    expect(
+      screen.queryByRole("button", { name: messages.assetDeleteRowLabel("plain.png") }),
+    ).toBeNull();
+    expect(screen.getByText(messages.assetDeleteProtectedHint)).toBeTruthy();
+  });
+
+  test("an empty protectedRefs changes nothing for a non-selected row", async () => {
+    route({ lists: [[logo, banner]] });
+    renderDrawer({ onSelect: vi.fn(), selectedRef: ID_LOGO, protectedRefs: [] });
+    await screen.findByText("logo.png");
+
+    // banner is not selected and not protected: Delete is present.
+    expect(
+      screen.getByRole("button", { name: messages.assetDeleteRowLabel("banner.png") }),
+    ).toBeTruthy();
+  });
+
+  test("an absent protectedRefs changes nothing for a non-selected row", async () => {
+    route({ lists: [[logo, banner]] });
+    renderDrawer({ onSelect: vi.fn(), selectedRef: ID_LOGO });
+    await screen.findByText("logo.png");
+
+    expect(
+      screen.getByRole("button", { name: messages.assetDeleteRowLabel("banner.png") }),
+    ).toBeTruthy();
+  });
 });

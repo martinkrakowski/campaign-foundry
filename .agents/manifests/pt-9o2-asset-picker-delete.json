@@ -140,7 +140,7 @@
     },
     {
       "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
-      "before": "const canDelete = !isSelected;",
+      "before": "const canDelete = !isProtected;",
       "after": "const canDelete = true;",
       "because": "PT-9o2 mutation 8: always offer Delete on the selected row, so the hint never appears and the button is offered where the brief forbids it (the selected asset cannot be cleared). FAILS ON: expect(screen.queryByRole(\"button\", { name: messages.assetDeleteRowLabel(\"logo.png\") })).toBeNull()",
       "command": [
@@ -191,7 +191,7 @@
     },
     {
       "file": "apps/web/src/components/shell/Sidebar.tsx",
-      "before": "        onDeleted={(gone) =>\n          setAssets((prev) => prev.filter((a) => (a.id ?? a.name) !== (gone.id ?? gone.name)))\n        }",
+      "before": "        onDeleted={(gone) => {\n          deletedKeysRef.current.add(gone.id ?? gone.name);\n          setAssets((prev) => prev.filter((a) => (a.id ?? a.name) !== (gone.id ?? gone.name)));\n        }}",
       "after": "        onDeleted={undefined}",
       "because": "PT-9o2 mutation 12 (fix round 1): dropping the onDeleted wiring leaves the Project Bin counting the deleted asset. FAILS ON: await waitFor(() => expect(screen.getByText(\"1 asset\")).toBeTruthy())",
       "command": [
