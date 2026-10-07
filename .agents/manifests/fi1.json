@@ -5,8 +5,8 @@
     {
       "file": "apps/web/src/lib/preview-frame.ts",
       "before": "          identityKey ?? request.brief.id,",
-      "after": "          request.brief.id,",
-      "because": "If identity keys on the live slug again, typing Campaign Name on a new draft blanks the painted frame. The regression asserts the img survives those keystrokes; the cell-switch and saved-brief guards still pass because they do not depend on identityKey.",
+      "after": "          brief?.id,",
+      "because": "If the identity fingerprint reads the live `brief.id` instead of `identityKey ?? request.brief.id`, a re-slug of a not-yet-saved draft (a new `brief` reference with a different id) changes the identity and blanks the painted frame. The hook-level regression (usePreviewFrame with a stable identityKey, brief id 's' → 'summer') pins that the frame survives the re-slug; it fails when identity keys on the live slug.",
       "command": [
         "yarn",
         "vitest",
