@@ -251,7 +251,7 @@ describe("yarn test:pg-clean", () => {
     expect(asked).toEqual(["aged", "none"]);
     expect(bounded).toEqual([
       "Nothing to drop on that server.",
-      "A database younger than an hour was left, if there was one: it may be a run in flight. `yarn test:pg-clean --all` drops those too.",
+      "A database younger than an hour was left, if there was one: it may be a run in flight. `yarn test:pg-clean --all` drops those too: never run it while another run is using this server.",
     ]);
     expect(everything).toEqual(["Nothing to drop on that server."]);
   });
@@ -277,7 +277,7 @@ describe("yarn test:pg-clean", () => {
     expect(asked).toEqual(["aged"]);
     expect(lines).toEqual([
       "Dropped 1 database(s):\n  cf_t_1_2_0",
-      "A database younger than an hour was left, if there was one: it may be a run in flight. `yarn test:pg-clean --all` drops those too.",
+      "A database younger than an hour was left, if there was one: it may be a run in flight. `yarn test:pg-clean --all` drops those too: never run it while another run is using this server.",
     ]);
   });
 
