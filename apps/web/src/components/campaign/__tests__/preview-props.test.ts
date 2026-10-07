@@ -256,15 +256,18 @@ describe("previewRailKey — the memo boundary's identity axis (Qodo, caught in 
   });
 
   /**
-   * CodeRabbit, caught in review: `usePreviewFrame`'s own identity tuple
-   * includes `cell.productId` directly, but `productId` here previously fed
-   * ONLY the `previewFetchKey` lookup (the product's colour/logo) — neither
-   * `rawRailProps` (no product id in the look) nor that lookup's result
-   * carries the id itself. So the first product's id changing while its
-   * colour and logo stay put — an ordinary, editable-in-the-editor case —
-   * would not move the key, even though the real `/preview-frame` request
-   * (keyed on `cell.productId`) would ask the server for a different
-   * product than the one still painted.
+   * CodeRabbit, caught in review: `usePreviewFrame`'s identity tuple includes
+   * `cell.productId` directly. `productId` here is only ever used to look up a
+   * product inside `previewFetchKey` (its colour/logo), and #511 (d97dedce) now
+   * lets the look carry its own product's id too — so for a look that matches its
+   * argument the trailing term is redundant. This test isolates the case that
+   * looks redundant but is not: a look whose product id DISAGREES with the
+   * argument. It holds the look constant (p1's, which carries productId) and
+   * gives both briefs the same colour and logo, so JSON.stringify(rawRailProps),
+   * previewFetchKey and identityKey are identical; the trailing `productId` is
+   * then the only input that can distinguish the keys. Drop it (the mutation)
+   * and the two keys collide while the brief and argument still point at
+   * different products.
    */
   test("moves when the first product's id changes even though its colour and logo stay put", () => {
     const rawRailPropsFor = (productId: string) => {
@@ -292,11 +295,13 @@ describe("previewRailKey — the memo boundary's identity axis (Qodo, caught in 
       products: [{ id: productId, name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
     });
 
-    // rawRailProps is IDENTICAL between p1 and p2 (the look carries no
-    // product id — only colour, which is unchanged) — the product id
-    // argument itself is the only thing that can distinguish these calls.
-    const keyA = previewRailKey(rawRailPropsFor("p1"), briefWithProduct("p1"), "p1");
-    const keyB = previewRailKey(rawRailPropsFor("p2"), briefWithProduct("p2"), "p2");
+    // The look DOES carry productId since #511 (d97dedce) put product.id into
+    // rawRailProps, so the shared look below makes JSON.stringify(rawRailProps)
+    // identical between the two calls — isolating the product-id argument (and
+    // the brief) as the only thing that can distinguish them.
+    const sharedLook = rawRailPropsFor("p1");
+    const keyA = previewRailKey(sharedLook, briefWithProduct("p1"), "p1");
+    const keyB = previewRailKey(sharedLook, briefWithProduct("p2"), "p2");
     expect(keyA).not.toBe(keyB);
   });
 });
