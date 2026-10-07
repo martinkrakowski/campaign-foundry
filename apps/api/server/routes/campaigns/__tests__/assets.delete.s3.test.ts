@@ -311,14 +311,14 @@ describe("DELETE /campaigns/assets under s3", () => {
     expect(stored!.brief.products[0].logoPath).toBe(logo);
   });
 
-  test("DELETE /campaigns/assets under s3 frees nothing when the campaign row is gone", async () => {
+  test("DELETE /campaigns/assets under s3 answers 404 and frees nothing when the campaign is tombstoned after the resolve", async () => {
     const assetStore = getAssetStore(owner);
     const real = assetStore.freeUnreferencedAssets.bind(assetStore);
     const beforeRows = await rows("local", "camp");
     const beforeObjects = await objects("local", "camp");
 
     vi.spyOn(assetStore, "freeUnreferencedAssets").mockImplementation(async (campaign, ids) => {
-      // Tombstone AFTER the route's resolve and before the free.
+      // Tombstone AFTER the route's resolve and before the free (D231).
       await harness.db.query(
         "update campaign set deleted_at = now() where org_id = 'local' and slug = $1",
         [campaign],
@@ -327,14 +327,37 @@ describe("DELETE /campaigns/assets under s3", () => {
     });
 
     const res = await del(owner, `briefId=camp&id=${logo}`);
-    // The re-list of a tombstoned campaign answers [], so the route reads the
-    // "still there" arm as 200 — but the bytes never came this route's way.
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ deleted: true });
+    // The re-resolve after the free sees the tombstone and answers the same 404,
+    // so the bytes never come this route's way.
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: `Asset "${logo}" not found.` });
     // The asset row and object STILL EXIST: a tombstoned campaign's bytes belong
     // to the purge, never to this route.
     expect(await rows("local", "camp")).toEqual(beforeRows);
     expect(await objects("local", "camp")).toEqual(beforeObjects);
+    expect(Buffer.from((await store.get(inputKey("local", campId, logo)))!.bytes)).toEqual(PNG);
+    expect(Buffer.from((await store.get(inputKey("local", campId, other)))!.bytes)).toEqual(
+      PNG_ALT,
+    );
+  });
+
+  // --- Batch 5: repeated parameters ---
+
+  test("DELETE /campaigns/assets under s3 answers 400 for a repeated id or name and removes nothing", async () => {
+    const beforeRows = await rows("local", "camp");
+    const beforeObjects = await objects("local", "camp");
+
+    // A repeated `id` beside a single `name` would otherwise ignore the id and
+    // delete by name; a repeated `name` beside a single `id` would ignore the name.
+    const repeatedId = await del(owner, `briefId=camp&id=${logo}&id=${other}&name=logo.png`);
+    expect(repeatedId.status).toBe(400);
+    const repeatedName = await del(owner, `briefId=camp&name=logo.png&name=other.png&id=${logo}`);
+    expect(repeatedName.status).toBe(400);
+
+    // Neither asset row nor object was touched.
+    expect(await rows("local", "camp")).toEqual(beforeRows);
+    expect(await objects("local", "camp")).toEqual(beforeObjects);
+    expect(await getAssetStore(owner).readAssetById(logo)).toEqual(PNG);
     expect(Buffer.from((await store.get(inputKey("local", campId, logo)))!.bytes)).toEqual(PNG);
     expect(Buffer.from((await store.get(inputKey("local", campId, other)))!.bytes)).toEqual(
       PNG_ALT,

@@ -46,6 +46,13 @@ export default defineEventHandler(async (event) => {
     return { error: errorMessage(error) };
   }
 
+  // A repeated `id` or `name` query parameter arrives as an array; this route
+  // takes exactly one string each, so refuse rather than silently drop one side.
+  if (Array.isArray(query.id) || Array.isArray(query.name)) {
+    setResponseStatus(event, 400);
+    return { error: "Give exactly one of id or name." };
+  }
+
   const id = typeof query.id === "string" ? query.id : undefined;
   const name = typeof query.name === "string" ? query.name : undefined;
   if ((id === undefined) === (name === undefined)) {
@@ -111,6 +118,14 @@ export default defineEventHandler(async (event) => {
     if (draft !== undefined && namesAsset(draft.state, names)) return inUse();
 
     await assetStore.freeUnreferencedAssets(slug, [entry.id ?? entry.name]);
+
+    // A tombstone (D231) can land between the route's first resolve and the free —
+    // the purge takes its own lock on the campaign row just before it. Re-resolve
+    // now: a tombstoned campaign answers the same 404 and its bytes stay put,
+    // because they belong to the purge, never to this route.
+    if (briefs.supportsTeams && (await briefs.resolveCampaign(briefId)) === undefined) {
+      return notFound();
+    }
 
     // `freeUnreferencedAssets` answers void and, under s3, keeps an asset that ANY stored
     // version names. Success is what a second listing says, never what the call implied.
