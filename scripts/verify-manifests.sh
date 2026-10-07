@@ -38,7 +38,10 @@ if [ "$MODE" = "list" ]; then
   exec 3>&1 1>&2
 fi
 
-if [ ! -d "$MANIFEST_DIR" ]; then
+# --replay is handed an explicit list, so "no manifests directory" is not "nothing to do" there:
+# it falls through and every listed path is reported as missing. Exiting 0 here would be a replay
+# that silently did not happen.
+if [ ! -d "$MANIFEST_DIR" ] && [ "$MODE" != "replay" ]; then
   echo "verify-manifests: no $MANIFEST_DIR directory; nothing to replay"
   exit 0
 fi

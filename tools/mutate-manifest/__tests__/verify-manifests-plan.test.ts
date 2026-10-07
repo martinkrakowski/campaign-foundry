@@ -214,6 +214,23 @@ describe("verify-manifests.sh --replay", () => {
     expect(r.stderr).toMatch(/no manifest/);
   });
 
+  test("--replay with a listed manifest and no manifests directory fails instead of skipping", () => {
+    const dir = makeDir("replaynodir");
+    setupRepo(dir, { "a.json": makeManifest(1) });
+    rmSync(join(dir, ".agents", "manifests"), { recursive: true, force: true });
+
+    const r = spawnSync("sh", [SCRIPT, "--replay"], {
+      cwd: dir,
+      input: ".agents/manifests/a.json\n",
+      env: { ...process.env, MANIFEST_DIFF_BASE: "HEAD~1" },
+      encoding: "utf8",
+    });
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/does not exist/);
+    expect(r.stdout + r.stderr).not.toMatch(/nothing to replay/);
+  });
+
   test("--replay with non-existent path exits non-zero", () => {
     const dir = makeDir("replaybad");
     setupRepo(dir, { "a.json": makeManifest(1) });
