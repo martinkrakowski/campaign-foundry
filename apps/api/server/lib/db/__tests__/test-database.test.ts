@@ -234,6 +234,63 @@ describe("yarn test:pg-clean", () => {
       "TEST_PG_URL is not set — nothing to clean. Set it to the test server to drop its databases.",
     ]);
   });
+
+  test("keeps the one-hour bound unless --all is given", async () => {
+    process.env["TEST_PG_URL"] = "postgres://cf_test@127.0.0.1:5433/postgres";
+    const asked: string[] = [];
+    const drop = async (clones: "aged" | "none"): Promise<string[]> => {
+      asked.push(clones);
+      return [];
+    };
+
+    const bounded: string[] = [];
+    await pgClean((line) => bounded.push(line), [], drop);
+    const everything: string[] = [];
+    await pgClean((line) => everything.push(line), ["--all"], drop);
+
+    expect(asked).toEqual(["aged", "none"]);
+    expect(bounded).toEqual([
+      "Nothing to drop on that server.",
+      "A database younger than an hour was left, if there was one: it may be a run in flight. `yarn test:pg-clean --all` drops those too.",
+    ]);
+    expect(everything).toEqual(["Nothing to drop on that server."]);
+  });
+
+  test("reads its flags from the command line, and a bare command line is the bounded one", async () => {
+    process.env["TEST_PG_URL"] = "postgres://cf_test@127.0.0.1:5433/postgres";
+    const argv = process.argv;
+    const asked: string[] = [];
+    const lines: string[] = [];
+    try {
+      process.argv = [argv[0]!, "pg-clean.ts"];
+      await pgClean(
+        (line) => lines.push(line),
+        undefined,
+        async (clones) => {
+          asked.push(clones);
+          return ["cf_t_1_2_0"];
+        },
+      );
+    } finally {
+      process.argv = argv;
+    }
+    expect(asked).toEqual(["aged"]);
+    expect(lines).toEqual([
+      "Dropped 1 database(s):\n  cf_t_1_2_0",
+      "A database younger than an hour was left, if there was one: it may be a run in flight. `yarn test:pg-clean --all` drops those too.",
+    ]);
+  });
+
+  test("lists what it dropped", async () => {
+    process.env["TEST_PG_URL"] = "postgres://cf_test@127.0.0.1:5433/postgres";
+    const lines: string[] = [];
+    await pgClean(
+      (line) => lines.push(line),
+      ["--all"],
+      async () => ["cf_t_1_2_0", "cf_t_1_2_1"],
+    );
+    expect(lines).toEqual(["Dropped 2 database(s):\n  cf_t_1_2_0\n  cf_t_1_2_1"]);
+  });
 });
 
 /**
@@ -279,7 +336,7 @@ describe("sweep", () => {
     ];
     const session = fakeSession(rows, () => undefined);
 
-    const dropped = await sweep(session as unknown as pg.Client, "cf_tpl_dummy", false);
+    const dropped = await sweep(session as unknown as pg.Client, "cf_tpl_dummy", "orphaned");
 
     expect(dropped).toEqual([]);
     const scan = session.statements[0]!;
@@ -293,7 +350,7 @@ describe("sweep", () => {
   });
 
   test("survives a 42501 on one row and still visits the next", async () => {
-    // everyClone = true makes the clone eligible without the age/pid guards, so the
+    // "none" makes the clone eligible without the age/pid guards, so the
     // drop runs and the refused-then-plain pair both answer 42501.
     const epoch = Math.floor(Date.now() / 1000) - 4_000;
     const rows: FakeRow[] = [
@@ -306,7 +363,7 @@ describe("sweep", () => {
         : undefined,
     );
 
-    const dropped = await sweep(session as unknown as pg.Client, "cf_tpl_dummy", true);
+    const dropped = await sweep(session as unknown as pg.Client, "cf_tpl_dummy", "none");
 
     expect(dropped).toEqual([]);
     const attempted = session.statements
@@ -317,5 +374,54 @@ describe("sweep", () => {
     expect(new Set(attempted)).toEqual(
       new Set([`cf_t_999999998_${epoch}_0`, `cf_t_999999998_${epoch}_1`]),
     );
+  });
+
+  /** The clone names a sweep tried to drop, in order, once each. */
+  function dropsOf(session: { statements: string[] }): string[] {
+    const names = session.statements
+      .filter((s) => s.startsWith("drop database"))
+      .map((s) => s.match(/"(cf_t_\d+_\d+_\d+)"/)?.[1])
+      .filter(Boolean) as string[];
+    return [...new Set(names)];
+  }
+
+  // Three clones: one made a minute ago, and two made over an hour ago — one by
+  // a pid that is gone and one by this process, which is as alive as a pid gets.
+  function threeClones(): { young: string; oldDead: string; oldAlive: string; rows: FakeRow[] } {
+    const now = Math.floor(Date.now() / 1000);
+    const young = `cf_t_999999998_${now - 60}_0`;
+    const oldDead = `cf_t_999999998_${now - 4_000}_0`;
+    const oldAlive = `cf_t_${process.pid}_${now - 4_000}_0`;
+    const rows = [young, oldDead, oldAlive].map((datname) => ({ datname, description: null }));
+    return { young, oldDead, oldAlive, rows };
+  }
+
+  test("orphaned: takes only a clone an hour old whose pid is gone", async () => {
+    const { oldDead, rows } = threeClones();
+    const session = fakeSession(rows, () => undefined);
+
+    const dropped = await sweep(session as unknown as pg.Client, "cf_tpl_dummy", "orphaned");
+
+    expect(dropped).toEqual([oldDead]);
+    expect(dropsOf(session)).toEqual([oldDead]);
+  });
+
+  test("aged: takes every clone an hour old, whatever its pid, and leaves a younger one", async () => {
+    const { oldDead, oldAlive, rows } = threeClones();
+    const session = fakeSession(rows, () => undefined);
+
+    const dropped = await sweep(session as unknown as pg.Client, "cf_tpl_dummy", "aged");
+
+    expect(dropped).toEqual([oldDead, oldAlive]);
+    expect(dropsOf(session)).toEqual([oldDead, oldAlive]);
+  });
+
+  test("none: takes a clone younger than an hour too", async () => {
+    const { young, oldDead, oldAlive, rows } = threeClones();
+    const session = fakeSession(rows, () => undefined);
+
+    const dropped = await sweep(session as unknown as pg.Client, "cf_tpl_dummy", "none");
+
+    expect(dropped).toEqual([young, oldDead, oldAlive]);
   });
 });
