@@ -1160,32 +1160,32 @@ export function RunProvider({ children }: { children: ReactNode }) {
         // interruption notice below already names the fact and the remedy, so a
         // failed read keeps that notice instead of being conflated with absence.
         //
-      // A 403 no_membership on this re-read is the same fact `setBrief` and the
-      // mount restore already name in `membershipError`, never a nameless failed
-      // read — folding it into `null` (as this used to) hid a real membership
-      // denial behind LOST_JOB_MESSAGE (greptile "membership denial is hidden").
-      // A 404 (PT-9p2) is the same class of fact for deletions: the campaign the
-      // job ran under is gone, so it must not be folded into "could not ask"
-      // either — show the notice, leave the screen, and go to /brief.
-      let deniedMembership = false;
-      let campaignWasDeleted = false;
-      const persisted = await fetchPersistedRun(target.id).catch((err) => {
-        if (isNoMembershipError(err)) deniedMembership = true;
-        if (isDeletedCampaignError(err)) campaignWasDeleted = true;
-        return null;
-      });
-      if (runSeq.current !== owned) return;
-      if (deniedMembership) {
-        setMembershipError(NO_ORGANISATION_YET_MESSAGE);
-        return;
-      }
-      if (campaignWasDeleted) {
-        setDeletedCampaign(DELETED_CAMPAIGN_MESSAGE);
-        setRun(null);
-        router.replace("/brief");
-        return;
-      }
-      if (persisted) setRun({ result: persisted, target });
+        // A 403 no_membership on this re-read is the same fact `setBrief` and the
+        // mount restore already name in `membershipError`, never a nameless failed
+        // read — folding it into `null` (as this used to) hid a real membership
+        // denial behind LOST_JOB_MESSAGE (greptile "membership denial is hidden").
+        // A 404 (PT-9p2) is the same class of fact for deletions: the campaign the
+        // job ran under is gone, so it must not be folded into "could not ask"
+        // either — show the notice, leave the screen, and go to /brief.
+        let deniedMembership = false;
+        let campaignWasDeleted = false;
+        const persisted = await fetchPersistedRun(target.id).catch((err) => {
+          if (isNoMembershipError(err)) deniedMembership = true;
+          if (isDeletedCampaignError(err)) campaignWasDeleted = true;
+          return null;
+        });
+        if (runSeq.current !== owned) return;
+        if (deniedMembership) {
+          setMembershipError(NO_ORGANISATION_YET_MESSAGE);
+          return;
+        }
+        if (campaignWasDeleted) {
+          setDeletedCampaign(DELETED_CAMPAIGN_MESSAGE);
+          setRun(null);
+          router.replace("/brief");
+          return;
+        }
+        if (persisted) setRun({ result: persisted, target });
         setError(LOST_JOB_MESSAGE);
         return;
       }
@@ -1430,7 +1430,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
           .then((d) => {
             if (!mountedRef.current || briefIdRef.current !== next.id || runSeq.current !== owned)
               return; // superseded, or unmounted
-             // A successful read is proof of membership for this brief — heals a stale
+            // A successful read is proof of membership for this brief — heals a stale
             // 403 from an earlier, since-resolved failure (F6: "a later successful
             // fetch heals it"), whether or not this brief happens to have a run on disk.
             setMembershipError(null);
@@ -1476,11 +1476,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const releaseCampaign = useCallback(() => {
     clearRunState();
     briefIdRef.current = DEFAULT_BRIEF.id;
-     setBriefState(DEFAULT_BRIEF);
-     setError(null);
-     setMembershipError(null);
-     setDeletedCampaign(null);
-   }, [clearRunState]);
+    setBriefState(DEFAULT_BRIEF);
+    setError(null);
+    setMembershipError(null);
+  }, [clearRunState]);
 
   // The latest `setBrief`, readable from `openPageCampaign`'s stable closure (the
   // same mirror pattern `loadingRef`/`decisionsRef` use): the page campaign's
@@ -1682,7 +1681,6 @@ export function RunProvider({ children }: { children: ReactNode }) {
           // successful fetch heals it"), whether or not this brief happens to
           // have a run on disk.
           setMembershipError(null);
-          setDeletedCampaign(null); // a 200 heals a stale deletion notice too
           if (!d) return; // no run on disk
           setRun({ result: d, target: startBrief });
           if (d.assets?.length) setAssetVersion((v) => v + 1);
@@ -1695,7 +1693,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
           if (isNoMembershipError(err)) {
             setMembershipError(NO_ORGANISATION_YET_MESSAGE);
           }
-          /* F6: could-not-ask is not absence — restore nothing, claim nothing. */
+          /* PT-9p2: a DeletedCampaignError here is the default brief's own read —
+             it was never "the one open", so do NOT show the notice or navigate.
+             F6: could-not-ask is not absence — restore nothing, claim nothing.
+             A later successful fetch (a run, a re-roll, a brief switch) heals it. */
         });
     });
   }, [adoptJob]);
@@ -1926,16 +1927,16 @@ export function RunProvider({ children }: { children: ReactNode }) {
       let deniedMembership = false;
       let campaignWasDeleted = false;
       /**
-        * A read that never settles is a read whose URLs never get renewed, so this one is
-        * given up on after {@link URL_REFRESH_TIMEOUT_MS}. The abort REJECTS the fetch
-        * (which is how a real `fetch` behaves), the `.catch` below reads it as any other
-        * non-membership failure, and the `finally` re-arms — so a stalled request costs one
-        * tick, not the remaining life of every signature on screen.
-        *
-        * Composed rather than `AbortSignal.timeout` because that one is not drivable by a
-        * fake clock, which would leave this the only line in the effect no test could
-        * reach; the trade is a timer to clear, and the `finally` clears it on every path.
-        */
+       * A read that never settles is a read whose URLs never get renewed, so this one is
+       * given up on after {@link URL_REFRESH_TIMEOUT_MS}. The abort REJECTS the fetch
+       * (which is how a real `fetch` behaves), the `.catch` below reads it as any other
+       * non-membership failure, and the `finally` re-arms — so a stalled request costs one
+       * tick, not the remaining life of every signature on screen.
+       *
+       * Composed rather than `AbortSignal.timeout` because that one is not drivable by a
+       * fake clock, which would leave this the only line in the effect no test could
+       * reach; the trade is a timer to clear, and the `finally` clears it on every path.
+       */
       const giveUp = new AbortController();
       const giveUpTimer = setTimeout(() => giveUp.abort(), URL_REFRESH_TIMEOUT_MS);
       try {
