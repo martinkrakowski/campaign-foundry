@@ -87,6 +87,14 @@ function assertNotReserved(id: string): void {
 }
 
 /**
+ * Shared by every PgBriefStore in this process: an in-process lock chain per
+ * org, then per brief id, so two instances on the same org and brief id
+ * serialise — even when the registry mints them per (org, user). A nested Map
+ * keeps each org's chains isolated, so an org id cannot alias another.
+ */
+const briefLockChains = new Map<string, Map<string, Promise<unknown>>>();
+
+/**
  * Briefs as rows (PT-3d, D168, D169). `campaign` mints the org-scoped surrogate
  * id and carries the slug — still the domain id every route and this port
  * address a brief by (`brief.id`), until PT-5 moves routes to ids. `brief_version`
@@ -104,8 +112,6 @@ function assertNotReserved(id: string): void {
 export class PgBriefStore implements BriefStorePort {
   /** Team columns and `campaignVisibility("hidden")` — see `BriefStorePort.supportsTeams`. */
   readonly supportsTeams = true;
-
-  private readonly lockChains = new Map<string, Promise<unknown>>();
 
   /**
    * `roles` and `teamIds` default to none (an admin-less, team-less caller):
@@ -760,25 +766,36 @@ export class PgBriefStore implements BriefStorePort {
   }
 
   /**
-   * The in-process per-brief chain, unchanged from `FsBriefStore`
-   * (`fs-brief-store.ts:230-242`). Cross-process safety is `rewriteBrief` and
-   * `replaceBrief`'s compare-and-swap plus `createBrief`'s unique key, above —
-   * never a database lock held around `fn`: `fn`'s own store calls run on other
-   * pooled connections and would deadlock against one, which PGlite (one
-   * connection) cannot show. The trade-off this leaves: two users' saves on one
-   * brief serialise only through the compare-and-swap (the loser gets 409), not
-   * through this chain, which only ever sees its own process's callers.
+   * The in-process per-brief chain, shared by every PgBriefStore in this
+   * process through the module-level `briefLockChains` map (keyed by org, then
+   * brief id). The registry still keys a store per (org, user), so two users'
+   * saves on one brief serialise here in-process — but only within one API
+   * process. Cross-process safety is `rewriteBrief` and `replaceBrief`'s
+   * compare-and-swap plus `createBrief`'s unique key, above — never a database
+   * lock held across `fn`: `fn`'s own store calls run on other pooled
+   * connections and would deadlock against one, which PGlite (one connection)
+   * cannot show. Two processes still do not serialise here; the
+   * compare-and-swap (the loser gets 409, D82) is the cross-process rule.
+   *
+   * Not re-entrant by design: a second `withBriefLock` on the same (org, brief
+   * id) from inside `fn` deadlocks on purpose, because `createCampaign` and
+   * `createBrief` do not take the lock and the caller wraps the whole sequence.
    */
   withBriefLock<T>(briefId: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.lockChains.get(briefId) ?? Promise.resolve();
+    let chain = briefLockChains.get(this.orgId);
+    if (chain === undefined) {
+      chain = new Map<string, Promise<unknown>>();
+      briefLockChains.set(this.orgId, chain);
+    }
+    const previous = chain.get(briefId) ?? Promise.resolve();
     const run = previous.then(fn, fn);
     const settled = run.then(
       () => undefined,
       () => undefined,
     );
-    this.lockChains.set(briefId, settled);
+    chain.set(briefId, settled);
     void settled.then(() => {
-      if (this.lockChains.get(briefId) === settled) this.lockChains.delete(briefId);
+      if (chain.get(briefId) === settled) chain.delete(briefId);
     });
     return run;
   }
