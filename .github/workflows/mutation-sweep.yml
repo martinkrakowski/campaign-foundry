@@ -140,11 +140,11 @@ jobs:
     steps:
       - name: Download all legs' failures
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           pattern: sweep-*
           merge-multiple: true
           path: sweep-failures
-          continue-on-error: true
       - name: Report
         if: always()
         env:
@@ -166,9 +166,6 @@ jobs:
               missing=1
             fi
           done < sweep-names.txt
-          if [ "$missing" = "1" ]; then
-            exit 1
-          fi
           printed=
           for f in sweep-failures/*.txt; do
             [ -e "$f" ] || continue
@@ -179,10 +176,6 @@ jobs:
               printed=1
             done < "$f"
           done
-          if [ -n "$printed" ]; then
-            exit 1
-          fi
-          if [ "$REPLAY_RESULT" != "success" ]; then
-            echo "::error::the replay job ended $REPLAY_RESULT"
+          if [ "$missing" = "1" ] || [ -n "$printed" ] || [ "$REPLAY_RESULT" != "success" ]; then
             exit 1
           fi
