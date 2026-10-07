@@ -351,10 +351,7 @@ describe("DELETE /campaigns/assets under s3", () => {
     // delete by name; a repeated `name` beside a single `id` would ignore the name.
     const repeatedId = await del(owner, `briefId=camp&id=${logo}&id=${other}&name=logo.png`);
     expect(repeatedId.status).toBe(400);
-    const repeatedName = await del(
-      owner,
-      `briefId=camp&name=logo.png&name=other.png&id=${logo}`,
-    );
+    const repeatedName = await del(owner, `briefId=camp&name=logo.png&name=other.png&id=${logo}`);
     expect(repeatedName.status).toBe(400);
 
     // Neither asset row nor object was touched.
