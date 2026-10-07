@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "lane": "TD1-snapshot-start",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/db/__tests__/pglite-snapshot.ts",
+      "before": "  await migrate(sqlClientOver(db), migrations);",
+      "after": "  await Promise.resolve(migrations);",
+      "because": "Skipping migrate() in buildSnapshots means the migrated snapshot has no schema_migrations table, so test 2's select from it fails.",
+      "command": [
+        "sh",
+        "-c",
+        "rm -rf /tmp/cf-lanes-m1/cf-pglite-snapshots && env -u TEST_PG_URL TMPDIR=/tmp/cf-lanes-m1 yarn vitest run --project api apps/api/server/lib/db/__tests__/pglite-snapshot.test.ts -t 'migratedDatabase has every shipped migration recorded'"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/db/__tests__/pglite-client.ts",
+      "before": "  return new PGlite(options);",
+      "after": "  return ((globalThis as { cfSharedPglite?: PGlite }).cfSharedPglite ??= new PGlite(options));",
+      "because": "Caching the PGlite instance on globalThis means two migratedDatabase() calls share one instance, so the second sees the first's inserted row and the zero-row assertion fails.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/pglite-snapshot.test.ts",
+        "-t",
+        "two databases from one snapshot are independent"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/db/__tests__/pglite-snapshot.ts",
+      "before": "  const shape = migrations.map((m) => ({ id: m.id, checksum: checksum(m.sql) }));",
+      "after": "  const shape = migrations.map((m) => ({ id: m.id, checksum: checksum(\"\") }));",
+      "because": "Blanking the checksum in snapshotKey means two sets with the same id but different SQL produce the same key, so the key-change assertion fails.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/pglite-snapshot.test.ts",
+        "-t",
+        "snapshotKey changes when a migration's SQL changes but its id does not"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/db/__tests__/pglite-client.ts",
+      "before": "pgliteClient(\"empty\")",
+      "after": "pgliteClient(\"migrated\")",
+      "because": "Loading the migrated snapshot in emptyDatabase() means schema_migrations has rows, failing the zero-count assertion.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/pglite-snapshot.test.ts",
+        "-t",
+        "emptyDatabase has no migration applied"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/db/__tests__/pglite-snapshot.ts",
+      "before": "engine: engineVersion,",
+      "after": "engine: \"\",",
+      "because": "Hardcoding engine to empty string means the version is ignored, so 0.5.8 and 0.5.9 produce the same key, failing the engine-version assertion.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/pglite-snapshot.test.ts",
+        "-t",
+        "snapshotKey changes when a migration's SQL changes but its id does not"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
