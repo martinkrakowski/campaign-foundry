@@ -9,7 +9,7 @@ import {
   nextMock,
   renderWithRun as renderWithShell,
 } from "@/__tests__/helpers";
-import { API, useRun } from "@/lib/run-context";
+import { API, useRun, DEFAULT_BRIEF } from "@/lib/run-context";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
 import { CreateCampaignDialog } from "@/components/shell/CreateCampaignDialog";
@@ -2533,27 +2533,16 @@ describe("BriefPage — capabilities and motion", () => {
    *   so that fresh reference republishes the top panels for nothing —
    *   `touchSectionFromEvent`, three lines above it, already had this exact
    *   guard. Verified directly: reverting just this guard turns this test's
-   *   measured gesture from 3 commits to 5.
+   * measured gesture from 1 commit to 3.
    *
-   * N=3 is what remains, and it is not a BriefEditor effect at all: instrumented
-   * every setState call BriefEditor's effects make (setDirty, setTopPanels,
-   * setPanels, the D35 setDraftRun handoff, setTouched, setTouchedSections) and
-   * confirmed each already bails out correctly on the measured gesture — the
-   * third commit lands before this component's own `dispatch` runs, and before
-   * any of them. A control confirms it is click-side, not keyboard-side: passing
-   * `{ skipClick: true }` (so `userEvent.type` only fires keyboard events, no
-   * pointer events, on an already-focused field) drops it straight to 2, matching
-   * a click. `userEvent.type` always precedes typing with a click sequence
-   * (mousedown/mouseup/click) to establish focus and caret position — modelling a
-   * real user clicking into a field before typing — and that click is on a
-   * controlled `<input>`, which pays a React-internal commit a button's click
-   * never does. Not fixable without decontrolling the field, which would be a
-   * correctness regression (D3's typed value would stop round-tripping through
-   * validation) — out of scope for this lane. N=3 is the honest floor for
-   * "click into a field, then type" — the shape every keystroke in this suite's
-   * `fillValidDraft` actually takes.
+   * N=1 is what remains on the correct code; reverting this guard sends the
+   * gesture straight to 3, and the +2 the guard's removal adds is the only gap
+   * this test pins — a fresh `touched` reference, from re-blurring an
+   * already-touched field, that `visibleErrors` (keying on it by reference)
+   * republishes. The bound below pins that gap, not the historical three this
+   * test once carried.
    */
-  test("a single keystroke into a text field commits the shell at most three times (X32)", async () => {
+  test("a single keystroke into a text field commits the shell at most one time (X32)", async () => {
     const user = userEvent.setup();
     routes({});
     let commits = 0;
@@ -2580,7 +2569,7 @@ describe("BriefPage — capabilities and motion", () => {
     // Leaving Target Region again is the re-blur of an already-touched field this
     // fix targets; typing into Campaign Name is the keystroke being measured.
     await user.type(screen.getByLabelText("Campaign Name"), "q");
-    expect(commits).toBeLessThanOrEqual(3);
+    expect(commits).toBeLessThanOrEqual(1);
   });
 
   /**
@@ -5079,9 +5068,17 @@ describe("BriefPage — the run slot: Validate → Generate (SG9)", () => {
     const post = await waitFor(() => {
       const call = generateCalls(calls)[0];
       expect(call).toBeTruthy();
-      return call as { body?: { id?: string } };
+      return call as { body?: { id?: string; campaignMessage?: string } };
     });
     expect(post.body?.id).toBe("fresh");
+    expect(post.body?.id).not.toBe(DEFAULT_BRIEF.id);
+    // `execute(draftBrief)` POSTs the on-screen draft; a bare `execute()` falls
+    // back to `?? brief` (run-context.tsx:2077), which here is the route-loaded
+    // never-saved brief (id "fresh" but empty fields) — so the id matches either
+    // way and the two checks above pass under the mutation. The mutation is
+    // caught by the BODY, not the id: fillValidDraft set these fields, and the
+    // blank shell brief that `execute()` posts leaves them at "".
+    expect(post.body?.campaignMessage).toBe("Hi");
     // Zero brief writes left the page: run-without-write.
     expect(calls.filter((c) => c.method !== "GET" && c.url.includes("/campaigns/briefs"))).toEqual(
       [],
