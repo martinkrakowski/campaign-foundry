@@ -6751,3 +6751,185 @@ and source formatting, recorded here rather than fixed.
 **Deferred (recorded, not chased):** the near-cap warning test would pass without the code it names; the refused-lane warning does not name the wave; the charter's source scan does not see a namespace import of `child_process` (pre-existing); the near-cap warning repeats every tick.
 
 **Definition of done (plan §4):** `yarn waves:register` exists (the operator appends `--admin-token-file`); a `--watch` push updated the service within one interval and read fresh; a stopped push reads stale after the service's threshold. **Still open:** hexagen-monaco registering and pushing as a second project.
+
+---
+
+## 2026-10-07 — session log catch-up for #696 through #718
+
+The six blocks below are the lanes' own uncommitted session-log entries, copied as they wrote them. This session did not re-run their verification. They cover #689, #693, #695, #696, #707 and #708. The table after them is the orchestrator's list of what is on origin/main from #696 through #718 at `9ff48d29`. Pull requests with a lane block above are not described again. Commits with no pull-request number are reviewer-trial changes that landed on main. There is no #700 in this range.
+
+
+---
+
+## 2026-10-05 — PT-9e1-copy-marks-created
+
+- **Mode:** Implementer
+- **Changes:**
+  - Added `AssetCopyResult` interface (`paths` + `created`) to `asset-store.port.ts`; changed `copyAssets` signature from `Promise<Record<string, string>>` to `Promise<AssetCopyResult>`.
+  - `ObjectAssetStore.copyAssets` now returns `{ paths, created }`; `created.add(assetId)` placed after `if (destination.reused) continue;` so sha-deduped reuses never enter `created`.
+  - `FsAssetStore.copyAssets` now returns `{ paths, created }`; a `reused` flag tracks the plain-candidate and suffixed-candidate byte-match paths; `created.add(destRelPath)` only runs when `!reused`.
+  - Three one-line destructures updated: `brief-asset-refs.ts:270`, `index.post.ts:416`, `duplicate.post.ts:322`.
+  - Updated 4 test files for the new return shape; added pinned tests `copyAssets marks a fresh copy as created` and `copyAssets never marks a sha-deduped reuse as created`.
+  - Created `.agents/manifests/pt-9e1-copy-marks-created.json` with one mutation (swap `created.add` / `reused` check).
+- **Decisions:**
+  - Used `.size).toBe()` instead of vitest's `toHaveSize` on `ReadonlySet` to satisfy `exactOptionalPropertyTypes` typecheck.
+  - Confirmed `briefs.post.ts` and `briefs/[id].put.ts` have no other `.copyAssets(` call sites (grep per item 4).
+  - `create.test.ts:860-865` and `briefs-team.test.ts:702-705` wrap the real call (not bare `{}`), so no change needed.
+- **Left open:**
+  - `object-asset-store.ts` coverage at 90.74% and `asset-store.port.ts` at 50% are pre-existing gaps (uncovered lines are in `writeAsset`, `readAsset`, etc., and the `isAssetId` function — not in the `copyAssets` changes, which are 100% covered).
+
+---
+
+## 2026-10-05 — PT-9e1 fix-round-1 (PR #689)
+
+- **Mode:** Implementer
+- **Changes:**
+  - `fs-asset-store.ts`: `copyAssets` now wraps the decide-write cycle in a `while (true)` loop: the write uses `{ flag: "wx" }` (refuse to overwrite), an `EEXIST` sends the loop back to re-decide for the same file, any other error is rethrown, and a sha-deduped reuse (`reused === true`) breaks before any write. Added `isEexist` helper.
+  - `fs-asset-store.test.ts`: added `vi.mock("node:fs/promises")` with a one-shot `readFile` ENOENT hook (via `vi.hoisted` state `fsRace`) to simulate the upload-race; added two tests: `copyAssets never overwrites or claims a file an upload created mid-copy` and `copyAssets does not rewrite a sha-deduped reuse` (uses `statSync` mtime check).
+  - Manifest: added second mutation dropping `{ flag: "wx" }`, caught by the first test.
+- **Decisions:**
+  - `vi.spyOn` on `node:fs/promises` namespace throws "Module namespace is not configurable in ESM" — used `vi.mock` with `vi.hoisted` state instead.
+  - The race test fails on unfixed code (overwrites upload bytes, asserts `readFileSync` unchanged) and passes with the `wx` fix.
+- **Left open:** none.
+
+
+### PT-9g3-purge-sweep (2026-10-05)
+
+- **Implemented** `apps/api/bin/purge.ts` (`connect`, `sweep`, `main`, entry guard) as one connection per invocation (`max: 1`), mirroring `apps/api/bin/db.ts`; `sweep` claims due rows via the shipped `claimDue` lease and purges them via the shipped `purgeCampaign`, recording per-row failures with `recordFailure` (never re-claiming a failed row until its lease lapses). `main` exits 0 on per-row failure (retried by the next CronJob tick) and exits 1 only on setup failure (USAGE / failed open). `command !== "sweep"` is a plain equality, so PT-9h/9m can add `reconcile`/`org` siblings later.
+- **Added** the root `purge:sweep` script (one line, beside `db:migrate`).
+- **Unit tests** (`apps/api/bin/__tests__/purge.test.ts`): mocked `claimDue`/`listDue`/`recordFailure`/`purgeCampaign`; `connect` mirrors `db.test.ts`; `sweep` covers a purged/retry/throw mix (the mutation witness), an unimplemented org/user row, a null-org campaign row, a thrown purge error (Error and non-Error branches) that does not stop the sweep, and the `MAX_CLAIMS_PER_SWEEP` cap; `main` covers `--dry-run` (empty and non-empty, including the `org —` null-org line) and the real-run summary, plus USAGE on an unknown/missing command. 100% coverage on `purge.ts` (lines/functions/branches/statements; entry guard istanbul-ignored) under both real Postgres and PGlite.
+- **E2E** (`apps/api/server/routes/campaigns/__tests__/purge-engine.e2e.test.ts`): real producer chain (create → upload → brief → generate `?model=procedural` → poll → package → decide → draft) mounted behind one tenant app, then the tombstone + `deletion` row planted by raw SQL and the real `sweep` invoked. Asserts all 10 per-campaign tables empty by BOTH slug and uuid text (20 queries), s3 prefix empty / fs trees gone, slug reuse reads empty (C1), a uuid-addressed run is purged identically (no uuid-keyed orphan), and two `deleteCampaignObjects`/`deleteCampaignRows` interrupt points converge on the next sweep. `describe.each` parameterises `fs` + `s3`.
+- **Mutation** (`.agents/manifests/pt-9g3-purge-sweep.json`): dropping the `if (outcome === "purged")` guard is caught by `sweep purges and counts across a mix of outcomes`. `mutate:verify` reproduces the verdict.
+- **Verification:** `yarn lint` 0 errors; `yarn typecheck` exit 0; `prettier --check` clean; unit coverage 100% (real PG and PGlite); e2e 6/6 on real Postgres (fs and s3) and PGlite (fs). Committed on base `3d0a8880` on `feat/purge-sweep`, 5 files, no push.
+- **Note:** the `connect` test's first `emptyDatabase()` pays PGlite's WASM-init cost (~5 s on this host, no AVX2 — identical to the pre-existing `db.test.ts` connect test), so it is given a 20 s test timeout to pass under PGlite; under real Postgres it runs in ~2.5 s.
+
+### PT-9g3 fix round 1 (PR #693) (2026-10-05)
+
+- **FIX 1** (`apps/api/bin/__tests__/purge.test.ts`, MAX_CLAIMS test): the always-resolving `claim` stub starved vitest's timeout under the no-cap mutant (a synchronous stub resolved on the microtask queue can wedge the worker). Replaced with `vi.fn(async () => (n < MAX * 2 ? deletionRow(\`row-${n++}\`) : undefined))` so a mutant that drops the `for` bound terminates on its own stub and `expect(claim).toHaveBeenCalledTimes(MAX)` fails on its assertion line. `yarn mutate` confirms: removing the bound makes `claim` called 2*MAX+1 times → assertion failure, no hang.
+- **FIX 2** (`purge-engine.e2e.test.ts`, uuid test): added pre-`plantDeletion` `job`/`report` counts by the uuid key with `toBeGreaterThan(0)`, so the post-purge "gone" assertions cannot pass vacuously.
+- **FIX 3** (`purge-engine.e2e.test.ts`, main `describe.each` test): added pre-purge existence proofs — `existsSync`/prefix-list for the objects, and `countRows > 0` for `draft`/`decision`/`report`/`job` on both backends; `asset` counted only under `s3` (FsAssetStore writes files, not rows, under `fs` — covered by the tree-existence check). Also called `assertConverged` (pins `purged_at`) at the end. The fs/s3 path expressions are factored into `fsTrees()`/`s3Prefix()` helpers shared with `assertGone`.
+- **FIX 4** (`purge-engine.e2e.test.ts`): hoisted the four provider-key deletes to a file-level `beforeEach`/`afterEach` (save+restore) so order-independent; removed the per-`describe` copies and `withE2e`'s unneeded `MOTION` save/restore.
+- **Gate:** `yarn typecheck` 0, `yarn lint` 0 errors, `yarn format:check` clean, both test files 17/17 on real Postgres (fs and `OBJECT_STORE=s3`), `yarn mutate:verify` reproduced the caught verdict, `yarn mutate:anchors` exit 0, `yarn lint:arch` exit 0 (the `bin/` import is compliant). Committed `a2dceebb` (two test files only; `.agents/session-log.md` left uncommitted as the running log).
+
+
+---
+
+**Session:** 2026-10-05 — PT-9g4-fs-step2-share-lock: fs purge holds campaign row for share
+
+- **Mode:** Implementer
+- **Changes:**
+  - `apps/api/server/lib/deletion/purge-campaign.ts`: split step 2 into s3 (unchanged, no transaction) and fs (new `db.transaction` that selects the campaign row `FOR SHARE`, uses the locked row's slug, and skips if the row is gone). s3 path and step 3–5 untouched.
+  - `apps/api/server/lib/deletion/__tests__/purge-campaign.objects.test.ts`: added Test 3 (reproduction via a `db.query` seam on `sharesCampaignKey`'s `id <> $2::uuid` query — deletes X, inserts Y with the same slug, plants Y's trees; asserts Y's files survive) and Test 2 (regression — locked row exists, trees freed named by the locked row's slug, `purged_at` set).
+  - `apps/api/server/lib/deletion/__tests__/purge-campaign.fs-lock.concurrency.test.ts` (new): real-Postgres concurrency test, copies the `deletion-store.concurrency.test.ts` harness (own schema, `poolMax: "2"`, pausing client on `/select slug from campaign/`, `Promise.race` on the non-paused `deleteCampaignRows` connection against `sleep(300)`).
+  - `.agents/manifests/pt-9g4-fs-step2-share-lock.json` (new): one mutation (`const locked = rows[0] ?? campaign`), witnessed by Test 3.
+- **Decisions:**
+  - The concurrency race is on the NON-paused connection (A = `deleteCampaignRows`), following the same pattern as `deletion-store.concurrency.test.ts` where the race is on the non-paused `claimDue`. This is what makes the hand-run `for share` mutation observable: without the lock, A settles immediately ("settled" beats `sleep(300)`); with it, A blocks and `sleep(300)` wins ("timeout").
+- **Verified:**
+  - Test 3 fails on old code (ENOENT on Y's files), passes on fixed code.
+  - Test 2 passes on both old and new code.
+  - `yarn mutate:verify` on all three PT-9g manifests: every verdict reproduced.
+  - `yarn mutate:anchors .agents/manifests`: all 848 live anchors resolve, all `-t` patterns select tests.
+  - Hand-run `for share` removal mutation: exit code 1, caught. `expect(outcome).toBe("timeout")` at line 179 fails with `expected 'settled' to be 'timeout'`.
+  - PGlite suite: 45 passed, 2 skipped. Real Postgres Test 1: passed.
+- **Left open:**
+  - The "two concurrent step-2s both hold `FOR SHARE` and may `rm` the same tree at once" case is pre-existing, bounded by the lease retry, and explicitly out of scope (noted in the brief).
+
+
+---
+
+## 2026-10-05 — PT-9f1-request-deletion lane
+
+- **Mode:** Implementer
+- **Changes:**
+  - `apps/api/server/lib/config.ts`: added `purgeGraceHours()` — reads `PURGE_GRACE_HOURS` as a non-negative integer, defaulting to 0; throws on malformed values.
+  - `apps/api/server/lib/__tests__/config.test.ts`: added `describe("purgeGraceHours")` with coverage for default, valid parse, and all rejection branches (negative, float, non-numeric, scientific notation, unsafe integer).
+  - `apps/api/server/lib/deletion/deletion-store.ts`: added `insertCampaignDeletion(db, input)` — inserts a `deletion` row with `kind = 'campaign'`, `subject` as the campaign uuid, and `not_before = now() + grace::interval`; returns the new row's id.
+  - `apps/api/server/lib/deletion/purge-campaign.ts`: extracted `activeJobId(db, orgId, slug, campaignId)` from `hasActiveJob`'s body (same SQL, `select id` instead of `select 1`, `order by seq desc`); `hasActiveJob` now delegates to it.
+  - `apps/api/server/lib/deletion/request.ts` (new): `requestCampaignDeletion(db, request)` — the D235 tombstone transaction. Locks the campaign row `for update`, checks for an active job (D246 dual-key), refuses if `mayDelete` says forbidden, then sets `deleted_at`/`deleted_by` and inserts a `deletion` row in one transaction. Returns `gone` | `forbidden` | `active-job` | `requested`.
+  - `apps/api/server/lib/deletion/__tests__/request.test.ts` (new): 9 PGlite tests covering all return paths, grace-hours `not_before`, rollback on insert failure, dual-key job visibility, cross-org/missing-gone, non-uuid ref, and team-scope authorisation.
+  - `apps/api/server/lib/deletion/__tests__/request.concurrency.test.ts` (new): 2 real-Postgres two-connection tests proving the DELETE ∥ generate mutual exclusion (one wins, the other refuses).
+  - `.agents/manifests/pt-9f1-request-deletion.json` (new): 6 mutation tests, all witnessed by `request.test.ts`.
+- **Decisions:**
+  - Used `order by seq desc` on the active-job query for deterministic `jobId` selection.
+  - `mayDelete` is a callback taking `team_id` from the locked row (no read-then-act gap).
+  - The tombstone guard (`!UUID_PATTERN.test(...)`) returns `gone` before the `::uuid` cast, preventing 22P02.
+- **Verifications (all green):**
+  - PGlite coverage: 107 tests pass; `request.ts`, `deletion-store.ts`, `purge-campaign.ts`, `config.ts` all 100%.
+  - Real-Postgres coverage: 107 tests pass; same 4 files at 100%.
+  - Concurrency tests (real Postgres): 2 passed.
+  - Concurrency skip (no `TEST_DATABASE_URL`): 2 skipped, exit 0.
+  - Manifest replay: 6 mutations caught.
+  - Manifest replays for pt-9g1 (3), pt-9g2 (3), pt-9g4 (1): all reproduced.
+  - By-hand real-Postgres mutations H1 (drop `for update`) and H2 (skip active-job read): both caught.
+  - `yarn typecheck`, `yarn lint` (0 errors), `yarn format:check`: all green.
+  - `yarn mutate:anchors .agents/manifests`: all 633 `-t` patterns select tests, all 854 anchors resolve exactly once.
+- **Commit:** `941c15a1` on top of `542ae3bc`. Never pushed.
+
+
+## PT-9o1-asset-delete-route (implementer lane)
+
+**Who ran it.** One implementer seat, lane branch `feat/asset-delete-route` off `origin/main` f3129772, workspace `/mnt/pool/cloud-services/projects/.worktrees/campaign-foundry/cf-pt9o1`.
+
+**What shipped (new files only).** `apps/api/server/routes/campaigns/assets.delete.ts` (`DELETE /campaigns/assets?briefId=&id=` or `&name=`) plus three test files (fs validation+file store; Postgres+file assets; Postgres+object store) and `.agents/manifests/pt-9o1-asset-delete-route.json`. No existing source file was edited.
+
+**Verification (foreground, exit codes read):**
+- Baseline `yarn build && yarn typecheck` before edits: 0/0; `yarn typecheck` after route: 0.
+- Regression vitest (3 new files + `assets.test.ts`, `assets.get.test.ts`, `assets.postgres.test.ts`, `route-tree.test.ts`, `--tagsFilter '!golden-bytes && !cpu-bound'`): 106 passed, exit 0.
+- Coverage `assets.delete.ts` — real Postgres (`TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres`, `~/.pgpass`): lines 100, statements 100, functions 100, branches 100.
+- Coverage — PGlite (`env -u TEST_PG_URL`): lines 100, statements 100, functions 100, branches 100.
+- `sh scripts/gate-lock.sh run PT-9o1-asset-delete-route -- yarn mutate:verify .agents/manifests/pt-9o1-asset-delete-route.json`: 10/10 mutations re-run, every verdict reproduced (caught), exit 0.
+- `yarn lint`: exit 0 (only pre-existing warnings). `yarn format:check`: exit 0. `yarn mutate:anchors .agents/manifests`: 252 manifests / 960 mutations (910 live, 50 retired), every live anchor resolves exactly once, every `-t` selects a test, exit 0.
+
+**Commit:** `522f67a3 feat(assets): DELETE /campaigns/assets frees one uploaded asset unless a version or the callers draft names it` — exactly the five Owns paths, staged explicitly; not pushed.
+
+**Deferred:** PT-9o2 (web picker delete action) dispatches after merge; PT-9o3 (store `latestOnly` flag) is the documented follow-up for assets named only by an old s3 version.
+
+
+---
+
+## 2026-10-06 — lane PT-9m1-org-tombstone
+
+- **Mode:** Implementer
+- **Changes:**
+  - Migration `0018_org_deleted_at.sql`: `alter table org add column deleted_at timestamptz;` (nullable, no default, no deleted_by, no index).
+  - `membership.ts`: `memberTenant` now joins `org` and filters `o.deleted_at is null`; doc comment extended; the `const member = …` block left byte-identical (the pt-1b1 anchor).
+  - 3 test files (9 tests: 2 migration shape, 4 membership, 3 middleware); 2 are controls by design.
+- **Verification (real PG, TEST_PG_URL set):** command A 136/136 exit 0; coverage (B) → membership.ts 100/100/100/100; `mutate:verify` pt-9m1 6/6 caught + pt-1b1 1/1 reproduced (both gated, exit 0); `mutate:anchors .agents/manifests` exit 0 (956 mutations, every live anchor resolves once); typecheck/lint/format:check all exit 0.
+- **Finding:** command C (`env -u TEST_PG_URL`, PGlite) times out on this host — the documented "5.2–6.5 s per start" limit (test-database.ts:14, brief line 168). The pre-existing `membership.test.ts` fails identically on PGlite here, so it is environmental, not a lane defect; CI runs PGlite on faster runners and the lane host's coverage gate is command B (real PG), which is 100/100/100/100.
+- **Commit:** `0b596ec3` on `feat/org-tombstone`, exactly the 6 Owns paths (verified via `git diff --stat f3129772..HEAD`); no push.
+
+---
+
+## 2026-10-07 — origin/main from #696 through #718
+
+Recorded from `git log` on `9ff48d29`. Subjects are the merge commits. No review findings or test counts are added here.
+
+| PR | Merge SHA | Subject |
+|---|---|---|
+| #696 | 4618c4fa | feat(deletion): requestCampaignDeletion tombstones a campaign and queues its purge |
+| #697 | 48cfe1a3 | fix(deletion): PURGE_GRACE_HOURS is capped at ten years |
+| #698 | e000fc8d | feat(campaigns): DELETE /campaigns/:id tombstones a campaign and queues its purge |
+| — | 9cf8be7d | chore(ci): PR-Agent reviews with Tencent Hy4 preview, on trial |
+| #699 | b21bf437 | feat(deletion): an orphan reconciler lists prefixes and inputs with no row and deletes them only on --apply |
+| #702 | 77b83d84 | feat(deletion): purge.ts cache expires render-cache objects older than thirty days |
+| #701 | 8a360742 | feat(deletion): deleteCampaignOnFileStore removes one campaign's files under the store's locks |
+| #704 | af354fb0 | fix(assets): copyBriefRefs re-checks each copy source after copying and frees what the request created when one became hidden |
+| #703 | f3129772 | feat(brief-picker): delete a campaign from the picker behind a typed-name confirmation |
+| #705 | 0b759fc4 | feat(campaigns): DELETE /campaigns/:id deletes a campaign synchronously on the file store |
+| #706 | 896949e3 | fix(assets): copyAssets frees what it created itself when it throws part-way through a copy |
+| #708 | e1f2bd20 | feat(org): an org can be marked deleted and a deleted org's members resolve no tenant |
+| #707 | ca2db005 | feat(assets): DELETE /campaigns/assets frees one uploaded asset unless a version or the callers draft names it |
+| #709 | f903d7a8 | fix(campaigns): save and put free the assets this request created when the write fails after the copy |
+| #711 | 530f5cda | feat(erasure): eraseUser anonymises a user's actor columns and deletes their identity rows in one transaction |
+| #710 | bcec19ab | feat(gate): a slow lane host can lift the test and hook timeouts with CF_TEST_TIMEOUT_MS |
+| #712 | 58277f95 | fix(campaigns): create frees only the assets this request created when the write fails, and re-checks the source after copying |
+| #713 | a4fa7900 | feat(asset-picker): delete an uploaded asset from the Asset Bin behind a confirmation |
+| — | 00213338 | ci(pr-agent): try DeepSeek Flash (OpenRouter's latest alias) as the reviewer, with Hy4 preview as first fallback |
+| #714 | 47eb29ad | fix(campaigns): duplicate frees only the assets this request created when the write fails |
+| — | 2ac7132d | ci(pr-agent): trial GPT-6.1 Sol against mercury-2 on the automatic reviews by PR number, and put the on-request review back on Hy4 preview |
+| — | c4827e83 | ci(pr-agent): a correctness reviewer on trial against Qodo, GPT-6.1 Sol on even PRs and Hy4 preview on odd, prompt frozen |
+| #715 | 197bfc0e | perf(ci): parallel jobs with sharded tests and merged coverage, one run per PR commit |
+| #716 | 408f3c5e | feat(assets): save-as and put copy only the assets the brief references from a source campaign |
+| #717 | f0614418 | fix(assets): a copy that fails after the exclusive open frees its partial file |
+| #718 | 9ff48d29 | perf(ci): fan the mutation replay out to one runner per changed manifest |
+
