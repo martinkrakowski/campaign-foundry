@@ -498,8 +498,11 @@ Rules:
   never per seat. `tools/gate/lib/max-workers.ts` reads `GATE_HOST_WORKERS` as its fallback, so a project that
   sets no worker cap still spends the host's budget the way the host intends.
 - Tests live <WHERE>, one behaviour per test, no real clock/network/filesystem in unit tests.
-- The database tests run on PGlite unless `TEST_PG_URL` is set. On midnight it should be set, to
-  `TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres`. The server uses SCRAM, so the
+- The database tests run on PGlite unless `TEST_PG_URL` is set. On midnight it should be set, to the
+  shared test server: `TEST_PG_URL=postgres://cf_test@10.60.0.1:5434/cf_home`, with
+  `TEST_DATABASE_URL=postgres://cf_test@10.60.0.1:5434/cf_conc` and `TEST_PG_ALLOW_HOSTS=10.60.0.1`
+  (owner, 2026-10-07; the Postgres inside the lane container, `127.0.0.1:5433/postgres`, is the
+  fallback). The database is `cf_home`, never `postgres`. The server uses SCRAM, so the
   credential comes from the operator's `~/.pgpass` — never in a URL, a brief or an env line.
   Every migrated test database is then a copy of one migrated template (110 ms) instead of a fresh
   PGlite (5.2–6.5 s), and the server-only tests stop skipping themselves. Without it every pg test
