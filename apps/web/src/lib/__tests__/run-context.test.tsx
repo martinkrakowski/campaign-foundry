@@ -7345,4 +7345,220 @@ describe("RunProvider — deleted campaign notice across adoptJob, regenerateRej
     expect(result.current.hasRun).toBe(false);
     expect(result.current.deletedCampaign).toBe(DELETED_CAMPAIGN_MESSAGE);
   });
+
+  test("regenerateRejected: 404 on a versioned page campaign shows notice, resets brief, clears run", async () => {
+    // Flag is TRUE: seedPersistedRun opens a versioned page campaign. The re-roll's
+    // re-read 404s — show the notice, reset to the default brief, clear the run.
+    const seeded = seedPersistedRun([asset()], { id: "reroll-camp" });
+    let deleted = false;
+    mockPipelineApi({
+      opened: seeded,
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ complianceScore: 0.9 })],
+          log: { entries: [], campaignId: "reroll-camp" },
+        }),
+      result: (url) => {
+        if (String(url).includes("/campaigns/jobs")) return json({});
+        if (String(url).includes("campaignId=reroll-camp")) {
+          return deleted
+            ? json({ error: "Campaign not found" }, 404)
+            : json({
+                halted: false,
+                assets: [asset()],
+                log: { entries: [], campaignId: "reroll-camp" },
+              });
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    await waitFor(() => expect(result.current.decisionsLoaded).toBe(true));
+    act(() => result.current.decide("alpha/1:1/default", "rejected"));
+    deleted = true;
+    await act(async () => {
+      await result.current.regenerateRejected();
+    });
+    expect(result.current.deletedCampaign).toBe(DELETED_CAMPAIGN_MESSAGE);
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
+    expect(result.current.hasRun).toBe(false);
+    expect(result.current.error).toBeNull();
+    expect(nextMock().router.replace).toHaveBeenCalledWith("/brief");
+  });
+
+  test("regenerateRejected: 404 on the default brief (flag false) does not show the notice or navigate", async () => {
+    // Flag is FALSE: the default brief is not a versioned page campaign. The
+    // re-read 404s — fall through to the job-payload overlay, no notice.
+    mockPipelineApi({
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset()],
+          log: { entries: [], campaignId: DEFAULT_BRIEF.id },
+        }),
+      result: () => json({ error: "Campaign not found" }, 404),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    await waitFor(() => expect(result.current.decisionsLoaded).toBe(true));
+    act(() => result.current.decide("alpha/1:1/default", "rejected"));
+    await act(async () => {
+      await result.current.regenerateRejected();
+    });
+    expect(result.current.deletedCampaign).toBeNull();
+    expect(result.current.error).toBeNull();
+    expect(result.current.hasRun).toBe(true);
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+  });
+
+  test("adoptJob completed: 404 on the default brief (flag false) commits the job's own result, no notice", async () => {
+    // Flag is FALSE. The job completes but the re-read 404s — commit the
+    // job's own (URL-less) payload, show no notice, navigate nowhere.
+    mockPipelineApi({
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ complianceScore: 0.7 })],
+          log: { entries: [], campaignId: DEFAULT_BRIEF.id },
+        }),
+      result: () => json({ error: "Campaign not found" }, 404),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.deletedCampaign).toBeNull();
+    expect(result.current.hasRun).toBe(true);
+    expect(result.current.error).toBeNull();
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+  });
+
+  test("a signed-URL refresh 404 on the default brief (flag false) does not navigate or show the notice", async () => {
+    // Flag is FALSE: the default brief opened with no versioned page campaign.
+    // The refresh read 404s — heal membership, keep the screen, no notice.
+    vi.useFakeTimers();
+    const first = asset({ productId: "p1", outputPath: "p1/1x1.png" });
+    let read = 0;
+    mockPipelineApi({
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset()],
+          log: { entries: [], campaignId: DEFAULT_BRIEF.id },
+        }),
+      result: (url) => {
+        if (
+          String(url).includes("/campaigns/result") &&
+          String(url).includes(`campaignId=${DEFAULT_BRIEF.id}`)
+        ) {
+          read += 1;
+          if (read === 1) return json(EMPTY_REPORT); // mount restore
+          if (read === 2)
+            return json({
+              halted: false,
+              assets: [{ ...first, ...s3Urls(first, "rev-1") }],
+              log: { entries: [], campaignId: DEFAULT_BRIEF.id },
+            }); // execute re-read
+          return json({ error: "Campaign not found" }, 404); // refresh
+        }
+        if (String(url).includes("/campaigns/jobs")) return json({});
+        return json(EMPTY_REPORT);
+      },
+    });
+    const { result } = setup();
+    // Flush mount restore.
+    for (let i = 0; i < 8; i += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    }
+    expect(read).toBe(1); // mount restore read done
+    // Execute to get a run with s3 URLs on screen (flag stays false).
+    await act(async () => {
+      void result.current.execute();
+    });
+    for (let i = 0; i < 8; i += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    }
+    expect(result.current.assets).toHaveLength(1);
+    // Advance past the refresh interval.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(URL_REFRESH_MS);
+    });
+    for (let i = 0; i < 8; i += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    }
+    expect(result.current.deletedCampaign).toBeNull();
+    expect(result.current.assets).toHaveLength(1);
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+    vi.useRealTimers();
+  });
+
+  test("a versionless page open whose result read 404s does not show the notice or navigate", async () => {
+    // meta.hasVersion === false → setBrief passes hasVersion: false → the flag
+    // stays false. A 404 on the result read is an absent run, not a deletion.
+    const UUID = "018f6d2a-9c3e-7b4a-8d21-3f9e2a5b6c7d";
+    const SLUG = "autumn-launch";
+    const storedBrief = {
+      id: SLUG,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      targetRegion: "DE",
+      targetAudience: "a",
+      campaignMessage: "m",
+      products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+    };
+    window.history.replaceState(null, "", `/grid?campaign=${UUID}`);
+
+    const probe = () => {
+      usePageCampaignParam();
+      return useRun();
+    };
+
+    mockPipelineApi({
+      result: (url) => {
+        if (url === `${API}/campaigns/${UUID}`) {
+          return json({
+            campaignId: UUID,
+            slug: SLUG,
+            name: "Autumn Launch",
+            type: "social-post",
+            hasVersion: false,
+          });
+        }
+        if (url.includes("/campaigns/briefs")) {
+          return json({
+            briefs: [{ file: `${SLUG}.yaml`, campaignId: UUID, brief: storedBrief }],
+          });
+        }
+        if (url.includes("/campaigns/jobs")) return json({});
+        if (url.includes("/campaigns/result")) {
+          return url.includes(`campaignId=${UUID}`)
+            ? json({ error: "Campaign not found" }, 404)
+            : json(EMPTY_REPORT);
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+
+    const { result, unmount } = renderHook(probe, { wrapper });
+    await waitFor(() => expect(result.current.brief.id).toBe(SLUG));
+    expect(result.current.deletedCampaign).toBeNull();
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+    unmount();
+    window.history.replaceState(null, "", "/grid");
+  });
 });
