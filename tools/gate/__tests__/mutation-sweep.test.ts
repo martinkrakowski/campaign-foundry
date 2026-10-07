@@ -77,7 +77,9 @@ describe("the mutation sweep workflow (.github/workflows/mutation-sweep.yml)", (
     const plan = byKey.get("plan");
     expect(plan).toBeDefined();
     const code = plan!.filter((l) => !/^\s*#/.test(l));
-    expect(code.some((l) => l.includes("find .agents/manifests -name '*.json' -type f"))).toBe(true);
+    expect(code.some((l) => l.includes("find .agents/manifests -name '*.json' -type f"))).toBe(
+      true,
+    );
     expect(text).not.toContain("verify-manifests.sh --list");
   });
 
