@@ -231,13 +231,18 @@ describe("the verification block", () => {
   });
 
   test("midnight's test Postgres address is in the midnight block and out of a mac brief", () => {
-    // `127.0.0.1` on the Mac is the Mac, so a mac lane told to set midnight's
-    // address selects the server-only path against a database that is not there.
+    // `10.60.0.1` is the lane containers' bridge on midnight and nothing on the
+    // Mac, so a mac lane told to set it selects the server-only path against a
+    // server it cannot reach.
     // The sentence therefore lives in VERIFICATION_MIDNIGHT, and this asserts on
     // the RENDERED brief rather than on the constant, because the constant
     // appearing in the mac block is only a bug once substitution has put it there.
     const midnight = render({ ...header, host: "midnight" });
-    expect(midnight).toContain("TEST_PG_URL=postgres://cf_test@127.0.0.1:5433/postgres");
+    expect(midnight).toContain("TEST_PG_URL=postgres://cf_test@10.60.0.1:5434/cf_home`");
+    expect(midnight).toContain("TEST_DATABASE_URL=postgres://cf_test@10.60.0.1:5434/cf_conc`");
+    // Without the allow-list the harness refuses a host that is not loopback.
+    expect(midnight).toContain("TEST_PG_ALLOW_HOSTS=10.60.0.1`");
+    expect(midnight).not.toContain("5433");
     // The credential is the operator's, and no doc, brief or env line carries it.
     expect(midnight).toContain("~/.pgpass");
     expect(render({ ...header, host: "mac" })).not.toContain("TEST_PG_URL");
