@@ -12,6 +12,8 @@ import {
   usePageCampaignParam,
   API,
   DEFAULT_BRIEF,
+  DELETED_CAMPAIGN_MESSAGE,
+  DeletedCampaignError,
   assetKey,
   assetCanvas,
   assetLabel,
@@ -45,6 +47,7 @@ import {
   s3Urls,
   FS_REVISION,
 } from "@/__tests__/helpers";
+import { nextMock } from "@/__tests__/helpers";
 import { CommandBar } from "@/components/shell/CommandBar";
 
 const wrapper = ({ children }: { children: ReactNode }) =>
@@ -145,9 +148,9 @@ describe("fetchPersistedRun — could not ask vs there is nothing (D83/F6)", () 
     await expect(fetchPersistedRun("seed")).resolves.toBeNull();
   });
 
-  test("a 404 from the server resolves as an absent run (PT-2b)", async () => {
+  test("a 404 from the server throws DeletedCampaignError (PT-9p2)", async () => {
     mockPipelineApi({ result: () => json({ error: "Campaign not found" }, 404) });
-    await expect(fetchPersistedRun("seed")).resolves.toBeNull();
+    await expect(fetchPersistedRun("seed")).rejects.toThrow(DeletedCampaignError);
   });
 
   test("a 200 carrying the campaign's own run resolves with it", async () => {
@@ -7049,5 +7052,513 @@ describe("RunProvider — signed URL refresh (PT-4g3)", () => {
     const reads = readsFor("seed");
     await advance(60 * 60_000);
     expect(readsFor("seed")).toBe(reads);
+  });
+
+  test("a 404 on a refresh navigates to /brief and shows the deleted-campaign notice", async () => {
+    // PT-9p2: a 404 from result.read means campaignKnown rejected the campaign — it was
+    // deleted while it was open. The screen must leave, /brief must be shown, and the
+    // notice must appear — not a "no run on disk" silence, and not a pipeline error.
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    let deleted = false;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        return deleted
+          ? json({ error: "Campaign not found" }, 404)
+          : onDisk("seed", [signed(first, "rev-1")]);
+      },
+    });
+
+    const { result } = setup();
+    await settle();
+    // The campaign is open on screen with a run.
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.deletedCampaign).toBeNull();
+
+    deleted = true;
+    await advance(URL_REFRESH_MS);
+
+    // Navigated away and the notice is shown.
+    expect(nextMock().router.replace).toHaveBeenCalledWith("/brief");
+    expect(result.current.deletedCampaign).toBe(DELETED_CAMPAIGN_MESSAGE);
+    // The run — and the grid's claim to a campaign — is cleared.
+    expect(result.current.hasRun).toBe(false);
+  });
+
+  test("a 200 empty result on a refresh does not navigate or show the notice", async () => {
+    // A 200 whose body carries no run for this campaign is a LIVE campaign that simply
+    // has not been run — never a deletion. The screen holds.
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    let absent = false;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        return absent ? json(EMPTY_REPORT) : onDisk("seed", [signed(first, "rev-1")]);
+      },
+    });
+
+    const { result } = setup();
+    await settle();
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.deletedCampaign).toBeNull();
+
+    absent = true;
+    await advance(URL_REFRESH_MS);
+    await settle();
+
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+    expect(result.current.deletedCampaign).toBeNull();
+    // The screen held — a live campaign with no run stays on screen.
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+  });
+
+  test("a 500 on a refresh does not navigate or show the notice", async () => {
+    // PT-9p2: only a 404 means deletion. A 500 is a failed read (F6) — the screen
+    // holds and retries on the next tick, exactly as the existing F6 test covers.
+    // This asserts the negative: no navigation, no notice.
+    vi.useFakeTimers();
+    const first = row();
+    const seeded = seedPersistedRun([first]);
+    let broken = false;
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (!String(url).includes("/campaigns/result?campaignId=seed")) return onDisk("seed", []);
+        return broken ? json({ error: "boom" }, 500) : onDisk("seed", [signed(first, "rev-1")]);
+      },
+    });
+
+    const { result } = setup();
+    await settle();
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.deletedCampaign).toBeNull();
+
+    broken = true;
+    await advance(URL_REFRESH_MS);
+    await settle();
+
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+    expect(result.current.deletedCampaign).toBeNull();
+    // The screen held — a failed read is not a deletion.
+    expect(result.current.assets).toHaveLength(1);
+    expect(result.current.assets[0].outputUrl).toBe(s3Urls(first, "rev-1").outputUrl);
+  });
+});
+
+describe("RunProvider — deleted campaign notice across adoptJob, regenerateRejected and setBrief (PT-9p2)", () => {
+  test("a lost job whose re-read 404s on a versioned page campaign shows the notice, not LOST_JOB_MESSAGE", async () => {
+    // The campaign was opened as a versioned page campaign. The job is lost
+    // (404 on poll) AND the re-read 404s — campaignKnown rejected it, so it was
+    // deleted while the run was in flight. Show the notice, not LOST_JOB_MESSAGE.
+    const seeded = seedPersistedRun([asset()], { id: "page-camp" });
+    let deleted = false;
+    mockPipelineApi({
+      opened: seeded,
+      job: () => json({ error: "not found" }, 404),
+      result: (url) => {
+        if (String(url).includes("/campaigns/jobs")) return json({});
+        if (String(url).includes("campaignId=page-camp")) {
+          return deleted
+            ? json({ error: "Campaign not found" }, 404)
+            : json({
+                halted: false,
+                assets: [asset()],
+                log: { entries: [], campaignId: "page-camp" },
+              });
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+    const { result } = setup();
+    // Wait for the versioned page-campaign open to complete (sets the flag).
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    deleted = true; // flip the re-read to 404 before execute()
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.deletedCampaign).toBe(DELETED_CAMPAIGN_MESSAGE);
+    expect(result.current.error).toBeNull();
+    expect(result.current.hasRun).toBe(false);
+    expect(nextMock().router.replace).toHaveBeenCalledWith("/brief");
+  });
+
+  test("a completed job whose re-read 404s on a versioned page campaign shows the notice, not the job's partial payload", async () => {
+    const seeded = seedPersistedRun([asset()], { id: "page-camp" });
+    let deleted = false;
+    mockPipelineApi({
+      opened: seeded,
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ complianceScore: 0.9 })],
+          log: { entries: [], campaignId: "page-camp" },
+        }),
+      result: (url) => {
+        if (String(url).includes("/campaigns/jobs")) return json({});
+        if (String(url).includes("campaignId=page-camp")) {
+          return deleted
+            ? json({ error: "Campaign not found" }, 404)
+            : json({
+                halted: false,
+                assets: [asset()],
+                log: { entries: [], campaignId: "page-camp" },
+              });
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    deleted = true;
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.deletedCampaign).toBe(DELETED_CAMPAIGN_MESSAGE);
+    expect(result.current.error).toBeNull();
+    expect(result.current.hasRun).toBe(false);
+    expect(nextMock().router.replace).toHaveBeenCalledWith("/brief");
+  });
+
+  test("a lost job on the default brief whose re-read 404s still shows LOST_JOB_MESSAGE, not the notice", async () => {
+    // The default brief is never "the one open": a 404 on its result read is an
+    // absent run, not a deletion. The job is lost, so show LOST_JOB_MESSAGE.
+    mockPipelineApi({
+      job: () => json({ error: "not found" }, 404),
+      result: () => json({ error: "Campaign not found" }, 404),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.deletedCampaign).toBeNull();
+    expect(result.current.error).toMatch(/Run was interrupted/);
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+  });
+
+  test("setBrief with no page param treats a result 404 as an absent run — no notice, no navigation", async () => {
+    // A brief committed from the picker/editor (no page param) that 404s on the
+    // result read is a campaign with no run on disk — NOT a deletion. Only a
+    // versioned page campaign (page set with hasVersion) shows the notice.
+    mockPipelineApi({
+      result: () => json({ error: "Campaign not found" }, 404),
+    });
+    const { result } = setup();
+    act(() => {
+      result.current.setBrief({
+        schemaVersion: BRIEF_SCHEMA_VERSION,
+        template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        id: "picked-brief",
+        targetRegion: "US",
+        targetAudience: "x",
+        campaignMessage: "y",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "a.png" }],
+      });
+    });
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([url]) =>
+            String(url).includes(`/campaigns/result?campaignId=picked-brief`),
+          ),
+      ),
+    );
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.deletedCampaign).toBeNull();
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+  });
+
+  test("a 404 on the default brief's result read does not navigate or show the notice", async () => {
+    // No pointer → restoreDefaultBrief → fetchPersistedRun for DEFAULT_BRIEF 404s.
+    // The default brief is never "the one open", so this is just an absent run.
+    mockPipelineApi({
+      result: () => json({ error: "Campaign not found" }, 404),
+    });
+    const { result } = setup();
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(globalThis.fetch)
+          .mock.calls.some(([url]) =>
+            String(url).includes(`/campaigns/result?campaignId=${DEFAULT_BRIEF.id}`),
+          ),
+      ),
+    );
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(result.current.deletedCampaign).toBeNull();
+    expect(result.current.hasRun).toBe(false);
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+  });
+
+  test("after a page-campaign 404 the brief resets to default and a late 200 does not restore the deleted run", async () => {
+    // releaseCampaign() bumps runSeq and resets briefIdRef to the default, so a
+    // persisted-run .then that resolves AFTER the 404 is superseded — its assets
+    // never come back on screen.
+    const seeded = seedPersistedRun([asset()], { id: "page-camp" });
+    mockPipelineApi({
+      opened: seeded,
+      result: (url) => {
+        if (String(url).includes("/campaigns/jobs")) return json({});
+        if (String(url).includes("campaignId=page-camp")) {
+          return json({ error: "Campaign not found" }, 404);
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.deletedCampaign).toBe(DELETED_CAMPAIGN_MESSAGE));
+    // releaseCampaign() ran inside the 404 handler:
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
+    expect(result.current.hasRun).toBe(false);
+    expect(nextMock().router.replace).toHaveBeenCalledWith("/brief");
+
+    // A 200 for the deleted campaign's result — a read that resolves now — must
+    // not put the deleted run back: briefIdRef is the default, runSeq was bumped.
+    mockPipelineApi({
+      result: () =>
+        json({
+          halted: false,
+          assets: [asset({ productId: "p-restored" })],
+          log: { entries: [], campaignId: "page-camp" },
+        }),
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    // Still on the default brief, still no run, still showing the notice.
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
+    expect(result.current.hasRun).toBe(false);
+    expect(result.current.deletedCampaign).toBe(DELETED_CAMPAIGN_MESSAGE);
+  });
+
+  test("regenerateRejected: 404 on a versioned page campaign shows notice, resets brief, clears run", async () => {
+    // Flag is TRUE: seedPersistedRun opens a versioned page campaign. The re-roll's
+    // re-read 404s — show the notice, reset to the default brief, clear the run.
+    const seeded = seedPersistedRun([asset()], { id: "reroll-camp" });
+    let deleted = false;
+    mockPipelineApi({
+      opened: seeded,
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ complianceScore: 0.9 })],
+          log: { entries: [], campaignId: "reroll-camp" },
+        }),
+      result: (url) => {
+        if (String(url).includes("/campaigns/jobs")) return json({});
+        if (String(url).includes("campaignId=reroll-camp")) {
+          return deleted
+            ? json({ error: "Campaign not found" }, 404)
+            : json({
+                halted: false,
+                assets: [asset()],
+                log: { entries: [], campaignId: "reroll-camp" },
+              });
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.assets).toHaveLength(1));
+    await waitFor(() => expect(result.current.decisionsLoaded).toBe(true));
+    act(() => result.current.decide("alpha/1:1/default", "rejected"));
+    deleted = true;
+    await act(async () => {
+      await result.current.regenerateRejected();
+    });
+    expect(result.current.deletedCampaign).toBe(DELETED_CAMPAIGN_MESSAGE);
+    expect(result.current.brief.id).toBe(DEFAULT_BRIEF.id);
+    expect(result.current.hasRun).toBe(false);
+    expect(result.current.error).toBeNull();
+    expect(nextMock().router.replace).toHaveBeenCalledWith("/brief");
+  });
+
+  test("regenerateRejected: 404 on the default brief (flag false) does not show the notice or navigate", async () => {
+    // Flag is FALSE: the default brief is not a versioned page campaign. The
+    // re-read 404s — fall through to the job-payload overlay, no notice.
+    mockPipelineApi({
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset()],
+          log: { entries: [], campaignId: DEFAULT_BRIEF.id },
+        }),
+      result: () => json({ error: "Campaign not found" }, 404),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.execute();
+    });
+    await waitFor(() => expect(result.current.decisionsLoaded).toBe(true));
+    act(() => result.current.decide("alpha/1:1/default", "rejected"));
+    await act(async () => {
+      await result.current.regenerateRejected();
+    });
+    expect(result.current.deletedCampaign).toBeNull();
+    expect(result.current.error).toBeNull();
+    expect(result.current.hasRun).toBe(true);
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+  });
+
+  test("adoptJob completed: 404 on the default brief (flag false) commits the job's own result, no notice", async () => {
+    // Flag is FALSE. The job completes but the re-read 404s — commit the
+    // job's own (URL-less) payload, show no notice, navigate nowhere.
+    mockPipelineApi({
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset({ complianceScore: 0.7 })],
+          log: { entries: [], campaignId: DEFAULT_BRIEF.id },
+        }),
+      result: () => json({ error: "Campaign not found" }, 404),
+    });
+    const { result } = setup();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await act(async () => {
+      await result.current.execute();
+    });
+    expect(result.current.deletedCampaign).toBeNull();
+    expect(result.current.hasRun).toBe(true);
+    expect(result.current.error).toBeNull();
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+  });
+
+  test("a signed-URL refresh 404 on the default brief (flag false) does not navigate or show the notice", async () => {
+    // Flag is FALSE: the default brief opened with no versioned page campaign.
+    // The refresh read 404s — heal membership, keep the screen, no notice.
+    vi.useFakeTimers();
+    const first = asset({ productId: "p1", outputPath: "p1/1x1.png" });
+    let read = 0;
+    mockPipelineApi({
+      post: () => json({ jobId: "job-1" }, 202),
+      job: () =>
+        jobOk({
+          halted: false,
+          assets: [asset()],
+          log: { entries: [], campaignId: DEFAULT_BRIEF.id },
+        }),
+      result: (url) => {
+        if (
+          String(url).includes("/campaigns/result") &&
+          String(url).includes(`campaignId=${DEFAULT_BRIEF.id}`)
+        ) {
+          read += 1;
+          if (read === 1) return json(EMPTY_REPORT); // mount restore
+          if (read === 2)
+            return json({
+              halted: false,
+              assets: [{ ...first, ...s3Urls(first, "rev-1") }],
+              log: { entries: [], campaignId: DEFAULT_BRIEF.id },
+            }); // execute re-read
+          return json({ error: "Campaign not found" }, 404); // refresh
+        }
+        if (String(url).includes("/campaigns/jobs")) return json({});
+        return json(EMPTY_REPORT);
+      },
+    });
+    const { result } = setup();
+    // Flush mount restore.
+    for (let i = 0; i < 8; i += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    }
+    expect(read).toBe(1); // mount restore read done
+    // Execute to get a run with s3 URLs on screen (flag stays false).
+    await act(async () => {
+      void result.current.execute();
+    });
+    for (let i = 0; i < 8; i += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    }
+    expect(result.current.assets).toHaveLength(1);
+    // Advance past the refresh interval.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(URL_REFRESH_MS);
+    });
+    for (let i = 0; i < 8; i += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    }
+    expect(result.current.deletedCampaign).toBeNull();
+    expect(result.current.assets).toHaveLength(1);
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+    vi.useRealTimers();
+  });
+
+  test("a versionless page open whose result read 404s does not show the notice or navigate", async () => {
+    // meta.hasVersion === false → setBrief passes hasVersion: false → the flag
+    // stays false. A 404 on the result read is an absent run, not a deletion.
+    const UUID = "018f6d2a-9c3e-7b4a-8d21-3f9e2a5b6c7d";
+    const SLUG = "autumn-launch";
+    const storedBrief = {
+      id: SLUG,
+      template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+      targetRegion: "DE",
+      targetAudience: "a",
+      campaignMessage: "m",
+      products: [{ id: "alpha", name: "Alpha", primaryColor: "#1473E6", logoPath: "a.png" }],
+    };
+    window.history.replaceState(null, "", `/grid?campaign=${UUID}`);
+
+    const probe = () => {
+      usePageCampaignParam();
+      return useRun();
+    };
+
+    mockPipelineApi({
+      result: (url) => {
+        if (url === `${API}/campaigns/${UUID}`) {
+          return json({
+            campaignId: UUID,
+            slug: SLUG,
+            name: "Autumn Launch",
+            type: "social-post",
+            hasVersion: false,
+          });
+        }
+        if (url.includes("/campaigns/briefs")) {
+          return json({
+            briefs: [{ file: `${SLUG}.yaml`, campaignId: UUID, brief: storedBrief }],
+          });
+        }
+        if (url.includes("/campaigns/jobs")) return json({});
+        if (url.includes("/campaigns/result")) {
+          return url.includes(`campaignId=${UUID}`)
+            ? json({ error: "Campaign not found" }, 404)
+            : json(EMPTY_REPORT);
+        }
+        return json(EMPTY_REPORT);
+      },
+    });
+
+    const { result, unmount } = renderHook(probe, { wrapper });
+    await waitFor(() => expect(result.current.brief.id).toBe(SLUG));
+    expect(result.current.deletedCampaign).toBeNull();
+    expect(nextMock().router.replace).not.toHaveBeenCalledWith("/brief");
+    unmount();
+    window.history.replaceState(null, "", "/grid");
   });
 });

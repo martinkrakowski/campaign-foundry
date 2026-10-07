@@ -38,6 +38,36 @@ export { NO_ORGANISATION_YET_MESSAGE, NoMembershipError, isNoMembershipError };
 /** Base path for the Nitro pipeline API (proxied by next.config rewrites). */
 export const API = "/api/pipeline";
 
+/** Shown by DeletedCampaignNotice when the open campaign was deleted by another user (PT-9p2). */
+export const DELETED_CAMPAIGN_MESSAGE = "This campaign was deleted.";
+
+/**
+ * Thrown by {@link fetchPersistedRun} when `GET /campaigns/result` answers 404 —
+ * `campaignKnown` rejected the campaign, meaning it was deleted or is hidden by
+ * team (PT-9a1, PT-9p2). Distinct from a 200 with no run: a 200 is a live campaign
+ * that simply has not been run yet, and a thrown error (network, 500) is a failed
+ * read. Only a 404 for the campaign that is open means it is no longer visible.
+ */
+export class DeletedCampaignError extends Error {
+  readonly code = "deleted" as const;
+
+  constructor() {
+    super(DELETED_CAMPAIGN_MESSAGE);
+    this.name = "DeletedCampaignError";
+    Object.setPrototypeOf(this, DeletedCampaignError.prototype);
+  }
+}
+
+/** Narrow an error to {@link DeletedCampaignError} without importing the class. */
+export function isDeletedCampaignError(error: unknown): error is DeletedCampaignError {
+  return (
+    error instanceof DeletedCampaignError ||
+    (typeof error === "object" &&
+      error !== null &&
+      (error as { code?: unknown }).code === "deleted")
+  );
+}
+
 /** One rendered creative, as returned by the pipeline run report. */
 export interface Asset {
   productId: string;
@@ -376,7 +406,7 @@ export async function fetchPersistedRun(
     // signatures with no tick left to replace them.
     ...(signal === undefined ? {} : { signal }),
   });
-  if (res.status === 404) return null;
+  if (res.status === 404) throw new DeletedCampaignError();
   if (!res.ok) {
     const raw = await res.text();
     const data = parseJson(raw);
@@ -854,6 +884,13 @@ interface RunContextValue {
    * fixed `NO_ORGANISATION_YET_MESSAGE` regardless of how the server worded it.
    */
   membershipError: string | null;
+  /**
+   * The open campaign was deleted by another member while this page held it
+   * (PT-9p2). Shows a notice and releases the screen to `/brief`. Null when the
+   * campaign is visible — including the default brief, which is never "the one
+   * open" and whose 404 is an absent run, not a deletion.
+   */
+  deletedCampaign: string | null;
   hasRun: boolean;
   decisions: Record<string, Decision>;
   decide: (key: string, decision: Decision) => void;
@@ -988,6 +1025,7 @@ interface CommittedRun {
 const RunContext = createContext<RunContextValue | null>(null);
 
 export function RunProvider({ children }: { children: ReactNode }) {
+  const router = useRouter();
   const [brief, setBriefState] = useState<CampaignBrief>(DEFAULT_BRIEF);
   const [run, setRun] = useState<CommittedRun | null>(null);
   const [decisions, setDecisions] = useState<Record<string, Decision>>({});
@@ -997,6 +1035,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
   const [progress, setProgress] = useState<RunProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [membershipError, setMembershipError] = useState<string | null>(null);
+  const [deletedCampaign, setDeletedCampaign] = useState<string | null>(null);
   const [assetVersion, setAssetVersion] = useState(0);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [regeneratingKeys, setRegeneratingKeys] = useState<ReadonlySet<string> | null>(null);
@@ -1066,6 +1105,13 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // in supersedes the one before it, so a slow resolution cannot land on a page
   // the user has already left.
   const pageCampaignSeq = useRef(0);
+  // PT-9p2: whether the campaign on screen was a versioned page campaign
+  // (open via ?campaign= whose meta.hasVersion is true). Only that campaign's 404
+  // on the result read is a deletion — a versionless campaign, the default brief,
+  // or an unsaved draft that 404s is just "no run on disk". Set by setBrief when
+  // page has hasVersion; cleared by releaseCampaign and when setBrief commits
+  // without a page.
+  const pageCampaignHasVersionRef = useRef(false);
   const packageSignal = (): AbortSignal => {
     packageAbort.current ??= new AbortController();
     return packageAbort.current.signal;
@@ -1125,15 +1171,31 @@ export function RunProvider({ children }: { children: ReactNode }) {
         // mount restore already name in `membershipError`, never a nameless failed
         // read — folding it into `null` (as this used to) hid a real membership
         // denial behind LOST_JOB_MESSAGE (greptile "membership denial is hidden").
+        // A 404 (PT-9p2) is the same class of fact for deletions: the campaign the
+        // job ran under is gone, so it must not be folded into "could not ask"
+        // either — show the notice, leave the screen, and go to /brief.
         let deniedMembership = false;
+        let campaignWasDeleted = false;
         const persisted = await fetchPersistedRun(target.id).catch((err) => {
           if (isNoMembershipError(err)) deniedMembership = true;
+          if (isDeletedCampaignError(err)) campaignWasDeleted = true;
           return null;
         });
         if (runSeq.current !== owned) return;
         if (deniedMembership) {
           setMembershipError(NO_ORGANISATION_YET_MESSAGE);
           return;
+        }
+        if (campaignWasDeleted) {
+          setMembershipError(null);
+          if (pageCampaignHasVersionRef.current) {
+            releaseCampaign();
+            setDeletedCampaign(DELETED_CAMPAIGN_MESSAGE);
+            router.replace("/brief");
+            return;
+          }
+          // Not a versioned page campaign — a 404 is just an absent re-read.
+          // Fall through to LOST_JOB_MESSAGE below.
         }
         if (persisted) setRun({ result: persisted, target });
         setError(LOST_JOB_MESSAGE);
@@ -1144,9 +1206,14 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // (possibly partial, for a re-roll) payload and heal the notice below, both
       // dishonest when the read that would justify either one just failed with a
       // membership denial (greptile "membership denial is hidden").
+      // PT-9p2: a 404 is the same kind of definitive answer for deletions — the
+      // campaign the job ran under is gone. Show the notice and go to /brief
+      // rather than committing the job's URL-less payload.
       let deniedMembership = false;
+      let campaignWasDeleted = false;
       const persisted = await fetchPersistedRun(target.id).catch((err) => {
         if (isNoMembershipError(err)) deniedMembership = true;
+        if (isDeletedCampaignError(err)) campaignWasDeleted = true;
         return null;
       });
       if (runSeq.current !== owned) return;
@@ -1154,6 +1221,17 @@ export function RunProvider({ children }: { children: ReactNode }) {
         // Show the denial, commit nothing, leave the grid exactly as it was.
         setMembershipError(NO_ORGANISATION_YET_MESSAGE);
         return;
+      }
+      if (campaignWasDeleted) {
+        setMembershipError(null);
+        if (pageCampaignHasVersionRef.current) {
+          releaseCampaign();
+          setDeletedCampaign(DELETED_CAMPAIGN_MESSAGE);
+          router.replace("/brief");
+          return;
+        }
+        // Not a versioned page campaign — a 404 is an absent re-read. Fall through
+        // to the existing completed logic (commit the job's own result if any).
       }
       if (persisted) {
         // A re-roll's own completed payload (`outcome.result.assets`) carries only
@@ -1279,7 +1357,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
   // persisted-run read adopts a report keyed by the page's slug, while the shell
   // keeps keying on the brief (whose id is the slug, both backends — D179).
   const setBrief = useCallback(
-    (next: CampaignBrief, page?: { fetchId: string; slug: string }) => {
+    (next: CampaignBrief, page?: { fetchId: string; slug: string; hasVersion: boolean }) => {
       // A deliberate commit made WITHOUT a page (the picker's select, the editor's
       // Save, a template pin) supersedes any `openPageCampaign` resolution still in
       // flight for this shell — the same way a newer page-campaign open supersedes
@@ -1290,11 +1368,13 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // is set) must not bump this — it is that resolution completing, not a newer
       // one superseding it.
       if (!page) pageCampaignSeq.current += 1;
+      pageCampaignHasVersionRef.current = page ? page.hasVersion : false;
       briefIdRef.current = next.id;
       briefDecidedRef.current = true;
       setBriefState(next);
       setError(null);
       setMembershipError(null);
+      setDeletedCampaign(null);
       // Record the last-opened campaign on the SERVER (PT-5e, D173, D180), so a
       // reload and a second device both come back to it — which is the whole
       // point of the move off `cf:brief`, a record only the browser that wrote
@@ -1372,6 +1452,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
             // 403 from an earlier, since-resolved failure (F6: "a later successful
             // fetch heals it"), whether or not this brief happens to have a run on disk.
             setMembershipError(null);
+            setDeletedCampaign(null); // a 200 heals a stale deletion notice too
             if (!d) return; // no run on disk
             setRun({ result: d, target: next });
             if (d.assets?.length) setAssetVersion((v) => v + 1);
@@ -1387,7 +1468,20 @@ export function RunProvider({ children }: { children: ReactNode }) {
               setMembershipError(NO_ORGANISATION_YET_MESSAGE);
             }
             /* F6: could-not-ask is not absence — restore nothing, claim nothing. A
-               later successful fetch (a run, a re-roll, a brief switch) heals it. */
+               later successful fetch (a run, a re-roll, a brief switch) heals it.
+               PT-9p2: a 404 is an authorised answer — heals a stale membership
+               error, just as a 200 does. Only a VERSIONED page campaign (page set
+               with hasVersion) shows the notice: a versionless campaign, the
+               default brief, or a picker/editor commit that 404s is just an absent
+               run, not a deletion. */
+            if (isDeletedCampaignError(err)) {
+              setMembershipError(null);
+            }
+            if (isDeletedCampaignError(err) && page?.hasVersion) {
+              releaseCampaign();
+              setDeletedCampaign(DELETED_CAMPAIGN_MESSAGE);
+              router.replace("/brief");
+            }
           });
       });
     },
@@ -1408,6 +1502,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
     setBriefState(DEFAULT_BRIEF);
     setError(null);
     setMembershipError(null);
+    pageCampaignHasVersionRef.current = false;
   }, [clearRunState]);
 
   // The latest `setBrief`, readable from `openPageCampaign`'s stable closure (the
@@ -1524,7 +1619,11 @@ export function RunProvider({ children }: { children: ReactNode }) {
             campaignMessage: "",
             products: [],
           };
-          setBriefRef.current(brief, { fetchId: meta.campaignId, slug: meta.slug });
+          setBriefRef.current(brief, {
+            fetchId: meta.campaignId,
+            slug: meta.slug,
+            hasVersion: meta.hasVersion,
+          });
         })
         .catch((err) => {
           if (pageCampaignSuperseded(owned)) return;
@@ -1622,7 +1721,12 @@ export function RunProvider({ children }: { children: ReactNode }) {
           if (isNoMembershipError(err)) {
             setMembershipError(NO_ORGANISATION_YET_MESSAGE);
           }
-          /* F6: could-not-ask is not absence — restore nothing, claim nothing. */
+          // PT-9p2 finding 4: a 404 is an authorised answer — heals a stale
+          // membership error, just as a 200 does. This is the default brief's own
+          // read, so it does NOT show the notice or navigate.
+          if (isDeletedCampaignError(err)) {
+            setMembershipError(null);
+          }
         });
     });
   }, [adoptJob]);
@@ -1851,6 +1955,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       const owned = runSeq.current;
       inFlight = true;
       let deniedMembership = false;
+      let campaignWasDeleted = false;
       /**
        * A read that never settles is a read whose URLs never get renewed, so this one is
        * given up on after {@link URL_REFRESH_TIMEOUT_MS}. The abort REJECTS the fetch
@@ -1872,6 +1977,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
         const d = await fetchPersistedRun(issued.target.id, undefined, giveUp.signal).catch(
           (err) => {
             if (isNoMembershipError(err)) deniedMembership = true;
+            // PT-9p2: a 404 means the campaign was deleted while it was open. Flag it
+            // and fall through to the handler below — do NOT treat it as "no run on
+            // disk", or the member stays on the screen of a campaign someone deleted.
+            if (isDeletedCampaignError(err)) campaignWasDeleted = true;
             return null;
           },
         );
@@ -1892,6 +2001,20 @@ export function RunProvider({ children }: { children: ReactNode }) {
           // The same read failing for the same reason as `adoptJob`'s re-read, so the
           // same answer: show the denial, leave the grid exactly as it was.
           setMembershipError(NO_ORGANISATION_YET_MESSAGE);
+          return;
+        }
+        // PT-9p2: a 404 on the result read means the campaign the member had open
+        // was deleted by another user — but only for a versioned page campaign.
+        // A 404 is an authorised answer, so it heals a stale membership error;
+        // only a versioned page campaign (hasVersion set by openPageCampaign)
+        // navigates and shows the notice.
+        if (campaignWasDeleted) {
+          setMembershipError(null);
+          if (pageCampaignHasVersionRef.current) {
+            releaseCampaign();
+            setDeletedCampaign(DELETED_CAMPAIGN_MESSAGE);
+            router.replace("/brief");
+          }
           return;
         }
         // A 200 that named no run for this campaign, or a failure that is not a
@@ -2195,8 +2318,10 @@ export function RunProvider({ children }: { children: ReactNode }) {
       // it — the re-read would pass every assertion on state and be gone from the
       // screen (Gemini brief review r2).
       let deniedMembership = false;
+      let campaignWasDeleted = false;
       const persisted = await fetchPersistedRun(target.id).catch((err) => {
         if (isNoMembershipError(err)) deniedMembership = true;
+        if (isDeletedCampaignError(err)) campaignWasDeleted = true;
         return null;
       });
       if (runSeq.current !== owned) return; // a brief switch (or newer run) superseded this
@@ -2205,6 +2330,17 @@ export function RunProvider({ children }: { children: ReactNode }) {
         // as in `adoptJob`, because it is the same read failing for the same reason.
         setMembershipError(NO_ORGANISATION_YET_MESSAGE);
         return;
+      }
+      if (campaignWasDeleted) {
+        setMembershipError(null);
+        if (pageCampaignHasVersionRef.current) {
+          releaseCampaign();
+          setDeletedCampaign(DELETED_CAMPAIGN_MESSAGE);
+          router.replace("/brief");
+          return;
+        }
+        // Not a versioned page campaign — a 404 is an absent re-read. Fall through
+        // to the existing re-roll logic (commit the job's own result or overlay).
       }
       if (persisted) {
         // The whole server-merged report, beside the recorded target — which is
@@ -2396,6 +2532,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       progress,
       error,
       membershipError,
+      deletedCampaign,
       hasRun: run !== null,
       decisions,
       decide,
@@ -2440,6 +2577,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
       progress,
       error,
       membershipError,
+      deletedCampaign,
       decisions,
       decide,
       decisionsNotice,
