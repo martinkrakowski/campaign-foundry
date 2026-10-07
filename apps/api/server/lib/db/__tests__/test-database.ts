@@ -227,17 +227,30 @@ export function processAlive(pid: number): boolean {
  * template for migrations this branch no longer ships expires.
  */
 export async function dropOrphans(currentTemplate: string): Promise<string[]> {
-  return dropHarnessDatabases(currentTemplate, false);
+  return dropHarnessDatabases(currentTemplate, "orphaned");
 }
 
 /**
- * Every `cf_t_*` the server holds, and every stale `cf_tpl_*` — what
- * `yarn test:pg-clean` runs when automatic cleanup's bounds are the wrong
- * bounds, because a run was killed hard enough to leave a database younger than
- * an hour and somebody has said out loud that nothing is using that server.
+ * Which `cf_t_*` clones a sweep may take. `orphaned`: an hour old AND its pid
+ * gone — the unattended bound. `aged`: an hour old, whatever its pid — the
+ * on-demand bound, because the pid in a name belongs to whichever host or
+ * container made it and says nothing on this one. `none`: every clone.
  */
-export async function dropEveryTestDatabase(): Promise<string[]> {
-  return dropHarnessDatabases("", true);
+export type CloneBound = "orphaned" | "aged" | "none";
+
+/**
+ * Every `cf_t_*` an hour old, and every stale `cf_tpl_*` — what
+ * `yarn test:pg-clean` runs when automatic cleanup's bounds are the wrong
+ * bounds, because the run that made a database was on another host and its pid
+ * cannot be read here. A clone younger than an hour is still left: a run in
+ * flight on a shared server looks exactly like that, and dropping it fails that
+ * run with "database does not exist". `none` lifts the age bound too, for when
+ * somebody has said out loud that nothing is using that server.
+ */
+export async function dropEveryTestDatabase(
+  clones: Exclude<CloneBound, "orphaned"> = "aged",
+): Promise<string[]> {
+  return dropHarnessDatabases("", clones);
 }
 
 /**
@@ -251,9 +264,10 @@ async function untemplate(session: pg.Client, name: string): Promise<void> {
 }
 
 /**
- * `everyClone` is the difference between the two callers: automatic cleanup
+ * `clones` is the difference between the two callers: automatic cleanup
  * respects the age and pid bounds below, because it runs unattended against a
- * server other runs may be using, and the on-demand script does not.
+ * server other runs may be using; the on-demand script keeps the age bound and
+ * drops the pid one, and drops both only when asked for everything.
  *
  * A sweep that is not part of a build takes `TEMPLATE_LOCK` first, so it cannot
  * run beside a build and read its half-written template as stale. The one that
@@ -264,12 +278,12 @@ async function untemplate(session: pg.Client, name: string): Promise<void> {
  */
 async function dropHarnessDatabases(
   currentTemplate: string,
-  everyClone: boolean,
+  clones: CloneBound,
 ): Promise<string[]> {
   const session = await maintenanceSession();
   try {
     await session.query("select pg_advisory_lock($1)", [TEMPLATE_LOCK]);
-    return await sweep(session, currentTemplate, everyClone);
+    return await sweep(session, currentTemplate, clones);
   } finally {
     await session.query("select pg_advisory_unlock($1)", [TEMPLATE_LOCK]).catch(() => undefined);
     await session.end();
@@ -280,7 +294,7 @@ async function dropHarnessDatabases(
 export async function sweep(
   session: pg.Client,
   currentTemplate: string,
-  everyClone: boolean,
+  clones: CloneBound,
 ): Promise<string[]> {
   const dropped: string[] = [];
   const { rows } = await session.query<{ datname: string; description: string | null }>(
@@ -309,10 +323,8 @@ export async function sweep(
       if (datname === currentTemplate) continue;
       const clone = CLONE_NAME.exec(datname);
       if (clone) {
-        if (!everyClone) {
-          if (now - Number(clone[2]) <= ORPHAN_MAX_AGE_S) continue;
-          if (processAlive(Number(clone[1]))) continue;
-        }
+        if (clones !== "none" && now - Number(clone[2]) <= ORPHAN_MAX_AGE_S) continue;
+        if (clones === "orphaned" && processAlive(Number(clone[1]))) continue;
       } else if (!TEMPLATE_NAME.test(datname)) {
         // Not a name this harness builds. Left alone rather than interpolated
         // into a DROP it has no business running.
@@ -384,7 +396,7 @@ async function buildTemplate(
   name: string,
   shipped: readonly Migration[],
 ): Promise<string> {
-  await sweep(session, name, false);
+  await sweep(session, name, "orphaned");
   const existing = await session.query<{ datistemplate: boolean; description: string | null }>(
     "select d.datistemplate, s.description from pg_database d left join pg_shdescription s" +
       " on s.objoid = d.oid and s.classoid = 'pg_database'::regclass where d.datname = $1",
