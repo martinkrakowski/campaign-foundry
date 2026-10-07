@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { open, writeFile } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FsAssetStore } from "../fs-asset-store.js";
@@ -22,6 +23,11 @@ const fsRace = vi.hoisted(() => ({
   failed: false,
   writeErrorPath: "",
   writeErrorCode: "",
+  openErrorPath: "",
+  openErrorCode: "",
+  handleWriteErrorPath: "",
+  handleWriteErrorCode: "",
+  handleCloses: 0,
 }));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -51,6 +57,33 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       }
       return (actual.writeFile as (...args: unknown[]) => Promise<unknown>)(...args);
     }),
+    open: vi.fn(async (...args: unknown[]) => {
+      const path = args[0];
+      if (fsRace.openErrorPath !== "" && path === fsRace.openErrorPath) {
+        const err = new Error(`${fsRace.openErrorCode}: planted`) as Error & { code: string };
+        err.code = fsRace.openErrorCode;
+        throw err;
+      }
+      const handle = await (actual.open as (...args: unknown[]) => Promise<FileHandle>)(...args);
+      if (fsRace.handleWriteErrorPath !== "" && path === fsRace.handleWriteErrorPath) {
+        return {
+          // Write a few real bytes first, so a partial file is on disk, then fail.
+          writeFile: async (data: unknown) => {
+            await handle.writeFile(Buffer.from(data as Uint8Array).subarray(0, 2));
+            const err = new Error(`${fsRace.handleWriteErrorCode}: planted`) as Error & {
+              code: string;
+            };
+            err.code = fsRace.handleWriteErrorCode;
+            throw err;
+          },
+          close: () => {
+            fsRace.handleCloses += 1;
+            return handle.close();
+          },
+        } as never;
+      }
+      return handle;
+    }),
   };
 });
 
@@ -70,6 +103,11 @@ describe("FsAssetStore", () => {
     fsRace.failed = false;
     fsRace.writeErrorPath = "";
     fsRace.writeErrorCode = "";
+    fsRace.openErrorPath = "";
+    fsRace.openErrorCode = "";
+    fsRace.handleWriteErrorPath = "";
+    fsRace.handleWriteErrorCode = "";
+    fsRace.handleCloses = 0;
   });
 
   test("getBaseDir returns base directory", () => {
@@ -388,12 +426,36 @@ describe("FsAssetStore", () => {
     // Only EEXIST means "an upload got here first, decide again"; any other write
     // failure (here a planted EACCES) is the copy's own error and must surface.
     await store.writeAsset("src-wfail", "logo.png", pngBytes);
-    fsRace.writeErrorPath = join(dir, "dst-wfail", "logo.png");
-    fsRace.writeErrorCode = "EACCES";
+    fsRace.openErrorPath = join(dir, "dst-wfail", "logo.png");
+    fsRace.openErrorCode = "EACCES";
 
     await expect(store.copyAssets("src-wfail", "dst-wfail")).rejects.toMatchObject({
       code: "EACCES",
     });
+  }, 5_000);
+
+  test("copyAssets frees a file whose write failed after the exclusive open", async () => {
+    // One file, so "freed with exactly that path" is unambiguous. The plant lets the
+    // open succeed (the file is created, two real bytes land) and then fails the
+    // handle's write with ENOSPC: the partial file must not outlive the call.
+    await store.writeAsset("src-enospc", "logo.png", pngBytes);
+    const partialPath = join(dir, "dst-enospc", "logo.png");
+    fsRace.handleWriteErrorPath = partialPath;
+    fsRace.handleWriteErrorCode = "ENOSPC";
+    const freeSpy = vi.spyOn(FsAssetStore.prototype, "freeUnreferencedAssets");
+    try {
+      await expect(store.copyAssets("src-enospc", "dst-enospc")).rejects.toMatchObject({
+        code: "ENOSPC",
+      });
+      expect(freeSpy).toHaveBeenCalledTimes(1);
+      expect(freeSpy).toHaveBeenCalledWith("dst-enospc", ["logo.png"]);
+      expect(existsSync(partialPath)).toBe(false);
+      // The handle is closed although its write threw: a leaked descriptor would pass every
+      // other assertion here.
+      expect(fsRace.handleCloses).toBe(1);
+    } finally {
+      freeSpy.mockRestore();
+    }
   }, 5_000);
 
   test("copyAssets rejects a disambiguation candidate that is a directory", async () => {
@@ -413,14 +475,14 @@ describe("FsAssetStore", () => {
     await store.writeAsset("target-reuse", "logo.png", pngBytes);
 
     const reusedPath = join(dir, "target-reuse", "logo.png");
-    vi.mocked(writeFile).mockClear();
+    vi.mocked(open).mockClear();
 
     const { paths, created } = await store.copyAssets("src-reuse", "target-reuse");
 
     // No write happened to the reused path: the copy's read found matching bytes
     // and skipped the write. Asserted on the call itself, not `mtimeMs`, which a
     // same-tick rewrite on a coarse-timestamp filesystem would leave unchanged.
-    expect(vi.mocked(writeFile).mock.calls.some((call) => call[0] === reusedPath)).toBe(false);
+    expect(vi.mocked(open).mock.calls.some((call) => call[0] === reusedPath)).toBe(false);
     // The reused path is NOT in created.
     expect(created.has("logo.png")).toBe(false);
     // paths still maps correctly (the name maps to itself).

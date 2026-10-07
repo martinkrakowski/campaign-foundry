@@ -211,7 +211,7 @@ export interface AssetStorePort {
    * the caller (every production caller does), which rules out a second WRITE
    * request touching this brief. The one writer the lock does NOT reach is an
    * upload (`assets.post.ts`, no brief lock) — safe for a different reason:
-   * `copyAssets` writes every path it hands back with `{ flag: "wx" }`, an
+   * `copyAssets` opens every path it hands back with `wx`, an
    * exclusive create, so a same-named upload racing it gets `EEXIST` rather
    * than silently taking the path over. A path this method is handed was
    * minted by THIS call and nothing has written over it since.

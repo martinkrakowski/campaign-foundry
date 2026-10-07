@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
 import { resolveConfined } from "../confined-path.js";
 import { ASSET_NAME_PATTERN, assetContentType } from "../asset-files.js";
@@ -13,7 +13,7 @@ import type {
 
 /**
  * Whether an error is the fs error `code` names. `copyAssets` needs two: `EEXIST`,
- * the one a `{ flag: "wx" }` write throws when an upload raced in between our read
+ * the one an exclusive `wx` open throws when an upload raced in between our read
  * and our write; and `ENOENT`, the only read failure that means "nothing is here".
  * Any other read failure (`EISDIR`, `EACCES`) must propagate: read as "absent",
  * an `EISDIR` destination makes every `wx` write answer `EEXIST` and the
@@ -149,10 +149,7 @@ export class FsAssetStore implements AssetStorePort {
     // throw part-way through still knows what the call had already made. The files
     // written before the failing one are removed (they were minted by this call with
     // `wx`) before the error is rethrown.
-    // Accepted residual: a `wx` write whose open succeeded and whose write then
-    // failed (ENOSPC, EIO) leaves a partial file that is not in `created`, so it
-    // is not freed here; adding the path on an arbitrary write error could name a
-    // file this call did not create.
+    // A path is in `created` from the moment its file exists, so a write that fails after the open is freed too.
     const created = new Set<string>();
     try {
       return await this.copyAssetsInto(fromBriefId, toBriefId, created, options?.only);
@@ -269,7 +266,16 @@ export class FsAssetStore implements AssetStorePort {
         try {
           // `wx` not `w`: an upload may have appeared at this path since the
           // read above (uploads take no brief lock, `assets.post.ts:105`).
-          await writeFile(destPath, srcBytes, { flag: "wx" });
+          // A returned handle proves this call created the file, so the path is
+          // in `created` from here on: a write that fails after the open (ENOSPC,
+          // EIO) leaves a partial file that the wrapper's free still removes.
+          const handle = await open(destPath, "wx");
+          created.add(destRelPath);
+          try {
+            await handle.writeFile(srcBytes);
+          } finally {
+            await handle.close();
+          }
           break;
         } catch (error) {
           if (hasErrorCode(error, "EEXIST")) continue;
@@ -277,7 +283,6 @@ export class FsAssetStore implements AssetStorePort {
         }
       }
 
-      if (!reused) created.add(destRelPath);
       pathMap[relPath] = destRelPath;
       pathMap[`assets/inputs/${fromBriefId}/${relPath}`] =
         `assets/inputs/${toBriefId}/${destRelPath}`;
