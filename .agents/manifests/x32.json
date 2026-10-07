@@ -15,7 +15,7 @@
         "web",
         "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
         "-t",
-        "a single keystroke into a text field commits the shell at most three times"
+        "a single keystroke into a text field commits the shell at most one time"
       ],
       "verdict": "caught"
     }

@@ -72,18 +72,18 @@
     },
     {
       "file": "apps/web/src/components/campaign/editor-state.ts",
-      "before": "      if (overridden) next.props = props;\n      else delete next.props;",
-      "after": "      next.props = props;",
-      "because": "X16's exact failure, reintroduced: clearing every override leaves `props: {}` on the layer instead of dropping the key, which LOOKS identical in the sheet (every field reads back at its brief default) and is a real, different brief on disk — a loaded snapshot with no `props` key now saves with an empty one, which is not the shape it was opened with. Every control still round-trips VALUES correctly, so a test that only re-read the props object after a set-then-clear would miss this if it accepted `{}` as equivalent to absent. Caught by asserting the exact key is gone (`\"props\" in layer === false`) and, separately, by `toBrief` deep-equality against the ORIGINAL brief rather than a re-derived one — the pair the brief's acceptance names.",
+      "before": "  if (Object.keys(kept).length === 0) return undefined;",
+      "after": "  if (false && Object.keys(kept).length === 0) return undefined;",
+      "because": "The original pin targeted `setLayerProps`' own `else delete next.props`, but that line is equivalent under mutation: `canonicalLayer(next)` runs on the lines immediately after and itself drops an empty `props` block, so removing the local `else` changes nothing — the result keeps `props: {}` anyway, the mutant compiles, and `toBrief` is byte-identical (a guard elsewhere absorbs it). The behaviour this pin was meant to catch still exists; it now lives in `canonicalProps`, the SE2 seam added by 14b0f4e9 (\"a prop that says nothing is dropped\"), so the pin is re-pointed to its `if (Object.keys(kept).length === 0) return undefined;`. With that guard disabled, `canonicalProps({})` returns the still-empty `kept` object instead of `undefined`, `canonicalLayer` no longer strips it, and the layer keeps `props: {}` — so `expect(Object.hasOwn(layerOf(out, 0), \"props\")).toBe(false)` (editor-state.canonical-props.test.ts:18) fails. The witness asserts the exact key is gone, not merely that values round-trip, which is the only distinction the original `else delete` mutation could not make.",
       "command": [
         "yarn",
         "vitest",
         "run",
         "--project",
         "web",
-        "apps/web/src/components/campaign/__tests__/editor-state.layer-props.test.ts",
+        "apps/web/src/components/campaign/__tests__/editor-state.canonical-props.test.ts",
         "-t",
-        "a single prop: the layer, and the whole serialised brief, return exactly as loaded"
+        "an empty props block is the same as no block"
       ],
       "verdict": "caught"
     },
