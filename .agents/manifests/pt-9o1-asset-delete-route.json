@@ -171,6 +171,23 @@
         "DELETE /campaigns/assets on the file store answers 409 when the saved brief names the asset by a non-canonical path"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/assets.delete.ts",
+      "before": "if (briefs.supportsTeams && (await briefs.resolveCampaign(briefId)) === undefined) {",
+      "after": "if (false) {",
+      "because": "Taking the re-resolve out lets a tombstone landed during the free pass silently: the route re-lists a tombstoned campaign as [] and reads the still-there arm as 200, so it frees nothing yet answers 200 instead of the 404 a gone campaign owes. FAILS ON: expect(res.status).toBe(404);",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/assets.delete.s3.test.ts",
+        "-t",
+        "DELETE /campaigns/assets under s3 answers 404 and frees nothing when the campaign is tombstoned after the resolve"
+      ],
+      "verdict": "caught"
     }
   ]
 }
