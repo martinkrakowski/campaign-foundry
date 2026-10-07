@@ -13,8 +13,15 @@ import { buildSnapshots } from "./server/lib/db/__tests__/pglite-snapshot.js";
 export default async function setup(project: TestProject): Promise<void | (() => void)> {
   if (process.env["TEST_PG_URL"]) return;
   const dir = mkdtempSync(join(tmpdir(), "cf-pglite-snap-"));
-  project.provide("pgliteSnapshots", await buildSnapshots(await loadMigrations(), dir));
-  return () => rmSync(dir, { recursive: true, force: true });
+  const remove = (): void => rmSync(dir, { recursive: true, force: true });
+  try {
+    project.provide("pgliteSnapshots", await buildSnapshots(await loadMigrations(), dir));
+  } catch (error) {
+    // No teardown is registered for a setup that threw: remove the directory here.
+    remove();
+    throw error;
+  }
+  return remove;
 }
 
 declare module "vitest" {

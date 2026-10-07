@@ -90,21 +90,26 @@ describe("pglite snapshot harness", () => {
     let dir: string;
     afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-    test("reuses files for the same set and writes new files for an edited one", async () => {
-      dir = mkdtempSync(join(tmpdir(), "cf-snap-"));
-      const migrations = await loadMigrations();
-      const first = await buildSnapshots(migrations, dir);
-      const mtimeBefore = statSync(first.migrated).mtimeMs;
-      const second = await buildSnapshots(migrations, dir);
-      const mtimeAfter = statSync(second.migrated).mtimeMs;
-      expect(mtimeBefore).toBe(mtimeAfter);
-      const edited = migrations.map((mig) =>
-        mig.id === "0001_org" ? { ...mig, sql: mig.sql + "\n-- edited" } : mig,
-      );
-      const third = await buildSnapshots(edited, dir);
-      expect(third.migrated).not.toBe(first.migrated);
-      expect(existsSync(third.migrated)).toBe(true);
-    });
+    // Two engine starts from nothing (the original set and the edited one): past the 5 s default on a CI runner.
+    test(
+      "reuses files for the same set and writes new files for an edited one",
+      { timeout: 60_000 },
+      async () => {
+        dir = mkdtempSync(join(tmpdir(), "cf-snap-"));
+        const migrations = await loadMigrations();
+        const first = await buildSnapshots(migrations, dir);
+        const mtimeBefore = statSync(first.migrated).mtimeMs;
+        const second = await buildSnapshots(migrations, dir);
+        const mtimeAfter = statSync(second.migrated).mtimeMs;
+        expect(mtimeBefore).toBe(mtimeAfter);
+        const edited = migrations.map((mig) =>
+          mig.id === "0001_org" ? { ...mig, sql: mig.sql + "\n-- edited" } : mig,
+        );
+        const third = await buildSnapshots(edited, dir);
+        expect(third.migrated).not.toBe(first.migrated);
+        expect(existsSync(third.migrated)).toBe(true);
+      },
+    );
   });
 
   test("a sequence and a default survive the snapshot dump/load cycle", async () => {
