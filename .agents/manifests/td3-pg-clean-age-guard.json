@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "lane": "TD3-pg-clean-age-guard",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/db/__tests__/test-database.ts",
+      "before": "        if (clones !== \"none\" && now - Number(clone[2]) <= ORPHAN_MAX_AGE_S) continue;",
+      "after": "        if (clones === \"orphaned\" && now - Number(clone[2]) <= ORPHAN_MAX_AGE_S) continue;",
+      "because": "The age bound must hold for the on-demand script as well as for automatic cleanup: applied to `orphaned` only, an `aged` sweep drops the clone made a minute ago, which is a run in flight.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/test-database.test.ts",
+        "-t",
+        "aged: takes every clone an hour old, whatever its pid, and leaves a younger one"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/db/__tests__/test-database.ts",
+      "before": "        if (clones === \"orphaned\" && processAlive(Number(clone[1]))) continue;",
+      "after": "        if (clones !== \"none\" && processAlive(Number(clone[1]))) continue;",
+      "because": "The on-demand script exists for databases whose pid cannot be read on this host: keeping the pid check under `aged` leaves the hour-old clone whose pid happens to be alive here.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/test-database.test.ts",
+        "-t",
+        "aged: takes every clone an hour old, whatever its pid, and leaves a younger one"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/db/__tests__/pg-clean.ts",
+      "before": "  const all = args.includes(\"--all\");",
+      "after": "  const all = true;",
+      "because": "Without the flag the script must ask for the bounded sweep: forced on, a bare `yarn test:pg-clean` asks for every clone and the one-hour guard is gone.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/db/__tests__/test-database.test.ts",
+        "-t",
+        "keeps the one-hour bound unless --all is given"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
