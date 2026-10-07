@@ -108,17 +108,17 @@ function identifier(name: string): string {
  * The maintenance database `TEST_PG_URL` names: the one every test server
  * connects to, and the only one `CREATE DATABASE` may be run from.
  *
- * `readCa` throws because it is never reached — a loopback test server is
- * reached over plain TCP, and `databaseConfig` calls this only for a CA path. A
- * REMOTE `TEST_PG_URL` is refused by `databaseConfig` itself, which is the point:
- * the harness must never be pointed at a hosted database.
+ * A loopback test server is reached over plain TCP, and so is a private address
+ * listed in `TEST_PG_ALLOW_HOSTS` (the lanes' shared test server; see
+ * `test-server-config.ts`). Every OTHER host is refused, which is the point: the
+ * harness must never be pointed at a hosted database.
  *
  * What it says when it refuses is re-pointed, because it can only name the
  * settings it was given: `DATABASE_URL` and `DATABASE_CA_PATH`, which the
  * harness never reads. Told to fix those, a reader would go and change the
  * application's database to fix a test server — and there is no CA setting here
- * to point at anything, so a remote host is refused outright rather than with
- * advice about certificates.
+ * to point at anything, so an unlisted remote host is refused outright rather than
+ * with advice about certificates.
  */
 export function maintenanceConfig(): DatabaseConfig {
   // Delegates to `testServerConfig`, which re-points `databaseConfig`'s
