@@ -21,6 +21,26 @@
         "copyAssets frees a file whose write failed after the exclusive open"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-asset-store.ts",
+      "before": "          } finally {\n            await handle.close();\n          }",
+      "after": "          } finally {\n            void handle;\n          }",
+      "because": "the handle is no longer closed, on success or on a failed write: the copy still rejects with ENOSPC and the partial file is still freed, so only the count of closes on the planted handle sees the leaked descriptor",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-asset-store.test.ts",
+        "-t",
+        "copyAssets frees a file whose write failed after the exclusive open"
+      ],
+      "verdict": "caught"
     }
   ]
 }

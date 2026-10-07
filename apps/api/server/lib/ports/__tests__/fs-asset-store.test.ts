@@ -27,6 +27,7 @@ const fsRace = vi.hoisted(() => ({
   openErrorCode: "",
   handleWriteErrorPath: "",
   handleWriteErrorCode: "",
+  handleCloses: 0,
 }));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -75,7 +76,10 @@ vi.mock("node:fs/promises", async (importOriginal) => {
             err.code = fsRace.handleWriteErrorCode;
             throw err;
           },
-          close: () => handle.close(),
+          close: () => {
+            fsRace.handleCloses += 1;
+            return handle.close();
+          },
         } as never;
       }
       return handle;
@@ -103,6 +107,7 @@ describe("FsAssetStore", () => {
     fsRace.openErrorCode = "";
     fsRace.handleWriteErrorPath = "";
     fsRace.handleWriteErrorCode = "";
+    fsRace.handleCloses = 0;
   });
 
   test("getBaseDir returns base directory", () => {
@@ -445,6 +450,9 @@ describe("FsAssetStore", () => {
       expect(freeSpy).toHaveBeenCalledTimes(1);
       expect(freeSpy).toHaveBeenCalledWith("dst-enospc", ["logo.png"]);
       expect(existsSync(partialPath)).toBe(false);
+      // The handle is closed although its write threw: a leaked descriptor would pass every
+      // other assertion here.
+      expect(fsRace.handleCloses).toBe(1);
     } finally {
       freeSpy.mockRestore();
     }
