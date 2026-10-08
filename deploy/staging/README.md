@@ -289,7 +289,37 @@ creates the bucket (`jobs/s3-bootstrap.yaml`), proves the app key against the
 bucket (`jobs/s3-app-probe.yaml`) and stops the deploy there if it cannot write,
 read back and delete an object, waits for Kafka and Postgres, runs
 the migrations (`jobs/migrate.yaml`), and restarts the app — which reads the
-bucket from that rollout on.
+bucket from that rollout on. After the rollout it applies the purge CronJob
+(`jobs/purge-cronjob.yaml`, below).
+
+### Purge sweep (PT-9q)
+
+`jobs/purge-cronjob.yaml` is the CronJob `cf-purge-sweep`. Every 10 minutes it runs
+`yarn purge:sweep`'s command (`node node_modules/tsx/dist/cli.mjs apps/api/bin/purge.ts sweep`)
+from the deployed image: it claims each due row of the `deletion` queue, which a
+`DELETE /campaigns/:id` writes, and frees that campaign's objects in the bucket and its
+rows in Postgres. A tick that finds the previous sweep still running is skipped
+(`concurrencyPolicy: Forbid`); a failed row waits out its lease and is retried by a later
+tick. It reads the same Postgres and bucket Secrets as the `api` container and has none of
+its own.
+
+`deploy.sh` applies it directly, after the rollout, and **never through the kustomization**:
+a kustomization entry would be applied before the migration that creates `deletion`, and the
+image tag is substituted per deploy, as for `jobs/migrate.yaml`.
+
+The same sweep expires cache objects older than 30 days (D242), so the shared render cache does not grow without bound.
+
+Run a sweep now, without waiting for the tick, and read it:
+
+```sh
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging create job --from=cronjob/cf-purge-sweep cf-purge-now'
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging logs job/cf-purge-now'
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging delete job cf-purge-now'
+```
+
+The Kafka copy of a run request expires too: topic `cf.run-requests` keeps messages for 24 hours
+(`retention.ms: 86400000`, D244) and rolls its segments hourly (`segment.ms: 3600000`), because
+retention deletes only closed segments. Database backups and logs follow the host's own retention.
 
 ## Known limits
 

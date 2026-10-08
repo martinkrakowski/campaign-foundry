@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "lane": "PT-9q-staging-cron-and-kafka",
+  "mutations": [
+    {
+      "file": "deploy/staging/jobs/purge-cronjob.yaml",
+      "before": "  concurrencyPolicy: Forbid",
+      "after": "  concurrencyPolicy: Allow",
+      "because": "Allowing concurrent sweep runs would let two 10-minute ticks claim and purge the same deletion rows at once instead of skipping an in-flight sweep; the `concurrencyPolicy: Forbid` assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/staging-purge-cronjob.test.ts",
+        "-t",
+        "purge cronjob forbids concurrent runs"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "deploy/staging/jobs/purge-cronjob.yaml",
+      "before": "  schedule: \"*/10 * * * *\"",
+      "after": "  schedule: \"* * * * *\"",
+      "because": "A one-minute tick would run the purge sweep far more often than its due rows warrant; the schedule `toContain` assertion fails on the mutated `*/10` text.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/staging-purge-cronjob.test.ts",
+        "-t",
+        "purge cronjob runs every ten minutes"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "deploy/staging/deploy.sh",
+      "before": "purge-cronjob.yaml | remote kubectl apply -f -",
+      "after": "purge-cronjob.yaml | cat",
+      "because": "Replacing the kubectl apply with `cat` never sends the CronJob to the cluster; `indexOf` for the apply text returns -1 and `toBeGreaterThan(rollout)` fails, so the deployment test catches it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/staging-purge-cronjob.test.ts",
+        "-t",
+        "deploy sh applies the purge cronjob directly after the rollout"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "deploy/staging/kafka.yaml",
+      "before": "    retention.ms: 86400000",
+      "after": "    retention.ms: 604800000",
+      "because": "A week of retention would outlive the 24-hour erasure promise (D244); the topic retention `toContain` assertion fails on the mutated milliseconds value.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/staging-purge-cronjob.test.ts",
+        "-t",
+        "the run requests topic keeps messages for 24 hours"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "deploy/staging/kustomization.yaml",
+      "before": "  - app.yaml",
+      "after": "  - app.yaml\n  - jobs/purge-cronjob.yaml",
+      "because": "Listing the CronJob in the kustomization would apply it in the services phase, before the migration creates the `deletion` table; the `not.toContain(\"purge-cronjob\")` assertion fails on the mutated list.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/staging-purge-cronjob.test.ts",
+        "-t",
+        "kustomization does not list the purge cronjob"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
