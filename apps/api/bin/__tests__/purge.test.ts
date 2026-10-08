@@ -319,7 +319,13 @@ describe("purge CLI (PT-9g3, D231)", () => {
         .mockResolvedValueOnce(undefined);
       vi.mocked(purgeCampaign).mockResolvedValueOnce("purged");
 
-      await main("sweep", false, open, (line) => lines.push(line));
+      await main(
+        "sweep",
+        false,
+        open,
+        (line) => lines.push(line),
+        async () => 0,
+      );
 
       // main and sweep write to the SAME injected log stream: the per-row line
       // followed by the summary line, in one array.
@@ -328,6 +334,45 @@ describe("purge CLI (PT-9g3, D231)", () => {
       // A per-row failure is not a setup failure: main returns normally and never
       // touches process.exitCode here.
       expect(process.exitCode).toBeUndefined();
+    });
+
+    test("main sweep runs housekeeping after the purges and throws when a step failed", async () => {
+      const db = stubDb();
+      const open = vi.fn(() => db);
+      const lines: string[] = [];
+      vi.mocked(claimDue)
+        .mockResolvedValueOnce(deletionRow("r1", "campaign", "acme", "c-uuid"))
+        .mockResolvedValueOnce(undefined);
+      vi.mocked(purgeCampaign).mockResolvedValueOnce("purged");
+      const after = vi.fn(async (_db: SqlClient, log: (line: string) => void) => {
+        log("  housekeeping ran");
+        return 1;
+      });
+
+      await expect(main("sweep", false, open, (line) => lines.push(line), after)).rejects.toThrow(
+        "1 housekeeping step(s) failed",
+      );
+
+      expect(lines).toEqual([
+        `  campaign r1: purged`,
+        `  Purged 1 deletion row(s), 0 failed.`,
+        "  housekeeping ran",
+      ]);
+      expect(after).toHaveBeenCalledTimes(1);
+      expect(after).toHaveBeenCalledWith(db, expect.anything());
+      expect(db.end).toHaveBeenCalled();
+    });
+
+    test("main sweep dry run never runs housekeeping", async () => {
+      const db = stubDb();
+      const open = vi.fn(() => db);
+      vi.mocked(listDue).mockResolvedValueOnce([]);
+      const after = vi.fn(async () => 0);
+
+      await main("sweep", true, open, () => {}, after);
+
+      expect(after).not.toHaveBeenCalled();
+      expect(db.end).toHaveBeenCalled();
     });
 
     test("main refuses an unknown or missing command", async () => {

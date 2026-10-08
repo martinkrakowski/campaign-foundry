@@ -2,15 +2,36 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import type { ObjectStorePort } from "@campaignfoundry/CampaignOrchestration";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
-import type { SqlClient } from "../../db/sql-client.js";
-import { campaignPrefix } from "../../object-store/object-keys.js";
+import type { SqlClient, SqlQuery } from "../../db/sql-client.js";
+import { campaignPrefix, inputKey } from "../../object-store/object-keys.js";
 import {
   ORPHAN_MIN_AGE_MS,
+  ROW_QUERY_CHUNK,
   applyReconcilePlan,
+  describePlan,
+  describeStep,
   planReconcile,
   reconcileOrgs,
   type ReconcilePlan,
+  type ReconcileStep,
 } from "../reconcile.js";
+
+const uuidN = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
+
+function recording(db: SqlClient): {
+  sql: SqlQuery;
+  calls: { text: string; params: readonly unknown[] }[];
+} {
+  const calls: { text: string; params: readonly unknown[] }[] = [];
+  const sql = {
+    query: (text: string, params: readonly unknown[] = []) => {
+      calls.push({ text, params });
+      return db.query(text, params);
+    },
+    exec: (text: string) => db.exec(text),
+  } as SqlQuery;
+  return { sql, calls };
+}
 
 const HOUR = 3_600_000;
 const NOW = Date.UTC(2026, 9, 5, 12, 0, 0);
@@ -411,5 +432,217 @@ describe("reconcile (D239)", () => {
     expect(result).toEqual({ prefixes: 0, inputs: 0, skipped: 1 });
     const before = (await store.list("org/")).map((o) => o.key).sort();
     expect(before).toEqual([`${prefix}inputs/${A2}`]);
+  });
+
+  test("reconcile asks the database about the listed campaigns only", async () => {
+    for (let i = 0; i < 30; i++) await seedCampaign(db, "local", `other-${i}`);
+    const c1Object = inputKey(ORG, C1, A1);
+    await putAt(c1Object, NOW - 5 * HOUR);
+    await seedCampaign(db, "local", "mine", { id: C2 });
+    await seedAsset(db, "local", C2, A1);
+    const c2Object = inputKey(ORG, C2, A1);
+    await putAt(c2Object, NOW - 5 * HOUR);
+
+    const { sql, calls } = recording(db);
+    const plan = await planReconcile(sql, store, "local", NOW);
+
+    expect(calls.length).toBe(2);
+    for (const call of calls) {
+      expect(call.params[0]).toBe("local");
+      expect(call.params[1]).toEqual([C1, C2]);
+      expect(call.text).toContain("any($2::uuid[])");
+    }
+    expect(plan).toEqual({
+      orgId: "local",
+      prefixes: [{ campaignId: C1, objects: 1 }],
+      inputs: [],
+    });
+  });
+
+  test("reconcile sends no row query when nothing is listed", async () => {
+    const { sql, calls } = recording(db);
+    const plan = await planReconcile(sql, store, "local", NOW);
+    expect(plan).toEqual({ orgId: "local", prefixes: [], inputs: [] });
+    expect(calls.length).toBe(0);
+  });
+
+  test("reconcile reads rows in chunks and still sees a campaign past the first chunk", async () => {
+    expect(ROW_QUERY_CHUNK).toBe(500);
+
+    clock = NOW - 5 * HOUR;
+    for (let i = 0; i <= 1200; i++) {
+      await store.put(`${campaignPrefix("local", uuidN(i))}inputs/${A1}`, new Uint8Array([1]));
+    }
+    clock = NOW;
+
+    for (const i of [0, 499, 500, 1200]) {
+      await seedCampaign(db, "local", `live-${i}`, { id: uuidN(i) });
+    }
+
+    const { sql, calls } = recording(db);
+    const plan = await planReconcile(sql, store, "local", NOW);
+
+    expect(plan.prefixes.length).toBe(1197);
+    for (const id of [uuidN(0), uuidN(499), uuidN(500), uuidN(1200)]) {
+      expect(plan.prefixes.map((p) => p.campaignId)).not.toContain(id);
+    }
+    expect(plan.inputs).toHaveLength(4);
+    expect(plan.inputs.map((i) => i.campaignId).sort()).toEqual(
+      [uuidN(0), uuidN(499), uuidN(500), uuidN(1200)].sort(),
+    );
+
+    expect(calls.length).toBe(6);
+    expect((calls[0].params[1] as string[]).length).toBe(500);
+    expect((calls[2].params[1] as string[]).length).toBe(500);
+    expect((calls[4].params[1] as string[]).length).toBe(201);
+  }, 60_000);
+
+  test("reconcile reports every org plan before the first delete and each delete as it completes", async () => {
+    const prefixLocalC1 = campaignPrefix(ORG, C1);
+    await putAt(inputKey(ORG, C1, A1), NOW - 5 * HOUR);
+    await seedCampaign(db, ORG, "live", { id: C2 });
+    await putAt(inputKey(ORG, C2, A2), NOW - 5 * HOUR);
+
+    const prefixAcmeC3 = campaignPrefix("acme", C3);
+    await putAt(`${prefixAcmeC3}renders/alpha/1x1/v1.png`, NOW - 5 * HOUR);
+
+    const events: string[] = [];
+    const realDeletePrefix = store.deletePrefix.bind(store);
+    const realDelete = store.delete.bind(store);
+    vi.spyOn(store, "deletePrefix").mockImplementation(async (p) => {
+      events.push(`store deletePrefix ${p}`);
+      await realDeletePrefix(p);
+    });
+    vi.spyOn(store, "delete").mockImplementation(async (k) => {
+      events.push(`store delete ${k}`);
+      await realDelete(k);
+    });
+
+    await reconcileOrgs(db, store, ["local", "acme"], {
+      apply: true,
+      now: () => NOW,
+      onPlan: (plan) => events.push(`plan ${plan.orgId}`),
+      onStep: (step) => events.push(`step ${step.outcome} ${step.kind} ${step.key}`),
+    });
+
+    expect(events).toEqual([
+      "plan local",
+      "plan acme",
+      `store deletePrefix ${prefixLocalC1}`,
+      `step deleted prefix ${prefixLocalC1}`,
+      `store delete ${inputKey(ORG, C2, A2)}`,
+      `step deleted input ${inputKey(ORG, C2, A2)}`,
+      `store deletePrefix ${prefixAcmeC3}`,
+      `step deleted prefix ${prefixAcmeC3}`,
+    ]);
+  });
+
+  test("reconcile keeps the record of the deletes that completed when a later delete fails", async () => {
+    const prefixC1 = campaignPrefix(ORG, C1);
+    await putAt(inputKey(ORG, C1, A1), NOW - 5 * HOUR);
+    await putAt(inputKey(ORG, C3, A1), NOW - 5 * HOUR);
+
+    let call = 0;
+    const realDeletePrefix = store.deletePrefix.bind(store);
+    vi.spyOn(store, "deletePrefix").mockImplementation(async (p) => {
+      if (call++ === 0) return realDeletePrefix(p);
+      throw new Error("store down");
+    });
+
+    const steps: ReconcileStep[] = [];
+    await expect(
+      reconcileOrgs(db, store, ["local"], {
+        apply: true,
+        now: () => NOW,
+        onStep: (s) => steps.push(s),
+      }),
+    ).rejects.toThrow("store down");
+
+    expect(steps).toEqual([{ kind: "prefix", key: prefixC1, outcome: "deleted" }]);
+    expect((await store.list(campaignPrefix(ORG, C3))).map((o) => o.key).sort()).toEqual([
+      inputKey(ORG, C3, A1),
+    ]);
+  });
+
+  test("reconcile reports a candidate whose row appeared as skipped", async () => {
+    await putAt(inputKey(ORG, C1, A1), NOW - 5 * HOUR);
+    await seedCampaign(db, ORG, "live", { id: C2 });
+    await putAt(inputKey(ORG, C2, A2), NOW - 5 * HOUR);
+
+    const plan = await planReconcile(db, store, ORG, NOW);
+    expect(plan.prefixes).toEqual([{ campaignId: C1, objects: 1 }]);
+    expect(plan.inputs).toEqual([{ campaignId: C2, assetId: A2 }]);
+
+    await seedCampaign(db, "local", "late", { id: C1 });
+    await seedAsset(db, "local", C2, A2);
+
+    const steps: ReconcileStep[] = [];
+    const result = await applyReconcilePlan(db, store, plan, (s) => steps.push(s));
+    expect(result).toEqual({ prefixes: 0, inputs: 0, skipped: 2 });
+    expect(steps).toEqual([
+      { kind: "prefix", key: campaignPrefix(ORG, C1), outcome: "skipped" },
+      { kind: "input", key: inputKey(ORG, C2, A2), outcome: "skipped" },
+    ]);
+    expect((await store.list("org/local/campaign/")).map((o) => o.key).sort()).toEqual(
+      [inputKey(ORG, C1, A1), inputKey(ORG, C2, A2)].sort(),
+    );
+  });
+
+  test("reconcile refuses to apply more candidates than the cap and deletes nothing", async () => {
+    await putAt(inputKey(ORG, C1, A1), NOW - 5 * HOUR);
+    await putAt(inputKey(ORG, C2, A1), NOW - 5 * HOUR);
+    await putAt(inputKey(ORG, C3, A1), NOW - 5 * HOUR);
+
+    const before = (await store.list("org/local/campaign/")).map((o) => o.key).sort();
+
+    let threw: string | undefined;
+    try {
+      await reconcileOrgs(db, store, ["local"], {
+        apply: true,
+        now: () => NOW,
+        maxCandidates: 2,
+      });
+    } catch (e) {
+      threw = e instanceof Error ? e.message : String(e);
+    }
+    expect(threw).toMatch(/exceed the cap of 2/);
+    expect(threw).not.toContain(C1);
+    expect((await store.list("org/local/campaign/")).map((o) => o.key).sort()).toEqual(before);
+
+    const dry = await reconcileOrgs(db, store, ["local"], {
+      apply: false,
+      now: () => NOW,
+      maxCandidates: 0,
+    });
+    expect(dry.plans[0].prefixes.length).toBe(3);
+    expect(dry.applied).toEqual({ prefixes: 0, inputs: 0, skipped: 0 });
+
+    const applied = await reconcileOrgs(db, store, ["local"], {
+      apply: true,
+      now: () => NOW,
+      maxCandidates: 3,
+    });
+    expect(applied.applied.prefixes).toBe(3);
+    expect(await store.list("org/local/campaign/")).toHaveLength(0);
+  });
+
+  test("reconcile describes a plan and a step as the lines the CLI logs", () => {
+    expect(
+      describePlan({
+        orgId: "local",
+        prefixes: [{ campaignId: C1, objects: 3 }],
+        inputs: [{ campaignId: C2, assetId: A2 }],
+      }),
+    ).toEqual([
+      `  org local: 1 orphan prefix(es), 1 orphan input(s)`,
+      `    prefix ${campaignPrefix("local", C1)} (3 object(s))`,
+      `    input ${inputKey("local", C2, A2)}`,
+    ]);
+    expect(describeStep({ kind: "prefix", key: "k1", outcome: "deleted" })).toBe(
+      "  deleted prefix k1",
+    );
+    expect(describeStep({ kind: "input", key: "k2", outcome: "skipped" })).toBe(
+      "  skipped input k2 (a row appeared)",
+    );
   });
 });
