@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "lane": "FU-shared-rollback-helper",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/campaign-rollback.ts",
+      "before": "await store.releaseCampaign(targetSlug);",
+      "after": "await Promise.resolve(targetSlug);",
+      "because": "release is replaced by a no-op Promise.resolve, so the reservation is never released; the witness test 1 `release toHaveBeenCalledWith(\"t\")` assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/campaign-rollback.test.ts",
+        "-t",
+        "rollback deletes the pool then frees the created ids then releases, in that order",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/campaign-rollback.ts",
+      "before": "if (createdIds.length > 0) {",
+      "after": "if (createdIds.length >= 0) {",
+      "because": "the guard becomes always-true, so an empty createdIds now hits campaignMeta; the witness test 5 `expect(store.campaignMeta).not.toHaveBeenCalled()` fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/campaign-rollback.test.ts",
+        "-t",
+        "rollback makes no store call when nothing was created",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/campaign-rollback.ts",
+      "before": "after a failed ${operation}",
+      "after": "after a failed create",
+      "because": "the operation label is hard-coded to `create`, so the witness test 7 duplicate warn text no longer matches `after a failed duplicate`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/campaign-rollback.test.ts",
+        "-t",
+        "rollback warns with the duplicate label and still releases when the free rejects",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/campaign-rollback.ts",
+      "before": "objectStore() === \"s3\" ||",
+      "after": "false ||",
+      "because": "the s3 short-circuit is forced false; the witness test 2, run alone with -t, now asks campaignMeta (undefined) and skips the free, so `free.toHaveBeenCalledWith(\"t\", ids)` fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/campaign-rollback.test.ts",
+        "-t",
+        "rollback frees under s3 without asking campaignMeta",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/campaign-rollback.ts",
+      "before": "  if (createdIds.length > 0) {",
+      "after": "  await store.releaseCampaign(targetSlug);\n  if (createdIds.length > 0) {",
+      "because": "release is moved before the free; the witness test 1 invocationCallOrder assertion (`freeOrder < releaseOrder`) fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/campaign-rollback.test.ts",
+        "-t",
+        "rollback deletes the pool then frees the created ids then releases, in that order",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

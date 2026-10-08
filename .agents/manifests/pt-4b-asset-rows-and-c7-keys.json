@@ -54,9 +54,9 @@
       "verdict": "caught"
     },
     {
-      "file": "apps/api/server/routes/campaigns/index.post.ts",
-      "before": "              await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);",
-      "after": "              await getAssetStore(scope).freeUnreferencedAssets(\"00000000-0000-4000-8000-000000000000\", createdIds);",
+      "file": "apps/api/server/lib/campaign-rollback.ts",
+      "before": "        await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);",
+      "after": "        await getAssetStore(scope).freeUnreferencedAssets(\"00000000-0000-4000-8000-000000000000\", createdIds);",
       "because": "The free is handed a uuid instead of the slug. `meta.campaignId` no longer exists in the rollback (nothing keeps createCampaign's result), so the mutant uses a literal uuid: the free resolves no campaign by slug on s3 and names a directory that was never written on fs, so the copied files survive a failed create; the pg+fs rollback test sees the file still on disk (witness unchanged).",
       "command": [
         "yarn",
@@ -122,9 +122,9 @@
       "verdict": "caught"
     },
     {
-      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
-      "before": "              await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);",
-      "after": "              await getAssetStore(scope).freeUnreferencedAssets(\"00000000-0000-4000-8000-000000000000\", createdIds);",
+      "file": "apps/api/server/lib/campaign-rollback.ts",
+      "before": "        await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);",
+      "after": "        await getAssetStore(scope).freeUnreferencedAssets(\"00000000-0000-4000-8000-000000000000\", createdIds);",
       "because": "The free is handed a uuid instead of the slug. `meta.campaignId` no longer exists in the rollback (nothing keeps createCampaign's result), so the mutant uses a literal uuid: the free resolves no campaign by slug on s3 and names a directory that was never written on fs, so the copied files survive a failed duplicate; the pg+fs rollback test sees the file still on disk (witness unchanged).",
       "command": [
         "yarn",
@@ -156,9 +156,9 @@
       "verdict": "caught"
     },
     {
-      "file": "apps/api/server/routes/campaigns/index.post.ts",
-      "before": "              (await store.campaignMeta(targetSlug))?.hasVersion === false",
-      "after": "              true",
+      "file": "apps/api/server/lib/campaign-rollback.ts",
+      "before": "(await store.campaignMeta(targetSlug))?.hasVersion === false",
+      "after": "true",
       "because": "The off-s3 hasVersion guard is gone (decision 8): FsAssetStore.freeUnreferencedAssets has no reference check, so a winning Save's version-named file is freed. The old witness (an s3 test) can no longer see this line, because under s3 the adapter's own check guards; the new witness is the pg plus fs winner test, which asserts the free was never called.",
       "command": [
         "env",
@@ -176,9 +176,9 @@
       "verdict": "caught"
     },
     {
-      "file": "apps/api/server/routes/campaigns/index.post.ts",
-      "before": "        if (createdIds.length > 0) {",
-      "after": "        await store.releaseCampaign(targetSlug);\n        if (createdIds.length > 0) {",
+      "file": "apps/api/server/lib/campaign-rollback.ts",
+      "before": "  if (createdIds.length > 0) {",
+      "after": "  await store.releaseCampaign(targetSlug);\n  if (createdIds.length > 0) {",
       "because": "The campaign is released BEFORE its assets are freed. The release cascade removes the asset rows and the slug stops resolving, so the free finds no campaign and does nothing, and the objects are left with no rows naming them; the pg+s3 rollback test sees objects still under the minted campaign prefix (witness unchanged).",
       "command": [
         "env",
@@ -196,9 +196,9 @@
       "verdict": "caught"
     },
     {
-      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
-      "before": "        if (createdIds.length > 0) {",
-      "after": "        await briefs.releaseCampaign(targetSlug);\n        if (createdIds.length > 0) {",
+      "file": "apps/api/server/lib/campaign-rollback.ts",
+      "before": "  if (createdIds.length > 0) {",
+      "after": "  await store.releaseCampaign(targetSlug);\n  if (createdIds.length > 0) {",
       "because": "The campaign is released BEFORE its assets are freed. The release cascade removes the asset rows and the slug stops resolving, so the free finds no campaign and does nothing, and the objects are left with no rows naming them; the pg+s3 rollback test sees objects still under the minted campaign prefix (witness unchanged).",
       "command": [
         "yarn",

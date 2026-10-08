@@ -82,6 +82,9 @@ spec:
 # Run requests (PT-6b2): keyed <orgId>:<campaignId>, so one campaign's requests
 # stay ordered on one partition. The Postgres job row is the lease; Kafka only
 # delivers, and a duplicate or replay loses startQueuedJob and is dropped.
+# A run request is useless after a day, and erasure (D244) promises the Kafka copy
+# expires with the topic: retention is 24 h, and segments roll hourly because
+# retention deletes only closed segments.
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
@@ -91,3 +94,6 @@ metadata:
 spec:
   partitions: 3
   replicas: 1
+  config:
+    retention.ms: 86400000
+    segment.ms: 3600000

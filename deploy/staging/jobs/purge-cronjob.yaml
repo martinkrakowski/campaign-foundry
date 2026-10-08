@@ -1,0 +1,85 @@
+# The deletion sweep (PT-9q): claims every due row of the `deletion` queue and
+# frees that campaign's objects and rows, the same command as `yarn purge:sweep`.
+# Applied by deploy.sh directly, AFTER the app has rolled out, and never through
+# kustomize: a kustomize entry would be applied in the "services" phase, before
+# the migration that creates `deletion` has run (PT-9-9).
+#
+# A tick that finds the previous sweep still running is skipped, not queued. The
+# sweep touches no filesystem tree under OBJECT_STORE=s3, so there is no data
+# volume. It carries no secret of its own: the database and bucket settings are
+# the `api` container's, by the same Secret references (app.yaml).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cf-purge-sweep
+  namespace: campaign-foundry-staging
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 540
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+          containers:
+            - name: purge
+              image: registry.midnight.lan/library/campaign-foundry:IMAGE_TAG
+              command: ["node", "node_modules/tsx/dist/cli.mjs", "apps/api/bin/purge.ts", "sweep"]
+              env:
+                - name: PROJECT_ROOT
+                  value: /app
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: cf-pg-app
+                      key: uri
+                - name: DATABASE_CA_PATH
+                  value: /etc/campaign-foundry/db/ca.crt
+                - name: STORE_BACKEND
+                  value: postgres
+                - name: OBJECT_STORE
+                  value: "s3"
+                - name: S3_ENDPOINT
+                  value: http://seaweedfs-s3:8333
+                - name: S3_PUBLIC_ENDPOINT
+                  value: https://s3.midnight.lan
+                - name: S3_REGION
+                  value: us-east-1
+                - name: S3_BUCKET
+                  value: campaign-foundry
+                - name: S3_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: seaweedfs-s3
+                      key: app-access-key
+                - name: S3_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: seaweedfs-s3
+                      key: app-secret-key
+              volumeMounts:
+                - name: db-ca
+                  mountPath: /etc/campaign-foundry/db
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+          volumes:
+            - name: db-ca
+              secret:
+                secretName: cf-pg-ca
+                items:
+                  - key: ca.crt
+                    path: ca.crt
