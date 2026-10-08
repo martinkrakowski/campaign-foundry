@@ -8,7 +8,7 @@ import {
   EraseIncompleteError,
   exitCodeFor,
 } from "../erase.js";
-import { eraseUser } from "../../server/lib/deletion/erase-user.js";
+import { eraseUser, ErasePassTwoError } from "../../server/lib/deletion/erase-user.js";
 import {
   seedWorld,
   dumpDatabase,
@@ -374,6 +374,9 @@ describe("erase CLI (bin/erase.ts)", () => {
       `erase incomplete: rows written while the erasure ran still name the user. Token ${token}. To finish, run: yarn erase:user --finish ${token} --user <the user's id> --apply`,
     );
 
+    // Exact STILL NAMING THE USER lines (one per non-zero field).
+    expect(log.join("\n")).toContain("  STILL NAMING THE USER: 1 decisions re-attributed");
+
     const lowerLog = log.join("\n").toLowerCase();
     expect(lowerLog).not.toContain(TARGET.email.toLowerCase());
     expect(lowerLog).not.toContain(TARGET.name.toLowerCase());
@@ -447,7 +450,7 @@ describe("erase CLI (bin/erase.ts)", () => {
     expect(endSpy).toHaveBeenCalledTimes(1);
   });
 
-  test("11b. --finish with a row that keeps reappearing rejects with EraseIncompleteError", async () => {
+  test("11b. --finish with a row that keeps reappearing prints STILL lines, rejects with exact error, no leak", async () => {
     const outcome = await eraseUser(db, { userId: TARGET.id }, { apply: true });
     if (outcome.outcome !== "erased") throw new Error("expected erased");
     const token = outcome.token;
@@ -459,17 +462,63 @@ describe("erase CLI (bin/erase.ts)", () => {
       );
     });
 
+    const log: string[] = [];
     let caught: unknown;
     try {
       await runErase(
         ["--finish", token, "--user", TARGET.id, "--apply"],
         () => proxy,
-        () => {},
+        (l) => log.push(l),
       );
     } catch (e) {
       caught = e;
     }
     expect(caught).toBeInstanceOf(EraseIncompleteError);
+    const message = (caught as Error).message;
+    expect(message).toBe(
+      `erase incomplete: rows written while the erasure ran still name the user. Token ${token}. To finish, run: yarn erase:user --finish ${token} --user <the user's id> --apply`,
+    );
+
+    // Exact STILL NAMING THE USER line.
+    expect(log.join("\n")).toContain("  STILL NAMING THE USER: 1 decisions re-attributed");
+
+    // Three not.toContain assertions on log and message each.
+    const lowerLog = log.join("\n").toLowerCase();
+    const lowerMsg = message.toLowerCase();
+    expect(lowerLog).not.toContain(TARGET.email.toLowerCase());
+    expect(lowerLog).not.toContain(TARGET.name.toLowerCase());
+    expect(lowerLog).not.toContain(TARGET.id.toLowerCase());
+    expect(lowerMsg).not.toContain(TARGET.email.toLowerCase());
+    expect(lowerMsg).not.toContain(TARGET.name.toLowerCase());
+    expect(lowerMsg).not.toContain(TARGET.id.toLowerCase());
+    expect(endSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("11c. --finish repairs a planted survivor and prints repaired + Finished lines", async () => {
+    const outcome = await eraseUser(db, { userId: TARGET.id }, { apply: true });
+    if (outcome.outcome !== "erased") throw new Error("expected erased");
+    const token = outcome.token;
+
+    await db.query(
+      `insert into decision (org_id, campaign_id, asset_key, ordinal, verdict, actor, decided_at, run) values ($1, $2, $3, 1, 'approved', $4, now(), 'run-2')`,
+      ["local", world.localCampaignId, "ak-survivor-finish", TARGET.id],
+    );
+
+    const log: string[] = [];
+    await runErase(
+      ["--finish", token, "--user", TARGET.id, "--apply"],
+      () => db,
+      (l) => log.push(l),
+    );
+
+    expect(log).toContain("  repaired after commit: 1 decisions re-attributed");
+    expect(log).toContain(`  Finished. Token ${token}.`);
+
+    const lowerLog = log.join("\n").toLowerCase();
+    expect(lowerLog).not.toContain(TARGET.email.toLowerCase());
+    expect(lowerLog).not.toContain(TARGET.name.toLowerCase());
+    expect(lowerLog).not.toContain(TARGET.id.toLowerCase());
+    expect(endSpy).toHaveBeenCalledTimes(1);
   });
 
   test("7ab. finishErasure refusals change nothing", async () => {
@@ -516,6 +565,22 @@ describe("erase CLI (bin/erase.ts)", () => {
       ),
     ).rejects.toThrow("erase: that user still exists; run a normal erasure.");
     expect(await dumpDatabase(db)).toEqual(before);
+  });
+
+  test("finish CLI refuses --user cli:erase-user and closes the database", async () => {
+    const outcome = await eraseUser(db, { userId: TARGET.id }, { apply: true });
+    if (outcome.outcome !== "erased") throw new Error("expected erased");
+    const before = await dumpDatabase(db);
+
+    await expect(
+      runErase(
+        ["--finish", outcome.token, "--user", "cli:erase-user", "--apply"],
+        () => db,
+        () => {},
+      ),
+    ).rejects.toThrow("erase: that id is not a user id.");
+    expect(await dumpDatabase(db)).toEqual(before);
+    expect(endSpy).toHaveBeenCalledTimes(1);
   });
 
   test("12. usage errors: finish without --user", async () => {
@@ -630,6 +695,55 @@ describe("erase CLI (bin/erase.ts)", () => {
         () => {},
       ),
     ).rejects.toThrow("erase: that token is not an erasure token.");
+    expect(endSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("apply with a failed repair pass prints counts, rejects with ErasePassTwoError, exitCodeFor 3, no leak, db closed", async () => {
+    const proxy: SqlClient = {
+      ...db,
+      query: async <R>(text: string, params?: readonly unknown[]): Promise<{ rows: R[] }> => {
+        if (text.includes("update provider_key set created_by")) {
+          throw new Error("injected failure");
+        }
+        return db.query<R>(text, params);
+      },
+    };
+    const log: string[] = [];
+    let caught: unknown;
+    try {
+      await runErase(
+        ["--user", TARGET.id, "--apply"],
+        () => proxy,
+        (l) => log.push(l),
+      );
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ErasePassTwoError);
+    const error = caught as ErasePassTwoError;
+    expect(error.token).toMatch(/^erased:[0-9a-f-]{36}$/);
+    expect(error.message).toBe(
+      `erase committed, but the repair pass failed: injected failure. Token ${error.token}. To finish, run: yarn erase:user --finish ${error.token} --user <the user's id> --apply`,
+    );
+
+    // Count lines that describe what the transaction changed are printed.
+    expect(log).toContain("  brief versions re-attributed: 1");
+    expect(log).toContain("  decisions re-attributed: 1");
+    expect(log).toContain("  provider keys re-attributed: 1");
+    expect(log).toContain("  campaigns re-attributed: 1");
+    expect(log).toContain("  deletion requests re-attributed: 1");
+    expect(log.join("\n")).not.toContain("Erased. Token");
+
+    const lowerLog = log.join("\n").toLowerCase();
+    expect(lowerLog).not.toContain(TARGET.email.toLowerCase());
+    expect(lowerLog).not.toContain(TARGET.name.toLowerCase());
+    expect(lowerLog).not.toContain(TARGET.id.toLowerCase());
+    const lowerMsg = error.message.toLowerCase();
+    expect(lowerMsg).not.toContain(TARGET.email.toLowerCase());
+    expect(lowerMsg).not.toContain(TARGET.name.toLowerCase());
+    expect(lowerMsg).not.toContain(TARGET.id.toLowerCase());
+
+    expect(exitCodeFor(error)).toBe(3);
     expect(endSpy).toHaveBeenCalledTimes(1);
   });
 });

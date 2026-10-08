@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { SqlClient, SqlQuery } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
-import { eraseUser, repairErasedActor, countActorRows, finishErasure } from "../erase-user.js";
-import type { ActorCounts, EraseUserOutcome } from "../erase-user.js";
+import {
+  eraseUser,
+  repairErasedActor,
+  countActorRows,
+  finishErasure,
+  ErasePassTwoError,
+} from "../erase-user.js";
 import {
   ACME_OWNER,
   BYSTANDER,
@@ -394,12 +399,55 @@ describe("finishErasure (PT-9l3)", () => {
     );
     expect(await dumpDatabase(db)).toEqual(before);
   });
+
+  test("finishErasure refuses 'cli:erase-user' as a user id and changes nothing", async () => {
+    const token = await erasedToken();
+    // After an erasure, deletion.requested_by = 'cli:erase-user' rows exist (step 8).
+    const before = await dumpDatabase(db);
+    await expect(finishErasure(db, "cli:erase-user", token)).rejects.toThrow(
+      "erase: that id is not a user id.",
+    );
+    expect(await dumpDatabase(db)).toEqual(before);
+  });
+
+  test("finishErasure refuses an erased:<uuid> token used as a user id and changes nothing", async () => {
+    const token = await erasedToken();
+    // Plant a row that the bad id WOULD have matched if the refusal were absent.
+    await db.query(
+      `insert into decision (org_id, campaign_id, asset_key, ordinal, verdict, actor, decided_at, run) values ($1, $2, $3, 1, 'approved', $4, now(), 'run-2')`,
+      [
+        "local",
+        world.localCampaignId,
+        "ak-fake-token",
+        "erased:00000000-0000-4000-8000-000000000000",
+      ],
+    );
+    const before = await dumpDatabase(db);
+    await expect(
+      finishErasure(db, "erased:00000000-0000-4000-8000-000000000000", token),
+    ).rejects.toThrow("erase: that id is not a user id.");
+    expect(await dumpDatabase(db)).toEqual(before);
+  });
+
+  test("finishErasure refuses 'local' as a user id and changes nothing", async () => {
+    const token = await erasedToken();
+    // Plant a row that the bad id WOULD have matched if the refusal were absent.
+    await db.query(
+      `insert into brief_version (campaign_id, version, body, revision, actor) values ($1, 4, '{}', 'r3', $2)`,
+      [world.localCampaignId, "local"],
+    );
+    const before = await dumpDatabase(db);
+    await expect(finishErasure(db, "local", token)).rejects.toThrow(
+      "erase: that id is not a user id.",
+    );
+    expect(await dumpDatabase(db)).toEqual(before);
+  });
 });
 
 describe("repairErasedActor standalone (PT-9l3)", () => {
   test("returns five zeros and changes nothing when nothing survives", async () => {
     const db = await migratedDatabase();
-    const world = await seedWorld(db);
+    await seedWorld(db);
     const outcome = await eraseUser(db, { userId: TARGET.id }, { apply: true });
     if (outcome.outcome !== "erased") throw new Error("expected erased");
 
@@ -430,6 +478,58 @@ describe("repairErasedActor standalone (PT-9l3)", () => {
       campaignsDeletedBy: 0,
       deletionsRequestedBy: 0,
     });
+    await db.end();
+  }, 30_000);
+});
+
+describe("ErasePassTwoError (PT-9l3 finding 2)", () => {
+  test("eraseUser raises ErasePassTwoError when pass two throws after the commit", async () => {
+    const db = await migratedDatabase();
+    await seedWorld(db);
+
+    // Proxy that only guards query (not transaction) so pass one commits
+    // but the third repair update (provider_key) throws.
+    const proxy: SqlClient = {
+      ...db,
+      query: async <R>(text: string, params?: readonly unknown[]): Promise<{ rows: R[] }> => {
+        if (text.includes("update provider_key set created_by")) {
+          throw new Error("injected failure");
+        }
+        return db.query<R>(text, params);
+      },
+    };
+
+    let caught: unknown;
+    try {
+      await eraseUser(proxy, { userId: TARGET.id }, { apply: true });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ErasePassTwoError);
+    const error = caught as ErasePassTwoError;
+    expect(error.token).toMatch(/^erased:[0-9a-f-]{36}$/);
+
+    const { rows } = await db.query<{ n: number }>(
+      `select count(*)::int as n from deletion where kind = 'user' and subject = $1`,
+      [error.token],
+    );
+    expect(rows[0]!.n).toBe(1);
+
+    const gone = await db.query<{ n: number }>(
+      `select count(*)::int as n from "user" where id = $1`,
+      [TARGET.id],
+    );
+    expect(gone.rows[0]!.n).toBe(0);
+
+    const result = await finishErasure(db, TARGET.id, error.token);
+    expect(result.remaining).toEqual({
+      briefVersions: 0,
+      decisions: 0,
+      providerKeys: 0,
+      campaignsDeletedBy: 0,
+      deletionsRequestedBy: 0,
+    });
+
     await db.end();
   }, 30_000);
 });

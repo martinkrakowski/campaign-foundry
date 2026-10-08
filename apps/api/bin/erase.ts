@@ -3,6 +3,7 @@ import type { SqlClient } from "../server/lib/db/sql-client.js";
 import {
   eraseUser,
   finishErasure,
+  ErasePassTwoError,
   type ActorCounts,
   type EraseUserCounts,
   type EraseUserRef,
@@ -53,7 +54,9 @@ export class EraseIncompleteError extends Error {
 
 /** Exit code: 3 for an incomplete erasure, 1 for all other errors. */
 export function exitCodeFor(error: unknown): number {
-  return error instanceof EraseIncompleteError ? 3 : 1;
+  if (error instanceof EraseIncompleteError) return 3;
+  if (error instanceof ErasePassTwoError) return 3;
+  return 1;
 }
 
 /** Print one line per non-zero `ActorCounts` field, using COUNT_LINES labels. */
@@ -124,25 +127,32 @@ export async function runErase(
     }
 
     const { ref, apply } = parsed;
-    const outcome = await eraseUser(db, ref, { apply });
-    if (outcome.outcome === "not-found") throw new Error("erase: no such user.");
-    if (outcome.outcome === "sole-owner") {
-      throw new Error(
-        `erase refused: the user is the only owner of org ${outcome.orgIds.join(", ")}; move ownership or delete the org first.`,
-      );
-    }
-    for (const [key, label] of COUNT_LINES) log(`  ${label}: ${outcome.counts[key]}`);
-    log(
-      outcome.outcome === "erased"
-        ? `  Erased. Token ${outcome.token}.`
-        : "  Dry run: nothing changed. Re-run with --apply to erase.",
-    );
-    if (outcome.outcome === "erased") {
-      logActorCounts(log, "repaired after commit", outcome.repaired);
-      if (Object.values(outcome.remaining).some((n) => n > 0)) {
-        logActorCounts(log, "STILL NAMING THE USER", outcome.remaining);
-        throw new EraseIncompleteError(outcome.token);
+    try {
+      const outcome = await eraseUser(db, ref, { apply });
+      if (outcome.outcome === "not-found") throw new Error("erase: no such user.");
+      if (outcome.outcome === "sole-owner") {
+        throw new Error(
+          `erase refused: the user is the only owner of org ${outcome.orgIds.join(", ")}; move ownership or delete the org first.`,
+        );
       }
+      for (const [key, label] of COUNT_LINES) log(`  ${label}: ${outcome.counts[key]}`);
+      log(
+        outcome.outcome === "erased"
+          ? `  Erased. Token ${outcome.token}.`
+          : "  Dry run: nothing changed. Re-run with --apply to erase.",
+      );
+      if (outcome.outcome === "erased") {
+        logActorCounts(log, "repaired after commit", outcome.repaired);
+        if (Object.values(outcome.remaining).some((n) => n > 0)) {
+          logActorCounts(log, "STILL NAMING THE USER", outcome.remaining);
+          throw new EraseIncompleteError(outcome.token);
+        }
+      }
+    } catch (e) {
+      if (e instanceof ErasePassTwoError) {
+        for (const [key, label] of COUNT_LINES) log(`  ${label}: ${e.counts[key]}`);
+      }
+      throw e;
     }
   } finally {
     await db.end();

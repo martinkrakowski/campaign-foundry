@@ -94,6 +94,18 @@ export async function countActorRows(db: SqlQuery, userId: string): Promise<Acto
 const ERASURE_TOKEN = /^erased:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
+ * Non-user sentinels written into the five actor columns. A Better Auth user id
+ * (`safeId()` in `lib/auth/id.ts`) is 32 lowercase hex chars — never contains
+ * `:` nor matches these literals. `finishErasure` must refuse them so a repair
+ * does not rewrite another session's audit rows under a different token.
+ */
+export const NON_USER_ACTOR_VALUES: readonly string[] = [
+  "cli:erase-user", // erase-user.ts step 8: deletion.requested_by for a user erasure
+  "local", // AUTH_MODE=local session identity (lib/tenant.ts LOCAL_TENANT.userId),
+  // written by pg-brief-store.ts / pg-decision-store.ts / pg-provider-key-store.ts / request.ts
+];
+
+/**
  * Finish an erasure whose pass one committed but whose pass two can still run:
  * re-attribute rows written after the commit, then re-scan. Refuses a token
  * that is not an erasure token (no `deletion` row for it) or a user id that
@@ -115,6 +127,16 @@ export async function finishErasure(
   );
   if (deletionRow.length === 0) {
     throw new Error("erase: that token is not an erasure token.");
+  }
+
+  // Refuse ids that were never a user: sentinels and tokens share the five
+  // actor columns and must not be re-attributed under a repair token.
+  if (
+    userId.startsWith("erased:") ||
+    userId.includes(":") ||
+    NON_USER_ACTOR_VALUES.includes(userId)
+  ) {
+    throw new Error("erase: that id is not a user id.");
   }
 
   const { rows: userRow } = await db.query<{ n: number }>(
@@ -213,6 +235,26 @@ const COUNTS = `select
   (select count(distinct team_id) from team_member where user_id = $1)::int as "teams"`;
 
 /**
+ * The erasure transaction committed, but pass two (repairErasedActor or
+ * countActorRows) threw. The token and the transaction's counts are carried
+ * so the caller can print them and tell the operator how to finish. The
+ * message contains the token but never the user id.
+ */
+export class ErasePassTwoError extends Error {
+  readonly token: string;
+  readonly counts: EraseUserCounts;
+  constructor(token: string, counts: EraseUserCounts, cause: Error) {
+    super(
+      `erase committed, but the repair pass failed: ${cause.message}. Token ${token}. To finish, run: yarn erase:user --finish ${token} --user <the user's id> --apply`,
+      { cause },
+    );
+    this.name = "ErasePassTwoError";
+    this.token = token;
+    this.counts = counts;
+  }
+}
+
+/**
  * D240: erase one user in ONE transaction. `apply: false` runs the sole-owner
  * check and the counts and writes nothing.
  */
@@ -224,9 +266,14 @@ export async function eraseUser(
   const { apply } = options;
   const state = await db.transaction((tx) => run(tx, ref, apply));
   if (state.outcome.outcome === "erased") {
-    const repaired = await repairErasedActor(db, state.userId, state.token);
-    const remaining = await countActorRows(db, state.userId);
-    return { ...state.outcome, repaired, remaining };
+    const { token, counts } = state.outcome;
+    try {
+      const repaired = await repairErasedActor(db, state.userId, token);
+      const remaining = await countActorRows(db, state.userId);
+      return { ...state.outcome, repaired, remaining };
+    } catch (e) {
+      throw new ErasePassTwoError(token, counts, e as Error);
+    }
   }
   return state.outcome;
 }
