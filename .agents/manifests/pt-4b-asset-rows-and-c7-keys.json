@@ -56,7 +56,7 @@
     {
       "file": "apps/api/server/lib/campaign-rollback.ts",
       "before": "        await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);",
-      "after": "        await Promise.resolve(createdIds);",
+      "after": "        await getAssetStore(scope).freeUnreferencedAssets(\"00000000-0000-4000-8000-000000000000\", createdIds);",
       "because": "The free is handed a uuid instead of the slug. `meta.campaignId` no longer exists in the rollback (nothing keeps createCampaign's result), so the mutant uses a literal uuid: the free resolves no campaign by slug on s3 and names a directory that was never written on fs, so the copied files survive a failed create; the pg+fs rollback test sees the file still on disk (witness unchanged).",
       "command": [
         "yarn",

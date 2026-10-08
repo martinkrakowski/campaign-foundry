@@ -63,7 +63,7 @@
       "file": "apps/api/server/lib/campaign-rollback.ts",
       "before": "objectStore() === \"s3\" ||",
       "after": "false ||",
-      "because": "the s3 short-circuit is forced false; under s3 the witness test 2 now asks campaignMeta (undefined) and skips the free, so `free.toHaveBeenCalledWith(\"t\", ids)` fails.",
+      "because": "the s3 short-circuit is forced false; the witness test 2, run alone with -t, now asks campaignMeta (undefined) and skips the free, so `free.toHaveBeenCalledWith(\"t\", ids)` fails.",
       "command": [
         "yarn",
         "vitest",

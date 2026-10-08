@@ -37,7 +37,7 @@ const PNG = Buffer.from(
 );
 const PNG_ALT = Buffer.concat([PNG, Buffer.from([0x00])]);
 const PNG_ALT2 = Buffer.concat([PNG, Buffer.from([0x00, 0x00])]);
-const PNG_ALT3 = Buffer.concat([PNG, Buffer.from([0x00, 0x00, 0x00])]);
+const PNG_ALT3 = Buffer.concat([PNG, Buffer.from([0x00, 0x00, 0x00, 0x00])]);
 const PNG_ALT4 = Buffer.concat([PNG, Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00])]);
 const PNG_MARK = Buffer.concat([PNG, Buffer.from([0x01])]);
 const PNG_THIRD = Buffer.concat([PNG, Buffer.from([0x00, 0x00, 0x00])]);
