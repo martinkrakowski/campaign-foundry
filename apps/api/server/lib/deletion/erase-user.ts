@@ -4,6 +4,132 @@ import type { SqlClient, SqlQuery } from "../db/sql-client.js";
 /** A user is named by the address they signed up with or by their Better Auth id. */
 export type EraseUserRef = { readonly email: string } | { readonly userId: string };
 
+/** Row counts only for the five "actor" columns that carry the user id or token. */
+export interface ActorCounts {
+  readonly briefVersions: number;
+  readonly decisions: number;
+  readonly providerKeys: number;
+  readonly campaignsDeletedBy: number;
+  readonly deletionsRequestedBy: number;
+}
+
+/**
+ * The five "actor" re-attributions from step 3, defined ONCE so pass one
+ * (inside the transaction) and pass two (the repair outside it) cannot drift
+ * apart. `$1` is the user id, `$2` is the token.
+ */
+const ACTOR_UPDATES: readonly {
+  readonly key: keyof ActorCounts;
+  readonly sql: string;
+}[] = [
+  { key: "briefVersions", sql: "update brief_version set actor = $2 where actor = $1" },
+  { key: "decisions", sql: "update decision set actor = $2 where actor = $1" },
+  { key: "providerKeys", sql: "update provider_key set created_by = $2 where created_by = $1" },
+  { key: "campaignsDeletedBy", sql: "update campaign set deleted_by = $2 where deleted_by = $1" },
+  {
+    key: "deletionsRequestedBy",
+    sql: "update deletion set requested_by = $2 where requested_by = $1",
+  },
+];
+
+/**
+ * Pass two: re-attribute any row that was written with the raw user id AFTER
+ * pass one committed, to the token that replaced it. Runs outside any
+ * transaction, using the shared `ACTOR_UPDATES` list. Returns how many rows
+ * each statement changed (`update ... returning 1` → `rows.length`). Safe to
+ * run twice: the second pass matches nothing and returns five zeros.
+ */
+export async function repairErasedActor(
+  db: SqlQuery,
+  userId: string,
+  token: string,
+): Promise<ActorCounts> {
+  const repaired: Record<keyof ActorCounts, number> = {
+    briefVersions: 0,
+    decisions: 0,
+    providerKeys: 0,
+    campaignsDeletedBy: 0,
+    deletionsRequestedBy: 0,
+  };
+  for (const { key, sql } of ACTOR_UPDATES) {
+    const { rows } = await db.query(`${sql} returning 1`, [userId, token]);
+    repaired[key] = rows.length;
+  }
+  return { ...repaired };
+}
+
+/**
+ * Re-scan: count rows that STILL name the raw user id in each of the five
+ * actor columns, AFTER pass one and pass two have run. A zero for a key means
+ * the re-attribution caught everything; a non-zero means a row was written
+ * after pass two and survives (reported, not repaired).
+ */
+export async function countActorRows(db: SqlQuery, userId: string): Promise<ActorCounts> {
+  const { rows } = await db.query<{
+    briefVersions: number;
+    decisions: number;
+    providerKeys: number;
+    campaignsDeletedBy: number;
+    deletionsRequestedBy: number;
+  }>(
+    `select
+      (select count(*) from brief_version where actor = $1)::int as "briefVersions",
+      (select count(*) from decision where actor = $1)::int as "decisions",
+      (select count(*) from provider_key where created_by = $1)::int as "providerKeys",
+      (select count(*) from campaign where deleted_by = $1)::int as "campaignsDeletedBy",
+      (select count(*) from deletion where requested_by = $1)::int as "deletionsRequestedBy"`,
+    [userId],
+  );
+  const r = rows[0]!;
+  return {
+    briefVersions: r.briefVersions,
+    decisions: r.decisions,
+    providerKeys: r.providerKeys,
+    campaignsDeletedBy: r.campaignsDeletedBy,
+    deletionsRequestedBy: r.deletionsRequestedBy,
+  };
+}
+
+/** A token minted by step 8 of an erasure — `erased:<uuid>`, nothing else. */
+const ERASURE_TOKEN = /^erased:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Finish an erasure whose pass one committed but whose pass two can still run:
+ * re-attribute rows written after the commit, then re-scan. Refuses a token
+ * that is not an erasure token (no `deletion` row for it) or a user id that
+ * still has a live `"user"` row — that means a normal erasure is the right call,
+ * not a repair.
+ */
+export async function finishErasure(
+  db: SqlClient,
+  userId: string,
+  token: string,
+): Promise<{ readonly repaired: ActorCounts; readonly remaining: ActorCounts }> {
+  if (!ERASURE_TOKEN.test(token)) {
+    throw new Error("erase: that token is not an erasure token.");
+  }
+
+  const { rows: deletionRow } = await db.query<{ n: number }>(
+    `select 1 as n from deletion where kind = 'user' and subject = $1`,
+    [token],
+  );
+  if (deletionRow.length === 0) {
+    throw new Error("erase: that token is not an erasure token.");
+  }
+
+  const { rows: userRow } = await db.query<{ n: number }>(
+    `select 1 as n from "user" where id = $1`,
+    [userId],
+  );
+  if (userRow.length > 0) {
+    throw new Error("erase: that user still exists; run a normal erasure.");
+  }
+
+  const repaired = await repairErasedActor(db, userId, token);
+  const remaining = await countActorRows(db, userId);
+  return { repaired, remaining };
+}
+
 /** Row counts only: what an erasure changes (or, on a dry run, would change). */
 export interface EraseUserCounts {
   readonly briefVersions: number;
@@ -27,7 +153,27 @@ export type EraseUserOutcome =
   | { readonly outcome: "not-found" }
   | { readonly outcome: "sole-owner"; readonly orgIds: readonly string[] }
   | { readonly outcome: "planned"; readonly counts: EraseUserCounts }
+  | {
+      readonly outcome: "erased";
+      readonly token: string;
+      readonly counts: EraseUserCounts;
+      readonly repaired: ActorCounts;
+      readonly remaining: ActorCounts;
+    };
+
+/** Internal: outcome before pass two adds repaired/remaining. */
+type EraseRunOutcome =
+  | { readonly outcome: "not-found" }
+  | { readonly outcome: "sole-owner"; readonly orgIds: readonly string[] }
+  | { readonly outcome: "planned"; readonly counts: EraseUserCounts }
   | { readonly outcome: "erased"; readonly token: string; readonly counts: EraseUserCounts };
+
+/** Internal: run() hands the user id and token to eraseUser for pass two. */
+interface EraseRunState {
+  readonly outcome: EraseRunOutcome;
+  readonly userId: string;
+  readonly token: string;
+}
 
 const LOOKUP_BY_EMAIL = `select id, email from "user" where email = lower($1)`;
 const LOOKUP_BY_ID = `select id, email from "user" where id = $1`;
@@ -76,15 +222,21 @@ export async function eraseUser(
   options: { readonly apply: boolean },
 ): Promise<EraseUserOutcome> {
   const { apply } = options;
-  return db.transaction((tx) => run(tx, ref, apply));
+  const state = await db.transaction((tx) => run(tx, ref, apply));
+  if (state.outcome.outcome === "erased") {
+    const repaired = await repairErasedActor(db, state.userId, state.token);
+    const remaining = await countActorRows(db, state.userId);
+    return { ...state.outcome, repaired, remaining };
+  }
+  return state.outcome;
 }
 
-async function run(tx: SqlQuery, ref: EraseUserRef, apply: boolean): Promise<EraseUserOutcome> {
+async function run(tx: SqlQuery, ref: EraseUserRef, apply: boolean): Promise<EraseRunState> {
   const [lookup, value] =
     "email" in ref ? [LOOKUP_BY_EMAIL, ref.email] : [LOOKUP_BY_ID, ref.userId];
   const found = await tx.query<{ id: string; email: string }>(lookup, [value]);
   const user = found.rows[0];
-  if (user === undefined) return { outcome: "not-found" };
+  if (user === undefined) return { outcome: { outcome: "not-found" }, userId: "", token: "" };
   const userId = user.id;
   const email = user.email;
 
@@ -93,7 +245,11 @@ async function run(tx: SqlQuery, ref: EraseUserRef, apply: boolean): Promise<Era
   await tx.query(LOCK_MEMBERS, [userId]);
   const sole = await tx.query<{ org_id: string }>(SOLE_OWNER, [userId]);
   if (sole.rows.length > 0) {
-    return { outcome: "sole-owner", orgIds: sole.rows.map((row) => row.org_id) };
+    return {
+      outcome: { outcome: "sole-owner", orgIds: sole.rows.map((row) => row.org_id) },
+      userId,
+      token: "",
+    };
   }
 
   const main = await tx.query<Omit<EraseUserCounts, "verifications" | "invitationsAsInvitee">>(
@@ -113,16 +269,14 @@ async function run(tx: SqlQuery, ref: EraseUserRef, apply: boolean): Promise<Era
     verifications: verifications.rows[0]!.n,
     invitationsAsInvitee: invitees.rows[0]!.n,
   };
-  if (!apply) return { outcome: "planned", counts };
+  if (!apply) return { outcome: { outcome: "planned", counts }, userId, token: "" };
 
   // Step 2.
   const token = `erased:${randomUUID()}`;
   // Step 3.
-  await tx.query(`update brief_version set actor = $2 where actor = $1`, [userId, token]);
-  await tx.query(`update decision set actor = $2 where actor = $1`, [userId, token]);
-  await tx.query(`update provider_key set created_by = $2 where created_by = $1`, [userId, token]);
-  await tx.query(`update campaign set deleted_by = $2 where deleted_by = $1`, [userId, token]);
-  await tx.query(`update deletion set requested_by = $2 where requested_by = $1`, [userId, token]);
+  for (const { sql } of ACTOR_UPDATES) {
+    await tx.query(sql, [userId, token]);
+  }
   // Step 4.
   await tx.query(`delete from draft where user_id = $1`, [userId]);
   await tx.query(`delete from last_opened where user_id = $1`, [userId]);
@@ -152,5 +306,5 @@ async function run(tx: SqlQuery, ref: EraseUserRef, apply: boolean): Promise<Era
        values (null, 'user', $1, 'cli:erase-user', now(), now())`,
     [token],
   );
-  return { outcome: "erased", token, counts };
+  return { outcome: { outcome: "erased", token, counts }, userId, token };
 }

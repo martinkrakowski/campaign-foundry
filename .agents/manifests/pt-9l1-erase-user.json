@@ -99,9 +99,9 @@
     },
     {
       "file": "apps/api/server/lib/deletion/erase-user.ts",
-      "before": "return db.transaction((tx) => run(tx, ref, apply));",
-      "after": "return run(db, ref, apply);",
-      "because": "without a transaction, steps 3-7 commit on the caller's connection before step 8 throws, so the failed-erase dump no longer equals the pre-call dump; the toEqual on the post-failure dump fails.",
+      "before": "const state = await db.transaction((tx) => run(tx, ref, apply));",
+      "after": "const state = await run(db, ref, apply);",
+      "because": "without a transaction, steps 3-7 commit on the caller's connection before step 8 throws, so the failed-erase dump no longer equals the pre-call dump; the toEqual on the post-failure dump fails. (Line changed from pt-9l1's original `return db.transaction(...)` to the pass-two composition that PT-9l3 added.)",
       "command": [
         "yarn",
         "vitest",
@@ -137,8 +137,8 @@
     },
     {
       "file": "apps/api/server/lib/deletion/erase-user.ts",
-      "before": "if (!apply) return { outcome: \"planned\", counts };",
-      "after": "if (false) return { outcome: \"planned\", counts };",
+      "before": "if (!apply) return { outcome: { outcome: \"planned\", counts }, userId, token: \"\" };",
+      "after": "if (false) return { outcome: { outcome: \"planned\", counts }, userId, token: \"\" };",
       "because": "the dry-run guard is removed, so a dry run (apply: false) falls through and performs the erase, answering `erased` instead of `planned`; the planned toEqual fails.",
       "command": [
         "yarn",

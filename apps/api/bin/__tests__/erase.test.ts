@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { SqlClient, SqlQuery } from "../../server/lib/db/sql-client.js";
 import { migratedDatabase } from "../../server/lib/db/__tests__/pglite-client.js";
-import type { SqlClient } from "../../server/lib/db/sql-client.js";
-import { USAGE_ERASE, parseEraseArgs, runErase } from "../erase.js";
+import {
+  USAGE_ERASE,
+  parseEraseArgs,
+  runErase,
+  EraseIncompleteError,
+  exitCodeFor,
+} from "../erase.js";
+import { eraseUser } from "../../server/lib/deletion/erase-user.js";
 import {
   seedWorld,
   dumpDatabase,
@@ -10,14 +17,67 @@ import {
   BYSTANDER,
   LOCAL_OWNER,
 } from "../../server/lib/deletion/__tests__/erase-user-fixtures.js";
+import type { World } from "../../server/lib/deletion/__tests__/erase-user-fixtures.js";
+
+/** Insert one surviving row per actor column, all carrying `TARGET.id`. */
+async function insertSurvivors(db: SqlClient, world: World): Promise<void> {
+  await db.query(
+    `insert into brief_version (campaign_id, version, body, revision, actor) values ($1, 3, '{}', 'r2', $2)`,
+    [world.localCampaignId, TARGET.id],
+  );
+  await db.query(
+    `insert into decision (org_id, campaign_id, asset_key, ordinal, verdict, actor, decided_at, run) values ($1, $2, $3, 1, 'approved', $4, now(), 'run-2')`,
+    ["local", world.localCampaignId, "ak-survivor", TARGET.id],
+  );
+  await db.query(
+    `insert into provider_key (org_id, provider, ciphertext, iv, tag, sealed_dek, dek_iv, dek_tag, kek_version, last4, created_by) values ('local', 'firefly', 'ct', 'iv', 'tag', 'dek', 'div', 'dtag', 'v1', 'abcd', $1)`,
+    [TARGET.id],
+  );
+  await db.query(
+    `insert into campaign (org_id, slug, deleted_at, deleted_by) values ('local', 'c-survivor', now(), $1)`,
+    [TARGET.id],
+  );
+  await db.query(
+    `insert into deletion (org_id, kind, subject, requested_by, not_before) values ('local', 'campaign', 'survivor-subject', $1, now())`,
+    [TARGET.id],
+  );
+}
+
+/** Proxy: after `transaction` resolves, insert surviving rows, then return. */
+function withPostCommitInserts(db: SqlClient, world: World): SqlClient {
+  const originalTransaction = db.transaction.bind(db);
+  return {
+    ...db,
+    transaction: async <T>(work: (tx: SqlQuery) => Promise<T>): Promise<T> => {
+      const result = await originalTransaction(work);
+      await insertSurvivors(db, world);
+      return result;
+    },
+  };
+}
+
+/** Proxy: when the countActorRows select is about to run, insert a decision row. */
+function withInsertOnCount(db: SqlClient, insert: () => Promise<void>): SqlClient {
+  return {
+    ...db,
+    query: async <R = Record<string, unknown>>(
+      text: string,
+      params?: readonly unknown[],
+    ): Promise<{ rows: R[] }> => {
+      if (text.includes('as "briefVersions"')) await insert();
+      return db.query<R>(text, params);
+    },
+  };
+}
 
 describe("erase CLI (bin/erase.ts)", () => {
   let db: SqlClient;
+  let world: World;
   let endSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
     db = await migratedDatabase();
-    await seedWorld(db);
+    world = await seedWorld(db);
     endSpy = vi.spyOn(db, "end").mockResolvedValue(undefined);
   }, 30_000);
 
@@ -73,16 +133,36 @@ describe("erase CLI (bin/erase.ts)", () => {
 
   test("erase CLI parses an email or a user id and defaults to a dry run", () => {
     expect(parseEraseArgs(["--email", "a@x.com"])).toEqual({
+      mode: "erase",
       ref: { email: "a@x.com" },
       apply: false,
     });
     expect(parseEraseArgs(["--user", "u1", "--apply"])).toEqual({
+      mode: "erase",
       ref: { userId: "u1" },
       apply: true,
     });
     expect(parseEraseArgs(["--user", "u1", "--dry-run"])).toEqual({
+      mode: "erase",
       ref: { userId: "u1" },
       apply: false,
+    });
+  });
+
+  test("erase CLI parses a finish mode with the right shape", () => {
+    expect(
+      parseEraseArgs([
+        "--finish",
+        "erased:00000000-0000-4000-8000-000000000000",
+        "--user",
+        "u1",
+        "--apply",
+      ]),
+    ).toEqual({
+      mode: "finish",
+      token: "erased:00000000-0000-4000-8000-000000000000",
+      userId: "u1",
+      apply: true,
     });
   });
 
@@ -194,7 +274,7 @@ describe("erase CLI (bin/erase.ts)", () => {
         (l) => log.push(l),
       );
     } catch (e) {
-      message = e instanceof Error ? (e as Error).message : String(e);
+      message = e instanceof Error ? e.message : String(e);
     }
     expect(message).toBe(
       "erase refused: the user is the only owner of org local; move ownership or delete the org first.",
@@ -216,7 +296,7 @@ describe("erase CLI (bin/erase.ts)", () => {
         () => {},
       );
     } catch (e) {
-      message = e instanceof Error ? (e as Error).message : String(e);
+      message = e instanceof Error ? e.message : String(e);
     }
     expect(message).toBe("erase: no such user.");
     expect(message).not.toContain("nobody");
@@ -238,5 +318,318 @@ describe("erase CLI (bin/erase.ts)", () => {
       ),
     ).rejects.toThrow("boom");
     expect(broken.end).toHaveBeenCalledTimes(1);
+  });
+
+  // ---- New tests for PT-9l3 repair ----
+
+  test("8. apply with rows repaired in pass two prints 'repaired after commit' lines, no throw", async () => {
+    const proxy = withPostCommitInserts(db, world);
+    const log: string[] = [];
+
+    await runErase(
+      ["--user", TARGET.id, "--apply"],
+      () => proxy,
+      (l) => log.push(l),
+    );
+
+    const erasedIdx = log.findIndex((l) => l.includes("Erased. Token"));
+    expect(erasedIdx).toBeGreaterThanOrEqual(0);
+    const repairedLines = log.slice(erasedIdx + 1);
+    expect(repairedLines).toEqual([
+      "  repaired after commit: 1 brief versions re-attributed",
+      "  repaired after commit: 1 decisions re-attributed",
+      "  repaired after commit: 1 provider keys re-attributed",
+      "  repaired after commit: 1 campaigns re-attributed",
+      "  repaired after commit: 1 deletion requests re-attributed",
+    ]);
+    expect(endSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("9. apply with a row remaining prints STILL lines, rejects with EraseIncompleteError", async () => {
+    const proxy = withInsertOnCount(db, async () => {
+      await db.query(
+        `insert into decision (org_id, campaign_id, asset_key, ordinal, verdict, actor, decided_at, run) values ($1, $2, $3, 1, 'approved', $4, now(), 'run-3')`,
+        ["local", world.localCampaignId, "ak-after-scan", TARGET.id],
+      );
+    });
+    const log: string[] = [];
+    let caught: unknown;
+
+    try {
+      await runErase(
+        ["--user", TARGET.id, "--apply"],
+        () => proxy,
+        (l) => log.push(l),
+      );
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(EraseIncompleteError);
+    const message = (caught as Error).message;
+    const token = log
+      .find((l) => l.includes("Erased. Token"))!
+      .match(/Token (erased:[0-9a-f-]{36})/)![1];
+    expect(message).toBe(
+      `erase incomplete: rows written while the erasure ran still name the user. Token ${token}. To finish, run: yarn erase:user --finish ${token} --user <the user's id> --apply`,
+    );
+
+    const lowerLog = log.join("\n").toLowerCase();
+    expect(lowerLog).not.toContain(TARGET.email.toLowerCase());
+    expect(lowerLog).not.toContain(TARGET.name.toLowerCase());
+    expect(lowerLog).not.toContain(TARGET.id.toLowerCase());
+    const lowerMsg = message.toLowerCase();
+    expect(lowerMsg).not.toContain(TARGET.email.toLowerCase());
+    expect(lowerMsg).not.toContain(TARGET.name.toLowerCase());
+    expect(lowerMsg).not.toContain(TARGET.id.toLowerCase());
+
+    expect(message).not.toContain(TARGET.id);
+
+    expect(exitCodeFor(caught as Error)).toBe(3);
+    expect(exitCodeFor(new Error("x"))).toBe(1);
+    expect(exitCodeFor("x")).toBe(1);
+    expect(endSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("10. log and error message of the incomplete path leak no personal data", async () => {
+    const proxy = withInsertOnCount(db, async () => {
+      await db.query(
+        `insert into decision (org_id, campaign_id, asset_key, ordinal, verdict, actor, decided_at, run) values ($1, $2, $3, 1, 'approved', $4, now(), 'run-3')`,
+        ["local", world.localCampaignId, "ak-after-scan", TARGET.id],
+      );
+    });
+    const log: string[] = [];
+    let caught: unknown;
+
+    try {
+      await runErase(
+        ["--user", TARGET.id, "--apply"],
+        () => proxy,
+        (l) => log.push(l),
+      );
+    } catch (e) {
+      caught = e;
+    }
+
+    const message = caught instanceof Error ? caught.message : String(caught);
+    const lowerLog = log.join("\n").toLowerCase();
+    const lowerMsg = message.toLowerCase();
+
+    // Three not.toContain assertions on the log:
+    expect(lowerLog).not.toContain(TARGET.email.toLowerCase());
+    expect(lowerLog).not.toContain(TARGET.name.toLowerCase());
+    expect(lowerLog).not.toContain(TARGET.id.toLowerCase());
+
+    // Three not.toContain assertions on the error message:
+    expect(lowerMsg).not.toContain(TARGET.email.toLowerCase());
+    expect(lowerMsg).not.toContain(TARGET.name.toLowerCase());
+    expect(lowerMsg).not.toContain(TARGET.id.toLowerCase());
+  });
+
+  test("11. --finish finishes and prints 'Finished. Token ...'", async () => {
+    const outcome = await eraseUser(db, { userId: TARGET.id }, { apply: true });
+    if (outcome.outcome !== "erased") throw new Error("expected erased");
+    const token = outcome.token;
+    const log: string[] = [];
+
+    await runErase(
+      ["--finish", token, "--user", TARGET.id, "--apply"],
+      () => db,
+      (l) => log.push(l),
+    );
+
+    expect(log).toContain(`  Finished. Token ${token}.`);
+    // No leak of personal data
+    const lowerLog = log.join("\n").toLowerCase();
+    expect(lowerLog).not.toContain(TARGET.email.toLowerCase());
+    expect(lowerLog).not.toContain(TARGET.name.toLowerCase());
+    expect(lowerLog).not.toContain(TARGET.id.toLowerCase());
+    expect(endSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("11b. --finish with a row that keeps reappearing rejects with EraseIncompleteError", async () => {
+    const outcome = await eraseUser(db, { userId: TARGET.id }, { apply: true });
+    if (outcome.outcome !== "erased") throw new Error("expected erased");
+    const token = outcome.token;
+
+    const proxy = withInsertOnCount(db, async () => {
+      await db.query(
+        `insert into decision (org_id, campaign_id, asset_key, ordinal, verdict, actor, decided_at, run) values ($1, $2, $3, 1, 'approved', $4, now(), 'run-3')`,
+        ["local", world.localCampaignId, "ak-after-scan", TARGET.id],
+      );
+    });
+
+    let caught: unknown;
+    try {
+      await runErase(
+        ["--finish", token, "--user", TARGET.id, "--apply"],
+        () => proxy,
+        () => {},
+      );
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(EraseIncompleteError);
+  });
+
+  test("7ab. finishErasure refusals change nothing", async () => {
+    const outcome = await eraseUser(db, { userId: TARGET.id }, { apply: true });
+    if (outcome.outcome !== "erased") throw new Error("expected erased");
+
+    const before = await dumpDatabase(db);
+
+    // (b) well-formed token, no deletion row
+    await expect(
+      runErase(
+        ["--finish", "erased:00000000-0000-4000-8000-000000000000", "--user", TARGET.id, "--apply"],
+        () => db,
+        () => {},
+      ),
+    ).rejects.toThrow("erase: that token is not an erasure token.");
+    expect(await dumpDatabase(db)).toEqual(before);
+
+    // (c) malformed tokens
+    for (const bad of ["erased:", "erased:not-a-uuid", "00000000-0000-4000-8000-000000000000"]) {
+      await expect(
+        runErase(
+          ["--finish", bad, "--user", TARGET.id, "--apply"],
+          () => db,
+          () => {},
+        ),
+      ).rejects.toThrow("erase: that token is not an erasure token.");
+      expect(await dumpDatabase(db)).toEqual(before);
+    }
+  });
+
+  test("7d. finishErasure refuses when the user still exists even with a real token", async () => {
+    const outcome = await eraseUser(db, { userId: TARGET.id }, { apply: true });
+    if (outcome.outcome !== "erased") throw new Error("expected erased");
+    const token = outcome.token;
+
+    const before = await dumpDatabase(db);
+
+    await expect(
+      runErase(
+        ["--finish", token, "--user", BYSTANDER.id, "--apply"],
+        () => db,
+        () => {},
+      ),
+    ).rejects.toThrow("erase: that user still exists; run a normal erasure.");
+    expect(await dumpDatabase(db)).toEqual(before);
+  });
+
+  test("12. usage errors: finish without --user", async () => {
+    const open = vi.fn();
+    await expect(
+      runErase(
+        ["--finish", "erased:00000000-0000-4000-8000-000000000000", "--apply"],
+        open,
+        () => {},
+      ),
+    ).rejects.toThrow(USAGE_ERASE);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  test("12. usage errors: finish --email is rejected", async () => {
+    const open = vi.fn();
+    await expect(
+      runErase(
+        [
+          "--finish",
+          "erased:00000000-0000-4000-8000-000000000000",
+          "--email",
+          "x@y.com",
+          "--apply",
+        ],
+        open,
+        () => {},
+      ),
+    ).rejects.toThrow(USAGE_ERASE);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  test("12. usage errors: finish without --apply", async () => {
+    const open = vi.fn();
+    await expect(
+      runErase(
+        ["--finish", "erased:00000000-0000-4000-8000-000000000000", "--user", "u1"],
+        open,
+        () => {},
+      ),
+    ).rejects.toThrow(USAGE_ERASE);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  test("12. usage errors: --finish twice", async () => {
+    const open = vi.fn();
+    await expect(
+      runErase(
+        [
+          "--finish",
+          "erased:00000000-0000-4000-8000-000000000000",
+          "--finish",
+          "erased:00000000-0000-4000-8000-000000000001",
+          "--user",
+          "u1",
+          "--apply",
+        ],
+        open,
+        () => {},
+      ),
+    ).rejects.toThrow(USAGE_ERASE);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  test("12. usage errors: --email --apply treats --apply as address (rejected)", async () => {
+    const open = vi.fn();
+    await expect(runErase(["--email", "--apply"], open, () => {})).rejects.toThrow(USAGE_ERASE);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  test("12. usage errors: --user --apply same", async () => {
+    const open = vi.fn();
+    await expect(runErase(["--user", "--apply"], open, () => {})).rejects.toThrow(USAGE_ERASE);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  test("12. usage errors: --email empty string", async () => {
+    const open = vi.fn();
+    await expect(runErase(["--email", "", "--apply"], open, () => {})).rejects.toThrow(USAGE_ERASE);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  test("12. usage errors: --finish --apply treats --apply as token (rejected)", async () => {
+    const open = vi.fn();
+    await expect(runErase(["--finish", "--apply"], open, () => {})).rejects.toThrow(USAGE_ERASE);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  test("13. incomplete rejection closes the database", async () => {
+    const proxy = withInsertOnCount(db, async () => {
+      await db.query(
+        `insert into decision (org_id, campaign_id, asset_key, ordinal, verdict, actor, decided_at, run) values ($1, $2, $3, 1, 'approved', $4, now(), 'run-3')`,
+        ["local", world.localCampaignId, "ak-after-scan", TARGET.id],
+      );
+    });
+
+    await expect(
+      runErase(
+        ["--user", TARGET.id, "--apply"],
+        () => proxy,
+        () => {},
+      ),
+    ).rejects.toThrow(EraseIncompleteError);
+    expect(endSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("13. finish refusal closes the database", async () => {
+    await expect(
+      runErase(
+        ["--finish", "erased:00000000-0000-4000-8000-000000000000", "--user", TARGET.id, "--apply"],
+        () => db,
+        () => {},
+      ),
+    ).rejects.toThrow("erase: that token is not an erasure token.");
+    expect(endSpy).toHaveBeenCalledTimes(1);
   });
 });
