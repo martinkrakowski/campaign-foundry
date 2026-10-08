@@ -265,3 +265,17 @@ export function cachePrefix(orgId: string): ObjectKey {
   assertObjectKey(prefix);
   return prefix;
 }
+
+/**
+ * Everything one org owns in the store: `org/<orgId>/` (D243, PT-9m2). It spans
+ * `campaign/` AND `cache/`, so a `deletePrefix` on it empties the whole org.
+ * **No request-path code may call it.** Its one caller is the org purge
+ * (`lib/deletion/purge-org.ts`). The trailing `/` is load-bearing: without it
+ * the prefix `org/acme` would also match `org/acme-two/...`. The id goes through
+ * the same `segment` check as every prefix here, never a second validator.
+ */
+export function orgPrefix(orgId: string): ObjectKey {
+  const prefix = ["org", segment("the org id", orgId, ORG_ID_PATTERN), ""].join("/");
+  assertObjectKey(prefix);
+  return prefix;
+}

@@ -1,0 +1,244 @@
+{
+  "version": 1,
+  "lane": "PT-9m2-purge-org",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "delete from provider_key where org_id = $1",
+      "after": "delete from provider_key where org_id = $1 and false",
+      "because": "skipping the provider_key delete leaves the org's sealed key rows (and their ciphertext) behind; the witness asserts the ct-acme row is gone and the count is 0.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.test.ts",
+        "-t",
+        "purgeOrg deletes the provider keys of the org and no other org"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "delete from invitation where org_id = $1",
+      "after": "delete from invitation where $1::text is not null",
+      "because": "the always-true condition deletes every org's invitation; the witness asserts beta's invitation is unchanged.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.test.ts",
+        "-t",
+        "purgeOrg deletes the teams team members invitations and members of the org only"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "  \"pool\",",
+      "after": "  \"decision\",",
+      "because": "removing the pool entry from the literal table list leaves ghost pool rows behind; the witness asserts each ghost table is empty.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.test.ts",
+        "-t",
+        "purgeOrg deletes leftover slug keyed rows of the org only"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "where org_id = $1 and requested_by not like 'erased:%'",
+      "after": "where $1::text is not null and requested_by not like 'erased:%'",
+      "because": "the always-true condition anonymises every org's deletion rows; the witness asserts beta's deletion rows are unchanged.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.test.ts",
+        "-t",
+        "purgeOrg anonymises requested_by on every deletion row of the org only"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "await markPurged(db, deletionRow.id);",
+      "after": "void deletionRow;",
+      "because": "replacing markPurged with a no-op leaves the org deletion row un-purged; the witness asserts purged_at is not null.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.test.ts",
+        "-t",
+        "purgeOrg marks the org row purged and a second run changes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "if (left[0]!.n > 0) return \"retry\";",
+      "after": "if (left[0]!.n > 1000000) return \"retry\";",
+      "because": "raising the pending-campaign threshold makes purgeOrg skip the retry and proceed to delete org rows while campaigns remain; the witness asserts retry with rows intact.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.queue.test.ts",
+        "-t",
+        "purgeOrg answers retry and keeps every row while campaign purges are pending"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "orgId === LOCAL_TENANT.orgId",
+      "after": "orgId === \"never-local\"",
+      "because": "relocating the local check to a never-matching value lets requestOrgDeletion tombstone local; the witness asserts local.deleted_at stays null and no deletion row is written.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.request.test.ts",
+        "-t",
+        "requestOrgDeletion refuses the local org and writes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "await objectStoreClient().deletePrefix(orgPrefix(orgId));",
+      "after": "await objectStoreClient().deletePrefix(`${orgPrefix(orgId)}cache/`);",
+      "because": "narrowing the s3 prefix to only the cache leaves the campaign objects under org/<org>/; the witness asserts store.list(orgPrefix(org)) is empty.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.objects.test.ts",
+        "-t",
+        "purgeOrg deletes everything under the org prefix including the cache and no sibling org"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "  await rm(roots.projectRoot, { recursive: true, force: true });",
+      "after": "  await Promise.resolve();",
+      "because": "stubbing the project-root rm leaves that tree behind; the witness (two separate roots, four assertions) sees the project tree still present and its ENOENT assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.objects.test.ts",
+        "-t",
+        "purgeOrg under the file object store removes the org trees and no other org tree"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "  await rm(roots.outputRoot, { recursive: true, force: true });",
+      "after": "  await Promise.resolve();",
+      "because": "stubbing the output-root rm leaves that tree behind; the witness sees the output tree still present and its ENOENT assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.objects.test.ts",
+        "-t",
+        "purgeOrg under the file object store removes the org trees and no other org tree"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "export async function deleteOrgRows(db: SqlClient, orgId: string): Promise<void> {\n  refuseLocal(orgId);",
+      "after": "export async function deleteOrgRows(db: SqlClient, orgId: string): Promise<void> {",
+      "because": "removing the local refusal from deleteOrgRows lets it delete the local org's rows; the witness sees the call not throw and local rows change, failing the refused-and-writes-nothing assertion.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.test.ts",
+        "-t",
+        "deleteOrgRows refuses the local org and writes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "): Promise<boolean> {\n  refuseLocal(orgId);\n  let blocked = false;",
+      "after": "): Promise<boolean> {\n  let blocked = false;",
+      "because": "removing the local refusal from queueCampaignPurges lets it run over local; the witness sees the call not throw (returns false) instead of refusing, failing the refused-and-writes-nothing assertion.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.test.ts",
+        "-t",
+        "queueCampaignPurges refuses the local org and writes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "  if (orgDeRow === undefined) {\n    throw new Error(`unknown deletion row \"${deletionRow.id}\"`);\n  }",
+      "after": "  // no-such-row check removed by mutation",
+      "because": "removing the no-such-row check lets purgeOrg dereference undefined to read `kind`, throwing a TypeError instead of `unknown deletion row <id>`; the witness expects that message and its rejected-with assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.test.ts",
+        "-t",
+        "an id naming no row throws and the org's rows and objects are untouched"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "update org set name = 'Deleted org', slug = null, logo = null, metadata = null where id = $1",
+      "after": "update org set name = 'Deleted org', slug = id, logo = null, metadata = null where id = $1",
+      "because": "reverting slug to `id` makes the step-6 update collide with another org that holds this org's id as its slug (org_slug_uidx), throwing a unique violation inside purgeOrg; the witness expects outcome `purged` and its toBe assertion fails instead.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.test.ts",
+        "-t",
+        "purgeOrg sets the purged org's slug to null so it cannot collide with another org's slug"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
