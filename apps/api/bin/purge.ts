@@ -332,7 +332,9 @@ export async function runOrgExpire(
     if (apply) {
       log(`  Expired ${expired.length} org tombstone(s).`);
       for (const id of failed) {
-        log(`  org ${id}: failed (rows still reference this org).`);
+        log(
+          `  org ${id}: failed (could not be expired; a row may still reference it); it is left in place`,
+        );
       }
       return;
     }

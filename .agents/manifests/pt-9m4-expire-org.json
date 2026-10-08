@@ -6,7 +6,7 @@
       "file": "apps/api/server/lib/deletion/expire-org.ts",
       "before": "delete from usage where org_id = $1",
       "after": "delete from usage where org_id = $1 and false",
-      "because": "without the usage delete the org row's delete hits the FK constraint and the transaction rolls back; the org survives and the run reports failed instead of expired. The test asserts the org row is gone and usage is 0; under this mutant expect(orgCount[0]!.n).toBe(0) fails on that assertion line.",
+      "because": "without the usage delete the org row's delete hits the FK constraint and the transaction rolls back; the org survives and the run reports failed instead of expired. The test asserts the result is { eligible: ['acme'], expired: [], failed: ['acme'] } and that the org row count is 1; under this mutant the result is { expired: ['acme'] } and expect(result).toEqual(...) on the result line fails first, before the org-count assertion.",
       "command": [
         "yarn",
         "vitest",
@@ -80,8 +80,8 @@
     },
     {
       "file": "apps/api/server/lib/deletion/expire-org.ts",
-      "before": "and d.purged_at is not null",
-      "after": "and true",
+      "before": "and o.id <> $2\n     and exists (select 1 from deletion d where d.kind = 'org' and d.org_id = o.id and d.subject = o.id and d.purged_at is not null)\n     order by o.id",
+      "after": "and o.id <> $2\n     and true\n     order by o.id",
       "because": "the purged_at guard is removed, so an org with a deletion row that was requested but never purged is eligible. The incomplete-purge test asserts eligible is empty and the snapshot is unchanged; under this mutant the org is listed as eligible and expired, so expect(result).toEqual({ eligible: [], ... }) fails on that assertion line.",
       "command": [
         "yarn",
@@ -120,7 +120,7 @@
       "file": "apps/api/bin/purge.ts",
       "before": "if (apply) {",
       "after": "if (true) {",
-      "because": "the dry-run guard is removed, so a dry run (--apply absent) deletes org tombstones. The dry-run test asserts the org and usage rows are unchanged after a dry run; under this mutant they are deleted, so expect(await snapshot(db, \"acme\")).toEqual(beforeAcme) fails on that assertion line.",
+      "because": "the dry-run guard (if (apply)) is replaced with a tautology (if (true)), so the apply-mode log lines run even when parseOrgExpireArgs returned apply=false. The library is still called with apply=false (no deletion happens), but the output is 'Expired 0 org tombstone(s).' instead of the dry-run lines, so expect(lines).toEqual([...]) on the dry-run output fails.",
       "command": [
         "yarn",
         "vitest",
@@ -130,6 +130,25 @@
         "apps/api/bin/__tests__/purge-org-expire.test.ts",
         "-t",
         "org-expire CLI dry run lists eligible orgs and deletes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/expire-org.ts",
+      "before": "and exists (select 1 from deletion d where d.kind = 'org' and d.org_id = o.id and d.subject = o.id and d.purged_at is not null)\n       for update",
+      "after": "and true\n       for update",
+      "because": "the purge-complete guard is removed from the locked re-check, so expireOrg can hard-delete a tombstoned org whose purge is not complete. State A test (purge threw after row deletes, purged_at NULL) asserts expireOrg returns 'skipped' and the org row is still there; under this mutant expireOrg deletes it, so expect(await expireOrg(db, \"acme\")).toBe(\"skipped\") fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/expire-org.test.ts",
+        "-t",
+        "expireOrg skips an org whose purge is not complete even if it is old enough state A rows deleted purge threw",
         "--tagsFilter",
         "!golden-bytes && !cpu-bound"
       ],

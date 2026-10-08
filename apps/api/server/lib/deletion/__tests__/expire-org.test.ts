@@ -218,15 +218,75 @@ describe("expireOrgTombstones (PT-9m4, D241, Q5)", () => {
     expect(await objectSnapshot(store, "acme")).toEqual(beforeAcmeObj);
   });
 
-  test("expireOrg skips an org that is not eligible when it takes the lock", async () => {
-    await seedOrg(db, "beta", store);
-    const beforeBeta = await snapshot(db, "beta");
-    const beforeBetaObj = await objectSnapshot(store, "beta");
+  test("expireOrg skips an org whose purge is not complete even if it is old enough state A rows deleted purge threw", async () => {
+    // State A: purgeOrg deleted all org-scoped rows but threw before marking
+    // purged_at, so no row references the org, the org is backdated past the
+    // retention, but the deletion row has purged_at = NULL.
+    await seedOrg(db, "acme", store);
+    await purgeOrgCompletely(db, "acme");
+    const { rows: delRows } = await db.query<{ id: string }>(
+      `select id from deletion where org_id = 'acme' and kind = 'org' order by not_before limit 1`,
+    );
+    await db.query(`update deletion set purged_at = null where id = $1`, [delRows[0]!.id]);
+    await backdateOrg(db, "acme", "13 months 1 day");
+    const beforeAcme = await snapshot(db, "acme");
 
-    expect(await expireOrg(db, "ghost")).toBe("skipped");
-    expect(await expireOrg(db, "beta")).toBe("skipped");
+    expect(await expireOrg(db, "acme")).toBe("skipped");
 
-    expect(await snapshot(db, "beta")).toEqual(beforeBeta);
-    expect(await objectSnapshot(store, "beta")).toEqual(beforeBetaObj);
+    expect(await snapshot(db, "acme")).toEqual(beforeAcme);
+  });
+
+  test("expireOrg skips an org whose purge is not complete state B never purged with cascade FK rows", async () => {
+    // State B: tombstoned old org, never purged, with member, team, invitation
+    // rows (which would cascade-delete). expireOrg must refuse first.
+    await seedOrg(db, "acme", store);
+    await requestOrgDeletion(db, { orgId: "acme", requestedBy: "operator" });
+    await backdateOrg(db, "acme", "13 months 1 day");
+    const beforeAcme = await snapshot(db, "acme");
+    const beforeAcmeObj = await objectSnapshot(store, "acme");
+
+    expect(await expireOrg(db, "acme")).toBe("skipped");
+
+    // The cascade FK rows (member, team, invitation) are all still there.
+    expect(await snapshot(db, "acme")).toEqual(beforeAcme);
+    expect(await objectSnapshot(store, "acme")).toEqual(beforeAcmeObj);
+  });
+
+  test("expireOrg expires an org whose purge is complete and is old enough", async () => {
+    await seedOrg(db, "acme", store);
+    await purgeOrgCompletely(db, "acme");
+    await backdateOrg(db, "acme", "13 months 1 day");
+
+    expect(await expireOrg(db, "acme")).toBe("expired");
+
+    const { rows: n } = await db.query<{ n: number }>(
+      `select count(*)::int as n from org where id = 'acme'`,
+    );
+    expect(n[0]!.n).toBe(0);
+  });
+
+  test("expireOrgTombstones keeps a tombstone at thirteen months minus one hour and expires one at thirteen months plus one hour", async () => {
+    // The exact 13-month instant is not tested because the DB clock and the
+    // backdate statement are separate steps: a statement-level now() - interval
+    // '13 months' cannot be matched exactly across two statements. Instead we
+    // test two points close on either side. Interval '13 months 1 hour' means
+    // 13 months + 1 hour (over the threshold); '12 months 23 hours' is just
+    // under.
+    await seedOrg(db, "acme", store);
+    await purgeOrgCompletely(db, "acme");
+    await backdateOrg(db, "acme", "12 months 23 hours");
+    const young = await snapshot(db, "acme");
+    const result = await expireOrgTombstones(db, { apply: true });
+    expect(result).toEqual({ eligible: [], expired: [], failed: [] });
+    expect(await snapshot(db, "acme")).toEqual(young);
+
+    // Now backdate to just over 13 months: 13 months plus 1 hour.
+    backdateOrg(db, "acme", "13 months 1 hour");
+    const result2 = await expireOrgTombstones(db, { apply: true });
+    expect(result2).toEqual({ eligible: ["acme"], expired: ["acme"], failed: [] });
+    const { rows: n } = await db.query<{ n: number }>(
+      `select count(*)::int as n from org where id = 'acme'`,
+    );
+    expect(n[0]!.n).toBe(0);
   });
 });

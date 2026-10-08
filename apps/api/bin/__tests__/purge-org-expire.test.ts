@@ -154,6 +154,35 @@ describe("org-expire CLI (bin/purge.ts, PT-9m4, D241, Q5)", () => {
     expect(endSpy).toHaveBeenCalled();
   });
 
+  test("org-expire CLI --org --apply takes --apply as the org id and refuses it before deleting", async () => {
+    // parseOrgArgs is shared unedited: --org with no following value that is
+    // not option-shaped is consumed as the org id. "--apply" is not
+    // option-shaped (it doesn't start with -), so it becomes the org value
+    // with apply=false. The id "--apply" matches no org, so the not-eligible
+    // throw fires. Pinned: exact message, nothing deleted, connection closed.
+    const beforeBeta = await snapshot(db, "beta");
+    const beforeBetaObj = await objectSnapshot(memory, "beta");
+
+    await expect(runOrgExpire(["--org", "--apply"], open)).rejects.toThrow(
+      'org-expire: org "--apply" is not eligible: it must be tombstoned, fully purged and older than 13 months.',
+    );
+    expect(await snapshot(db, "beta")).toEqual(beforeBeta);
+    expect(await objectSnapshot(memory, "beta")).toEqual(beforeBetaObj);
+    expect(endSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("org-expire CLI --org --apply --apply takes the second --apply as the org id in apply mode", async () => {
+    const beforeBeta = await snapshot(db, "beta");
+    const beforeBetaObj = await objectSnapshot(memory, "beta");
+
+    await expect(runOrgExpire(["--org", "--apply", "--apply"], open)).rejects.toThrow(
+      'org-expire: org "--apply" is not eligible: it must be tombstoned, fully purged and older than 13 months.',
+    );
+    expect(await snapshot(db, "beta")).toEqual(beforeBeta);
+    expect(await objectSnapshot(memory, "beta")).toEqual(beforeBetaObj);
+    expect(endSpy).toHaveBeenCalledTimes(1);
+  });
+
   test("org-expire CLI reports a failed org with a fixed message and no detail", async () => {
     await purgeAndBackdate("acme");
     await db.query(`insert into campaign (org_id, slug) values ('acme', 'late')`);
@@ -164,7 +193,7 @@ describe("org-expire CLI (bin/purge.ts, PT-9m4, D241, Q5)", () => {
     await runOrgExpire(["--org", "acme", "--apply"], open, (l) => lines.push(l));
     expect(lines).toEqual([
       "  Expired 0 org tombstone(s).",
-      "  org acme: failed (rows still reference this org).",
+      "  org acme: failed (could not be expired; a row may still reference it); it is left in place",
     ]);
     for (const needle of ["violates", "foreign key", "constraint", "campaign"]) {
       expect(lines.some((l) => l.includes(needle))).toBe(false);
