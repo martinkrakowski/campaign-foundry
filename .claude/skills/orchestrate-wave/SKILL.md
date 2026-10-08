@@ -119,6 +119,32 @@ status wins and your summary says so.
   timeout.* (Template A, [pipeline
   doc](../../../docs/workflows/delegated-implementation-pipeline.md#template-a--lane-brief-implementer))
 
+**Four more, earned in wave platform-and-tenancy-w07 (2026-10-08, thirteen lanes).** The first three go in
+every brief and fix brief; the fourth goes in the dispatch prompt itself.
+
+- *Every baseline is taken before the action it guards.* A "nothing changed" or "the other org is
+  untouched" assertion compares against a snapshot taken BEFORE the call; ask the lane to name both
+  line numbers in its report. Three tests in one wave took theirs after and could not fail. The
+  same rule for a hook: it sits on the object the statement really runs on (the transaction's `tx`,
+  not `db`) and the test asserts it fired.
+- *A mutation must fail on an assertion, never on a syntax or bind error.* Every `after` must still
+  parse and keep every bound parameter referenced; a mutant that cannot run is recorded "caught"
+  with no assertion executed. Ask for the failing assertion line, and re-run one suspicious entry
+  yourself with `yarn mutate` on a second host.
+- *An error in a file the lane changed is never pre-existing.* A lane that reports a failure, a
+  warning or a coverage gap in a file it edited owns it; "it was already like that" needs the same
+  command run on the base commit, with its output.
+- *Name the first action in the dispatch prompt.* "After proving the gap, your FIRST action is to
+  write `<file>` with your write tool; then one numbered item at a time: a few sentences of thought,
+  edit, run its test." Three of the first six dispatches of that wave ended on finish reason
+  `length` (one 32,000-token reasoning pass, exit 0, nothing written); none of the next seven did
+  once the prompt named the first action. A lane that stops that way is resumed in its own session
+  with one concrete first edit named, never re-dispatched.
+
+**Two things a sandboxed lane cannot do, so never brief them:** `git fetch` and `git merge`. After
+`scripts/merge-prs.sh` refreshes a branch, fast-forward the lane's worktree from the host yourself,
+then resume the lane with `--fork`.
+
 **Know which gates are enforced by CI and which are enforced by you.** `plan:verify`, a lane
 retiring its own premise, and `mutate:verify` on a changed manifest are **CI**; a manifest existing
 at all, and `handoff:check` on a two-stage lane, are **habits only you enforce**. (why: [rationale](references/rationale.md#which-gates-are-machinery-and-which-are-you))
