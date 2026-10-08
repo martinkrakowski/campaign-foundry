@@ -42,6 +42,7 @@ const PNG_ALT4 = Buffer.concat([PNG, Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00])
 const PNG_MARK = Buffer.concat([PNG, Buffer.from([0x01])]);
 const PNG_THIRD = Buffer.concat([PNG, Buffer.from([0x00, 0x00, 0x00])]);
 const NESTED = Buffer.from("nested-third-campaign-file-bytes");
+const MP3 = Buffer.concat([Buffer.from([0xff, 0xfb]), Buffer.alloc(64, 0x00)]);
 
 const OWNER: TenantContext = { orgId: "local", userId: "owner", roles: ["owner"], teamIds: [] };
 const ONLY_T1: TenantContext = { orgId: "local", userId: "u1", roles: [], teamIds: ["t1"] };
@@ -556,6 +557,218 @@ describe("copy third-campaign-only under s3 on pg (FU-third-campaign-copy, D238)
     expect(copy).toHaveBeenCalledWith(thirdSlug, newSlug, { only: ["alt.png"] });
     const stored = (await ownerStore.findBriefById(newSlug))!.brief;
     expect((await store().assetOwner(stored.products[0].inputAsset!))?.slug).toBe(newSlug);
+    expect((await assetRows(newUuid)).some((n) => n === "bg.png")).toBe(false);
+    expect(free).not.toHaveBeenCalled();
+    expect(deleteAssets).not.toHaveBeenCalled();
+    await expectSourcesUntouched(
+      { slug: slug, rows: ["extra.png", "logo.png"], objects: 2 },
+      { slug: thirdSlug, rows: ["alt.png", "bg.png", "logo.png"], objects: 3 },
+    );
+  });
+
+  test("s3, a third-campaign ref carried in audio.path is copied narrowly in create", async () => {
+    const thirdSlug = unique("third");
+    await ownerStore.createCampaign(thirdSlug, { teamId: "t1" });
+    const bedId = await upload(OWNER, thirdSlug, "bed.mp3", MP3);
+    await upload(OWNER, thirdSlug, "logo.png", PNG_THIRD);
+    await upload(OWNER, thirdSlug, "bg.png", PNG_ALT3);
+    const slug = unique("src");
+    const { campaignId } = await ownerStore.createCampaign(slug, { teamId: "t1" });
+    const sourceLogoId = await upload(OWNER, slug, "logo.png", PNG);
+    await upload(OWNER, slug, "extra.png", PNG_ALT);
+    await ownerStore.createBrief(
+      {
+        ...baseBrief(slug, pathRef(slug)),
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#1473E3",
+            logoPath: sourceLogoId,
+          },
+        ],
+        audio: { path: bedId, rights: { licenceId: "lic-1", source: "library" } },
+      },
+      { teamId: "t1" },
+    );
+    const { copy, free, deleteAssets } = watch();
+
+    const res = await createFrom(ONLY_T1, { name: unique("copy"), source: campaignId });
+    expect(res.status).toBe(201);
+    const { slug: newSlug, campaignId: newUuid } = (await res.json()) as {
+      campaignId: string;
+      slug: string;
+      revision: string;
+    };
+    expect((await assetRows(newUuid)).sort()).toEqual(["bed.mp3", "extra.png", "logo.png"]);
+    expect(copy).toHaveBeenCalledWith(thirdSlug, newSlug, { only: ["bed.mp3"] });
+    const stored = (await ownerStore.findBriefById(newSlug))!.brief;
+    const owner = await store().assetOwner(stored.audio!.path);
+    expect(owner?.slug).toBe(newSlug);
+    expect(owner?.name).toBe("bed.mp3");
+    expect(stored.audio!.path).not.toBe(bedId);
+    expect((await assetRows(newUuid)).some((n) => n === "bg.png")).toBe(false);
+    expect(free).not.toHaveBeenCalled();
+    expect(deleteAssets).not.toHaveBeenCalled();
+    await expectSourcesUntouched(
+      { slug: slug, rows: ["extra.png", "logo.png"], objects: 2 },
+      { slug: thirdSlug, rows: ["bed.mp3", "bg.png", "logo.png"], objects: 3 },
+    );
+  });
+
+  test("s3, a third-campaign ref carried in audio.path is copied narrowly in duplicate", async () => {
+    const thirdSlug = unique("third");
+    await ownerStore.createCampaign(thirdSlug, { teamId: "t1" });
+    const bedId = await upload(OWNER, thirdSlug, "bed.mp3", MP3);
+    await upload(OWNER, thirdSlug, "logo.png", PNG_THIRD);
+    await upload(OWNER, thirdSlug, "bg.png", PNG_ALT3);
+    const slug = unique("src");
+    const { campaignId } = await ownerStore.createCampaign(slug, { teamId: "t1" });
+    const sourceLogoId = await upload(OWNER, slug, "logo.png", PNG);
+    await upload(OWNER, slug, "extra.png", PNG_ALT);
+    await ownerStore.createBrief(
+      {
+        ...baseBrief(slug, pathRef(slug)),
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#1473E3",
+            logoPath: sourceLogoId,
+          },
+        ],
+        audio: { path: bedId, rights: { licenceId: "lic-1", source: "library" } },
+      },
+      { teamId: "t1" },
+    );
+    const { copy, free, deleteAssets } = watch();
+
+    const res = await duplicate(ONLY_T1, campaignId, unique("copy"));
+    expect(res.status).toBe(201);
+    const newSlug = (await res.json()).brief.id as string;
+    const newUuid = await uuidOf(newSlug);
+    expect((await assetRows(newUuid)).sort()).toEqual(["bed.mp3", "extra.png", "logo.png"]);
+    expect(copy).toHaveBeenCalledWith(thirdSlug, newSlug, { only: ["bed.mp3"] });
+    const stored = (await ownerStore.findBriefById(newSlug))!.brief;
+    const owner = await store().assetOwner(stored.audio!.path);
+    expect(owner?.slug).toBe(newSlug);
+    expect(owner?.name).toBe("bed.mp3");
+    expect(stored.audio!.path).not.toBe(bedId);
+    expect((await assetRows(newUuid)).some((n) => n === "bg.png")).toBe(false);
+    expect(free).not.toHaveBeenCalled();
+    expect(deleteAssets).not.toHaveBeenCalled();
+    await expectSourcesUntouched(
+      { slug: slug, rows: ["extra.png", "logo.png"], objects: 2 },
+      { slug: thirdSlug, rows: ["bed.mp3", "bg.png", "logo.png"], objects: 3 },
+    );
+  });
+
+  test("s3, a third-campaign ref carried in a beat background is copied narrowly in create", async () => {
+    const thirdSlug = unique("third");
+    await ownerStore.createCampaign(thirdSlug, { teamId: "t1" });
+    const altId = await upload(OWNER, thirdSlug, "alt.png", PNG_ALT2);
+    await upload(OWNER, thirdSlug, "logo.png", PNG_THIRD);
+    await upload(OWNER, thirdSlug, "bg.png", PNG_ALT3);
+    const slug = unique("src");
+    const { campaignId } = await ownerStore.createCampaign(slug, { teamId: "t1" });
+    const sourceLogoId = await upload(OWNER, slug, "logo.png", PNG);
+    await upload(OWNER, slug, "extra.png", PNG_ALT);
+    await ownerStore.createBrief(
+      {
+        ...baseBrief(slug, pathRef(slug)),
+        mode: "variation",
+        output: { formats: ["motion"] },
+        variation: { count: 2 },
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#1473E3",
+            logoPath: sourceLogoId,
+          },
+        ],
+        copy: {
+          timeline: {
+            beats: [{ text: "Go", weight: 1, background: altId }],
+            transition: "cut",
+            keyBeat: 1,
+          },
+        },
+      },
+      { teamId: "t1" },
+    );
+    const { copy, free, deleteAssets } = watch();
+
+    const res = await createFrom(ONLY_T1, { name: unique("copy"), source: campaignId });
+    expect(res.status).toBe(201);
+    const { slug: newSlug, campaignId: newUuid } = (await res.json()) as {
+      campaignId: string;
+      slug: string;
+      revision: string;
+    };
+    expect((await assetRows(newUuid)).sort()).toEqual(["alt.png", "extra.png", "logo.png"]);
+    expect(copy).toHaveBeenCalledWith(thirdSlug, newSlug, { only: ["alt.png"] });
+    const stored = (await ownerStore.findBriefById(newSlug))!.brief;
+    const owner = await store().assetOwner(stored.copy!.timeline!.beats[0].background!);
+    expect(owner?.slug).toBe(newSlug);
+    expect(owner?.name).toBe("alt.png");
+    expect(stored.copy!.timeline!.beats[0].background!).not.toBe(altId);
+    expect((await assetRows(newUuid)).some((n) => n === "bg.png")).toBe(false);
+    expect(free).not.toHaveBeenCalled();
+    expect(deleteAssets).not.toHaveBeenCalled();
+    await expectSourcesUntouched(
+      { slug: slug, rows: ["extra.png", "logo.png"], objects: 2 },
+      { slug: thirdSlug, rows: ["alt.png", "bg.png", "logo.png"], objects: 3 },
+    );
+  });
+
+  test("s3, a third-campaign ref carried in a beat background is copied narrowly in duplicate", async () => {
+    const thirdSlug = unique("third");
+    await ownerStore.createCampaign(thirdSlug, { teamId: "t1" });
+    const altId = await upload(OWNER, thirdSlug, "alt.png", PNG_ALT2);
+    await upload(OWNER, thirdSlug, "logo.png", PNG_THIRD);
+    await upload(OWNER, thirdSlug, "bg.png", PNG_ALT3);
+    const slug = unique("src");
+    const { campaignId } = await ownerStore.createCampaign(slug, { teamId: "t1" });
+    const sourceLogoId = await upload(OWNER, slug, "logo.png", PNG);
+    await upload(OWNER, slug, "extra.png", PNG_ALT);
+    await ownerStore.createBrief(
+      {
+        ...baseBrief(slug, pathRef(slug)),
+        mode: "variation",
+        output: { formats: ["motion"] },
+        variation: { count: 2 },
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#1473E3",
+            logoPath: sourceLogoId,
+          },
+        ],
+        copy: {
+          timeline: {
+            beats: [{ text: "Go", weight: 1, background: altId }],
+            transition: "cut",
+            keyBeat: 1,
+          },
+        },
+      },
+      { teamId: "t1" },
+    );
+    const { copy, free, deleteAssets } = watch();
+
+    const res = await duplicate(ONLY_T1, campaignId, unique("copy"));
+    expect(res.status).toBe(201);
+    const newSlug = (await res.json()).brief.id as string;
+    const newUuid = await uuidOf(newSlug);
+    expect((await assetRows(newUuid)).sort()).toEqual(["alt.png", "extra.png", "logo.png"]);
+    expect(copy).toHaveBeenCalledWith(thirdSlug, newSlug, { only: ["alt.png"] });
+    const stored = (await ownerStore.findBriefById(newSlug))!.brief;
+    const owner = await store().assetOwner(stored.copy!.timeline!.beats[0].background!);
+    expect(owner?.slug).toBe(newSlug);
+    expect(owner?.name).toBe("alt.png");
+    expect(stored.copy!.timeline!.beats[0].background!).not.toBe(altId);
     expect((await assetRows(newUuid)).some((n) => n === "bg.png")).toBe(false);
     expect(free).not.toHaveBeenCalled();
     expect(deleteAssets).not.toHaveBeenCalled();
