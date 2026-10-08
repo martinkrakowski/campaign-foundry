@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { ObjectExistsError } from "../../../application/ports/out/ObjectStorePort.js";
+import {
+  ObjectExistsError,
+  type ListedObject,
+} from "../../../application/ports/out/ObjectStorePort.js";
 import { InMemoryObjectStore, LIST_PAGE_SIZE_PROBLEM } from "../InMemoryObjectStore.js";
 
 const BYTES = new Uint8Array([1, 2, 3, 4, 5]);
@@ -194,6 +197,51 @@ describe("InMemoryObjectStore", () => {
     await expect(store.list("")).rejects.toThrow(/Refusing an object key/);
     await expect(store.deletePrefix("")).rejects.toThrow(/Refusing an object key/);
     expect(await store.head("campaigns/c1/renders/a.png")).toBeDefined();
+  });
+
+  test("listPages yields pages no larger than the page size", async () => {
+    const store = new InMemoryObjectStore({ listPageSize: 2 });
+    for (const name of ["a", "b", "c", "d", "e"]) {
+      await store.put(`campaigns/c1/renders/${name}.png`, BYTES);
+    }
+    await store.put("campaigns/c2/renders/a.png", BYTES);
+    const pages: (readonly ListedObject[])[] = [];
+    for await (const page of store.listPages("campaigns/c1/renders/")) pages.push(page);
+    expect(pages.map((page) => page.length)).toEqual([2, 2, 1]);
+    expect(pages.flat().map((entry) => entry.key)).toEqual([
+      "campaigns/c1/renders/a.png",
+      "campaigns/c1/renders/b.png",
+      "campaigns/c1/renders/c.png",
+      "campaigns/c1/renders/d.png",
+      "campaigns/c1/renders/e.png",
+    ]);
+    expect(pages.flat().map((entry) => entry.key)).not.toContain("campaigns/c2/renders/a.png");
+  });
+
+  test("listPages yields no page for a prefix with nothing under it", async () => {
+    const store = frozen();
+    const pages: (readonly ListedObject[])[] = [];
+    for await (const page of store.listPages("campaigns/c9/renders/")) pages.push(page);
+    expect(pages).toEqual([]);
+  });
+
+  test("listPages refuses an empty prefix when it is called", () => {
+    const store = frozen();
+    expect(() => store.listPages("")).toThrow(/Refusing an object key/);
+  });
+
+  test("listPages carries size, etag and lastModified on every entry", async () => {
+    const store = new InMemoryObjectStore({ now: () => 1_700_000_000_000, listPageSize: 1 });
+    for (const name of ["a", "b", "c"]) {
+      await store.put(`campaigns/c1/renders/${name}.png`, BYTES);
+    }
+    const pages: (readonly ListedObject[])[] = [];
+    for await (const page of store.listPages("campaigns/c1/renders/")) pages.push(page);
+    const second = pages[1]![0];
+    expect(second.key).toBe("campaigns/c1/renders/b.png");
+    expect(second.size).toBe(5);
+    expect(second.etag).toMatch(/^[0-9a-f]{32}$/);
+    expect(second.lastModified).toEqual(new Date(1_700_000_000_000));
   });
 });
 

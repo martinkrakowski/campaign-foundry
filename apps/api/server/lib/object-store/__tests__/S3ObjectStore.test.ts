@@ -277,6 +277,22 @@ describe("S3ObjectStore failures", () => {
     ).not.toThrow();
   });
 
+  test("a deletePrefix cap that is not a positive integer is refused at construction", () => {
+    for (const cap of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => new S3ObjectStore({ settings: SETTINGS, deletePrefixMaxKeys: cap })).toThrow(
+        "deletePrefixMaxKeys must be a positive integer.",
+      );
+    }
+    expect(
+      () =>
+        new S3ObjectStore({
+          settings: SETTINGS,
+          deletePrefixMaxKeys: 1,
+          fetchImpl: async () => new Response(),
+        }),
+    ).not.toThrow();
+  });
+
   test("copy reads the body, and a 200 carrying an Error is not a successful copy", async () => {
     // S3 documents this: CopyObject can answer 200 with an <Error> document,
     // because the copy is evaluated after the status line is committed. Believing

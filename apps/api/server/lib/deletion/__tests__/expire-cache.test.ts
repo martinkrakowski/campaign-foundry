@@ -182,9 +182,9 @@ describe("cache expiry (D242)", () => {
   test("cache expiry plans every org before it deletes anything", async () => {
     await putAt(entry("local", D1), NOW - 60 * DAY);
     const failing = {
-      list: async (prefix: string) => {
+      listPages: (prefix: string) => {
         if (prefix === "org/acme/cache/") throw new Error("acme store down");
-        return store.list(prefix);
+        return store.listPages(prefix);
       },
       delete: vi.fn(),
     } as unknown as ObjectStorePort;
@@ -223,9 +223,9 @@ describe("cache expiry (D242)", () => {
 
   test("cache expiry treats a listed key outside the prefix as unrecognised and never deletes it", async () => {
     const stub = {
-      list: async () => [
-        { key: entry("other", D1), size: 1, lastModified: new Date(NOW - 60 * DAY) },
-      ],
+      listPages: async function* () {
+        yield [{ key: entry("other", D1), size: 1, lastModified: new Date(NOW - 60 * DAY) }];
+      },
       delete: vi.fn(),
     } as unknown as ObjectStorePort;
 
@@ -289,6 +289,24 @@ describe("cache expiry (D242)", () => {
     expect(result).toEqual({
       plans: [{ orgId: "local", expired: [], kept: 0, unrecognised: 0 }],
       deleted: 0,
+    });
+  });
+
+  test("cache expiry counts entries on every page", async () => {
+    const paged = new InMemoryObjectStore({ now: () => clock, listPageSize: 1 });
+    async function putAtPaged(key: string, at: number): Promise<void> {
+      clock = at;
+      await paged.put(key, PNG);
+      clock = NOW;
+    }
+    await putAtPaged(entry("local", D1), NOW - 61 * DAY);
+    await putAtPaged(entry("local", D2), NOW - DAY);
+    await putAtPaged("org/local/cache/not-a-digest.png", NOW - 61 * DAY);
+    expect(await planCacheExpiry(paged, "local", NOW)).toEqual({
+      orgId: "local",
+      expired: [D1],
+      kept: 1,
+      unrecognised: 1,
     });
   });
 });

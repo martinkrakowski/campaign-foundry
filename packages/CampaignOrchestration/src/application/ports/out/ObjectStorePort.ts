@@ -148,12 +148,29 @@ export interface ObjectStorePort {
   delete(key: ObjectKey): Promise<void>;
 
   /**
-   * Every object under `prefix`, paginating internally so a caller never sees a
-   * page size. The prefix is a key prefix and is confined by `assertObjectKey`,
+   * Every object under `prefix`, collected by calling `listPages` and folding
+   * each page into one array, so it is for prefixes known to be small (one
+   * campaign, one platform); a caller walking a whole org uses `listPages`
+   * instead. The prefix is a key prefix and is confined by `assertObjectKey`,
    * so an empty prefix — which would list, and `deletePrefix` would empty, the
    * whole store — is refused rather than honoured.
    */
   list(prefix: ObjectKey): Promise<readonly ListedObject[]>;
+
+  /**
+   * The objects under `prefix`, one page at a time, so a caller that only
+   * counts or filters never holds the whole listing (PT-9h3a).
+   *
+   * - A page holds at least one object and at most the adapter's page size; a
+   *   prefix with nothing under it yields NO page.
+   * - NO order is promised, within a page or across pages: a real store sorts
+   *   its keys and `InMemoryObjectStore` does not. A caller must not rely on it.
+   * - The prefix is confined by `assertObjectKey` when `listPages` is CALLED,
+   *   not when the first page is awaited.
+   * - A page is what the store held when that page was fetched: an object
+   *   written or removed during the iteration may or may not appear.
+   */
+  listPages(prefix: ObjectKey): AsyncIterable<readonly ListedObject[]>;
 
   /** Remove every object under `prefix`. Idempotent. */
   deletePrefix(prefix: ObjectKey): Promise<void>;

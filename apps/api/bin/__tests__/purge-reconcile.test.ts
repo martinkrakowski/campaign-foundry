@@ -764,11 +764,11 @@ describe("sweep housekeeping (bin/purge.ts)", () => {
     await oldOrphanPrefix(ORG, C1);
 
     const log: string[] = [];
-    const real = memory.list.bind(memory);
-    const list = vi.spyOn(memory, "list");
-    list.mockImplementationOnce(real);
-    list.mockImplementationOnce(real);
-    list.mockRejectedValueOnce("boom");
+    const real = memory.listPages.bind(memory);
+    vi.spyOn(memory, "listPages").mockImplementation((prefix) => {
+      if (prefix.endsWith("/cache/")) throw "boom";
+      return real(prefix);
+    });
 
     await expect(
       housekeeping(

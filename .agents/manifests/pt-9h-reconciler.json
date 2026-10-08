@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/deletion/reconcile.ts",
-      "before": "if (group.every(({ object }) => isOld(object))) {",
+      "before": "if (!group.fresh) {",
       "after": "if (true) {",
-      "because": "the plan's own mutation: with the age check dropped, an orphan prefix written minutes ago (a late writer that is still writing) is planned and deleted. The fresh-orphan test plants one at half an hour and asserts plan.prefixes is empty, so expect(plan.prefixes).toEqual([]) fails on that assertion line.",
+      "because": "the fresh check removed: with `if (!group.fresh)` mutated to `if (true)`, an orphan prefix whose objects are all fresh is still planned and deleted. `reconcile keeps a fresh orphan prefix` plants fresh objects under an orphan prefix and asserts plan.prefixes is empty, so expect(plan.prefixes).toEqual([]) fails on that assertion line.",
       "command": [
         "yarn",
         "vitest",
@@ -23,9 +23,9 @@
     },
     {
       "file": "apps/api/server/lib/deletion/reconcile.ts",
-      "before": "!assetRefs.has(`${campaignId}/${assetId}`) && isOld(object)",
-      "after": "!assetRefs.has(`${campaignId}/${assetId}`)",
-      "because": "without the age check on inputs, an upload whose object is written but whose asset row is not yet committed is planned for deletion. The test writes such an input half an hour ago and asserts plan.inputs is empty.",
+      "before": "if (old && assetId !== undefined) group.oldInputs.push(assetId);",
+      "after": "if (assetId !== undefined) group.oldInputs.push(assetId);",
+      "because": "the age guard on inputs removed: with `if (old && assetId !== undefined)` mutated to `if (assetId !== undefined)`, a fresh input with no asset row is folded into oldInputs and planned for deletion. `reconcile keeps a fresh input with no asset row` plants a fresh input and asserts plan.inputs is empty, so expect(plan.inputs).toEqual([]) fails on that assertion line.",
       "command": [
         "yarn",
         "vitest",

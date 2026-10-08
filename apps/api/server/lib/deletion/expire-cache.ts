@@ -38,10 +38,11 @@ function isExpired(object: ListedObject, now: number): boolean {
 }
 
 /**
- * D242, read only: which cache entries of one org are older than the TTL. Lists
- * `org/<org>/cache/` and nothing else (never a campaign prefix, never another
- * org), and puts every key it does not recognise in `unrecognised` instead of
- * touching it.
+ * D242, read only: which cache entries of one org are older than the TTL. It reads
+ * `org/<org>/cache/` page by page via `listPages` (so the sweep never holds a whole
+ * org's cache prefix at once) and nothing else (never a campaign prefix, never
+ * another org), and puts every key it does not recognise in `unrecognised` instead
+ * of touching it.
  */
 export async function planCacheExpiry(
   store: ObjectStorePort,
@@ -52,14 +53,16 @@ export async function planCacheExpiry(
   const expired: string[] = [];
   let kept = 0;
   let unrecognised = 0;
-  for (const object of await store.list(prefix)) {
-    const tail = object.key.startsWith(prefix) ? object.key.slice(prefix.length) : "";
-    if (!CACHE_KEY_TAIL.test(tail)) {
-      unrecognised++;
-    } else if (isExpired(object, now)) {
-      expired.push(tail.slice(0, 64));
-    } else {
-      kept++;
+  for await (const page of store.listPages(prefix)) {
+    for (const object of page) {
+      const tail = object.key.startsWith(prefix) ? object.key.slice(prefix.length) : "";
+      if (!CACHE_KEY_TAIL.test(tail)) {
+        unrecognised++;
+      } else if (isExpired(object, now)) {
+        expired.push(tail.slice(0, 64));
+      } else {
+        kept++;
+      }
     }
   }
   return { orgId, expired, kept, unrecognised };

@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { ObjectExistsError, type ObjectStorePort } from "@campaignfoundry/CampaignOrchestration";
+import {
+  ObjectExistsError,
+  type ListedObject,
+  type ObjectStorePort,
+} from "@campaignfoundry/CampaignOrchestration";
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import { S3ObjectStore } from "../S3ObjectStore.js";
 
@@ -126,6 +130,21 @@ function describeConformance({ real }: { real: boolean }): readonly string[] {
         expect(listed.map((entry) => entry.key).sort()).toEqual(
           [key("list/a.png"), key("list/b.png"), key("list/c.png")].sort(),
         );
+      });
+
+      it("a paged list yields every key under a prefix in pages no larger than the page size", async () => {
+        for (const name of ["a.png", "b.png", "c.png"]) {
+          await store.put(key(`paged/${name}`), BYTES);
+        }
+        const pages: (readonly ListedObject[])[] = [];
+        for await (const page of store.listPages(key("paged/"))) pages.push(page);
+        expect(pages.map((page) => page.length)).toEqual([2, 1]);
+        expect(
+          pages
+            .flat()
+            .map((entry) => entry.key)
+            .sort(),
+        ).toEqual([key("paged/a.png"), key("paged/b.png"), key("paged/c.png")].sort());
       });
 
       it("a Node Buffer body is stored as exactly its bytes", async () => {

@@ -20,8 +20,8 @@ export const ORPHAN_MIN_AGE_MS = 60 * 60_000;
 /**
  * Campaign ids per row query. The plan asks the database about the campaigns
  * the listing named, at most this many at a time, never about every row of the
- * org (PT-9h2). The listing itself is still one array per org until the port
- * pages it (PT-9h3).
+ * org (PT-9h2). The listing is now read page by page into one aggregate per
+ * campaign.
  */
 export const ROW_QUERY_CHUNK = 500;
 
@@ -85,33 +85,49 @@ function parseKey(root: ObjectKey, object: ListedObject): { campaignId: string; 
   return { campaignId: match[1]!, assetId: match[2] };
 }
 
+/** What the decision needs about one campaign's objects, and nothing else. */
+interface CampaignListing {
+  /** Every object listed under the campaign's prefix. */
+  objects: number;
+  /** True once ANY object is not older than the threshold. */
+  fresh: boolean;
+  /** The asset ids of its input objects that ARE older than the threshold. */
+  readonly oldInputs: string[];
+}
+
 /**
- * Group a listing by campaign, keeping only what the decision needs (the age of
- * each object and, for an input, its asset id) and parsing EVERY key, so one
- * odd key throws before anything is decided.
+ * Read the org's listing page by page into one aggregate per campaign, parsing
+ * EVERY key, so one odd key on ANY page throws before anything is decided. A
+ * campaign's objects may arrive on different pages and in any order: the
+ * aggregate is only read once the last page has been folded in.
  */
-function groupListing(
+async function aggregateListing(
   root: ObjectKey,
-  listed: readonly ListedObject[],
-): Map<string, { object: { readonly lastModified: Date }; assetId?: string }[]> {
-  const byCampaign = new Map<
-    string,
-    { object: { readonly lastModified: Date }; assetId?: string }[]
-  >();
-  for (const object of listed) {
-    const { campaignId, assetId } = parseKey(root, object);
-    const group = byCampaign.get(campaignId) ?? [];
-    group.push({ object: { lastModified: object.lastModified }, assetId });
-    byCampaign.set(campaignId, group);
+  pages: AsyncIterable<readonly ListedObject[]>,
+  now: number,
+): Promise<Map<string, CampaignListing>> {
+  const byCampaign = new Map<string, CampaignListing>();
+  for await (const page of pages) {
+    for (const object of page) {
+      const { campaignId, assetId } = parseKey(root, object);
+      const group = byCampaign.get(campaignId) ?? { objects: 0, fresh: false, oldInputs: [] };
+      const old = now - object.lastModified.getTime() > ORPHAN_MIN_AGE_MS;
+      group.objects++;
+      if (!old) group.fresh = true;
+      if (old && assetId !== undefined) group.oldInputs.push(assetId);
+      byCampaign.set(campaignId, group);
+    }
   }
   return byCampaign;
 }
 
 /**
- * D239, read only: what the reconciler WOULD delete for one org. Lists under
- * `org/<org>/campaign/` only (never `cache/`, never another org), parses EVERY
- * key before deciding anything, and reads the rows AFTER the listing, only for
- * the campaigns the listing named and at most `ROW_QUERY_CHUNK` at a time.
+ * D239, read only: what the reconciler WOULD delete for one org. Reads under
+ * `org/<org>/campaign/` only (never `cache/`, never another org) page by page
+ * into one aggregate per campaign via `listPages`, parses EVERY key on ANY
+ * page before deciding anything, and reads the rows AFTER the whole listing,
+ * only for the campaigns the listing named and at most `ROW_QUERY_CHUNK` at a
+ * time.
  */
 export async function planReconcile(
   db: SqlQuery,
@@ -120,7 +136,7 @@ export async function planReconcile(
   now: number,
 ): Promise<ReconcilePlan> {
   const root = orgCampaignsPrefix(orgId);
-  const byCampaign = groupListing(root, await store.list(root));
+  const byCampaign = await aggregateListing(root, store.listPages(root), now);
 
   const ids = [...byCampaign.keys()];
   const tombstoned = new Map<string, boolean>();
@@ -139,23 +155,19 @@ export async function planReconcile(
     for (const row of assets.rows) assetRefs.add(`${row.campaign_id}/${row.id}`);
   }
 
-  const isOld = (object: { readonly lastModified: Date }): boolean =>
-    now - object.lastModified.getTime() > ORPHAN_MIN_AGE_MS;
   const prefixes: { campaignId: string; objects: number }[] = [];
   const inputs: { campaignId: string; assetId: string }[] = [];
   for (const [campaignId, group] of byCampaign) {
     const state = tombstoned.get(campaignId);
     if (state === undefined) {
-      if (group.every(({ object }) => isOld(object))) {
-        prefixes.push({ campaignId, objects: group.length });
+      if (!group.fresh) {
+        prefixes.push({ campaignId, objects: group.objects });
       }
       continue;
     }
     if (state) continue;
-    for (const { object, assetId } of group) {
-      if (assetId !== undefined && !assetRefs.has(`${campaignId}/${assetId}`) && isOld(object)) {
-        inputs.push({ campaignId, assetId });
-      }
+    for (const assetId of group.oldInputs) {
+      if (!assetRefs.has(`${campaignId}/${assetId}`)) inputs.push({ campaignId, assetId });
     }
   }
   return { orgId, prefixes, inputs };
