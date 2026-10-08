@@ -44,9 +44,9 @@ export type EraseArgs =
 
 /** Thrown when rows still name the erased user after pass two. */
 export class EraseIncompleteError extends Error {
-  constructor(token: string) {
+  constructor(token: string, userId: string) {
     super(
-      `erase incomplete: rows written while the erasure ran still name the user. Token ${token}. To finish, run: yarn erase:user --finish ${token} --user <the user's id> --apply`,
+      `erase incomplete: rows written while the erasure ran still name the user. Token ${token}. To finish, run: yarn erase:user --finish ${token} --user ${userId} --apply\nThat line contains the erased user's internal id. It is needed once, to finish this erasure.\nDo not paste it into a ticket, a chat or a log.`,
     );
     this.name = "EraseIncompleteError";
   }
@@ -57,6 +57,17 @@ export function exitCodeFor(error: unknown): number {
   if (error instanceof EraseIncompleteError) return 3;
   if (error instanceof ErasePassTwoError) return 3;
   return 1;
+}
+
+/**
+ * Print a failure to `err` (stderr) and return the exit code. Extracted from
+ * the entry guard so tests can capture the output without spawning a CLI.
+ */
+export function reportFailure(error: unknown, err: (line: string) => void): number {
+  const code = exitCodeFor(error);
+  const message = error instanceof Error ? error.message : String(error);
+  err(`  x  ${message}`);
+  return code;
 }
 
 /** Print one line per non-zero `ActorCounts` field, using COUNT_LINES labels. */
@@ -120,7 +131,7 @@ export async function runErase(
       logActorCounts(log, "repaired after commit", repaired);
       if (Object.values(remaining).some((n) => n > 0)) {
         logActorCounts(log, "STILL NAMING THE USER", remaining);
-        throw new EraseIncompleteError(token);
+        throw new EraseIncompleteError(token, userId);
       }
       log(`  Finished. Token ${token}.`);
       return;
@@ -145,7 +156,7 @@ export async function runErase(
         logActorCounts(log, "repaired after commit", outcome.repaired);
         if (Object.values(outcome.remaining).some((n) => n > 0)) {
           logActorCounts(log, "STILL NAMING THE USER", outcome.remaining);
-          throw new EraseIncompleteError(outcome.token);
+          throw new EraseIncompleteError(outcome.token, outcome.finishUserId!);
         }
       }
     } catch (e) {
@@ -162,7 +173,6 @@ export async function runErase(
 /* istanbul ignore next -- CLI entry guard; runErase() is covered directly in tests */
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   runErase(process.argv.slice(2), connect, console.log).catch((error: unknown) => {
-    console.error(`  x  ${error instanceof Error ? error.message : String(error)}`);
-    process.exitCode = exitCodeFor(error);
+    process.exitCode = reportFailure(error, console.error);
   });
 }

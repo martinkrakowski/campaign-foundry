@@ -181,6 +181,12 @@ export type EraseUserOutcome =
       readonly counts: EraseUserCounts;
       readonly repaired: ActorCounts;
       readonly remaining: ActorCounts;
+      /**
+       * Present only when pass two found rows still naming the erased user, so
+       * the CLI can print the `--finish` command with this id on stderr. Never
+       * present on a clean erasure, a dry run, or any non-erased outcome.
+       */
+      readonly finishUserId?: string;
     };
 
 /** Internal: outcome before pass two adds repaired/remaining. */
@@ -236,21 +242,22 @@ const COUNTS = `select
 
 /**
  * The erasure transaction committed, but pass two (repairErasedActor or
- * countActorRows) threw. The token and the transaction's counts are carried
- * so the caller can print them and tell the operator how to finish. The
- * message contains the token but never the user id.
+ * countActorRows) threw. The token, the transaction's counts, and the user id
+ * are carried so the caller can print them and tell the operator how to finish.
  */
 export class ErasePassTwoError extends Error {
   readonly token: string;
   readonly counts: EraseUserCounts;
-  constructor(token: string, counts: EraseUserCounts, cause: Error) {
+  readonly userId: string;
+  constructor(token: string, counts: EraseUserCounts, userId: string, cause: Error) {
     super(
-      `erase committed, but the repair pass failed: ${cause.message}. Token ${token}. To finish, run: yarn erase:user --finish ${token} --user <the user's id> --apply`,
+      `erase committed, but the repair pass failed: ${cause.message}. Token ${token}. To finish, run: yarn erase:user --finish ${token} --user ${userId} --apply\nThat line contains the erased user's internal id. It is needed once, to finish this erasure.\nDo not paste it into a ticket, a chat or a log.`,
       { cause },
     );
     this.name = "ErasePassTwoError";
     this.token = token;
     this.counts = counts;
+    this.userId = userId;
   }
 }
 
@@ -270,9 +277,15 @@ export async function eraseUser(
     try {
       const repaired = await repairErasedActor(db, state.userId, token);
       const remaining = await countActorRows(db, state.userId);
-      return { ...state.outcome, repaired, remaining };
+      const hasRemaining = Object.values(remaining).some((n) => n > 0);
+      return {
+        ...state.outcome,
+        repaired,
+        remaining,
+        ...(hasRemaining ? { finishUserId: state.userId } : {}),
+      };
     } catch (e) {
-      throw new ErasePassTwoError(token, counts, e as Error);
+      throw new ErasePassTwoError(token, counts, state.userId, e as Error);
     }
   }
   return state.outcome;

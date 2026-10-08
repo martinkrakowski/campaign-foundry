@@ -63,7 +63,7 @@
       "file": "apps/api/bin/erase.ts",
       "before": "if (error instanceof EraseIncompleteError) return 3;",
       "after": "if (error instanceof EraseIncompleteError) return 1;",
-      "because": "exitCodeFor returns 1 for an EraseIncompleteError instead of 3. Witness '9. apply with a row remaining': exitCodeFor(caught) is 1 instead of 3, the toBe(3) assertion fails.",
+      "because": "exitCodeFor returns 1 for an EraseIncompleteError instead of 3. Witness '9. apply --email with a row remaining': exitCodeFor(caught) is 1 instead of 3, the toBe(3) assertion fails.",
       "command": [
         "yarn",
         "vitest",
@@ -72,7 +72,7 @@
         "api",
         "apps/api/bin/__tests__/erase.test.ts",
         "-t",
-        "9. apply with a row remaining",
+        "9. apply --email",
         "--tagsFilter",
         "!golden-bytes && !cpu-bound"
       ],
@@ -118,9 +118,9 @@
     },
     {
       "file": "apps/api/bin/erase.ts",
-      "before": "throw new EraseIncompleteError(outcome.token);",
-      "after": "throw new EraseIncompleteError(outcome.token + \" \" + args.join(\" \"));",
-      "because": "The incomplete-error message interpolates the raw args (which contain the user id). Witness '10. log and error message of the incomplete path leak no personal data': the lowerMsg.not.toContain(TARGET.id) assertion fails first, because args.join(' ') contains 'u-target'.",
+      "before": "outcome.finishUserId!",
+      "after": "(ref as { email: string }).email",
+      "because": "In erase mode (by --email), the finishUserId is replaced with ref.email, so the incomplete-error message leaks the email. Witness '9. apply --email with a row remaining': the lowerMsg.not.toContain(TARGET.email) assertion fails.",
       "command": [
         "yarn",
         "vitest",
@@ -129,7 +129,7 @@
         "api",
         "apps/api/bin/__tests__/erase.test.ts",
         "-t",
-        "10. log and error message of the incomplete path leak no personal data",
+        "9. apply --email",
         "--tagsFilter",
         "!golden-bytes && !cpu-bound"
       ],
@@ -156,7 +156,7 @@
     },
     {
       "file": "apps/api/server/lib/deletion/erase-user.ts",
-      "before": "throw new ErasePassTwoError(token, counts, e as Error);",
+      "before": "throw new ErasePassTwoError(token, counts, state.userId, e as Error);",
       "after": "throw e;",
       "because": "eraseUser rethrows the original error instead of wrapping it in ErasePassTwoError, so the caller cannot recover the token. Witness 'eraseUser raises ErasePassTwoError when pass two throws after the commit': the toBeInstanceOf(ErasePassTwoError) assertion fails.",
       "command": [
@@ -196,7 +196,7 @@
       "file": "apps/api/bin/erase.ts",
       "before": "logActorCounts(log, \"STILL NAMING THE USER\", outcome.remaining);",
       "after": "void 0; // STILL removed",
-      "because": "The STILL NAMING THE USER log call is removed in erase mode. Witness '9. apply with a row remaining': the toContain('STILL NAMING THE USER: 1 decisions re-attributed') assertion fails.",
+      "because": "The STILL NAMING THE USER log call is removed in erase mode. Witness '9. apply --email with a row remaining': the toContain('STILL NAMING THE USER: 1 decisions re-attributed') assertion fails.",
       "command": [
         "yarn",
         "vitest",
@@ -205,7 +205,7 @@
         "api",
         "apps/api/bin/__tests__/erase.test.ts",
         "-t",
-        "9. apply with a row remaining",
+        "9. apply --email",
         "--tagsFilter",
         "!golden-bytes && !cpu-bound"
       ],

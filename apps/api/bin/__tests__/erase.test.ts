@@ -7,6 +7,7 @@ import {
   runErase,
   EraseIncompleteError,
   exitCodeFor,
+  reportFailure,
 } from "../erase.js";
 import { eraseUser, ErasePassTwoError } from "../../server/lib/deletion/erase-user.js";
 import {
@@ -345,7 +346,7 @@ describe("erase CLI (bin/erase.ts)", () => {
     expect(endSpy).toHaveBeenCalledTimes(1);
   });
 
-  test("9. apply with a row remaining prints STILL lines, rejects with EraseIncompleteError", async () => {
+  test("9. apply --email with a row remaining: exact message, id once, log clean, reportFailure 3", async () => {
     const proxy = withInsertOnCount(db, async () => {
       await db.query(
         `insert into decision (org_id, campaign_id, asset_key, ordinal, verdict, actor, decided_at, run) values ($1, $2, $3, 1, 'approved', $4, now(), 'run-3')`,
@@ -357,7 +358,7 @@ describe("erase CLI (bin/erase.ts)", () => {
 
     try {
       await runErase(
-        ["--user", TARGET.id, "--apply"],
+        ["--email", TARGET.email, "--apply"],
         () => proxy,
         (l) => log.push(l),
       );
@@ -370,23 +371,34 @@ describe("erase CLI (bin/erase.ts)", () => {
     const token = log
       .find((l) => l.includes("Erased. Token"))!
       .match(/Token (erased:[0-9a-f-]{36})/)![1];
-    expect(message).toBe(
-      `erase incomplete: rows written while the erasure ran still name the user. Token ${token}. To finish, run: yarn erase:user --finish ${token} --user <the user's id> --apply`,
-    );
 
-    // Exact STILL NAMING THE USER lines (one per non-zero field).
+    // Exact three-sentence message with real token and id.
+    expect(message).toBe(
+      `erase incomplete: rows written while the erasure ran still name the user. Token ${token}. To finish, run: yarn erase:user --finish ${token} --user ${TARGET.id} --apply\nThat line contains the erased user's internal id. It is needed once, to finish this erasure.\nDo not paste it into a ticket, a chat or a log.`,
+    );
+    // The id appears exactly once, inside the --finish command.
+    expect(message.split(TARGET.id).length).toBe(2);
+
+    // Exact STILL NAMING THE USER lines.
     expect(log.join("\n")).toContain("  STILL NAMING THE USER: 1 decisions re-attributed");
 
+    // stdout (log) leaks neither id, email, nor name.
     const lowerLog = log.join("\n").toLowerCase();
     expect(lowerLog).not.toContain(TARGET.email.toLowerCase());
     expect(lowerLog).not.toContain(TARGET.name.toLowerCase());
     expect(lowerLog).not.toContain(TARGET.id.toLowerCase());
+
+    // stderr message contains neither email nor name.
     const lowerMsg = message.toLowerCase();
     expect(lowerMsg).not.toContain(TARGET.email.toLowerCase());
     expect(lowerMsg).not.toContain(TARGET.name.toLowerCase());
-    expect(lowerMsg).not.toContain(TARGET.id.toLowerCase());
 
-    expect(message).not.toContain(TARGET.id);
+    // reportFailure writes one entry to err (stderr), contains the id, returns 3.
+    const errLines: string[] = [];
+    const code = reportFailure(caught as Error, (l) => errLines.push(l));
+    expect(code).toBe(3);
+    expect(errLines).toHaveLength(1);
+    expect(errLines[0]).toContain(TARGET.id);
 
     expect(exitCodeFor(caught as Error)).toBe(3);
     expect(exitCodeFor(new Error("x"))).toBe(1);
@@ -394,7 +406,13 @@ describe("erase CLI (bin/erase.ts)", () => {
     expect(endSpy).toHaveBeenCalledTimes(1);
   });
 
-  test("10. log and error message of the incomplete path leak no personal data", async () => {
+  test("reportFailure stringifies a non-Error and returns 1", () => {
+    const errLines: string[] = [];
+    expect(reportFailure("string error", (l) => errLines.push(l))).toBe(1);
+    expect(errLines).toEqual(["  x  string error"]);
+  });
+
+  test("10. log of incomplete path leaks no email/name/id; message leaks no email/name", async () => {
     const proxy = withInsertOnCount(db, async () => {
       await db.query(
         `insert into decision (org_id, campaign_id, asset_key, ordinal, verdict, actor, decided_at, run) values ($1, $2, $3, 1, 'approved', $4, now(), 'run-3')`,
@@ -418,15 +436,14 @@ describe("erase CLI (bin/erase.ts)", () => {
     const lowerLog = log.join("\n").toLowerCase();
     const lowerMsg = message.toLowerCase();
 
-    // Three not.toContain assertions on the log:
+    // stdout (log): no id, email, or name.
     expect(lowerLog).not.toContain(TARGET.email.toLowerCase());
     expect(lowerLog).not.toContain(TARGET.name.toLowerCase());
     expect(lowerLog).not.toContain(TARGET.id.toLowerCase());
 
-    // Three not.toContain assertions on the error message:
+    // stderr message: no email or name (id is intentionally present).
     expect(lowerMsg).not.toContain(TARGET.email.toLowerCase());
     expect(lowerMsg).not.toContain(TARGET.name.toLowerCase());
-    expect(lowerMsg).not.toContain(TARGET.id.toLowerCase());
   });
 
   test("11. --finish finishes and prints 'Finished. Token ...'", async () => {
@@ -450,7 +467,7 @@ describe("erase CLI (bin/erase.ts)", () => {
     expect(endSpy).toHaveBeenCalledTimes(1);
   });
 
-  test("11b. --finish with a row that keeps reappearing prints STILL lines, rejects with exact error, no leak", async () => {
+  test("11b. --finish with a row that keeps reappearing: exact message, STILL line, no leak", async () => {
     const outcome = await eraseUser(db, { userId: TARGET.id }, { apply: true });
     if (outcome.outcome !== "erased") throw new Error("expected erased");
     const token = outcome.token;
@@ -476,13 +493,14 @@ describe("erase CLI (bin/erase.ts)", () => {
     expect(caught).toBeInstanceOf(EraseIncompleteError);
     const message = (caught as Error).message;
     expect(message).toBe(
-      `erase incomplete: rows written while the erasure ran still name the user. Token ${token}. To finish, run: yarn erase:user --finish ${token} --user <the user's id> --apply`,
+      `erase incomplete: rows written while the erasure ran still name the user. Token ${token}. To finish, run: yarn erase:user --finish ${token} --user ${TARGET.id} --apply\nThat line contains the erased user's internal id. It is needed once, to finish this erasure.\nDo not paste it into a ticket, a chat or a log.`,
     );
+    expect(message.split(TARGET.id).length).toBe(2);
 
     // Exact STILL NAMING THE USER line.
     expect(log.join("\n")).toContain("  STILL NAMING THE USER: 1 decisions re-attributed");
 
-    // Three not.toContain assertions on log and message each.
+    // Log: no id, email, or name. Message: no email or name (id is intended).
     const lowerLog = log.join("\n").toLowerCase();
     const lowerMsg = message.toLowerCase();
     expect(lowerLog).not.toContain(TARGET.email.toLowerCase());
@@ -490,7 +508,6 @@ describe("erase CLI (bin/erase.ts)", () => {
     expect(lowerLog).not.toContain(TARGET.id.toLowerCase());
     expect(lowerMsg).not.toContain(TARGET.email.toLowerCase());
     expect(lowerMsg).not.toContain(TARGET.name.toLowerCase());
-    expect(lowerMsg).not.toContain(TARGET.id.toLowerCase());
     expect(endSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -723,8 +740,9 @@ describe("erase CLI (bin/erase.ts)", () => {
     const error = caught as ErasePassTwoError;
     expect(error.token).toMatch(/^erased:[0-9a-f-]{36}$/);
     expect(error.message).toBe(
-      `erase committed, but the repair pass failed: injected failure. Token ${error.token}. To finish, run: yarn erase:user --finish ${error.token} --user <the user's id> --apply`,
+      `erase committed, but the repair pass failed: injected failure. Token ${error.token}. To finish, run: yarn erase:user --finish ${error.token} --user ${TARGET.id} --apply\nThat line contains the erased user's internal id. It is needed once, to finish this erasure.\nDo not paste it into a ticket, a chat or a log.`,
     );
+    expect(error.message.split(TARGET.id).length).toBe(2);
 
     // Count lines that describe what the transaction changed are printed.
     expect(log).toContain("  brief versions re-attributed: 1");
@@ -734,16 +752,101 @@ describe("erase CLI (bin/erase.ts)", () => {
     expect(log).toContain("  deletion requests re-attributed: 1");
     expect(log.join("\n")).not.toContain("Erased. Token");
 
+    // stdout (log): no id, email, or name.
     const lowerLog = log.join("\n").toLowerCase();
     expect(lowerLog).not.toContain(TARGET.email.toLowerCase());
     expect(lowerLog).not.toContain(TARGET.name.toLowerCase());
     expect(lowerLog).not.toContain(TARGET.id.toLowerCase());
+    // stderr message: no email or name (id is intended).
     const lowerMsg = error.message.toLowerCase();
     expect(lowerMsg).not.toContain(TARGET.email.toLowerCase());
     expect(lowerMsg).not.toContain(TARGET.name.toLowerCase());
-    expect(lowerMsg).not.toContain(TARGET.id.toLowerCase());
 
     expect(exitCodeFor(error)).toBe(3);
     expect(endSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("d. successful --finish prints only Finished line, no id", async () => {
+    const outcome = await eraseUser(db, { userId: TARGET.id }, { apply: true });
+    if (outcome.outcome !== "erased") throw new Error("expected erased");
+    const log: string[] = [];
+    await runErase(
+      ["--finish", outcome.token, "--user", TARGET.id, "--apply"],
+      () => db,
+      (l) => log.push(l),
+    );
+    expect(log).toEqual([`  Finished. Token ${outcome.token}.`]);
+    expect(log.join("\n")).not.toContain(TARGET.id);
+  });
+
+  test("e. other failures leak no id, email, or name", async () => {
+    const cases: { args: readonly string[]; match: string }[] = [
+      { args: ["--email", "nobody@example.com", "--apply"], match: "erase: no such user." },
+      { args: ["--bogus"], match: USAGE_ERASE },
+      { args: ["--user", LOCAL_OWNER.id, "--apply"], match: "erase refused" },
+      {
+        args: [
+          "--finish",
+          "erased:00000000-0000-4000-8000-000000000000",
+          "--user",
+          TARGET.id,
+          "--apply",
+        ],
+        match: "not an erasure token",
+      },
+      {
+        args: [
+          "--finish",
+          "erased:00000000-0000-4000-8000-000000000000",
+          "--user",
+          "cli:erase-user",
+          "--apply",
+        ],
+        match: "not an erasure token",
+      },
+    ];
+    for (const { args, match } of cases) {
+      const log: string[] = [];
+      let message = "";
+      try {
+        await runErase(
+          args,
+          () => db,
+          (l) => log.push(l),
+        );
+      } catch (e) {
+        message = e instanceof Error ? e.message : String(e);
+      }
+      expect(message).toMatch(match);
+      expect(message).not.toContain(TARGET.id);
+      expect(message).not.toContain(TARGET.email);
+      expect(message).not.toContain(TARGET.name);
+      expect(log.join("\n")).not.toContain(TARGET.id);
+      expect(log.join("\n")).not.toContain(TARGET.email);
+      expect(log.join("\n")).not.toContain(TARGET.name);
+    }
+  });
+
+  test("f. no deletion row column contains the erased user id after an incomplete erasure", async () => {
+    const proxy = withInsertOnCount(db, async () => {
+      await db.query(
+        `insert into decision (org_id, campaign_id, asset_key, ordinal, verdict, actor, decided_at, run) values ($1, $2, $3, 1, 'approved', $4, now(), 'run-3')`,
+        ["local", world.localCampaignId, "ak-after-scan", TARGET.id],
+      );
+    });
+    try {
+      await runErase(
+        ["--email", TARGET.email, "--apply"],
+        () => proxy,
+        () => {},
+      );
+    } catch {
+      // expected
+    }
+    const { rows } = await db.query<{ requested_by: string; subject: string }>(
+      `select requested_by, subject from deletion where requested_by = $1 or subject = $1`,
+      [TARGET.id],
+    );
+    expect(rows).toEqual([]);
   });
 });

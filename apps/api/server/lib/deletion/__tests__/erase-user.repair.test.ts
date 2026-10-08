@@ -508,6 +508,13 @@ describe("ErasePassTwoError (PT-9l3 finding 2)", () => {
     expect(caught).toBeInstanceOf(ErasePassTwoError);
     const error = caught as ErasePassTwoError;
     expect(error.token).toMatch(/^erased:[0-9a-f-]{36}$/);
+    expect(error.userId).toBe(TARGET.id);
+    expect(error.message).toBe(
+      `erase committed, but the repair pass failed: injected failure. Token ${error.token}. To finish, run: yarn erase:user --finish ${error.token} --user ${TARGET.id} --apply\nThat line contains the erased user's internal id. It is needed once, to finish this erasure.\nDo not paste it into a ticket, a chat or a log.`,
+    );
+    expect(error.message.split(TARGET.id).length).toBe(2);
+    expect(error.cause).toBeInstanceOf(Error);
+    expect((error.cause as Error).message).toBe("injected failure");
 
     const { rows } = await db.query<{ n: number }>(
       `select count(*)::int as n from deletion where kind = 'user' and subject = $1`,
