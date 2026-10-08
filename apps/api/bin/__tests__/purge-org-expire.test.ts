@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import { migratedDatabase } from "../../server/lib/db/__tests__/pglite-client.js";
 import type { SqlClient } from "../../server/lib/db/sql-client.js";
@@ -15,6 +15,8 @@ import {
   objectSnapshot,
 } from "../../server/lib/deletion/__tests__/purge-org-fixtures.js";
 
+const SAVED_OBJECT_STORE = process.env.OBJECT_STORE;
+
 function saveStore(): string | undefined {
   return process.env.OBJECT_STORE;
 }
@@ -27,12 +29,14 @@ describe("org-expire CLI (bin/purge.ts, PT-9m4, D241, Q5)", () => {
   let db: SqlClient;
   let endSpy: ReturnType<typeof vi.spyOn>;
   let memory: InMemoryObjectStore;
+  let savedStore: string | undefined;
 
   const open = () => db;
 
   beforeEach(async () => {
     db = await migratedDatabase();
     endSpy = vi.spyOn(db, "end").mockResolvedValue(undefined);
+    savedStore = saveStore();
     process.env.OBJECT_STORE = "s3";
     memory = new InMemoryObjectStore();
     setObjectStoreClient(memory);
@@ -42,8 +46,13 @@ describe("org-expire CLI (bin/purge.ts, PT-9m4, D241, Q5)", () => {
     endSpy.mockRestore();
     await db.end();
     resetObjectStoreClient();
-    restoreStore(saveStore());
+    restoreStore(savedStore);
     vi.restoreAllMocks();
+  });
+
+  afterAll(() => {
+    // Proving the leak is fixed: OBJECT_STORE is unchanged across the whole suite.
+    expect(process.env.OBJECT_STORE).toBe(SAVED_OBJECT_STORE);
   });
 
   async function purgeAndBackdate(orgId: string): Promise<void> {
@@ -190,7 +199,9 @@ describe("org-expire CLI (bin/purge.ts, PT-9m4, D241, Q5)", () => {
     const beforeAcmeObj = await objectSnapshot(memory, "acme");
 
     const lines: string[] = [];
-    await runOrgExpire(["--org", "acme", "--apply"], open, (l) => lines.push(l));
+    await expect(
+      runOrgExpire(["--org", "acme", "--apply"], open, (l) => lines.push(l)),
+    ).rejects.toThrow("org-expire: 1 org(s) could not be expired; see the lines above.");
     expect(lines).toEqual([
       "  Expired 0 org tombstone(s).",
       "  org acme: failed (could not be expired; a row may still reference it); it is left in place",
@@ -209,5 +220,6 @@ describe("org-expire CLI (bin/purge.ts, PT-9m4, D241, Q5)", () => {
     expect(usageRows[0]!.n).toBe(2);
     expect(await snapshot(db, "acme")).toEqual(beforeAcme);
     expect(await objectSnapshot(memory, "acme")).toEqual(beforeAcmeObj);
+    expect(endSpy).toHaveBeenCalledTimes(1);
   });
 });

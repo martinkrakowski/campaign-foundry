@@ -172,6 +172,25 @@
         "!golden-bytes && !cpu-bound"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "if (failed.length > 0) {",
+      "after": "if (false) {",
+      "because": "the throw after a failed expiry is removed, so --apply on a non-expirable org exits 0. The failed-org test asserts the call rejects with the exact org-expire message; under this mutant the call resolves and expect(...).rejects.toThrow(...) fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-org-expire.test.ts",
+        "-t",
+        "org-expire CLI reports a failed org with a fixed message and no detail",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
     }
   ]
 }

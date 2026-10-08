@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "vitest";
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import type { SqlClient } from "../../db/sql-client.js";
@@ -12,6 +12,8 @@ import {
   snapshot,
   objectSnapshot,
 } from "./purge-org-fixtures.js";
+
+const SAVED_OBJECT_STORE = process.env.OBJECT_STORE;
 
 function saveStore(): string | undefined {
   return process.env.OBJECT_STORE;
@@ -37,6 +39,10 @@ describe("expireOrgTombstones (PT-9m4, D241, Q5)", () => {
     await db.end();
     resetObjectStoreClient();
     restoreStore(savedStore);
+  });
+
+  afterAll(() => {
+    expect(process.env.OBJECT_STORE).toBe(SAVED_OBJECT_STORE);
   });
 
   test("expireOrgTombstones deletes usage then the org row of a purged org older than thirteen months", async () => {

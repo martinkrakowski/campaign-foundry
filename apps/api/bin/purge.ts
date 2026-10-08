@@ -336,6 +336,11 @@ export async function runOrgExpire(
           `  org ${id}: failed (could not be expired; a row may still reference it); it is left in place`,
         );
       }
+      if (failed.length > 0) {
+        throw new Error(
+          `org-expire: ${failed.length} org(s) could not be expired; see the lines above.`,
+        );
+      }
       return;
     }
     // Dry run

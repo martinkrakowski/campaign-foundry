@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import { ObjectBackgroundCache } from "@campaignfoundry/CreativeGeneration";
 import { migratedDatabase } from "../../server/lib/db/__tests__/pglite-client.js";
@@ -45,6 +45,11 @@ function restoreEnv(): void {
   if (SAVED_PURGE_RECONCILE === undefined) delete process.env.PURGE_RECONCILE;
   else process.env.PURGE_RECONCILE = SAVED_PURGE_RECONCILE;
 }
+
+afterAll(() => {
+  expect(process.env.OBJECT_STORE).toBe(SAVED_OBJECT_STORE);
+  expect(process.env.PURGE_RECONCILE).toBe(SAVED_PURGE_RECONCILE);
+});
 
 describe("reconcile CLI (bin/purge.ts)", () => {
   let db: SqlClient;
