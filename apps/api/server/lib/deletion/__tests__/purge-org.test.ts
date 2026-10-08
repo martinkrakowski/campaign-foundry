@@ -5,7 +5,7 @@ import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import { resetObjectStoreClient, setObjectStoreClient } from "../../object-store/index.js";
 import { orgPrefix } from "../../object-store/object-keys.js";
-import { purgeOrg, requestOrgDeletion } from "../purge-org.js";
+import { deleteOrgRows, purgeOrg, queueCampaignPurges, requestOrgDeletion } from "../purge-org.js";
 import {
   BYTES,
   finishCampaignPurges,
@@ -258,5 +258,134 @@ describe("purgeOrg completion (PT-9m2, D241)", () => {
     await seedOrg(db, "acme", store);
     const fakeRow = { id: randomUUID(), requestedBy: "operator" };
     await expect(purgeOrg(db, "ghost", fakeRow)).rejects.toThrow(/unknown org "ghost"/);
+  });
+
+  // Finding 2 (PT-9m2-fix1): the exported destructive helpers must refuse `local`
+  // just like `purgeOrg` does, and leave the database untouched.
+  describe("destructive helpers refuse the local org (PT-9m2-fix1, finding 2)", () => {
+    /** Plant rows under `local` in every table `deleteOrgRows` would touch. */
+    async function seedLocalRows(): Promise<void> {
+      await db.query(
+        `insert into "user" (id, name, email, email_verified, image) values ('u-local-1', 'U1', 'l1@example.test', false, null)`,
+      );
+      await db.query(
+        `insert into "user" (id, name, email, email_verified, image) values ('u-local-2', 'U2', 'l2@example.test', false, null)`,
+      );
+      await db.query(
+        `insert into member (id, org_id, user_id, role, created_at) values ('m-local-1', 'local', 'u-local-1', 'member', now())`,
+      );
+      await db.query(
+        `insert into team (id, name, "memberCount", org_id, created_at, updated_at) values ('local:t', 't', 0, 'local', now(), now())`,
+      );
+      await db.query(
+        `insert into team_member (id, team_id, user_id, "membershipKey", created_at) values ('tm-local', 'local:t', 'u-local-1', 'local:t:u1', now())`,
+      );
+      await db.query(
+        `insert into invitation (id, org_id, email, role, team_id, status, expires_at, created_at, inviter_id) values ('inv-local', 'local', 'inv-local@example.test', 'member', null, 'pending', now() + interval '1 day', now(), 'u-local-1')`,
+      );
+      await db.query(
+        `insert into provider_key (org_id, provider, ciphertext, iv, tag, sealed_dek, dek_iv, dek_tag, kek_version, last4, created_by, created_at) values ('local', 'gemini', 'ct-local', 'iv', 'tag', 'sd', 'div', 'dtag', 'v1', '0000', 'u-local-1', now())`,
+      );
+      await db.query(
+        `insert into usage (org_id, provider, model, units, key_owner) values ('local', 'gemini', 'm', 1, 'platform')`,
+      );
+    }
+
+    test("deleteOrgRows refuses the local org and writes nothing", async () => {
+      await seedLocalRows();
+      const before = await snapshot(db, "local");
+
+      await expect(deleteOrgRows(db, "local")).rejects.toThrow(
+        /org "local" can never be deleted\./,
+      );
+      // Every seeded row survives: the refusal happened before any delete.
+      expect(await snapshot(db, "local")).toEqual(before);
+    });
+
+    test("queueCampaignPurges refuses the local org and writes nothing", async () => {
+      await seedOrg(db, "acme", store);
+      const beforeAcme = await snapshot(db, "acme");
+      const beforeAcmeObj = await objectSnapshot(store, "acme");
+
+      await expect(queueCampaignPurges(db, "local", "operator")).rejects.toThrow(
+        /org "local" can never be deleted\./,
+      );
+      // The local org has no campaigns, but the call must refuse before it reads
+      // any table — and acme is untouched.
+      expect(await snapshot(db, "acme")).toEqual(beforeAcme);
+      expect(await objectSnapshot(store, "acme")).toEqual(beforeAcmeObj);
+    });
+  });
+
+  // Finding 3 (PT-9m2-fix1): a deletion id that names no row (or a foreign row)
+  // must be rejected before any org row or byte is touched.
+  describe("purgeOrg validates its deletion row before doing anything (PT-9m2-fix1, finding 3)", () => {
+    test("an id naming no row throws and the org's rows and objects are untouched", async () => {
+      await seedOrg(db, "acme", store);
+      await seedOrg(db, "beta", store);
+      // Acme is tombstoned first; the bogus id must still be rejected before any
+      // row or object is freed.
+      await requestOrgDeletion(db, { orgId: "acme", requestedBy: "operator" });
+      const beforeAcme = await snapshot(db, "acme");
+      const beforeAcmeObj = await objectSnapshot(store, "acme");
+      const beforeBeta = await snapshot(db, "beta");
+      const beforeBetaObj = await objectSnapshot(store, "beta");
+
+      const bogus = randomUUID();
+      await expect(purgeOrg(db, "acme", { id: bogus, requestedBy: "operator" })).rejects.toThrow(
+        `unknown deletion row "${bogus}"`,
+      );
+      // No rows and no objects were freed.
+      expect(await snapshot(db, "acme")).toEqual(beforeAcme);
+      expect(await objectSnapshot(store, "acme")).toEqual(beforeAcmeObj);
+      expect(await snapshot(db, "beta")).toEqual(beforeBeta);
+      expect(await objectSnapshot(store, "beta")).toEqual(beforeBetaObj);
+    });
+
+    test("a row of kind campaign throws and nothing is touched", async () => {
+      await seedOrg(db, "acme", store);
+      await seedOrg(db, "beta", store);
+      await requestOrgDeletion(db, { orgId: "acme", requestedBy: "operator" });
+      // A `kind = 'campaign'` deletion row belonging to acme.
+      const { rows } = await db.query<{ id: string }>(
+        `insert into deletion (org_id, kind, subject, requested_by, not_before)
+           values ('acme', 'campaign', '00000000-0000-4000-8000-000000000000', 'someone', now())
+         returning id`,
+      );
+      const campaignDelId = rows[0]!.id;
+      const beforeAcme = await snapshot(db, "acme");
+      const beforeAcmeObj = await objectSnapshot(store, "acme");
+      const beforeBeta = await snapshot(db, "beta");
+      const beforeBetaObj = await objectSnapshot(store, "beta");
+
+      await expect(
+        purgeOrg(db, "acme", { id: campaignDelId, requestedBy: "operator" }),
+      ).rejects.toThrow(`deletion row "${campaignDelId}" is not this org's purge`);
+      expect(await snapshot(db, "acme")).toEqual(beforeAcme);
+      expect(await objectSnapshot(store, "acme")).toEqual(beforeAcmeObj);
+      expect(await snapshot(db, "beta")).toEqual(beforeBeta);
+      expect(await objectSnapshot(store, "beta")).toEqual(beforeBetaObj);
+    });
+
+    test("another org's org row throws and nothing is touched", async () => {
+      await seedOrg(db, "acme", store);
+      await seedOrg(db, "beta", store);
+      // Acme is tombstoned (its own row is valid); beta's org deletion row is foreign.
+      await requestOrgDeletion(db, { orgId: "acme", requestedBy: "operator" });
+      await requestOrgDeletion(db, { orgId: "beta", requestedBy: "operator" });
+      const betaOrgRow = await orgRow(db, "beta");
+      const beforeAcme = await snapshot(db, "acme");
+      const beforeAcmeObj = await objectSnapshot(store, "acme");
+      const beforeBeta = await snapshot(db, "beta");
+      const beforeBetaObj = await objectSnapshot(store, "beta");
+
+      await expect(
+        purgeOrg(db, "acme", { id: betaOrgRow.id, requestedBy: "operator" }),
+      ).rejects.toThrow(`deletion row "${betaOrgRow.id}" is not this org's purge`);
+      expect(await snapshot(db, "acme")).toEqual(beforeAcme);
+      expect(await objectSnapshot(store, "acme")).toEqual(beforeAcmeObj);
+      expect(await snapshot(db, "beta")).toEqual(beforeBeta);
+      expect(await objectSnapshot(store, "beta")).toEqual(beforeBetaObj);
+    });
   });
 });

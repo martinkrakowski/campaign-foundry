@@ -83,51 +83,57 @@ describe("deleteOrgObjects (PT-9m2, D241)", () => {
   });
 
   describe("fs", () => {
-    let dir: string;
+    let projectDir: string;
+    let outputDir: string;
 
     beforeEach(() => {
-      dir = mkdtempSync(join(tmpdir(), "cf-purge-org-fs-"));
-      process.env.OUTPUT_DIR = dir;
-      process.env.PROJECT_ROOT = dir;
+      // Two SEPARATE roots: `storageRoots` resolves one org's trees under each,
+      // so each `rm` in `deleteOrgObjects` owns a distinct directory. Sharing
+      // one root hid a missing `rm` from the test (D180: a mutation that drops
+      // one line must still fail).
+      projectDir = mkdtempSync(join(tmpdir(), "cf-purge-org-proj-"));
+      outputDir = mkdtempSync(join(tmpdir(), "cf-purge-org-out-"));
+      process.env.PROJECT_ROOT = projectDir;
+      process.env.OUTPUT_DIR = outputDir;
       delete process.env.OBJECT_STORE;
       resetProjectRoot();
     });
     afterEach(() => {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+      rmSync(outputDir, { recursive: true, force: true });
       restoreEnv();
     });
 
     test("purgeOrg under the file object store removes the org trees and no other org tree", async () => {
-      // projectRoot and outputRoot both resolve under the temp root for a non-local
-      // org, so each org's tree is `<dir>/orgs/<org>/`.
-      for (const org of ["acme", "beta"]) {
-        mkdirSync(join(dir, "orgs", org), { recursive: true });
-        writeFileSync(join(dir, "orgs", org, "a.txt"), "data");
-        writeFileSync(join(dir, "orgs", org, "b.txt"), "data");
-      }
-      // The roots themselves (the temp dir and orgs/) must survive.
-      writeFileSync(join(dir, "keep.txt"), "keep");
-      writeFileSync(join(dir, "orgs", "keep.txt"), "keep");
+      // The org's tree in each root, plus a file under a sibling org in each root.
+      mkdirSync(join(projectDir, "orgs", "acme"), { recursive: true });
+      writeFileSync(join(projectDir, "orgs", "acme", "a.txt"), "data");
+      mkdirSync(join(outputDir, "orgs", "acme"), { recursive: true });
+      writeFileSync(join(outputDir, "orgs", "acme", "b.txt"), "data");
+      mkdirSync(join(projectDir, "orgs", "beta"), { recursive: true });
+      writeFileSync(join(projectDir, "orgs", "beta", "keep.txt"), "keep");
+      mkdirSync(join(outputDir, "orgs", "beta"), { recursive: true });
+      writeFileSync(join(outputDir, "orgs", "beta", "keep.txt"), "keep");
 
       await deleteOrgObjects("acme");
 
-      expect(() => statSync(join(dir, "orgs", "acme", "a.txt"))).toThrow("ENOENT");
-      expect(() => statSync(join(dir, "orgs", "acme", "b.txt"))).toThrow("ENOENT");
-      expect(() => statSync(join(dir, "orgs", "beta", "a.txt"))).not.toThrow();
-      expect(() => statSync(join(dir, "orgs", "beta", "b.txt"))).not.toThrow();
-      expect(() => statSync(join(dir, "keep.txt"))).not.toThrow();
-      expect(() => statSync(join(dir, "orgs", "keep.txt"))).not.toThrow();
+      // Four assertions: each acme tree is gone, each beta tree survives.
+      expect(() => statSync(join(projectDir, "orgs", "acme", "a.txt"))).toThrow("ENOENT");
+      expect(() => statSync(join(outputDir, "orgs", "acme", "b.txt"))).toThrow("ENOENT");
+      expect(() => statSync(join(projectDir, "orgs", "beta", "keep.txt"))).not.toThrow();
+      expect(() => statSync(join(outputDir, "orgs", "beta", "keep.txt"))).not.toThrow();
     });
 
     test("deleteOrgObjects refuses the local org before touching any tree", async () => {
-      mkdirSync(join(dir, "orgs"), { recursive: true });
-      writeFileSync(join(dir, "keep.txt"), "keep");
-      writeFileSync(join(dir, "orgs", "keep.txt"), "keep");
+      mkdirSync(projectDir, { recursive: true });
+      mkdirSync(outputDir, { recursive: true });
+      writeFileSync(join(projectDir, "keep.txt"), "keep");
+      writeFileSync(join(outputDir, "keep.txt"), "keep");
 
       await expect(deleteOrgObjects("local")).rejects.toThrow(/org "local" can never be deleted\./);
 
-      expect(() => statSync(join(dir, "keep.txt"))).not.toThrow();
-      expect(() => statSync(join(dir, "orgs", "keep.txt"))).not.toThrow();
+      expect(() => statSync(join(projectDir, "keep.txt"))).not.toThrow();
+      expect(() => statSync(join(outputDir, "keep.txt"))).not.toThrow();
     });
   });
 });

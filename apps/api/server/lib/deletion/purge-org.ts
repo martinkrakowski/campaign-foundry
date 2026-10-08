@@ -77,6 +77,7 @@ export async function queueCampaignPurges(
   orgId: string,
   requestedBy: string,
 ): Promise<boolean> {
+  refuseLocal(orgId);
   let blocked = false;
   const { rows } = await db.query<{ id: string }>(
     `select id::text as id from campaign where org_id = $1 and deleted_at is null order by id`,
@@ -116,6 +117,7 @@ export async function queueCampaignPurges(
  * before this step converges (D231): each `where org_id = $1` is its own guard.
  */
 export async function deleteOrgRows(db: SqlClient, orgId: string): Promise<void> {
+  refuseLocal(orgId);
   await db.transaction(async (tx) => {
     await tx.query(`delete from provider_key where org_id = $1`, [orgId]);
     await tx.query(
@@ -177,6 +179,22 @@ export async function purgeOrg(
   if (row.deleted_at === null) {
     throw new Error(`org "${orgId}" is not tombstoned; refusing to purge it`);
   }
+  // The deletion row that owns this purge must be real and ours BEFORE any
+  // destructive work: a bogus or foreign id from a caller must fail now, not after
+  // `deleteOrgRows` and `deleteOrgObjects` have already freed the org's rows and
+  // bytes (D231: a purge that throws after step 4 leaves the org half-gone and
+  // re-claims only what a re-run can still see).
+  const { rows: orgDeRows } = await db.query<{ kind: string; org_id: string }>(
+    `select kind, org_id from deletion where id = $1`,
+    [deletionRow.id],
+  );
+  const orgDeRow = orgDeRows[0];
+  if (orgDeRow === undefined) {
+    throw new Error(`unknown deletion row "${deletionRow.id}"`);
+  }
+  if (orgDeRow.kind !== "org" || orgDeRow.org_id !== orgId) {
+    throw new Error(`deletion row "${deletionRow.id}" is not this org's purge`);
+  }
   if (await queueCampaignPurges(db, orgId, deletionRow.requestedBy)) {
     await recordFailure(db, deletionRow.id, ORG_BLOCKED_MESSAGE);
     return "retry";
@@ -205,7 +223,10 @@ export async function purgeOrg(
     `select purged_at from deletion where id = $1`,
     [deletionRow.id],
   );
-  if (already[0]!.purged_at === null) {
+  // `already[0]` is guarded by the validation above; read without a `!` so a
+  // missing row skips markPurged instead of throwing (a re-run must still change
+  // nothing, D241 step 8).
+  if (already[0]?.purged_at === null) {
     await markPurged(db, deletionRow.id);
   }
   return "purged";

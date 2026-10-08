@@ -137,6 +137,91 @@
         "purgeOrg deletes everything under the org prefix including the cache and no sibling org"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "  await rm(roots.projectRoot, { recursive: true, force: true });",
+      "after": "  await Promise.resolve();",
+      "because": "stubbing the project-root rm leaves that tree behind; the witness (two separate roots, four assertions) sees the project tree still present and its ENOENT assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.objects.test.ts",
+        "-t",
+        "purgeOrg under the file object store removes the org trees and no other org tree"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "  await rm(roots.outputRoot, { recursive: true, force: true });",
+      "after": "  await Promise.resolve();",
+      "because": "stubbing the output-root rm leaves that tree behind; the witness sees the output tree still present and its ENOENT assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.objects.test.ts",
+        "-t",
+        "purgeOrg under the file object store removes the org trees and no other org tree"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "export async function deleteOrgRows(db: SqlClient, orgId: string): Promise<void> {\n  refuseLocal(orgId);",
+      "after": "export async function deleteOrgRows(db: SqlClient, orgId: string): Promise<void> {",
+      "because": "removing the local refusal from deleteOrgRows lets it delete the local org's rows; the witness sees the call not throw and local rows change, failing the refused-and-writes-nothing assertion.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.test.ts",
+        "-t",
+        "deleteOrgRows refuses the local org and writes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "): Promise<boolean> {\n  refuseLocal(orgId);\n  let blocked = false;",
+      "after": "): Promise<boolean> {\n  let blocked = false;",
+      "because": "removing the local refusal from queueCampaignPurges lets it run over local; the witness sees the call not throw (returns false) instead of refusing, failing the refused-and-writes-nothing assertion.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.test.ts",
+        "-t",
+        "queueCampaignPurges refuses the local org and writes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "  if (orgDeRow === undefined) {\n    throw new Error(`unknown deletion row \"${deletionRow.id}\"`);\n  }",
+      "after": "  // no-such-row check removed by mutation",
+      "because": "removing the no-such-row check lets purgeOrg dereference undefined to read `kind`, throwing a TypeError instead of `unknown deletion row <id>`; the witness expects that message and its rejected-with assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.test.ts",
+        "-t",
+        "an id naming no row throws and the org's rows and objects are untouched"
+      ],
+      "verdict": "caught"
     }
   ]
 }
