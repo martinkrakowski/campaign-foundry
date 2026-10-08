@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "lane": "FU-third-campaign-copy",
+  "mutations": [
+    {
+      "file": "apps/api/server/routes/campaigns/index.post.ts",
+      "before": "          resolved.copyOnly,",
+      "after": "          new Map(),",
+      "because": "Dropping copyOnly from the index.post copy call empties the only-map the route now passes: copyBriefRefs copies the THIRD campaign whole again, so its bg.png lands in the new campaign and the per-source spy assertion expects { only: ['alt.png'] } but sees a two-argument whole copy. Caught by the s3 create test (rows include bg.png, three objects, and the third-campaign copyAssets call is two-argument).",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/copy-third-campaign.test.ts",
+        "-t",
+        "s3, create copies only the named third-campaign asset"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "          resolved.copyOnly,",
+      "after": "          new Map(),",
+      "because": "The identical drop on duplicate.post: the third campaign is copied whole, so its bg.png reaches the new campaign and the { only: ['alt.png'] } call assertion fails. Caught by the s3 duplicate test.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/copy-third-campaign.test.ts",
+        "-t",
+        "s3, duplicate copies only the named third-campaign asset"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/index.post.ts",
+      "before": "        const sourceCopy = await getAssetStore(scope).copyAssets(sourceSlug, targetSlug);",
+      "after": "        const sourceCopy = await getAssetStore(scope).copyAssets(sourceSlug, targetSlug, { only: [] });",
+      "because": "Narrowing the SOURCE campaign's own copy to nothing removes extra.png (the source's unreferenced asset) from the new campaign — the Q8 pin. Caught by the source-stays-whole test, whose create half asserts extra.png survives after a sourced create.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/copy-third-campaign.test.ts",
+        "-t",
+        "s3, the source stays whole, Q8 regression pin"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "        const sourceCopy = await getAssetStore(scope).copyAssets(sourceSlug, targetSlug);",
+      "after": "        const sourceCopy = await getAssetStore(scope).copyAssets(sourceSlug, targetSlug, { only: [] });",
+      "because": "The identical source-copy narrowing on duplicate.post: the new campaign's source copy omits extra.png, so the duplicate half of the source-stays-whole test fails. Caught by the same Q8 test.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/copy-third-campaign.test.ts",
+        "-t",
+        "s3, the source stays whole, Q8 regression pin"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/index.post.ts",
+      "before": "        createdIds.push(...copied.createdIds);",
+      "after": "        void copied.createdIds;",
+      "because": "Stripping the third campaign's created ids from the route's createdIds means a later failure frees only the source's copy and leaks the third's alt.png row/object into the target, so the freed-id list no longer equals the union of the source's and the third's created sets (the third set has size 1, not 3). Caught by the s3 failure test.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/copy-third-campaign.test.ts",
+        "-t",
+        "s3, a failure after the narrowed copy frees only what this request created"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/routes/campaigns/briefs/[id]/duplicate.post.ts",
+      "before": "        createdIds.push(...copied.createdIds);",
+      "after": "        void copied.createdIds;",
+      "because": "The identical createdIds strip on duplicate.post: the failed duplicate frees only the source copy and leaks the third's alt.png, so the duplicate half of the s3 failure test's freed-id list no longer matches the per-request created union. Caught by the same failure test.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/copy-third-campaign.test.ts",
+        "-t",
+        "s3, a failure after the narrowed copy frees only what this request created"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
