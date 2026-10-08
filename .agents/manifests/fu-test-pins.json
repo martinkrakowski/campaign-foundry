@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "lane": "FU-test-pins",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/asset-files.ts",
+      "before": "if (brief.audio !== undefined) refs.push(brief.audio.path);",
+      "after": "if (brief.audio !== undefined) void brief.audio.path;",
+      "because": "skip collecting audio.path so the third-campaign bed is neither copied under only: nor remapped onto the new slug; the pin asserts the narrowed copy, the remapped stored audio.path owner, and bed.mp3 present",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/copy-third-campaign.test.ts",
+        "-t",
+        "s3, a third-campaign ref carried in audio.path is copied narrowly in create",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/asset-files.ts",
+      "before": "if (beat.background !== undefined) refs.push(beat.background);",
+      "after": "if (beat.background !== undefined) void beat.background;",
+      "because": "skip collecting a beat background so the third-campaign alt is neither copied under only: nor remapped; the pin asserts the narrowed copy, the remapped stored background owner, and alt.png present",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/copy-third-campaign.test.ts",
+        "-t",
+        "s3, a third-campaign ref carried in a beat background is copied narrowly in create",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -227,6 +227,34 @@ describe("purge CLI (PT-9g3, D231)", () => {
     ]);
   });
 
+  test("sweep records a thrown org purge error and continues to the campaign row after it", async () => {
+    const db = stubDb();
+    const lines: string[] = [];
+    // `claim` hands out an org row that throws, then a campaign row that purges,
+    // then nothing. `purge` throws for the org row and resolves for the campaign
+    // row after it, proving the sweep does not abort on the thrown org row.
+    const afterRow = deletionRow("after");
+    const claim = vi
+      .fn()
+      .mockResolvedValueOnce(deletionRow("org-row", "org"))
+      .mockResolvedValueOnce(afterRow)
+      .mockResolvedValueOnce(undefined);
+    const purge = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("org boom"))
+      .mockResolvedValueOnce("purged");
+
+    const { purged, failed } = await sweep(db, (line) => lines.push(line), claim, purge);
+
+    expect(purged).toBe(1);
+    expect(failed).toBe(1);
+    expect(purge).toHaveBeenCalledTimes(2);
+    expect(purge.mock.calls[1]![2]).toBe(afterRow);
+    expect(recordFailure).toHaveBeenCalledTimes(1);
+    expect(recordFailure).toHaveBeenCalledWith(db, "org-row", "org boom");
+    expect(lines).toEqual([`  org org-row: failed (org boom)`, `  campaign after: purged`]);
+  });
+
   test("sweep stops after MAX_CLAIMS_PER_SWEEP claims in one run", async () => {
     const db = stubDb();
     // A claim that would never return undefined on its own: the per-invocation
