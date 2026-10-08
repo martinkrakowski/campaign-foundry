@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "lane": "FU-purge-org-hardening",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "    if (rows.length > 0 && rows[0]!.deleted_at !== null) throw orgTombstoned();",
+      "after": "    if (rows.length > 0 && rows[0]!.deleted_at === null) throw orgTombstoned();",
+      "because": "inverting the tombstone check makes the guard fire on a LIVE org and never on a dead one; test 1's .rejects toMatchObject({ code: 'EFORBIDDEN' }) fails because createCampaign resolves instead of throwing, and test 5 fails the other way (the live create is refused).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-brief-store.tombstone.test.ts",
+        "-t",
+        "createCampaign refuses a tombstoned org and inserts nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "      await this.assertOrgLive(tx);\n      if (teamId !== null) await this.assertTeamInOrg(tx, teamId);",
+      "after": "      if (teamId !== null) await this.assertTeamInOrg(tx, teamId);",
+      "because": "removing assertOrgLive from createCampaign's transaction lets a create against a tombstoned org succeed; test 1's .rejects toMatchObject({ code: 'EFORBIDDEN' }) fails because the create resolves.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-brief-store.tombstone.test.ts",
+        "-t",
+        "createCampaign refuses a tombstoned org and inserts nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "      await this.assertOrgLive(tx);\n      if (teamId !== null && teamId !== undefined) await this.assertTeamInOrg(tx, teamId);",
+      "after": "      if (teamId !== null && teamId !== undefined) await this.assertTeamInOrg(tx, teamId);",
+      "because": "removing assertOrgLive from createBriefInternal's transaction lets createBrief against a tombstoned org succeed; test 2's .rejects toMatchObject({ code: 'EFORBIDDEN' }) fails because the create resolves.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-brief-store.tombstone.test.ts",
+        "-t",
+        "createBrief refuses a tombstoned org and inserts nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "  (err as { code?: string; statusCode?: number }).code = \"EFORBIDDEN\";",
+      "after": "  (err as { code?: string; statusCode?: number }).code = \"EEXIST\";",
+      "because": "changing the code from EFORBIDDEN to EEXIST makes the error carry the wrong code; tests 1, 2 and 3 fail their toMatchObject({ code: 'EFORBIDDEN' }) assertions — routes would answer 409 for a deleted org instead of 403.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-brief-store.tombstone.test.ts",
+        "-t",
+        "createCampaign refuses a tombstoned org and inserts nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "where d.org_id = $1 and d.kind = 'campaign'\n                 and d.subject = c.id::text and d.purged_at is null",
+      "after": "where d.org_id = $1 and d.kind = 'campaign'\n                 and d.subject = c.id::text and d.purged_at is not null",
+      "because": "inverting the insert statement's not-exists check from pending (purged_at is null) to purged (purged_at is not null) makes the back-fill skip a tombstoned campaign whose only deletion row is already purged; test 12 case 2 expects a new pending row and gets none.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.backfill.test.ts",
+        "-t",
+        "a back-fill leaves a campaign that already has a pending row alone"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "          where c.org_id = $1 and c.deleted_at is not null\n            and c.id = any($3::uuid[])",
+      "after": "          where $1::text is not null and c.deleted_at is not null\n            and true",
+      "because": "replacing both the org_id filter and the locked-id filter with tautologies makes the back-fill insert deletion rows for every org's tombstoned campaigns; beta gains a deletion row where none existed, and the snapshot equality fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.backfill.test.ts",
+        "-t",
+        "queueCampaignPurges back-fills this org's orphans only"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
