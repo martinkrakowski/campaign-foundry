@@ -86,6 +86,23 @@
         "kustomization does not list the purge cronjob"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "deploy/staging/jobs/purge-cronjob.yaml",
+      "before": "\n                - name: STORE_BACKEND\n                  value: postgres\n                - name: OBJECT_STORE",
+      "after": "\n                - name: OBJECT_STORE",
+      "because": "Removing the STORE_BACKEND entry leaves the CronJob under OBJECT_STORE=s3 with the default fs backend; objectStoreSettings() then throws 'OBJECT_STORE=s3 requires STORE_BACKEND=postgres' at housekeeping, so the STORE_BACKEND test fails on its toBe assertion rather than the sweep running.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/staging-purge-cronjob.test.ts",
+        "-t",
+        "purge cronjob sets STORE_BACKEND to postgres"
+      ],
+      "verdict": "caught"
     }
   ]
 }

@@ -44,6 +44,8 @@ spec:
                       key: uri
                 - name: DATABASE_CA_PATH
                   value: /etc/campaign-foundry/db/ca.crt
+                - name: STORE_BACKEND
+                  value: postgres
                 - name: OBJECT_STORE
                   value: "s3"
                 - name: S3_ENDPOINT

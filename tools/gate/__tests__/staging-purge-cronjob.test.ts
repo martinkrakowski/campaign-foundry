@@ -23,6 +23,20 @@ const SHARED_ENV = [
   "S3_SECRET_ACCESS_KEY",
 ];
 
+/** The env entries the sweep reads that are also owned by the api container. */
+const ENV_NAMES = [
+  "STORE_BACKEND",
+  "OBJECT_STORE",
+  "DATABASE_URL",
+  "DATABASE_CA_PATH",
+  "S3_ENDPOINT",
+  "S3_PUBLIC_ENDPOINT",
+  "S3_REGION",
+  "S3_BUCKET",
+  "S3_ACCESS_KEY_ID",
+  "S3_SECRET_ACCESS_KEY",
+];
+
 /** Each `- name: UPPER_CASE` env entry -> its body lines, trimmed and joined (comments and blanks skipped). */
 function envBlocks(text: string): Map<string, string> {
   const blocks = new Map<string, string>();
@@ -41,6 +55,30 @@ function envBlocks(text: string): Map<string, string> {
     blocks.set(head[2] ?? "", body.join(" | "));
   });
   return blocks;
+}
+
+/** The full env entry for `name`: the `- name:` line and its value/valueFrom block,
+ * each line trimmed and joined with " | " so structurally different indentation
+ * (the CronJob nests deeper than the Deployment) cannot mask a value drift. */
+function entryOf(text: string, name: string): string | undefined {
+  const lines = text.split("\n");
+  let found: string | undefined;
+  lines.forEach((line, index) => {
+    if (found !== undefined) return;
+    const head = /^(\s*)- name: ([A-Z][A-Z0-9_]*)$/.exec(line);
+    if (!head) return;
+    if (head[2] !== name) return;
+    const indent = (head[1] ?? "").length;
+    const parts: string[] = [line.trim()];
+    for (const next of lines.slice(index + 1)) {
+      const trimmed = next.trim();
+      if (trimmed === "" || trimmed.startsWith("#")) continue;
+      if (next.length - next.trimStart().length <= indent) break;
+      parts.push(trimmed);
+    }
+    found = parts.join(" | ");
+  });
+  return found;
 }
 
 describe("staging purge sweep", () => {
@@ -154,5 +192,17 @@ describe("staging purge sweep", () => {
   });
   test("purge cronjob does not set the purge reconcile switch", () => {
     expect(read(CRON)).not.toContain("PURGE_RECONCILE");
+  });
+  test("purge cronjob sets STORE_BACKEND to postgres", () => {
+    expect(entryOf(read(CRON), "STORE_BACKEND")).toBe("- name: STORE_BACKEND | value: postgres");
+  });
+  test("purge cronjob env entries match the api container", () => {
+    const cron = read(CRON);
+    const app = read("app.yaml");
+    for (const name of ENV_NAMES) {
+      expect(entryOf(cron, name), `env ${name} in the cronjob differs from the api container`).toBe(
+        entryOf(app, name),
+      );
+    }
   });
 });
