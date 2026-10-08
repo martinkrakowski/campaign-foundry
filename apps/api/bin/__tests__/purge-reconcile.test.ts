@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import { ObjectBackgroundCache } from "@campaignfoundry/CreativeGeneration";
 import { migratedDatabase } from "../../server/lib/db/__tests__/pglite-client.js";
@@ -45,6 +45,11 @@ function restoreEnv(): void {
   if (SAVED_PURGE_RECONCILE === undefined) delete process.env.PURGE_RECONCILE;
   else process.env.PURGE_RECONCILE = SAVED_PURGE_RECONCILE;
 }
+
+afterAll(() => {
+  expect(process.env.OBJECT_STORE).toBe(SAVED_OBJECT_STORE);
+  expect(process.env.PURGE_RECONCILE).toBe(SAVED_PURGE_RECONCILE);
+});
 
 describe("reconcile CLI (bin/purge.ts)", () => {
   let db: SqlClient;
@@ -871,6 +876,65 @@ describe("sweep housekeeping (bin/purge.ts)", () => {
     );
     expect(db.end).toHaveBeenCalled();
   });
+
+  test("housekeeping with PURGE_RECONCILE=off counts a setup failure as one step and logs the skip", async () => {
+    process.env.OBJECT_STORE = "s3";
+    setObjectStoreClient(memory);
+    process.env.PURGE_RECONCILE = "off";
+    const log: string[] = [];
+
+    const realQuery = db.query.bind(db);
+    vi.spyOn(db, "query").mockImplementation(async (text, params) => {
+      if (typeof text === "string" && text.startsWith("select id from org")) {
+        throw new Error("org lookup boom");
+      }
+      return realQuery(text, params);
+    });
+
+    const failed = await housekeeping(
+      db,
+      (l) => log.push(l),
+      () => NOW,
+    );
+    expect(failed).toBe(1);
+    expect(log).toContain("  Reconcile skipped: PURGE_RECONCILE=off.");
+    expect(log).toContain(
+      "  cache expiry failed (setup failed: store client or org list unavailable)",
+    );
+    // The two log lines appear in order.
+    const skipIdx = log.indexOf("  Reconcile skipped: PURGE_RECONCILE=off.");
+    const cacheIdx = log.indexOf(
+      "  cache expiry failed (setup failed: store client or org list unavailable)",
+    );
+    expect(skipIdx).toBeLessThan(cacheIdx);
+  });
+
+  test("housekeeping with PURGE_RECONCILE=on counts a setup failure as two steps", async () => {
+    process.env.OBJECT_STORE = "s3";
+    setObjectStoreClient(memory);
+    process.env.PURGE_RECONCILE = "on";
+    const log: string[] = [];
+
+    const realQuery = db.query.bind(db);
+    vi.spyOn(db, "query").mockImplementation(async (text, params) => {
+      if (typeof text === "string" && text.startsWith("select id from org")) {
+        throw new Error("org lookup boom");
+      }
+      return realQuery(text, params);
+    });
+
+    const failed = await housekeeping(
+      db,
+      (l) => log.push(l),
+      () => NOW,
+    );
+    expect(failed).toBe(2);
+    expect(log).toContain(`  reconcile failed (org lookup boom)`);
+    expect(log).toContain(
+      "  cache expiry failed (setup failed: store client or org list unavailable)",
+    );
+  });
+
   test("sweep housekeeping reconciles exactly SWEEP_RECONCILE_MAX_CANDIDATES orphans across two orgs without failing", async () => {
     expect(SWEEP_RECONCILE_MAX_CANDIDATES).toBe(100);
     process.env.OBJECT_STORE = "s3";

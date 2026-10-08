@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import type { SqlClient } from "../../db/sql-client.js";
 import { purgeCampaign } from "../purge-campaign.js";
+import { purgeOrg, requestOrgDeletion } from "../purge-org.js";
 import { campaignPrefix, cachePrefix, orgPrefix } from "../../object-store/object-keys.js";
 
 const BYTES = new Uint8Array([42]);
@@ -307,3 +308,32 @@ export async function finishCampaignPurges(db: SqlClient, orgId: string): Promis
 }
 
 export { BYTES };
+
+/**
+ * Drive an org all the way through the purge lifecycle: request its deletion
+ * (tombstones the org row and plants the `kind = 'org'` deletion row), answer
+ * `"retry"` from `purgeOrg` while the seeded campaigns are still live, drain
+ * them with `finishCampaignPurges`, then `purgeOrg` again expecting `"purged"`.
+ * The caller sets `OBJECT_STORE=s3` and injects an `InMemoryObjectStore` before
+ * calling — this helper only touches the database.
+ */
+export async function purgeOrgCompletely(db: SqlClient, orgId: string): Promise<void> {
+  await requestOrgDeletion(db, { orgId, requestedBy: "operator" });
+  const { id, requestedBy } = await orgRow(db, orgId);
+  if ((await purgeOrg(db, orgId, { id, requestedBy })) !== "retry") {
+    throw new Error(`expected purgeOrg to retry for ${orgId}`);
+  }
+  await finishCampaignPurges(db, orgId);
+  const again = await orgRow(db, orgId);
+  if ((await purgeOrg(db, orgId, { id: again.id, requestedBy: again.requestedBy })) !== "purged") {
+    throw new Error(`expected purgeOrg to purge ${orgId}`);
+  }
+}
+
+/** Move an org's `deleted_at` tombstone back into the past by `interval`. */
+export async function backdateOrg(db: SqlClient, orgId: string, interval: string): Promise<void> {
+  await db.query(`update org set deleted_at = now() - $2::interval where id = $1`, [
+    orgId,
+    interval,
+  ]);
+}
