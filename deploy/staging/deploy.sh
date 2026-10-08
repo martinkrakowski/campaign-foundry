@@ -186,4 +186,10 @@ remote kubectl -n "$NS" wait job/cf-migrate --for=condition=complete --timeout=5
 echo "==> roll out"
 printf '%s\n' "$RENDERED" | only_app app | remote kubectl apply -f -
 remote kubectl -n "$NS" rollout status deployment/campaign-foundry --timeout=10m
+
+# The deletion sweep (PT-9q) is applied directly, never through the kustomization:
+# it needs this commit's image tag, and it must not exist before the migration has
+# created the table it reads. A CronJob is updated in place by apply, so no delete.
+echo "==> purge sweep schedule"
+sed "s#IMAGE_TAG#$TAG#" deploy/staging/jobs/purge-cronjob.yaml | remote kubectl apply -f -
 echo "==> https://campaign-foundry.midnight.lan ($TAG)"
