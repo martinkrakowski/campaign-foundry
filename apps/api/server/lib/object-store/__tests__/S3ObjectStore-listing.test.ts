@@ -308,6 +308,42 @@ describe("S3ObjectStore.list", () => {
     );
   });
 
+  test("a truncated body with an empty NextContinuationToken is refused and not followed", async () => {
+    const { requests, fetchImpl } = canned(
+      xmlResponse(
+        result(
+          entry("campaigns/c1/a.png", 1),
+          "<IsTruncated>true</IsTruncated><NextContinuationToken></NextContinuationToken>",
+        ),
+      ),
+      xmlResponse(result(entry("campaigns/c1/b.png", 1), "<IsTruncated>false</IsTruncated>")),
+    );
+    expect(requests).toHaveLength(0);
+    await expect(store(fetchImpl).list("campaigns/c1/")).rejects.toThrow(
+      /Refusing a truncated listing with no NextContinuationToken/,
+    );
+    expect(requests).toHaveLength(1);
+  });
+
+  test("deletePrefix refuses a listing with an empty continuation token and deletes nothing", async () => {
+    const { requests, fetchImpl } = canned(
+      xmlResponse(
+        result(
+          entry("campaigns/c1/a.png", 1),
+          "<IsTruncated>true</IsTruncated><NextContinuationToken></NextContinuationToken>",
+        ),
+      ),
+      xmlResponse(result(entry("campaigns/c1/b.png", 1), "<IsTruncated>false</IsTruncated>")),
+      new Response(null, { status: 204 }),
+    );
+    expect(requests).toHaveLength(0);
+    await expect(store(fetchImpl).deletePrefix("campaigns/c1/")).rejects.toThrow(
+      /Refusing a truncated listing with no NextContinuationToken/,
+    );
+    expect(requests.every((request) => request.method === "GET")).toBe(true);
+    expect(requests.filter((request) => request.method === "DELETE")).toHaveLength(0);
+  });
+
   test("deletePrefix lists first, then issues one DELETE per key it found", async () => {
     const { requests, fetchImpl } = canned(
       xmlResponse(
