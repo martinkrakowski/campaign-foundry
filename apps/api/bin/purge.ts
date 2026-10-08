@@ -14,11 +14,16 @@ import {
   recordFailure,
   type DeletionRow,
 } from "../server/lib/deletion/deletion-store.js";
-import { reconcileOrgs } from "../server/lib/deletion/reconcile.js";
+import {
+  describePlan,
+  describeStep,
+  reconcileOrgs,
+  type ReconcilePlan,
+  type ReconcileStep,
+} from "../server/lib/deletion/reconcile.js";
 import { describeCachePlan, expireCache } from "../server/lib/deletion/expire-cache.js";
 import { purgeCampaign } from "../server/lib/deletion/purge-campaign.js";
 import { objectStoreClient } from "../server/lib/object-store/index.js";
-import { campaignPrefix, inputKey } from "../server/lib/object-store/object-keys.js";
 
 export const USAGE = "usage: yarn purge:sweep [-- --dry-run]";
 
@@ -123,6 +128,7 @@ export async function main(
   dryRun: boolean,
   open: () => SqlClient = connect,
   log: (line: string) => void = console.log,
+  after: (db: SqlClient, log: (line: string) => void) => Promise<number> = housekeeping,
 ): Promise<void> {
   if (command !== "sweep") throw new Error(USAGE);
   const db = open();
@@ -140,6 +146,10 @@ export async function main(
     }
     const { purged, failed } = await sweep(db, log);
     log(`  Purged ${purged} deletion row(s), ${failed} failed.`);
+    const stepsFailed = await after(db, log);
+    if (stepsFailed > 0) {
+      throw new Error(`${stepsFailed} housekeeping step(s) failed; see the lines above.`);
+    }
   } finally {
     await db.end();
   }
@@ -194,48 +204,6 @@ export function cacheStore(): ObjectStorePort {
   return s3Store("cache needs OBJECT_STORE=s3: the file store has no object store to expire.");
 }
 
-export async function runReconcile(
-  args: readonly string[],
-  open: () => SqlClient = connect,
-  log: (line: string) => void = console.log,
-  store: () => ObjectStorePort = reconcileStore,
-  now: () => number = Date.now,
-): Promise<void> {
-  const { apply, org } = parseReconcileArgs(args);
-  const objects = store();
-  const db = open();
-  try {
-    const { rows } = await db.query<{ id: string }>(`select id from org order by id`);
-    const known = rows.map((row) => row.id);
-    if (org !== undefined && !known.includes(org))
-      throw new Error(`reconcile: unknown org "${org}"`);
-    const { plans, applied } = await reconcileOrgs(db, objects, org === undefined ? known : [org], {
-      apply,
-      now,
-    });
-    for (const plan of plans) {
-      log(
-        `  org ${plan.orgId}: ${plan.prefixes.length} orphan prefix(es), ${plan.inputs.length} orphan input(s)`,
-      );
-      for (const prefix of plan.prefixes) {
-        log(
-          `    prefix ${campaignPrefix(plan.orgId, prefix.campaignId)} (${prefix.objects} object(s))`,
-        );
-      }
-      for (const input of plan.inputs) {
-        log(`    input ${inputKey(plan.orgId, input.campaignId, input.assetId)}`);
-      }
-    }
-    log(
-      apply
-        ? `  Deleted ${applied.prefixes} prefix(es) and ${applied.inputs} input(s); skipped ${applied.skipped}.`
-        : "  Dry run: nothing deleted. Re-run with --apply to delete.",
-    );
-  } finally {
-    await db.end();
-  }
-}
-
 /** The orgs of the `org` table, or exactly `org` when it is one of them (an unknown id is refused). */
 async function orgsToVisit(
   db: SqlClient,
@@ -247,6 +215,45 @@ async function orgsToVisit(
   if (org === undefined) return known;
   if (!known.includes(org)) throw new Error(`${command}: unknown org "${org}"`);
   return [org];
+}
+
+/** The two hooks that give `reconcileOrgs` its record: each plan before the first delete, each step as it completes. */
+function reconcileLogging(log: (line: string) => void): {
+  onPlan: (plan: ReconcilePlan) => void;
+  onStep: (step: ReconcileStep) => void;
+} {
+  return {
+    onPlan: (plan) => {
+      for (const line of describePlan(plan)) log(line);
+    },
+    onStep: (step) => log(describeStep(step)),
+  };
+}
+
+export async function runReconcile(
+  args: readonly string[],
+  open: () => SqlClient = connect,
+  log: (line: string) => void = console.log,
+  store: () => ObjectStorePort = reconcileStore,
+  now: () => number = Date.now,
+): Promise<void> {
+  const { apply, org } = parseReconcileArgs(args);
+  const objects = store();
+  const db = open();
+  try {
+    const { applied } = await reconcileOrgs(db, objects, await orgsToVisit(db, org, "reconcile"), {
+      apply,
+      now,
+      ...reconcileLogging(log),
+    });
+    log(
+      apply
+        ? `  Deleted ${applied.prefixes} prefix(es) and ${applied.inputs} input(s); skipped ${applied.skipped}.`
+        : "  Dry run: nothing deleted. Re-run with --apply to delete.",
+    );
+  } finally {
+    await db.end();
+  }
 }
 
 export async function runCache(
@@ -275,6 +282,85 @@ export async function runCache(
   } finally {
     await db.end();
   }
+}
+
+/**
+ * Per sweep, more reconcile candidates than this and the UNATTENDED apply
+ * refuses to delete any of them: a database that looks empty or wrong makes
+ * every prefix older than an hour an "orphan". An operator reviews with
+ * `yarn purge:reconcile --org <id>` and applies per org (no cap there). The
+ * number is arbitrary and the orchestrator's to change.
+ */
+export const SWEEP_RECONCILE_MAX_CANDIDATES = 100;
+
+/**
+ * `PURGE_RECONCILE`: `off` turns the sweep's reconcile off; unset, empty or `on`
+ * leaves it on (the plan says the sweep runs it). Anything else is refused. The
+ * cache expiry has no switch.
+ */
+export function reconcileSwitch(): boolean {
+  loadEnv();
+  const value = process.env.PURGE_RECONCILE;
+  if (value === undefined || value === "" || value === "on") return true;
+  if (value === "off") return false;
+  throw new Error(`PURGE_RECONCILE must be "on" or "off".`);
+}
+
+function reason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * What the sweep does after its claim loop: reconcile every org, then expire
+ * the old cache objects of every org. The two steps are independent: each is
+ * wrapped, a failure is logged and counted, and the other still runs. Returns
+ * the number of failed steps (`main` turns it into the exit code). The purges
+ * that already ran are committed and unaffected.
+ */
+export async function housekeeping(
+  db: SqlClient,
+  log: (line: string) => void,
+  now: () => number = Date.now,
+): Promise<number> {
+  if (objectStore() !== "s3") {
+    log("  Reconcile and cache expiry skipped: OBJECT_STORE is not s3.");
+    return 0;
+  }
+  const objects = objectStoreClient();
+  const orgIds = await orgsToVisit(db, undefined, "sweep");
+  let failed = 0;
+  try {
+    if (reconcileSwitch()) {
+      const { applied } = await reconcileOrgs(db, objects, orgIds, {
+        apply: true,
+        now,
+        maxCandidates: SWEEP_RECONCILE_MAX_CANDIDATES,
+        ...reconcileLogging(log),
+      });
+      log(
+        `  Reconcile: deleted ${applied.prefixes} prefix(es) and ${applied.inputs} input(s); skipped ${applied.skipped}.`,
+      );
+    } else {
+      log("  Reconcile skipped: PURGE_RECONCILE=off.");
+    }
+  } catch (error) {
+    failed++;
+    log(`  reconcile failed (${reason(error)})`);
+  }
+  try {
+    const { deleted } = await expireCache(objects, orgIds, {
+      apply: true,
+      now,
+      onPlan: (plan) => {
+        for (const line of describeCachePlan(plan)) log(line);
+      },
+    });
+    log(`  Cache expiry: deleted ${deleted} object(s).`);
+  } catch (error) {
+    failed++;
+    log(`  cache expiry failed (${reason(error)})`);
+  }
+  return failed;
 }
 
 /* istanbul ignore next -- CLI entry guard; main() is covered directly in tests */

@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "lane": "PT-9l2-erase-cli",
+  "mutations": [
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "if ((email === undefined) === (user === undefined)) throw new Error(USAGE_ERASE);",
+      "after": "if (false) throw new Error(USAGE_ERASE);",
+      "because": "the exactly-one-identity check is disabled: a repeated flag, both identity flags, or neither no longer reject. Witness `erase CLI refuses a repeated flag both identity flags or neither`: both-flags and neither no longer reject, the `rejects.toThrow` assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "erase CLI refuses a repeated flag both identity flags or neither",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "if (apply && dryRun) throw new Error(USAGE_ERASE);",
+      "after": "if (apply && dryRun && false) throw new Error(USAGE_ERASE);",
+      "because": "the apply+dry-run refusal is disabled: an operator can ask for both. Witness `erase CLI refuses apply together with dry-run`: the `rejects.toThrow` assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "erase CLI refuses apply together with dry-run",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "let apply = false;",
+      "after": "let apply = true;",
+      "because": "dry run is no longer the default: a bare `--email`/`--user` erases. Witnesses `erase CLI parses an email or a user id and defaults to a dry run` (`apply` expected false) and `erase CLI dry run prints counts and never an email or name` (the database changes). The first is the pinned witness.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "erase CLI parses an email or a user id and defaults to a dry run",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "\"  Dry run: nothing changed. Re-run with --apply to erase.\"",
+      "after": "`  Dry run for ${args.join(\" \")}: nothing changed.`",
+      "because": "the dry-run line prints the raw arguments (an email) instead of the static hint. Witness `erase CLI dry run prints counts and never an email or name`: the `not.toContain(TARGET.email)` assertion fails. This is the output-leak mutation.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "erase CLI dry run prints counts and never an email or name",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "if (outcome.outcome === \"not-found\") throw new Error(\"erase: no such user.\");",
+      "after": "if (outcome.outcome === \"not-found\") return;",
+      "because": "an unknown user exits 0 instead of rejecting: a typo and an already-erased user become indistinguishable. Witness `erase CLI refuses an unknown user without echoing the identity`: the `rejects` assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "erase CLI refuses an unknown user without echoing the identity",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "const outcome = await eraseUser(db, ref, { apply });",
+      "after": "const outcome = await eraseUser(db, ref, { apply: false });",
+      "because": "`--apply` is ignored: eraseUser always runs a dry plan, so the user row and the `deletion` row read back are empty. Witness `erase CLI apply erases the user and prints the token and counts only`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "erase CLI apply erases the user and prints the token and counts only",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "await db.end();",
+      "after": "await Promise.resolve();",
+      "because": "the database is never closed when the erasure fails: `db.end()` is not called. Witness `erase CLI closes the database when the erasure fails`: `toHaveBeenCalledTimes(1)` fails with 0.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "erase CLI closes the database when the erasure fails",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
