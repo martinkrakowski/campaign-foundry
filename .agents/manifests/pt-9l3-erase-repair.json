@@ -229,6 +229,25 @@
         "!golden-bytes && !cpu-bound"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "  \"operator\", // bin/purge.ts runOrgPurge: requested_by of an org purge, and of the\n  // campaign purges that purge queues (purge-org.ts queueCampaignPurges passes it through)\n];",
+      "after": "];",
+      "because": "The operator entry is removed from NON_USER_ACTOR_VALUES, so finishErasure no longer recognises it as a non-user sentinel. Witness 'finishErasure refuses operator as a user id and changes nothing': the rejects.toThrow assertion fails because finishErasure proceeds to repair instead of throwing 'erase: that id is not a user id.'.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/erase-user.repair.test.ts",
+        "-t",
+        "finishErasure refuses 'operator' as a user id and changes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
     }
   ]
 }

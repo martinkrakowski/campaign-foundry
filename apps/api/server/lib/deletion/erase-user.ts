@@ -103,6 +103,8 @@ export const NON_USER_ACTOR_VALUES: readonly string[] = [
   "cli:erase-user", // erase-user.ts step 8: deletion.requested_by for a user erasure
   "local", // AUTH_MODE=local session identity (lib/tenant.ts LOCAL_TENANT.userId),
   // written by pg-brief-store.ts / pg-decision-store.ts / pg-provider-key-store.ts / request.ts
+  "operator", // bin/purge.ts runOrgPurge: requested_by of an org purge, and of the
+  // campaign purges that purge queues (purge-org.ts queueCampaignPurges passes it through)
 ];
 
 /**

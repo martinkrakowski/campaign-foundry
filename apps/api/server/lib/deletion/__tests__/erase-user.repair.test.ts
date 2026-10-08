@@ -7,6 +7,7 @@ import {
   countActorRows,
   finishErasure,
   ErasePassTwoError,
+  NON_USER_ACTOR_VALUES,
 } from "../erase-user.js";
 import {
   ACME_OWNER,
@@ -441,6 +442,36 @@ describe("finishErasure (PT-9l3)", () => {
       "erase: that id is not a user id.",
     );
     expect(await dumpDatabase(db)).toEqual(before);
+  });
+
+  test("finishErasure refuses 'operator' as a user id and changes nothing", async () => {
+    const token = await erasedToken();
+    // Plant a row that the bad id WOULD have matched if the refusal were absent:
+    // the operator value purge.ts writes into deletion.requested_by.
+    await db.query(
+      `insert into deletion (org_id, kind, subject, requested_by, not_before) values ('local', 'campaign', 'operator-scratch', 'operator', now())`,
+    );
+    const before = await dumpDatabase(db);
+    await expect(finishErasure(db, "operator", token)).rejects.toThrow(
+      "erase: that id is not a user id.",
+    );
+    expect(await dumpDatabase(db)).toEqual(before);
+  });
+
+  test("finishErasure refuses every entry of NON_USER_ACTOR_VALUES and changes nothing", async () => {
+    const token = await erasedToken();
+    for (const value of NON_USER_ACTOR_VALUES) {
+      // Plant a deletion row carrying this value so a missing refusal would rewrite it.
+      await db.query(
+        `insert into deletion (org_id, kind, subject, requested_by, not_before) values ('local', 'campaign', $1, $2, now())`,
+        [`scratch-${value}`, value],
+      );
+      const before = await dumpDatabase(db);
+      await expect(finishErasure(db, value, token)).rejects.toThrow(
+        "erase: that id is not a user id.",
+      );
+      expect(await dumpDatabase(db)).toEqual(before);
+    }
   });
 });
 
