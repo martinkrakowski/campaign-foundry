@@ -12,10 +12,24 @@ import {
 } from "../../../lib/capabilities.js";
 import { createJob, getJob, resetJobs } from "../../../lib/jobs.js";
 import { getBriefStore } from "../../../lib/ports/index.js";
+import { setRunDelivery, resetRunDelivery } from "../../../lib/ports/run-delivery-registry.js";
+import type { RunDeliveryPort } from "../../../lib/ports/run-delivery.port.js";
+import type { RunRequest } from "../../../lib/run-request.js";
 import planHandler from "../plan.post.js";
 import generateHandler from "../generate.post.js";
 
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
+
+function deliverySpy(): RunDeliveryPort & { readonly delivered: RunRequest[] } {
+  const delivered: RunRequest[] = [];
+  return {
+    delivered,
+    deliver: async (request) => {
+      delivered.push(request);
+    },
+  };
+}
+
 const web = (path: string, handler: EventHandler) => {
   const app = createApp();
   const router = createRouter();
@@ -117,6 +131,10 @@ beforeEach(async () => {
   await getBriefStore(LOCAL_TENANT).createCampaign("camp");
   // The boot-window snapshot, exactly as the module starts out.
   setCapabilities({ motion: false, reason: NOT_PROBED_REASON });
+  // Stub run delivery so this file's answer-only tests never start a real render
+  // or encode — `callGenerate` still returns 202 + jobId, but `deliver` records
+  // the request without starting the pipeline. Reset in `teardown`'s finally.
+  setRunDelivery(deliverySpy());
 });
 
 async function teardown(settleTimeoutMs = 9_000): Promise<void> {
@@ -124,6 +142,7 @@ async function teardown(settleTimeoutMs = 9_000): Promise<void> {
     for (const jobId of started.splice(0)) await settle(jobId, settleTimeoutMs);
   } finally {
     await resetJobs();
+    resetRunDelivery();
     probeWait.timeoutMs = defaultWait;
     setCapabilities({ motion: false, reason: NOT_PROBED_REASON });
     if (origOut === undefined) delete process.env.OUTPUT_DIR;
@@ -153,24 +172,17 @@ describe("run paths vs the capability boot race", () => {
     expect(body.variants.some((v) => v.motion !== undefined)).toBe(true);
   });
 
-  test(
-    "a motion generate that lands in the boot window waits and is accepted",
-    // cpu-bound: this is the one test on the owner's midnight host that its own
-    // settle() deadline (9s above, in afterEach) beats, not vitest's timeout.
-    // So --testTimeout cannot save it; the profile filters it out instead.
-    { tags: ["cpu-bound"] },
-    async () => {
-      const pending = callGenerate(motionBrief());
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      setCapabilities({ motion: true });
-      const res = await pending;
-      // Register the run before asserting: a failed check must not leave it running.
-      const { jobId } = (await res.json()) as { jobId?: string };
-      if (typeof jobId === "string") started.push(jobId);
-      expect(res.status).toBe(202);
-      expect(jobId).toEqual(expect.any(String));
-    },
-  );
+  test("a motion generate that lands in the boot window waits and is accepted", async () => {
+    const pending = callGenerate(motionBrief());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    setCapabilities({ motion: true });
+    const res = await pending;
+    // Register the run before asserting: a failed check must not leave it running.
+    const { jobId } = (await res.json()) as { jobId?: string };
+    if (typeof jobId === "string") started.push(jobId);
+    expect(res.status).toBe(202);
+    expect(jobId).toEqual(expect.any(String));
+  });
 
   test("a motion run on a host that cannot encode video is still refused, naming the probe reason", async () => {
     setCapabilities({ motion: false, reason: "ffmpeg-static binary is not available" });
