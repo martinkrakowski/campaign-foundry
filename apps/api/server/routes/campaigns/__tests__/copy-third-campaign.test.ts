@@ -603,7 +603,10 @@ describe("copy third-campaign-only under s3 on pg (FU-third-campaign-copy, D238)
     expect((await assetRows(newUuid)).sort()).toEqual(["bed.mp3", "extra.png", "logo.png"]);
     expect(copy).toHaveBeenCalledWith(thirdSlug, newSlug, { only: ["bed.mp3"] });
     const stored = (await ownerStore.findBriefById(newSlug))!.brief;
-    expect((await store().assetOwner(stored.audio!.path))?.slug).toBe(newSlug);
+    const owner = await store().assetOwner(stored.audio!.path);
+    expect(owner?.slug).toBe(newSlug);
+    expect(owner?.name).toBe("bed.mp3");
+    expect(stored.audio!.path).not.toBe(bedId);
     expect((await assetRows(newUuid)).some((n) => n === "bg.png")).toBe(false);
     expect(free).not.toHaveBeenCalled();
     expect(deleteAssets).not.toHaveBeenCalled();
@@ -647,7 +650,10 @@ describe("copy third-campaign-only under s3 on pg (FU-third-campaign-copy, D238)
     expect((await assetRows(newUuid)).sort()).toEqual(["bed.mp3", "extra.png", "logo.png"]);
     expect(copy).toHaveBeenCalledWith(thirdSlug, newSlug, { only: ["bed.mp3"] });
     const stored = (await ownerStore.findBriefById(newSlug))!.brief;
-    expect((await store().assetOwner(stored.audio!.path))?.slug).toBe(newSlug);
+    const owner = await store().assetOwner(stored.audio!.path);
+    expect(owner?.slug).toBe(newSlug);
+    expect(owner?.name).toBe("bed.mp3");
+    expect(stored.audio!.path).not.toBe(bedId);
     expect((await assetRows(newUuid)).some((n) => n === "bg.png")).toBe(false);
     expect(free).not.toHaveBeenCalled();
     expect(deleteAssets).not.toHaveBeenCalled();
@@ -703,9 +709,10 @@ describe("copy third-campaign-only under s3 on pg (FU-third-campaign-copy, D238)
     expect((await assetRows(newUuid)).sort()).toEqual(["alt.png", "extra.png", "logo.png"]);
     expect(copy).toHaveBeenCalledWith(thirdSlug, newSlug, { only: ["alt.png"] });
     const stored = (await ownerStore.findBriefById(newSlug))!.brief;
-    expect((await store().assetOwner(stored.copy!.timeline!.beats[0].background!))?.slug).toBe(
-      newSlug,
-    );
+    const owner = await store().assetOwner(stored.copy!.timeline!.beats[0].background!);
+    expect(owner?.slug).toBe(newSlug);
+    expect(owner?.name).toBe("alt.png");
+    expect(stored.copy!.timeline!.beats[0].background!).not.toBe(altId);
     expect((await assetRows(newUuid)).some((n) => n === "bg.png")).toBe(false);
     expect(free).not.toHaveBeenCalled();
     expect(deleteAssets).not.toHaveBeenCalled();
@@ -758,9 +765,10 @@ describe("copy third-campaign-only under s3 on pg (FU-third-campaign-copy, D238)
     expect((await assetRows(newUuid)).sort()).toEqual(["alt.png", "extra.png", "logo.png"]);
     expect(copy).toHaveBeenCalledWith(thirdSlug, newSlug, { only: ["alt.png"] });
     const stored = (await ownerStore.findBriefById(newSlug))!.brief;
-    expect((await store().assetOwner(stored.copy!.timeline!.beats[0].background!))?.slug).toBe(
-      newSlug,
-    );
+    const owner = await store().assetOwner(stored.copy!.timeline!.beats[0].background!);
+    expect(owner?.slug).toBe(newSlug);
+    expect(owner?.name).toBe("alt.png");
+    expect(stored.copy!.timeline!.beats[0].background!).not.toBe(altId);
     expect((await assetRows(newUuid)).some((n) => n === "bg.png")).toBe(false);
     expect(free).not.toHaveBeenCalled();
     expect(deleteAssets).not.toHaveBeenCalled();
