@@ -6958,3 +6958,89 @@ Recorded from `git log` on `c29da509`. Subjects are the merge commits. No review
 | TD1-snapshot-start | #725 | 14:13 | 16:37 | one remediate round (15:37 to 16:00) before the gate |
 | MF1-stale-manifests | #727 | 14:13 | 18:42 | implement settled 18:12; no remediate round recorded |
 | TD2-shared-test-server | #728 | 17:30 | 19:22 | the merge stage reported `failed` at 19:09 and was started again at 19:19 |
+
+---
+
+## 2026-10-08 — Wave platform-and-tenancy-w07: PT-9 org purge, erasure CLI, unattended sweep, and their follow-ups (#734 through #746)
+
+Orchestrator's wave record. Thirteen lanes on the Laguna S 2.1 seat in the `cf-lanes` container, three at a time; base `1c0b01f4`. Released by the owner through the fleet session on 2026-10-08 ("proceed with all work. Maximize parallel lanes"; "Keep the lanes running"). Times are UTC, from the wave event log. Counts in the tables are read from that log and from `git log`, not from memory.
+
+### What merged
+
+| PR | Merge SHA | Lane | Subject |
+|---|---|---|---|
+| #734 | 650e785d | PT-9l2-erase-cli | feat(erasure): yarn erase:user erases a user by email or id, a dry run unless --apply |
+| #736 | b3913a3b | PT-9h2b-sweep-housekeeping | feat(deletion): the sweep reconciles orphans and expires old render-cache objects after the queue drains |
+| #737 | aafb64a6 | FU-render-ref-checks-cleanup-race | test(api): render-ref-checks stubs run delivery on fs to close the cleanup race |
+| #739 | 4da100a4 | FU-third-campaign-copy | feat(assets): create and duplicate copy only the assets the brief references from a third campaign |
+| #735 | eddd7468 | PT-9m2-purge-org | feat(deletion): purgeOrg queues an org's campaign purges then frees its rows, objects and requesters |
+| #740 | 554c4f9b | FU-capability-race-settle | test(api): capability-race starts no real motion job where it only checks the answer |
+| #738 | 1db888ac | PT-9q-staging-cron-and-kafka | feat(deploy): staging purges deleted campaigns every ten minutes and expires run requests in 24 h |
+| #742 | 954203ec | PT-9m3-purge-org-cli | feat(deletion): purge:org tombstones an org and the sweep purges it through purgeOrg |
+| #743 | eaffef29 | FU-shared-rollback-helper | refactor(campaigns): create and duplicate share one rollback helper, with the third-campaign copy tests closed |
+| #744 | 65492882 | FU-purge-org-hardening | fix(deletion): refuse campaign creates in a tombstoned org and make the org purge back-fill idempotent |
+| #741 | c4a2df09 | PT-9l3-erase-repair | feat(erasure): erase:user repairs rows written while it ran and fails when any still name the user |
+| #746 | 5ff6d6b6 | FU-operator-actor-value | fix(erasure): finish refuses the operator value an org purge records as its requester |
+| #745 | dc2442b7 | PT-9m4-expire-org | feat(deletion): purge:org-expire deletes a purged org's usage and tombstone thirteen months on |
+
+First dispatch 02:03; last merge 11:16. Six lanes came from the held fills (PT-9l2, 9h2b, 9m2, 9m3, 9m4, 9q), one (PT-9l3) from a decision made in the wave, and six were follow-ups briefed during it.
+
+### Review, fix rounds and threads (from the event log)
+
+| Lane | Model pass | Should-fix / notes | Fix rounds (fixed) | Bot threads fixed / refuted / deferred |
+|---|---|---|---|---|
+| PT-9l2 | Fable | 0 / 3 | 0 | 0 / 1 / 2 |
+| PT-9m2 | Fable | 1 / 3 | 2 (3, 1) | 1 / 2 / 2 |
+| PT-9h2b | Fable | 0 / 4 | 0 | 0 / 0 / 1 |
+| PT-9q | none (config; diff and client-side dry run by the orchestrator) | — | 1 (1) | 1 / 0 / 0 |
+| PT-9l3 | Fable | 3 / 2 | 2 (3, 1) | 2 / 2 / 0 |
+| PT-9m3 | Fable | 1 / 7 | 2 (5, 1) | 6 / 0 / 0 |
+| PT-9m4 | Fable | 2 / 5 | 2 (4, 2) | 3 / 0 / 0 |
+| FU-third-campaign-copy | Fable | 1 / 7 | 0 | 0 / 0 / 0 |
+| FU-shared-rollback-helper | Fable | 2 / 1 | 1 (3) | 1 / 0 / 0 |
+| FU-purge-org-hardening | Opus on the brief, Fable pre-merge | 2 / 1 | 2 (3, 1) | 2 / 2 / 0 |
+| FU-render-ref-checks, FU-capability-race, FU-operator-actor-value | none (test-only or a two-line twin; diff read by the orchestrator) | — | 0 | 1 nit declined (#737) |
+
+No pass reported a blocker. Every refutation is written on its PR with the mechanism.
+
+### What the review layers actually bought
+
+Defects found by the single Fable pass and fixed before merge:
+- #735: the fs test pointed both storage roots at one directory, so dropping either directory removal survived as a mutation (verified: survived); two exported helpers did not refuse the `local` org; a deletion id naming no row was discovered only after the destructive steps.
+- #741: `--finish` accepted an id that was never a user (`cli:erase-user`), and the repair would have rewritten the requester on every erasure audit row; a repair pass that threw after the commit lost the token; required log lines were unasserted.
+- #743: one re-pointed mutation weakened into a copy of another; a shared fixture constant changed.
+- #744: four concurrency tests that would have hung the suite and leaked a schema on the shared test server on a failed assertion; one mutation that failed by a bind error instead of its assertion; lock-removal mutants predicted, not run (then run on the real server: they bite).
+- #745: `expireOrg` did not re-check under its lock that the purge was complete (would orphan objects, or cascade member/team/invitation rows, when called directly).
+
+Defects found by review bots (Qodo, CodeRabbit, PR-Agent) that the Fable pass on the same PR missed, each verified by the orchestrator before a fix round:
+- #735: the purged org's `slug = id` could collide with another org's slug after the rows and bytes were gone, failing every retry. Now `slug = null`.
+- #738: the staging CronJob set `OBJECT_STORE=s3` without `STORE_BACKEND=postgres`; every scheduled sweep would have failed in the cluster. The text tests and the client-side dry run could not see it.
+- #742: a manifest mutation that was a SYNTAX error (recorded "caught" with no assertion run), and two "nothing changed" tests whose baseline snapshot was taken after the action.
+- #744: an "interleaving" test whose hook sat on `db` while the statement ran on `tx`, so it never fired.
+- #745: a failed expiry exited 0; a test left `OBJECT_STORE` set for the next file.
+
+The recurring class, six times in one wave, was a test or mutation that could not fail: a baseline taken after its action, a hook on the wrong object, a mutation that was a parse or bind error, a fixture that made two things identical. The briefs now say "every baseline is taken before the action it guards" and "check each mutation's `after` still parses"; the merge gate refusing unresolved threads is what surfaced every bot finding.
+
+### Defects in the plan or the briefs, not the code
+
+- PT-9m2's fill prescribed `slug = id` (its OD13) without noticing the unique index could be violated by another org's slug.
+- PT-9q's fill listed the CronJob's environment from memory of the api container and left out `STORE_BACKEND`.
+- PT-9m3 and PT-9m4's fills predated #735 and #736; base notes corrected three facts (slug null, the deletion-row check, the grown `bin/purge.ts`).
+- FU-purge-org-hardening's first draft had a wrong lock-mode claim and three concurrency tests hooked on the wrong object; an Opus review of the brief corrected 17 points before dispatch.
+- Orchestrator errors: a fix brief told a lane to fetch and fast-forward, which lanes cannot do (one wasted resume; the orchestrator now syncs the worktree from the host); a verification command ran `yarn typecheck`, `yarn lint` and a tools test in the MAIN checkout because the worktree it named had been removed (no file changed; now `cd … || exit 1`); a merge refresh ran in a detached worktree and its refresh commit was never pushed (one refused merge).
+
+### Seat and host notes
+
+- Laguna S 2.1: 3 of the 13 first dispatches ended on finish reason `length` (one 32 000-token reasoning pass, nothing written): PT-9m2, PT-9h2b, PT-9l3. A resume in the lane's own session naming one concrete first edit worked each time. After the dispatch prompt was changed to name the first action (from PT-9q on), 0 of the next 7 first dispatches did it.
+- Two lanes committed or left an edit to `.agents/session-log.md`, which their brief forbade; the orchestrator removed it from one commit before pushing.
+- `yarn install --immutable` inside `cf-lanes` failed intermittently with `EACCES … mkdir` under `node_modules` on the pool; a retry cleared it every time. Undiagnosed; reported to the fleet session.
+- `yarn mutate:anchors` hung twice in one lane while two others held the gate lock and ran coverage; fix rounds were told not to run it.
+- The lanes used the shared test database (`fleet-test-pg`, `cf_home` / `cf_conc`) throughout, three at a time. No lane reported a database that vanished. No full gate ran on the lane host, by rule.
+
+### What stays the owner's own run, and what is deferred
+
+- **Not run by anyone in this wave:** `yarn erase:user --apply`, `yarn purge:org --apply`, `yarn purge:org-expire --apply` against any real database; `yarn deploy:staging`. The next staging deploy starts unattended deletion on staging (CronJob `cf-purge-sweep`, every ten minutes, reconciler on) and drops `cf.run-requests` to 24-hour retention (#738).
+- **Standing rule:** no production schedule of `purge:sweep` until PT-9h3 (the paged listing) lands and the owner says so.
+- **For the owner to confirm (fleet session's decision under delegation):** `erase:user` prints the erased user's id in its two exit-3 messages, on stderr only, so an incomplete erasure can be finished from the tool (#741). Reversing it is one small PR.
+- **Refused by the orchestrator session's permission layer, still queued for the owner:** adding "Build, Typecheck, Lint & Test" as a required status check on main (prepared as a separate ruleset so the existing no-force-push ruleset gains no bypass); closing wave `platform-and-tenancy-w05` on the waves page.
+- **Deferred, recorded on their PRs:** the released-slug leftover on the file store (after PT-9 closes); `console.warn` in the rollback helper (four tests assert it; moving to the structured logger is a visible change); the over-copy for a ref ending in a bare slash (since #716); a shape rule for user ids instead of the non-user list; the dry run of `purge:org` printing no org name; PT-9h3.
