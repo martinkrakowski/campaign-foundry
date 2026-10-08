@@ -67,13 +67,17 @@ describe("org purge CLI (bin/purge.ts, PT-9m3, D241)", () => {
   });
 
   test("org CLI dry run prints counts and changes nothing", async () => {
-    await seedOrg(db, "acme");
-    await seedOrg(db, "beta");
-    const lines: string[] = [];
-    await runOrgPurge(["--org", "acme"], open, (l) => lines.push(l));
+    await seedOrg(db, "acme", memory);
+    await seedOrg(db, "beta", memory);
+    expect((await objectSnapshot(memory, "acme")).length).toBeGreaterThan(0);
 
+    const beforeAcme = await snapshot(db, "acme");
+    const beforeAcmeObj = await objectSnapshot(memory, "acme");
     const beforeBeta = await snapshot(db, "beta");
     const beforeBetaObj = await objectSnapshot(memory, "beta");
+
+    const lines: string[] = [];
+    await runOrgPurge(["--org", "acme"], open, (l) => lines.push(l));
 
     expect(lines).toEqual([
       "  org acme: 2 live campaign(s), 0 tombstoned, 2 member(s), 1 team(s), 1 invitation(s), 1 provider key(s)",
@@ -90,6 +94,8 @@ describe("org purge CLI (bin/purge.ts, PT-9m3, D241)", () => {
     ]) {
       expect(lines.some((l) => l.includes(needle))).toBe(false);
     }
+    expect(await snapshot(db, "acme")).toEqual(beforeAcme);
+    expect(await objectSnapshot(memory, "acme")).toEqual(beforeAcmeObj);
     expect(await snapshot(db, "beta")).toEqual(beforeBeta);
     expect(await objectSnapshot(memory, "beta")).toEqual(beforeBetaObj);
 

@@ -40,6 +40,24 @@
     },
     {
       "file": "apps/api/bin/purge.ts",
+      "before": "if (!apply) {\n      const live = (",
+      "after": "if (!apply) {\n      const live = (await db.query(`delete from member where org_id = $1`, [org]),",
+      "because": "the dry-run path deletes the org's member rows as a side effect. The dry-run test asserts expect(await snapshot(db, \"acme\")).toEqual(beforeAcme), so the assertion fails when members are deleted before the snapshot is taken.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-org.test.ts",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "org CLI dry run prints counts and changes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
       "before": "if (!apply) {",
       "after": "if (false) {",
       "because": "the dry-run guard removed: --apply tombstones the org and queues the deletion row even without --apply. The dry run test asserts exactly three log lines including 'Dry run: nothing changed', so expect(lines).toEqual([...]) fails when the org gets tombstoned.",
