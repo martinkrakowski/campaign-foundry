@@ -809,8 +809,9 @@ describe("sweep housekeeping (bin/purge.ts)", () => {
     expect(endSpy).toHaveBeenCalledTimes(1);
   });
 
-  // A1: a failed org lookup is a counted housekeeping failure, and the cache
-  // step is still attempted (it needs the same org list, so it is counted too).
+  // A1: a failed org lookup is a counted housekeeping failure. Because
+  // expireCache needs the org list too, the cache step cannot run and is
+  // counted as failed alongside the reconcile step.
   test("housekeeping counts a failed org lookup as a failed step and counts the cache step too", async () => {
     process.env.OBJECT_STORE = "s3";
     setObjectStoreClient(memory);
@@ -836,6 +837,19 @@ describe("sweep housekeeping (bin/purge.ts)", () => {
     expect(log).toContain(
       "  cache expiry failed (setup failed: store client or org list unavailable)",
     );
+
+    // Also drive through main: the org-lookup failure must reject with the
+    // housekeeping-failed message and the database connection must be closed.
+    const log2: string[] = [];
+    await expect(
+      main(
+        "sweep",
+        false,
+        () => db,
+        (l) => log2.push(l),
+      ),
+    ).rejects.toThrow("2 housekeeping step(s) failed; see the lines above.");
+    expect(db.end).toHaveBeenCalled();
   });
 
   test("housekeeping counts a failed store client as a failed step and closes the database", async () => {
@@ -850,11 +864,13 @@ describe("sweep housekeeping (bin/purge.ts)", () => {
         () => db,
         (l) => log.push(l),
       ),
-    ).rejects.toThrow(/housekeeping step\(s\) failed/);
+    ).rejects.toThrow("2 housekeeping step(s) failed; see the lines above.");
+    expect(log.some((l) => l.startsWith("  reconcile failed ("))).toBe(true);
+    expect(log).toContain(
+      "  cache expiry failed (setup failed: store client or org list unavailable)",
+    );
     expect(db.end).toHaveBeenCalled();
   });
-
-  // A2: the breaker at exactly its limit, through the real constant.
   test("sweep housekeeping reconciles exactly SWEEP_RECONCILE_MAX_CANDIDATES orphans across two orgs without failing", async () => {
     expect(SWEEP_RECONCILE_MAX_CANDIDATES).toBe(100);
     process.env.OBJECT_STORE = "s3";
@@ -894,6 +910,25 @@ describe("sweep housekeeping (bin/purge.ts)", () => {
     // Young orphan prefix (30 min before now) -> survives.
     clock = NOW - 30 * 60_000;
     await memory.put(`${campaignPrefix(ORG, C2)}inputs/${A2}`, PNG);
+
+    // Old orphan input (5h before now, live campaign, no asset row) -> deleted.
+    const { rows } = await db.query<{ id: string }>(
+      `insert into campaign (org_id, slug) values ($1, $2) returning id`,
+      [ORG, "live-old"],
+    );
+    const oldLiveId = rows[0]!.id;
+    clock = NOW - 5 * HOUR;
+    await memory.put(inputKey(ORG, oldLiveId, A2), PNG);
+
+    // Young orphan input (30 min before now, live campaign, no asset row) -> survives.
+    const { rows: rows2 } = await db.query<{ id: string }>(
+      `insert into campaign (org_id, slug) values ($1, $2) returning id`,
+      [ORG, "live-young"],
+    );
+    const youngLiveId = rows2[0]!.id;
+    clock = NOW - 30 * 60_000;
+    await memory.put(inputKey(ORG, youngLiveId, A2), PNG);
+
     clock = NOW;
 
     const log: string[] = [];
@@ -905,8 +940,11 @@ describe("sweep housekeeping (bin/purge.ts)", () => {
       ),
     ).resolves.toBe(0);
     expect(log).toContain(`  deleted prefix ${campaignPrefix(ORG, C1)}`);
-    // C2 is younger than one hour, so it survives.
+    expect(log).toContain(`  deleted input ${inputKey(ORG, oldLiveId, A2)}`);
+    // Young prefix and young input survive.
     const remaining = (await memory.list("org/local/campaign/")).map((o) => o.key).sort();
-    expect(remaining).toEqual([`${campaignPrefix(ORG, C2)}inputs/${A2}`]);
+    expect(remaining).toEqual(
+      [`${inputKey(ORG, youngLiveId, A2)}`, `${campaignPrefix(ORG, C2)}inputs/${A2}`].sort(),
+    );
   });
 });

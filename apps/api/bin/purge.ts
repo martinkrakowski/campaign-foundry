@@ -131,9 +131,10 @@ export async function sweep(
     try {
       const outcome = await purge(db, row.orgId, row);
       if (outcome === "purged") purged++;
-      // "retry" already recorded its own last_error inside purgeCampaign
-      // (PT-9g2) or purgeOrg (PT-9m2) — nothing more to do here; it is
-      // neither purged nor failed, and `recordFailure` must NOT be called for it.
+      // "retry" is recorded by purgeCampaign (PT-9g2, via recordFailure for
+      // an active job) or by purgeOrg (PT-9m2, via recordFailure for ORG_BLOCKED_MESSAGE);
+      // a campaign retry leaves its own last_error. purgeOrg's "campaigns remain"
+      // retry answers "retry" without setting last_error here — nothing more to do.
       log(`  ${row.kind} ${row.id}: ${outcome}`);
     } catch (error) {
       failed++;
@@ -226,8 +227,10 @@ export function parseOrgPurgeArgs(args: readonly string[]): { apply: boolean; or
     const arg = args[i];
     if (arg === "--apply") apply = true;
     else if (arg === "--dry-run") dryRun = true;
-    else if (arg === "--org" && org === undefined && args[i + 1] !== undefined) org = args[++i];
-    else throw new Error(USAGE_ORG);
+    else if (arg === "--org" && org === undefined && args[i + 1] !== undefined) {
+      org = args[++i];
+      if (org === "" || org.startsWith("-")) throw new Error(USAGE_ORG);
+    } else throw new Error(USAGE_ORG);
   }
   if (apply && dryRun) throw new Error(USAGE_ORG);
   if (org === undefined) throw new Error(USAGE_ORG);

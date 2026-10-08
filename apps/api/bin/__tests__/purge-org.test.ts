@@ -43,6 +43,9 @@ describe("org purge CLI (bin/purge.ts, PT-9m3, D241)", () => {
       ["--org"],
       ["--org", "acme", "--org", "beta"],
       ["--org", "acme", "--apply", "--dry-run"],
+      ["--org", "--apply"],
+      ["--org", ""],
+      ["--org", "-x"],
       ["--bogus"],
     ]) {
       await expect(runOrgPurge(args, open)).rejects.toThrow(USAGE_ORG);
@@ -106,6 +109,7 @@ describe("org purge CLI (bin/purge.ts, PT-9m3, D241)", () => {
   test("org CLI apply tombstones the org and queues one org row and purges nothing", async () => {
     await seedOrg(db, "acme");
     await seedOrg(db, "beta");
+    const beforeAcme = await snapshot(db, "acme");
     const lines: string[] = [];
     await runOrgPurge(["--org", "acme", "--apply"], open, (l) => lines.push(l));
 
@@ -130,10 +134,32 @@ describe("org purge CLI (bin/purge.ts, PT-9m3, D241)", () => {
     expect(del[0]!.requested_by).toBe("operator");
     expect(del[0]!.purged_at).toBeNull();
 
-    // Campaigns, members, teams, keys still present
-    const before = await snapshot(db, "acme");
-    // org row has deleted_at set but the snapshot includes it
-    expect(before).toEqual(await snapshot(db, "acme"));
+    // After --apply, every table EXCEPT org and deletion is unchanged:
+    const afterAcme = await snapshot(db, "acme");
+    const orgChanged = JSON.parse(afterAcme.org[0]!) !== JSON.parse(beforeAcme.org[0]!);
+    expect(orgChanged).toBe(true); // deleted_at should have changed
+    for (const table of [
+      "campaign",
+      "member",
+      "team",
+      "invitation",
+      "provider_key",
+      "decision",
+      "decision_set",
+      "report",
+      "pool",
+      "job",
+      "asset",
+      "draft",
+      "last_opened",
+      "brief_version",
+      "team_member",
+      "usage",
+    ]) {
+      expect(afterAcme[table as keyof typeof afterAcme]).toEqual(
+        beforeAcme[table as keyof typeof beforeAcme],
+      );
+    }
 
     // A second --apply logs "already requested" and leaves exactly one org row
     lines.length = 0;
