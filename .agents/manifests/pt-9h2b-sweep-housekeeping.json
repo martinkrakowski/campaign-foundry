@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "lane": "PT-9h2b-sweep-housekeeping",
+  "mutations": [
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "if (reconcileSwitch()) {",
+      "after": "if (true) {",
+      "because": "the env switch ignored: with PURGE_RECONCILE=off the sweep still deletes orphans unattended. The test turns the switch off with an old orphan prefix in the store and asserts the orphan is still there and the skip line was logged.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "sweep housekeeping skips the reconciler when PURGE_RECONCILE is off but still expires the cache",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "if (options.maxCandidates !== undefined && candidates > options.maxCandidates) {",
+      "after": "if (false) {",
+      "because": "the circuit breaker removed: a plan far over the cap is applied. The test asks for an apply with a cap of 2 against three orphan prefixes and asserts it rejects and the store is unchanged, so the rejects assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile refuses to apply more candidates than the cap and deletes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "const chunk = ids.slice(start, start + ROW_QUERY_CHUNK);",
+      "after": "const chunk = ids.slice(0, ROW_QUERY_CHUNK);",
+      "because": "only the first chunk of ids is ever asked about, so every campaign past the 500th looks row-less: a LIVE campaign beyond the first chunk is planned as an orphan prefix and an unattended apply would empty it. The test lists 1201 campaigns with live rows past the first chunk and asserts exactly 1197 candidate prefixes, so that count assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile reads rows in chunks and still sees a campaign past the first chunk",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "for (const plan of plans) options.onPlan?.(plan);",
+      "after": "void plans;",
+      "because": "the plan is never reported, so an apply deletes with no record of what it set out to delete. The test collects plan and delete events in one array and asserts both plan events precede the first store call, so expect(events).toEqual(...) fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile reports every org plan before the first delete and each delete as it completes",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "if (stepsFailed > 0) {",
+      "after": "if (false) {",
+      "because": "a failed housekeeping step no longer fails the sweep, so the CronJob stays green while the reconciler is refusing every tick. The test passes an after hook that reports one failed step and asserts main rejects with the step count.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge.test.ts",
+        "-t",
+        "main sweep runs housekeeping after the purges and throws when a step failed",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
