@@ -161,7 +161,7 @@ export interface ObjectStorePort {
    * The objects under `prefix`, one page at a time, so a caller that only
    * counts or filters never holds the whole listing (PT-9h3a).
    *
-   * - A page holds at least one object and at most the adapter's page size; a
+   * - A page holds at least one object: what the store returned for one request, which is at most the adapter's page size when the store honours it; a
    *   prefix with nothing under it yields NO page.
    * - NO order is promised, within a page or across pages: a real store sorts
    *   its keys and `InMemoryObjectStore` does not. A caller must not rely on it.
