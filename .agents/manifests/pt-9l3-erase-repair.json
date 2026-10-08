@@ -1,0 +1,234 @@
+{
+  "version": 1,
+  "lane": "PT-9l3-erase-repair",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "{ key: \"decisions\", sql: \"update decision set actor = $2 where actor = $1\" },",
+      "after": "{ key: \"decisions\", sql: \"update decision set actor = $2 where actor = $1 and false\" },",
+      "because": "The decisions update in the shared ACTOR_UPDATES list is made a no-op, so pass two cannot repair a decision row carrying the raw id. Witness 'pass two repairs each column alone for decisions': repaired.decisions is 0 instead of 1, the toBe(1) assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/erase-user.repair.test.ts",
+        "-t",
+        "pass two repairs each column alone for decisions",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "const repaired = await repairErasedActor(db, state.userId, token);",
+      "after": "const repaired = { briefVersions: 0, decisions: 0, providerKeys: 0, campaignsDeletedBy: 0, deletionsRequestedBy: 0 } as ActorCounts;",
+      "because": "eraseUser skips repairErasedActor: surviving rows are left unreplaced. Witness 'pass two repairs rows written between the commit and the repair': repaired is all zeros instead of ones, and each repaired row still holds the raw id so the token-equality assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/erase-user.repair.test.ts",
+        "-t",
+        "pass two repairs rows written between the commit and the repair",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "if (state.outcome.outcome === \"erased\") {",
+      "after": "if (true) {",
+      "because": "The only-when-erased guard is removed, so the repair runs for every outcome including 'planned' (dry run). Witness 'a dry run runs neither pass': the update counter is non-zero and the outcome gains repaired/remaining keys.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/erase-user.repair.test.ts",
+        "-t",
+        "a dry run runs neither pass",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "if (error instanceof EraseIncompleteError) return 3;",
+      "after": "if (error instanceof EraseIncompleteError) return 1;",
+      "because": "exitCodeFor returns 1 for an EraseIncompleteError instead of 3. Witness '9. apply --email with a row remaining': exitCodeFor(caught) is 1 instead of 3, the toBe(3) assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "9. apply --email",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "if (deletionRow.length === 0) {",
+      "after": "if (false) {",
+      "because": "finishErasure skips the deletion-row check, so a well-formed token with no deletion row is accepted. Witness '7ab. finishErasure refusals change nothing': the rejects.toThrow assertion fails because no error is thrown.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "7ab. finishErasure refusals change nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "if (userRow.length > 0) {",
+      "after": "if (false) {",
+      "because": "finishErasure skips the user-still-exists check, so a live user id with a real token proceeds to repair. Witness '7d. finishErasure refuses when the user still exists': the rejects.toThrow assertion fails because no error is thrown.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "7d. finishErasure refuses when the user still exists",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "outcome.finishUserId!",
+      "after": "(ref as { email: string }).email",
+      "because": "In erase mode (by --email), the finishUserId is replaced with ref.email, so the incomplete-error message leaks the email. Witness '9. apply --email with a row remaining': the lowerMsg.not.toContain(TARGET.email) assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "9. apply --email",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "throw new Error(\"erase: that id is not a user id.\");",
+      "after": "void 0; // refusal removed",
+      "because": "The non-user id refusal is removed: finishErasure proceeds to repairErasedActor, which rewrites deletion.requested_by = 'cli:erase-user' rows. Witness 'finishErasure refuses cli:erase-user as a user id and changes nothing': the dumpDatabase toEqual fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/erase-user.repair.test.ts",
+        "-t",
+        "cli:erase-user",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/erase-user.ts",
+      "before": "throw new ErasePassTwoError(token, counts, state.userId, e as Error);",
+      "after": "throw e;",
+      "because": "eraseUser rethrows the original error instead of wrapping it in ErasePassTwoError, so the caller cannot recover the token. Witness 'eraseUser raises ErasePassTwoError when pass two throws after the commit': the toBeInstanceOf(ErasePassTwoError) assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/erase-user.repair.test.ts",
+        "-t",
+        "raises ErasePassTwoError when pass two throws",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "if (error instanceof ErasePassTwoError) return 3;",
+      "after": "if (error instanceof ErasePassTwoError) return 1;",
+      "because": "exitCodeFor returns 1 for an ErasePassTwoError instead of 3. Witness 'apply with a failed repair pass' (CLI): exitCodeFor(error) is 1 instead of 3, the toBe(3) assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "apply with a failed repair pass",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "logActorCounts(log, \"STILL NAMING THE USER\", outcome.remaining);",
+      "after": "void 0; // STILL removed",
+      "because": "The STILL NAMING THE USER log call is removed in erase mode. Witness '9. apply --email with a row remaining': the toContain('STILL NAMING THE USER: 1 decisions re-attributed') assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "9. apply --email",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "logActorCounts(log, \"STILL NAMING THE USER\", remaining);",
+      "after": "void 0; // STILL removed",
+      "because": "The STILL NAMING THE USER log call is removed in finish mode. Witness '11b. --finish with a row that keeps reappearing': the toContain('STILL NAMING THE USER: 1 decisions re-attributed') assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "11b. --finish with a row that keeps reappearing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
