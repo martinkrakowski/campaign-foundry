@@ -1,0 +1,158 @@
+{
+  "version": 1,
+  "lane": "PT-9m4-expire-org",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/deletion/expire-org.ts",
+      "before": "delete from usage where org_id = $1",
+      "after": "delete from usage where org_id = $1 and false",
+      "because": "without the usage delete the org row's delete hits the FK constraint and the transaction rolls back; the org survives and the run reports failed instead of expired. The test asserts the org row is gone and usage is 0; under this mutant expect(orgCount[0]!.n).toBe(0) fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/expire-org.test.ts",
+        "-t",
+        "expireOrgTombstones deletes usage then the org row of a purged org older than thirteen months",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/expire-org.ts",
+      "before": "delete from org where id = $1",
+      "after": "delete from org where id = $1 and false",
+      "because": "without the org row delete the org row survives and the org delete is a no-op. The test asserts the org row count is 0; under this mutant expect(orgCount[0]!.n).toBe(0) fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/expire-org.test.ts",
+        "-t",
+        "expireOrgTombstones deletes usage then the org row of a purged org older than thirteen months",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/expire-org.ts",
+      "before": "delete from usage where org_id = $1",
+      "after": "delete from usage where $1::text is not null",
+      "because": "the filter is removed so the delete matches every org's usage, not just the named one. The test snapshots beta before and after and asserts equality; under this mutant beta's usage changes, so expect(await snapshot(db, \"beta\")).toEqual(beforeBeta) fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/expire-org.test.ts",
+        "-t",
+        "expireOrgTombstones deletes usage then the org row of a purged org older than thirteen months",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/expire-org.ts",
+      "before": "export const ORG_RETENTION = \"13 months\";",
+      "after": "export const ORG_RETENTION = \"1 months\";",
+      "because": "the retention period shrinks to one month, so a tombstone backdated to 12 months is now eligible and gets expired. The younger-tombstone test asserts eligible is empty and the snapshot is unchanged; under this mutant expireOrgTombstones({ apply: true }) deletes the org, so expect(result).toEqual({ eligible: [], ... }) fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/expire-org.test.ts",
+        "-t",
+        "expireOrgTombstones keeps a tombstone younger than thirteen months and its usage",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/expire-org.ts",
+      "before": "and d.purged_at is not null",
+      "after": "and true",
+      "because": "the purged_at guard is removed, so an org with a deletion row that was requested but never purged is eligible. The incomplete-purge test asserts eligible is empty and the snapshot is unchanged; under this mutant the org is listed as eligible and expired, so expect(result).toEqual({ eligible: [], ... }) fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/expire-org.test.ts",
+        "-t",
+        "expireOrgTombstones keeps an old tombstone whose purge is not complete",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/expire-org.ts",
+      "before": "and o.id <> $2",
+      "after": "and $2::text is not null",
+      "because": "the local org exclusion is weakened to a tautology, so a backdated-and-purged 'local' org row is eligible for deletion. The local-exclusion test asserts eligible is empty and the local org row still exists; under this mutant local is eligible and deleted, so expect(result).toEqual({ eligible: [], ... }) fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/expire-org.test.ts",
+        "-t",
+        "expireOrgTombstones never expires the local org",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "if (apply) {",
+      "after": "if (true) {",
+      "because": "the dry-run guard is removed, so a dry run (--apply absent) deletes org tombstones. The dry-run test asserts the org and usage rows are unchanged after a dry run; under this mutant they are deleted, so expect(await snapshot(db, \"acme\")).toEqual(beforeAcme) fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-org-expire.test.ts",
+        "-t",
+        "org-expire CLI dry run lists eligible orgs and deletes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "if (process.env.PURGE_RECONCILE !== \"off\") {",
+      "after": "if (true) {",
+      "because": "the switch-off branch is removed, so a setup failure with PURGE_RECONCILE=off counts two failed steps and logs 'reconcile failed' instead of the skip message. The switch-off test asserts failed is 1 and the log contains 'Reconcile skipped: PURGE_RECONCILE=off.'; under this mutant expect(failed).toBe(1) fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "housekeeping with PURGE_RECONCILE=off counts a setup failure as one step and logs the skip",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

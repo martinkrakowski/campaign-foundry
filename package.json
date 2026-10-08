@@ -16,6 +16,7 @@
     "purge:reconcile": "tsx apps/api/bin/purge.ts reconcile",
     "purge:cache": "tsx apps/api/bin/purge.ts cache",
     "purge:org": "tsx apps/api/bin/purge.ts org",
+    "purge:org-expire": "tsx apps/api/bin/purge.ts org-expire",
     "erase:user": "tsx apps/api/bin/erase.ts",
     "auth:bootstrap": "tsx apps/api/bin/auth-cli.ts",
     "import": "tsx apps/api/bin/import.ts",

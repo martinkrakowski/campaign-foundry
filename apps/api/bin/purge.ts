@@ -24,6 +24,7 @@ import {
 import { describeCachePlan, expireCache } from "../server/lib/deletion/expire-cache.js";
 import { purgeCampaign } from "../server/lib/deletion/purge-campaign.js";
 import { purgeOrg, requestOrgDeletion } from "../server/lib/deletion/purge-org.js";
+import { expireOrgTombstones, ORG_RETENTION } from "../server/lib/deletion/expire-org.js";
 import { LOCAL_TENANT } from "../server/lib/tenant.js";
 import { objectStoreClient } from "../server/lib/object-store/index.js";
 
@@ -238,6 +239,12 @@ export function parseOrgPurgeArgs(args: readonly string[]): { apply: boolean; or
   return { apply, org };
 }
 
+export const USAGE_ORG_EXPIRE = "usage: yarn purge:org-expire [--org <id>] [--org <id> --apply]";
+
+export function parseOrgExpireArgs(args: readonly string[]): { apply: boolean; org?: string } {
+  return parseOrgArgs(args, USAGE_ORG_EXPIRE);
+}
+
 export async function runOrgPurge(
   args: readonly string[],
   open: () => SqlClient = connect,
@@ -303,6 +310,41 @@ export async function runOrgPurge(
     } else {
       log(`  Org ${org}: deletion was already requested.`);
     }
+  } finally {
+    await db.end();
+  }
+}
+
+export async function runOrgExpire(
+  args: readonly string[],
+  open: () => SqlClient = connect,
+  log: (line: string) => void = console.log,
+): Promise<void> {
+  const { apply, org } = parseOrgExpireArgs(args);
+  const db = open();
+  try {
+    const { eligible, expired, failed } = await expireOrgTombstones(db, { apply, org });
+    if (org !== undefined && eligible.length === 0) {
+      throw new Error(
+        `org-expire: org "${org}" is not eligible: it must be tombstoned, fully purged and older than ${ORG_RETENTION}.`,
+      );
+    }
+    if (apply) {
+      log(`  Expired ${expired.length} org tombstone(s).`);
+      for (const id of failed) {
+        log(`  org ${id}: failed (rows still reference this org).`);
+      }
+      return;
+    }
+    // Dry run
+    if (eligible.length > 0) {
+      for (const id of eligible) {
+        log(`  org ${id}: eligible (tombstoned over ${ORG_RETENTION} ago, purge complete)`);
+      }
+    } else {
+      log("  Nothing to expire.");
+    }
+    log("  Dry run: nothing deleted. Re-run with --org <id> --apply to delete.");
   } finally {
     await db.end();
   }
@@ -454,9 +496,15 @@ export async function housekeeping(
   } catch (error) {
     // `expireCache` needs both the store client and the org list, so a failure
     // of either setup step means the cache step cannot run either; both are
-    // counted as failed (A1).
-    log(`  reconcile failed (${reason(error)})`);
-    failed++;
+    // counted as failed (A1). When PURGE_RECONCILE=off the reconcile step would
+    // have been skipped, so it is not counted as a failure here — only the
+    // cache step is.
+    if (process.env.PURGE_RECONCILE !== "off") {
+      log(`  reconcile failed (${reason(error)})`);
+      failed++;
+    } else {
+      log("  Reconcile skipped: PURGE_RECONCILE=off.");
+    }
     log("  cache expiry failed (setup failed: store client or org list unavailable)");
     failed++;
     return failed;
@@ -506,7 +554,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         ? runCache(rest)
         : command === "org"
           ? runOrgPurge(rest)
-          : main(command, process.argv.includes("--dry-run"));
+          : command === "org-expire"
+            ? runOrgExpire(rest)
+            : main(command, process.argv.includes("--dry-run"));
   run.catch((error: unknown) => {
     console.error(`  x  ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
