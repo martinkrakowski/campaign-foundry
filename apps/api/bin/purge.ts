@@ -23,6 +23,8 @@ import {
 } from "../server/lib/deletion/reconcile.js";
 import { describeCachePlan, expireCache } from "../server/lib/deletion/expire-cache.js";
 import { purgeCampaign } from "../server/lib/deletion/purge-campaign.js";
+import { purgeOrg, requestOrgDeletion } from "../server/lib/deletion/purge-org.js";
+import { LOCAL_TENANT } from "../server/lib/tenant.js";
 import { objectStoreClient } from "../server/lib/object-store/index.js";
 
 export const USAGE = "usage: yarn purge:sweep [-- --dry-run]";
@@ -54,6 +56,20 @@ export function connect(build: (config: DatabaseConfig) => SqlClient = pgClient)
 }
 
 /**
+ * Dispatch by kind (D241): the default `purge` of `sweep`. An org row is purged
+ * by `purgeOrg` (which queues the org's campaign purges and answers "retry"
+ * until none remain), a campaign row by `purgeCampaign`. `user` rows never
+ * reach it: `sweep` releases them as not implemented until PT-9l.
+ */
+export async function purgeRow(
+  db: SqlClient,
+  orgId: string,
+  row: Pick<DeletionRow, "id" | "subject" | "kind" | "requestedBy">,
+): Promise<"purged" | "retry"> {
+  return row.kind === "org" ? purgeOrg(db, orgId, row) : purgeCampaign(db, orgId, row);
+}
+
+/**
  * Claim and purge due rows, one `log` line per row (id, kind, outcome — the
  * project convention for a `bin/` script, `AGENTS.md`'s own Conventions
  * section: "the only exempt sites are the logger transport, server startup,
@@ -68,6 +84,12 @@ export function connect(build: (config: DatabaseConfig) => SqlClient = pgClient)
  * sweep CAN outlast the 5-minute lease and reclaim a row it already failed
  * earlier in this same run; harmless, since `MAX_CLAIMS_PER_SWEEP` bounds the
  * retry count and every step it re-attempts is idempotent (D232).
+ *
+ * Org rows are purged through `purgeOrg` (which queues the org's campaign
+ * purges and answers "retry" while any campaign deletion row remains due);
+ * a "retry" row waits out its lease (5 minutes, `PURGE_LEASE_MS`), so an
+ * org purge needs at least two sweeps. `user` rows are released as not
+ * implemented until PT-9l ships.
  */
 export async function sweep(
   db: SqlClient,
@@ -76,18 +98,18 @@ export async function sweep(
   purge: (
     db: SqlClient,
     orgId: string,
-    row: Pick<DeletionRow, "id" | "subject">,
-  ) => Promise<"purged" | "retry"> = purgeCampaign,
+    row: Pick<DeletionRow, "id" | "subject" | "kind" | "requestedBy">,
+  ) => Promise<"purged" | "retry"> = purgeRow,
 ): Promise<{ purged: number; failed: number }> {
   let purged = 0;
   let failed = 0;
   for (let claims = 0; claims < MAX_CLAIMS_PER_SWEEP; claims++) {
     const row = await claim(db);
     if (!row) break;
-    if (row.kind !== "campaign") {
-      // PT-9l/9m (unshipped) own 'user' and 'org'. The CHECK constraint
-      // already allows them; this sweep must not crash on one, and must not
-      // claim it as done either.
+    if (row.kind === "user") {
+      // PT-9l/9m (unshipped) own 'user'. The CHECK constraint already allows
+      // it; this sweep must not crash on one, and must not claim it as done.
+      // An 'org' row is purged by the `purge` callback (`purgeRow`).
       const message = `${row.kind} purge is not implemented yet (PT-9l/9m).`;
       await recordFailure(db, row.id, message);
       failed++;
@@ -96,28 +118,29 @@ export async function sweep(
     }
     if (row.orgId === null) {
       // 0017_deletion.sql's own CHECK ties this: `(kind = 'user') = (org_id
-      // is null)`, so a 'campaign' row can never actually reach this branch
-      // today. Defensive, not reachable — a constraint a later migration
+      // is null)`, so a 'campaign' or 'org' row can never actually reach this
+      // branch today. Defensive, not reachable — a constraint a later migration
       // could in principle relax, and `purgeCampaign` requires a non-null
       // `orgId: string`, so this guards the type as much as the data.
-      const message = `campaign deletion row ${row.id} has a null org_id`;
+      const message = `${row.kind} deletion row ${row.id} has a null org_id`;
       await recordFailure(db, row.id, message);
       failed++;
-      log(`  campaign ${row.id}: failed (${message})`);
+      log(`  ${row.kind} ${row.id}: failed (${message})`);
       continue;
     }
     try {
       const outcome = await purge(db, row.orgId, row);
       if (outcome === "purged") purged++;
-      // "retry" already recorded its own last_error inside purgeCampaign
-      // (PT-9g2, shipped) — nothing more to do here; it is neither purged
-      // nor failed, and `recordFailure` must NOT be called again for it.
-      log(`  campaign ${row.id}: ${outcome}`);
+      // "retry" is recorded by purgeCampaign (PT-9g2, via recordFailure for
+      // an active job) or by purgeOrg (PT-9m2, via recordFailure for ORG_BLOCKED_MESSAGE);
+      // a campaign retry leaves its own last_error. purgeOrg's "campaigns remain"
+      // retry answers "retry" without setting last_error here — nothing more to do.
+      log(`  ${row.kind} ${row.id}: ${outcome}`);
     } catch (error) {
       failed++;
       const message = error instanceof Error ? error.message : String(error);
       await recordFailure(db, row.id, message);
-      log(`  campaign ${row.id}: failed (${message})`);
+      log(`  ${row.kind} ${row.id}: failed (${message})`);
     }
   }
   return { purged, failed };
@@ -187,6 +210,102 @@ export function parseReconcileArgs(args: readonly string[]): { apply: boolean; o
 
 export function parseCacheArgs(args: readonly string[]): { apply: boolean; org?: string } {
   return parseOrgArgs(args, USAGE_CACHE);
+}
+
+export const USAGE_ORG = "usage: yarn purge:org --org <id> [--apply]";
+
+/**
+ * `--org` is REQUIRED (an org deletion names its org) and `--apply` is the only
+ * thing that changes anything; `--dry-run` is the default spelled out. A second
+ * `--org` is refused, never "last one wins". `local` can never be deleted.
+ */
+export function parseOrgPurgeArgs(args: readonly string[]): { apply: boolean; org: string } {
+  let apply = false;
+  let dryRun = false;
+  let org: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--apply") apply = true;
+    else if (arg === "--dry-run") dryRun = true;
+    else if (arg === "--org" && org === undefined && args[i + 1] !== undefined) {
+      org = args[++i];
+      if (org === "" || org.startsWith("-")) throw new Error(USAGE_ORG);
+    } else throw new Error(USAGE_ORG);
+  }
+  if (apply && dryRun) throw new Error(USAGE_ORG);
+  if (org === undefined) throw new Error(USAGE_ORG);
+  if (org === LOCAL_TENANT.orgId) throw new Error('org "local" can never be deleted.');
+  return { apply, org };
+}
+
+export async function runOrgPurge(
+  args: readonly string[],
+  open: () => SqlClient = connect,
+  log: (line: string) => void = console.log,
+): Promise<void> {
+  const { apply, org } = parseOrgPurgeArgs(args);
+  const db = open();
+  try {
+    const { rows } = await db.query<{ deleted_at: Date | null }>(
+      `select deleted_at from org where id = $1`,
+      [org],
+    );
+    const row = rows[0];
+    if (row === undefined) throw new Error(`org: unknown org "${org}"`);
+    if (!apply) {
+      const live = (
+        await db.query<{ n: number }>(
+          `select count(*)::int as n from campaign where org_id = $1 and deleted_at is null`,
+          [org],
+        )
+      ).rows[0]!.n;
+      const tombstoned = (
+        await db.query<{ n: number }>(
+          `select count(*)::int as n from campaign where org_id = $1 and deleted_at is not null`,
+          [org],
+        )
+      ).rows[0]!.n;
+      const members = (
+        await db.query<{ n: number }>(`select count(*)::int as n from member where org_id = $1`, [
+          org,
+        ])
+      ).rows[0]!.n;
+      const teams = (
+        await db.query<{ n: number }>(`select count(*)::int as n from team where org_id = $1`, [
+          org,
+        ])
+      ).rows[0]!.n;
+      const invitations = (
+        await db.query<{ n: number }>(
+          `select count(*)::int as n from invitation where org_id = $1`,
+          [org],
+        )
+      ).rows[0]!.n;
+      const keys = (
+        await db.query<{ n: number }>(
+          `select count(*)::int as n from provider_key where org_id = $1`,
+          [org],
+        )
+      ).rows[0]!.n;
+      const orgTombstoned = row.deleted_at !== null;
+      log(
+        `  org ${org}: ${live} live campaign(s), ${tombstoned} tombstoned, ${members} member(s), ${teams} team(s), ${invitations} invitation(s), ${keys} provider key(s)`,
+      );
+      log(`  state: ${orgTombstoned ? "tombstoned" : "live"}`);
+      log(
+        "  Dry run: nothing changed. Re-run with --apply to tombstone the org and queue its purge, then run yarn purge:sweep.",
+      );
+      return;
+    }
+    const outcome = await requestOrgDeletion(db, { orgId: org, requestedBy: "operator" });
+    if (outcome === "requested") {
+      log(`  Org ${org}: deletion requested; run yarn purge:sweep to purge it.`);
+    } else {
+      log(`  Org ${org}: deletion was already requested.`);
+    }
+  } finally {
+    await db.end();
+  }
 }
 
 function s3Store(refusal: string): ObjectStorePort {
@@ -326,9 +445,22 @@ export async function housekeeping(
     log("  Reconcile and cache expiry skipped: OBJECT_STORE is not s3.");
     return 0;
   }
-  const objects = objectStoreClient();
-  const orgIds = await orgsToVisit(db, undefined, "sweep");
+  let objects: ObjectStorePort | undefined;
+  let orgIds: readonly string[] | undefined;
   let failed = 0;
+  try {
+    objects = objectStoreClient();
+    orgIds = await orgsToVisit(db, undefined, "sweep");
+  } catch (error) {
+    // `expireCache` needs both the store client and the org list, so a failure
+    // of either setup step means the cache step cannot run either; both are
+    // counted as failed (A1).
+    log(`  reconcile failed (${reason(error)})`);
+    failed++;
+    log("  cache expiry failed (setup failed: store client or org list unavailable)");
+    failed++;
+    return failed;
+  }
   try {
     if (reconcileSwitch()) {
       const { applied } = await reconcileOrgs(db, objects, orgIds, {
@@ -372,7 +504,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       ? runReconcile(rest)
       : command === "cache"
         ? runCache(rest)
-        : main(command, process.argv.includes("--dry-run"));
+        : command === "org"
+          ? runOrgPurge(rest)
+          : main(command, process.argv.includes("--dry-run"));
   run.catch((error: unknown) => {
     console.error(`  x  ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;

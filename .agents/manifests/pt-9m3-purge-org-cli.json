@@ -1,0 +1,220 @@
+{
+  "version": 1,
+  "lane": "PT-9m3-purge-org-cli",
+  "mutations": [
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "if (org === LOCAL_TENANT.orgId) throw new Error('org \"local\" can never be deleted.');",
+      "after": "if (org === \"never-local\") throw new Error('org \"local\" can never be deleted.');",
+      "because": "without the LOCAL_TENANT check the CLI would tombstone 'local'. The arguments test asserts --org local rejects with 'org \"local\" can never be deleted.', so expect(...).rejects.toThrow('org \"local\" can never be deleted.') fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-org.test.ts",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "org CLI refuses bad arguments and the local org before opening anything"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "      org = args[++i];\n      if (org === \"\" || org.startsWith(\"-\")) throw new Error(USAGE_ORG);",
+      "after": "      org = args[++i];",
+      "because": "the --org value validation is removed: --org --apply takes --apply as the org id, and --org \"\" takes the empty string. The arguments test asserts --org --apply rejects with USAGE_ORG, so expect(...).rejects.toThrow(USAGE_ORG) fails when the CLI accepts an option string as an org id.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-org.test.ts",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "org CLI refuses bad arguments and the local org before opening anything"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "if (!apply) {\n      const live = (",
+      "after": "if (!apply) {\n      const live = (await db.query(`delete from member where org_id = $1`, [org]),",
+      "because": "the dry-run path deletes the org's member rows as a side effect. The dry-run test asserts expect(await snapshot(db, \"acme\")).toEqual(beforeAcme), so the assertion fails when members are deleted before the snapshot is taken.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-org.test.ts",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "org CLI dry run prints counts and changes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "if (!apply) {",
+      "after": "if (false) {",
+      "because": "the dry-run guard removed: --apply tombstones the org and queues the deletion row even without --apply. The dry run test asserts exactly three log lines including 'Dry run: nothing changed', so expect(lines).toEqual([...]) fails when the org gets tombstoned.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-org.test.ts",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "org CLI dry run prints counts and changes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "from member where org_id = $1",
+      "after": "from member where $1::text is not null",
+      "because": "the member count reads every org instead of only the named one: the dry run reports beta's members. The dry run test asserts the exact counts '2 member(s)' for acme, so expect(lines).toEqual([...]) fails when the count includes beta's members.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-org.test.ts",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "org CLI dry run prints counts and changes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "const outcome = await requestOrgDeletion(db, { orgId: org, requestedBy: \"operator\" });",
+      "after": "const outcome = await requestOrgDeletion(db, { orgId: org, requestedBy: \"cli\" });",
+      "because": "the operator identity changes: the deletion row's requested_by is 'cli' instead of 'operator'. The apply test asserts the requested_by is 'operator', so expect(del[0]!.requested_by).toBe(\"operator\") fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-org.test.ts",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "org CLI apply tombstones the org and queues one org row and purges nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "    const outcome = await requestOrgDeletion(db, { orgId: org, requestedBy: \"operator\" });",
+      "after": "    const outcome = await requestOrgDeletion(db, { orgId: org, requestedBy: \"operator\" });\n    await db.query(`delete from member where org_id = $1`, [org]);",
+      "because": "the CLI deletes org rows inline instead of just enqueuing: --apply purges the org's members immediately. The apply test asserts every table except org and deletion is unchanged, so expect(afterAcme.member).toEqual(beforeAcme.member) fails when members are deleted.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-org.test.ts",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "org CLI apply tombstones the org and queues one org row and purges nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "return row.kind === \"org\" ? purgeOrg(db, orgId, row) : purgeCampaign(db, orgId, row);",
+      "after": "return row.kind === \"campaign\" ? purgeOrg(db, orgId, row) : purgeCampaign(db, orgId, row);",
+      "because": "the dispatch is inverted: an org row is sent to purgeCampaign (which rejects a non-uuid subject), and a campaign row is sent to purgeOrg (which rejects a live org). The purgeRow test asserts the exact error messages, so expect(...).rejects.toThrow(...) fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-org.test.ts",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "purgeRow sends an org row to purgeOrg and a campaign row to purgeCampaign"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "if (row.kind === \"user\") {",
+      "after": "if (row.kind === \"org\") {",
+      "because": "org rows are released as not-implemented instead of dispatched to purgeRow. The end-to-end sweep test asserts { purged: 2, failed: 0 } for the first sweep, so expect(first).toEqual({ purged: 2, failed: 0 }) fails when the org row is released as failed instead of retried.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-org.test.ts",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "sweep claims the org row and purges the org end to end"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "log(`  ${row.kind} ${row.id}: ${outcome}`);",
+      "after": "log(`  campaign ${row.id}: ${outcome}`);",
+      "because": "the log line names 'campaign' instead of the row's kind. The end-to-end test asserts the org row's log line contains 'retry', so expect(lines.some((l) => l.includes(`${orgRowId}: retry`))).toBe(true) fails when the line reads 'campaign <id>: retry'.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-org.test.ts",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "sweep claims the org row and purges the org end to end"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "    log(\"  cache expiry failed (setup failed: store client or org list unavailable)\");\n    failed++;\n    return failed;",
+      "after": "    log(\"  cache expiry failed (setup failed: store client or org list unavailable)\");\n    failed++;",
+      "because": "the early return after a setup failure is removed: housekeeping falls through to the reconcile step with undefined objects/orgIds, resolving with 0 instead of 2. The org lookup test asserts housekeeping resolves to 2, so expect(failed).toBe(2) fails when it resolves to 0.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "housekeeping counts a failed org lookup as a failed step and counts the cache step too"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "        now,\n        maxCandidates: SWEEP_RECONCILE_MAX_CANDIDATES,",
+      "after": "        now: () => now() + 2 * 3_600_000,\n        maxCandidates: SWEEP_RECONCILE_MAX_CANDIDATES,",
+      "because": "the clock handed to reconcileOrgs is two hours ahead: a 30-minute-old object appears 2.5h old, exceeds the 1h orphan threshold, and is deleted. The young-object test asserts the young prefix is still listed, so expect(remaining).toEqual([...]) fails when it is gone.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-reconcile.test.ts",
+        "-t",
+        "sweep housekeeping leaves young orphan objects alone but deletes old ones"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
