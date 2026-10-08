@@ -83,26 +83,33 @@ describe.skipIf(!url)(
       a.catch(() => undefined);
       await lockTaken;
 
-      // The campaign row is locked by A's `for update`: NOWAIT must reject
-      await expect(
-        db.query(`select id from campaign where id = $1 for update nowait`, [id]),
-      ).rejects.toMatchObject({ code: "55P03" });
+      let b: Promise<unknown> | undefined;
+      try {
+        // The campaign row is locked by A's `for update`: NOWAIT must reject
+        await expect(
+          db.query(`select id from campaign where id = $1 for update nowait`, [id]),
+        ).rejects.toMatchObject({ code: "55P03" });
 
-      // B starts on the raw db, unawaited: it blocks on the same campaign-row lock
-      const b = queueCampaignPurges(db, "acme", "u2");
-      b.catch(() => undefined);
+        // B starts on the raw db, unawaited: it blocks on the same campaign-row lock
+        b = queueCampaignPurges(db, "acme", "u2");
+        b.catch(() => undefined);
 
-      // Release A; both complete
-      release();
-      await Promise.all([a, b]);
+        // Release A; both complete
+        release();
+        await Promise.all([a, b]);
 
-      // Exactly one pending deletion row for the campaign
-      const { rows } = await db.query<{ n: number }>(
-        `select count(*)::int as n from deletion
-           where org_id = 'acme' and kind = 'campaign' and subject = $1 and purged_at is null`,
-        [id],
-      );
-      expect(rows[0]!.n).toBe(1);
+        // Exactly one pending deletion row for the campaign
+        const { rows } = await db.query<{ n: number }>(
+          `select count(*)::int as n from deletion
+             where org_id = 'acme' and kind = 'campaign' and subject = $1 and purged_at is null`,
+          [id],
+        );
+        expect(rows[0]!.n).toBe(1);
+      } finally {
+        release();
+        await a.catch(() => undefined);
+        if (b) await b.catch(() => undefined);
+      }
     });
   },
 );

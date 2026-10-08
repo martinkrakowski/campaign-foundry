@@ -90,8 +90,8 @@
     {
       "file": "apps/api/server/lib/deletion/purge-org.ts",
       "before": "          where c.org_id = $1 and c.deleted_at is not null\n            and c.id = any($3::uuid[])",
-      "after": "          where $1::text is not null and c.deleted_at is not null\n            and true",
-      "because": "replacing both the org_id filter and the locked-id filter with tautologies makes the back-fill insert deletion rows for every org's tombstoned campaigns; beta gains a deletion row where none existed, and the snapshot equality fails.",
+      "after": "          where $1::text is not null and c.deleted_at is not null\n            and $3::uuid[] is not null",
+      "because": "replacing both the org_id filter and the locked-campaign filter with tautologies (while still binding $3) makes the back-fill insert for every org's tombstoned campaigns, not just the locked org's; beta gains a deletion row where none existed, and the snapshot equality fails.",
       "command": [
         "yarn",
         "vitest",

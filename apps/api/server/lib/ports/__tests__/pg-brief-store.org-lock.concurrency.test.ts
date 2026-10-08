@@ -87,16 +87,21 @@ describe.skipIf(!url)(
       c1.catch(() => undefined);
       await lockTaken;
 
-      // C2 must not block: FOR SHARE is compatible with itself.
-      await store2.createCampaign("b");
+      try {
+        // C2 must not block: FOR SHARE is compatible with itself.
+        await store2.createCampaign("b");
 
-      release();
-      await c1;
+        release();
+        await c1;
 
-      const { rows } = await db.query<{ n: number }>(
-        `select count(*)::int as n from campaign where org_id = 'acme'`,
-      );
-      expect(rows[0]!.n).toBe(2);
+        const { rows } = await db.query<{ n: number }>(
+          `select count(*)::int as n from campaign where org_id = 'acme'`,
+        );
+        expect(rows[0]!.n).toBe(2);
+      } finally {
+        release();
+        await c1.catch(() => undefined);
+      }
     });
 
     test("an in-flight create holds the org row against a tombstone", async () => {
@@ -134,28 +139,33 @@ describe.skipIf(!url)(
       c1.catch(() => undefined);
       await lockTaken;
 
-      // C1 holds FOR SHARE: FOR UPDATE NOWAIT must reject (conflict)
-      await expect(
-        db.query(`select 1 from org where id = $1 for update nowait`, ["acme"]),
-      ).rejects.toMatchObject({ code: "55P03" });
+      try {
+        // C1 holds FOR SHARE: FOR UPDATE NOWAIT must reject (conflict)
+        await expect(
+          db.query(`select 1 from org where id = $1 for update nowait`, ["acme"]),
+        ).rejects.toMatchObject({ code: "55P03" });
 
-      // FOR SHARE NOWAIT must succeed (compatible with itself)
-      await db.query(`select 1 from org where id = $1 for share nowait`, ["acme"]);
+        // FOR SHARE NOWAIT must succeed (compatible with itself)
+        await db.query(`select 1 from org where id = $1 for share nowait`, ["acme"]);
 
-      release();
-      await c1;
+        release();
+        await c1;
 
-      // After releasing C1, requestOrgDeletion must get the FOR UPDATE and succeed
-      const result = await requestOrgDeletion(db, {
-        orgId: "acme",
-        requestedBy: "op",
-      });
-      expect(result).toBe("requested");
+        // After releasing C1, requestOrgDeletion must get the FOR UPDATE and succeed
+        const result = await requestOrgDeletion(db, {
+          orgId: "acme",
+          requestedBy: "op",
+        });
+        expect(result).toBe("requested");
 
-      // A new create against the tombstoned org must be refused
-      await expect(
-        new PgBriefStore(db, "acme", "u2").createCampaign("after-tombstone"),
-      ).rejects.toMatchObject({ code: "EFORBIDDEN" });
+        // A new create against the tombstoned org must be refused
+        await expect(
+          new PgBriefStore(db, "acme", "u2").createCampaign("after-tombstone"),
+        ).rejects.toMatchObject({ code: "EFORBIDDEN" });
+      } finally {
+        release();
+        await c1.catch(() => undefined);
+      }
     });
 
     test("a pending tombstone blocks a create, and a create after it commits is refused", async () => {
@@ -197,51 +207,62 @@ describe.skipIf(!url)(
       t.catch(() => undefined);
       await lockTaken;
 
-      // T holds FOR UPDATE: FOR SHARE NOWAIT must reject
-      await expect(
-        db.query(`select deleted_at from org where id = $1 for share nowait`, ["acme"]),
-      ).rejects.toMatchObject({ code: "55P03" });
+      let late: Promise<unknown> | undefined;
+      try {
+        // T holds FOR UPDATE: FOR SHARE NOWAIT must reject
+        await expect(
+          db.query(`select deleted_at from org where id = $1 for share nowait`, ["acme"]),
+        ).rejects.toMatchObject({ code: "55P03" });
 
-      // T holds FOR UPDATE: FOR KEY SHARE NOWAIT must also reject
-      await expect(
-        db.query(`select deleted_at from org where id = $1 for key share nowait`, ["acme"]),
-      ).rejects.toMatchObject({ code: "55P03" });
+        // T holds FOR UPDATE: FOR KEY SHARE NOWAIT must also reject
+        await expect(
+          db.query(`select deleted_at from org where id = $1 for key share nowait`, ["acme"]),
+        ).rejects.toMatchObject({ code: "55P03" });
 
-      // A create with lock_timeout must also be blocked by T's FOR UPDATE
-      const wrappedWithTimeout: SqlClient = {
-        ...db,
-        transaction: (work) =>
-          db.transaction(async (tx) => {
-            await tx.query(`set local lock_timeout = '200ms'`);
-            return work(tx);
-          }),
-      };
+        // A create with lock_timeout is blocked by T's FOR UPDATE. NOTE: this
+        // step is NOT a witness for assertOrgLive's `for share` — with `for share`
+        // removed, the insert's own FK check still waits on T's FOR UPDATE and
+        // times out the same way. The deterministic witness for `for share` is
+        // test 7's `for update nowait` probe, which fails if the lock is absent.
+        const wrappedWithTimeout: SqlClient = {
+          ...db,
+          transaction: (work) =>
+            db.transaction(async (tx) => {
+              await tx.query(`set local lock_timeout = '200ms'`);
+              return work(tx);
+            }),
+        };
 
-      await expect(
-        new PgBriefStore(wrappedWithTimeout, "acme", "u3").createCampaign("blocked"),
-      ).rejects.toMatchObject({ code: "55P03" });
+        await expect(
+          new PgBriefStore(wrappedWithTimeout, "acme", "u3").createCampaign("blocked"),
+        ).rejects.toMatchObject({ code: "55P03" });
 
-      // The blocked create inserted nothing
-      const { rows: count1 } = await db.query<{ n: number }>(
-        `select count(*)::int as n from campaign where org_id = 'acme'`,
-      );
-      expect(count1[0]!.n).toBe(0);
+        // The blocked create inserted nothing
+        const { rows: count1 } = await db.query<{ n: number }>(
+          `select count(*)::int as n from campaign where org_id = 'acme'`,
+        );
+        expect(count1[0]!.n).toBe(0);
 
-      // Start late create unawaited, then release T
-      const late = new PgBriefStore(db, "acme", "u4").createCampaign("late");
-      late.catch(() => undefined);
+        // Start late create unawaited, then release T
+        late = new PgBriefStore(db, "acme", "u4").createCampaign("late");
+        late.catch(() => undefined);
 
-      release();
-      const result = await t;
-      expect(result).toBe("requested");
+        release();
+        const result = await t;
+        expect(result).toBe("requested");
 
-      // The late create sees the committed tombstone and is refused
-      await expect(late).rejects.toMatchObject({ code: "EFORBIDDEN" });
+        // The late create sees the committed tombstone and is refused
+        await expect(late).rejects.toMatchObject({ code: "EFORBIDDEN" });
 
-      const { rows: count2 } = await db.query<{ n: number }>(
-        `select count(*)::int as n from campaign where org_id = 'acme'`,
-      );
-      expect(count2[0]!.n).toBe(0);
+        const { rows: count2 } = await db.query<{ n: number }>(
+          `select count(*)::int as n from campaign where org_id = 'acme'`,
+        );
+        expect(count2[0]!.n).toBe(0);
+      } finally {
+        release();
+        await t.catch(() => undefined);
+        if (late) await late.catch(() => undefined);
+      }
     });
   },
 );
