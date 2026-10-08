@@ -178,9 +178,9 @@ export async function main(
     const { purged, failed, orgFailed } = await sweep(db, log);
     log(`  Purged ${purged} deletion row(s), ${failed} failed.`);
     const stepsFailed = await after(db, log);
-    // An org purge that failed or was refused fails the run AFTER the other
-    // steps ran, so the staging CronJob goes red; campaign failures do not
-    // (#736 — they are retried after their lease).
+    // An org purge that THREW — including a refusal that throws, such as an org
+    // that is not tombstoned — fails the run AFTER the other steps ran; one that
+    // answers "retry" does not (#736: campaign failures do not fail the run).
     const problems: string[] = [];
     if (orgFailed > 0) problems.push(`${orgFailed} org purge(s) failed`);
     if (stepsFailed > 0) {

@@ -11,7 +11,7 @@ import { purgeCampaign } from "../../server/lib/deletion/purge-campaign.js";
 import { purgeOrg } from "../../server/lib/deletion/purge-org.js";
 
 /** No test below inspects the database: `claim`/`purge` are injected stubs and
- *  `recordFailure`/`claimDue`/`purgeCampaign` are module-level mocks, so a
+ *  `recordFailure`/`claimDue`/`purgeCampaign`/`purgeOrg` are module-level mocks, so a
  *  structurally-complete `SqlClient` double is enough — mirroring `db.test.ts`
  *  passing a PGlite instance only to `connect`, never to `sweep`. */
 function stubDb(): SqlClient {
@@ -41,7 +41,7 @@ function deletionRow(
 }
 
 // Mocked collaborators: `sweep` calls `recordFailure` directly (imported), and
-// `main` falls back to the imported `claimDue`/`purgeCampaign`/`listDue` when no
+// `main` falls back to the imported `claimDue`/`purgeCampaign`/`listDue`/`purgeOrg` when no
 // `claim`/`purge` is injected — so a `main`-level test reaches the real names
 // only through these mocks. A direct `sweep(db, log, claim, purge)` call still
 // passes its own stubs.
@@ -479,7 +479,7 @@ describe("purge CLI (PT-9g3, D231)", () => {
       expect(db.end).not.toHaveBeenCalled();
 
       await expect(main("sweep", false, open, (line) => lines.push(line), after)).rejects.toThrow(
-        "1 org purge(s) failed; see the lines above.",
+        new Error("1 org purge(s) failed; see the lines above."),
       );
 
       // Housekeeping ran BEFORE the throw, and the connection was closed.
@@ -505,7 +505,7 @@ describe("purge CLI (PT-9g3, D231)", () => {
       expect(db.end).not.toHaveBeenCalled();
 
       await expect(main("sweep", false, open, () => {}, after)).rejects.toThrow(
-        "1 org purge(s) failed and 2 housekeeping step(s) failed; see the lines above.",
+        new Error("1 org purge(s) failed and 2 housekeeping step(s) failed; see the lines above."),
       );
 
       expect(after).toHaveBeenCalledTimes(1);
@@ -527,7 +527,9 @@ describe("purge CLI (PT-9g3, D231)", () => {
       expect(db.end).not.toHaveBeenCalled();
 
       // Resolves: a campaign failure is retried after its lease and stays exit 0 (OD2).
-      await main("sweep", false, open, (line) => lines.push(line), after);
+      await expect(
+        main("sweep", false, open, (line) => lines.push(line), after),
+      ).resolves.toBeUndefined();
 
       expect(after).toHaveBeenCalledTimes(1);
       expect(db.end).toHaveBeenCalled();
@@ -546,11 +548,12 @@ describe("purge CLI (PT-9g3, D231)", () => {
         .mockResolvedValueOnce(undefined);
       vi.mocked(purgeOrg).mockResolvedValueOnce("retry");
 
+      expect(purgeOrg).not.toHaveBeenCalled();
       expect(after).not.toHaveBeenCalled();
       expect(db.end).not.toHaveBeenCalled();
 
       // Resolves: a "retry" org purge is deferred, not a failure (OD1).
-      await main("sweep", false, open, () => {}, after);
+      await expect(main("sweep", false, open, () => {}, after)).resolves.toBeUndefined();
 
       expect(purgeOrg).toHaveBeenCalledTimes(1);
       expect(after).toHaveBeenCalledTimes(1);
