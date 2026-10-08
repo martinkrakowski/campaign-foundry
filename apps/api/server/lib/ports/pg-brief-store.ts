@@ -64,6 +64,17 @@ function forbiddenTeam(teamId: string): Error {
   return err;
 }
 
+/**
+ * Thrown when a write would add a row to an org whose `org.deleted_at` is set
+ * (D241); same words and status as the 403 `no_membership` of the tenant middleware.
+ */
+function orgTombstoned(): Error {
+  const err = new Error("This account belongs to no organisation.");
+  (err as { code?: string; statusCode?: number }).code = "EFORBIDDEN";
+  (err as { code?: string; statusCode?: number }).statusCode = 403;
+  return err;
+}
+
 /** A write's id becomes a column value here, not a path — but an unsafe one is
  * still refused up front, the same guard `PgDecisionStore` applies (and the
  * same class of id `fs-brief-store.ts`'s path confinement refuses for reads). */
@@ -361,6 +372,14 @@ export class PgBriefStore implements BriefStorePort {
     if (rows.length === 0) throw forbiddenTeam(teamId);
   }
 
+  private async assertOrgLive(tx: SqlQuery): Promise<void> {
+    const { rows } = await tx.query<{ deleted_at: Date | null }>(
+      `select deleted_at from org where id = $1 for share`,
+      [this.orgId],
+    );
+    if (rows.length > 0 && rows[0]!.deleted_at !== null) throw orgTombstoned();
+  }
+
   /**
    * D236: a brief version may only name ids that are `asset` rows of THIS
    * campaign, checked inside the very transaction that writes the version.
@@ -438,6 +457,7 @@ export class PgBriefStore implements BriefStorePort {
   ): Promise<StoredBrief> {
     assertSafeSlug(brief.id);
     return this.db.transaction(async (tx) => {
+      await this.assertOrgLive(tx);
       if (teamId !== null && teamId !== undefined) await this.assertTeamInOrg(tx, teamId);
       const { rows: inserted } = await tx.query<{ id: string }>(
         `insert into campaign (org_id, slug, team_id) values ($1, $2, $3)
@@ -548,6 +568,7 @@ export class PgBriefStore implements BriefStorePort {
     assertNotReserved(slug);
     const teamId = options?.teamId ?? null;
     return this.db.transaction(async (tx) => {
+      await this.assertOrgLive(tx);
       if (teamId !== null) await this.assertTeamInOrg(tx, teamId);
       const { rows } = await tx.query<{ id: string }>(
         `insert into campaign (org_id, slug, team_id, name, type) values ($1, $2, $3, $4, $5)

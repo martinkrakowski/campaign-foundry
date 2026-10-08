@@ -5,7 +5,7 @@ import { objectStoreClient } from "../object-store/index.js";
 import { orgPrefix } from "../object-store/object-keys.js";
 import { storageRoots } from "../run-environment.js";
 import { LOCAL_TENANT } from "../tenant.js";
-import { insertCampaignDeletion, recordFailure, type DeletionRow } from "./deletion-store.js";
+import { recordFailure, type DeletionRow } from "./deletion-store.js";
 import { markPurged } from "./purge-campaign.js";
 import { requestCampaignDeletion } from "./request.js";
 
@@ -93,20 +93,33 @@ export async function queueCampaignPurges(
     });
     if (result.outcome === "active-job") blocked = true;
   }
-  const { rows: orphans } = await db.query<{ id: string }>(
-    `select c.id::text as id from campaign c
-       where c.org_id = $1 and c.deleted_at is not null
-         and not exists (
-           select 1 from deletion d
-            where d.org_id = $1 and d.kind = 'campaign'
-              and d.subject = c.id::text and d.purged_at is null
-         )
-     order by c.id`,
-    [orgId],
-  );
-  for (const { id: campaignId } of orphans) {
-    await insertCampaignDeletion(db, { orgId, campaignId, requestedBy, grace: "0 hours" });
-  }
+  // Back-fill in ONE transaction. The first statement locks the tombstoned campaigns that have
+  // no pending purge row, in id order, and returns their ids; a second run blocks there until the
+  // first commits. The second statement is a separate statement on purpose: under READ COMMITTED
+  // it takes a fresh snapshot after the lock is granted, so it sees the first run's rows and
+  // inserts nothing. It inserts only for the ids the first statement locked.
+  await db.transaction(async (tx) => {
+    const { rows: locked } = await tx.query<{ id: string }>(
+      `select c.id::text as id from campaign c
+        where c.deleted_at is not null and c.org_id = $1
+          and not exists (select 1 from deletion d where d.org_id = $1 and d.kind = 'campaign' and d.subject = c.id::text and d.purged_at is null)
+        order by c.id for update`,
+      [orgId],
+    );
+    await tx.query(
+      `insert into deletion (org_id, kind, subject, requested_by, not_before)
+         select c.org_id, 'campaign', c.id::text, $2::text, now()
+           from campaign c
+          where c.org_id = $1 and c.deleted_at is not null
+            and c.id = any($3::uuid[])
+            and not exists (
+              select 1 from deletion d
+               where d.org_id = $1 and d.kind = 'campaign'
+                 and d.subject = c.id::text and d.purged_at is null
+            )`,
+      [orgId, requestedBy, locked.map((r) => r.id)],
+    );
+  });
   return blocked;
 }
 
