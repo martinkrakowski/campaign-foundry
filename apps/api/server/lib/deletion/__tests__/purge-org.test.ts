@@ -136,7 +136,7 @@ describe("purgeOrg completion (PT-9m2, D241)", () => {
     const after = await snapshot(db, "acme");
     const afterOrg = JSON.parse(after.org[0]!);
     expect(afterOrg.name).toBe("Deleted org");
-    expect(afterOrg.slug).toBe("acme");
+    expect(afterOrg.slug).toBeNull();
     expect(afterOrg.logo).toBeNull();
     expect(afterOrg.metadata).toBeNull();
     expect(afterOrg.deleted_at).toEqual(beforeDeletedAt);
@@ -258,6 +258,29 @@ describe("purgeOrg completion (PT-9m2, D241)", () => {
     await seedOrg(db, "acme", store);
     const fakeRow = { id: randomUUID(), requestedBy: "operator" };
     await expect(purgeOrg(db, "ghost", fakeRow)).rejects.toThrow(/unknown org "ghost"/);
+  });
+
+  test("purgeOrg sets the purged org's slug to null so it cannot collide with another org's slug", async () => {
+    await seedOrg(db, "acme", store);
+    await seedOrg(db, "beta", store);
+    // acme was renamed acme-inc; beta took the free slug `acme` — exactly the
+    // collision OD13 warns about: `slug = id` on acme would write `acme` and
+    // hit beta's unique slug.
+    await db.query(`update org set slug = $1 where id = $2`, ["acme-inc", "acme"]);
+    await db.query(`update org set slug = $1 where id = $2`, ["acme", "beta"]);
+    const beforeBeta = await snapshot(db, "beta");
+    const beforeBetaObj = await objectSnapshot(store, "beta");
+
+    const row = await drainPending("acme");
+    const result = await purgeOrg(db, "acme", { id: row.id, requestedBy: row.requestedBy });
+    expect(result).toBe("purged");
+
+    const acmeOrg = JSON.parse((await snapshot(db, "acme")).org[0]!);
+    expect(acmeOrg.slug).toBeNull();
+    expect(acmeOrg.name).toBe("Deleted org");
+    // beta is byte-identical: rows and objects.
+    expect(await snapshot(db, "beta")).toEqual(beforeBeta);
+    expect(await objectSnapshot(store, "beta")).toEqual(beforeBetaObj);
   });
 
   // Finding 2 (PT-9m2-fix1): the exported destructive helpers must refuse `local`

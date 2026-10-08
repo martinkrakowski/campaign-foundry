@@ -222,6 +222,23 @@
         "an id naming no row throws and the org's rows and objects are untouched"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/purge-org.ts",
+      "before": "update org set name = 'Deleted org', slug = null, logo = null, metadata = null where id = $1",
+      "after": "update org set name = 'Deleted org', slug = id, logo = null, metadata = null where id = $1",
+      "because": "reverting slug to `id` makes the step-6 update collide with another org that holds this org's id as its slug (org_slug_uidx), throwing a unique violation inside purgeOrg; the witness expects outcome `purged` and its toBe assertion fails instead.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/purge-org.test.ts",
+        "-t",
+        "purgeOrg sets the purged org's slug to null so it cannot collide with another org's slug"
+      ],
+      "verdict": "caught"
     }
   ]
 }

@@ -206,8 +206,13 @@ export async function purgeOrg(
   if (left[0]!.n > 0) return "retry";
   await deleteOrgRows(db, orgId);
   await deleteOrgObjects(orgId);
+  // D241 step 6 (OD13): anonymise the org row in place. `slug` becomes `null`,
+  // never `id` — another org may already hold this org's id as its slug
+  // (`org_slug_uidx` is unique), and `null` is the only value a unique index
+  // cannot collide with. `name`/`logo`/`metadata` are blanked; `deleted_at`
+  // (the tombstone set at request time) and the row itself are left for 9m4.
   await db.query(
-    `update org set name = 'Deleted org', slug = id, logo = null, metadata = null where id = $1`,
+    `update org set name = 'Deleted org', slug = null, logo = null, metadata = null where id = $1`,
     [orgId],
   );
   await db.query(

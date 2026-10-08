@@ -78,7 +78,7 @@ describe("purgeOrg end-to-end (PT-9m2, D241)", () => {
     expect(after.org).toHaveLength(1);
     const org = JSON.parse(after.org[0]!);
     expect(org.name).toBe("Deleted org");
-    expect(org.slug).toBe("acme");
+    expect(org.slug).toBeNull();
     expect(org.logo).toBeNull();
     expect(org.metadata).toBeNull();
     for (const table of CHILD_TABLES) {
