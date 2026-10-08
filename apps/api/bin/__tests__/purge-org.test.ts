@@ -285,7 +285,7 @@ describe("org purge CLI (bin/purge.ts, PT-9m3, D241)", () => {
 
     const lines: string[] = [];
     const first = await sweep(db, (l) => lines.push(l));
-    expect(first).toEqual({ purged: 2, failed: 0 });
+    expect(first).toEqual({ purged: 2, failed: 0, orgFailed: 0 });
     // Contains "retry" line for the org and "purged" lines for campaigns
     const orgRowId = (
       await db.query<{ id: string }>(
@@ -307,7 +307,7 @@ describe("org purge CLI (bin/purge.ts, PT-9m3, D241)", () => {
 
     lines.length = 0;
     const second = await sweep(db, (l) => lines.push(l));
-    expect(second).toEqual({ purged: 1, failed: 0 });
+    expect(second).toEqual({ purged: 1, failed: 0, orgFailed: 0 });
     expect(lines.some((l) => l.includes(`${orgRowId}: purged`))).toBe(true);
 
     // acme has zero rows in every table except org, usage, deletion (anonymised)

@@ -8,6 +8,7 @@ import type { SqlClient } from "../../server/lib/db/sql-client.js";
 import type { DeletionRow } from "../../server/lib/deletion/deletion-store.js";
 import { claimDue, listDue, recordFailure } from "../../server/lib/deletion/deletion-store.js";
 import { purgeCampaign } from "../../server/lib/deletion/purge-campaign.js";
+import { purgeOrg } from "../../server/lib/deletion/purge-org.js";
 
 /** No test below inspects the database: `claim`/`purge` are injected stubs and
  *  `recordFailure`/`claimDue`/`purgeCampaign` are module-level mocks, so a
@@ -50,6 +51,10 @@ vi.mock("../../server/lib/deletion/deletion-store.js", () => ({
   recordFailure: vi.fn(),
 }));
 vi.mock("../../server/lib/deletion/purge-campaign.js", () => ({ purgeCampaign: vi.fn() }));
+vi.mock("../../server/lib/deletion/purge-org.js", async (original) => ({
+  ...(await original<typeof import("../../server/lib/deletion/purge-org.js")>()),
+  purgeOrg: vi.fn(),
+}));
 
 describe("purge CLI (PT-9g3, D231)", () => {
   afterEach(() => {
@@ -176,10 +181,11 @@ describe("purge CLI (PT-9g3, D231)", () => {
       .mockResolvedValueOnce(undefined);
     const purge = vi.fn();
 
-    const { purged, failed } = await sweep(db, (line) => lines.push(line), claim, purge);
+    const { purged, failed, orgFailed } = await sweep(db, (line) => lines.push(line), claim, purge);
 
     expect(purged).toBe(0);
     expect(failed).toBe(1);
+    expect(orgFailed).toBe(0);
     expect(purge).not.toHaveBeenCalled();
     expect(recordFailure).toHaveBeenCalledTimes(1);
     expect(recordFailure).toHaveBeenCalledWith(
@@ -188,6 +194,58 @@ describe("purge CLI (PT-9g3, D231)", () => {
       "campaign deletion row c1 has a null org_id",
     );
     expect(lines).toEqual([`  campaign c1: failed (campaign deletion row c1 has a null org_id)`]);
+  });
+
+  test("sweep counts an org row with a null org_id in orgFailed", async () => {
+    const db = stubDb();
+    const lines: string[] = [];
+    const claim = vi
+      .fn()
+      .mockResolvedValueOnce(deletionRow("o2", "org", null))
+      .mockResolvedValueOnce(undefined);
+    const purge = vi.fn();
+
+    const result = await sweep(db, (line) => lines.push(line), claim, purge);
+
+    expect(result).toEqual({ purged: 0, failed: 1, orgFailed: 1 });
+    expect(purge).not.toHaveBeenCalled();
+    expect(recordFailure).toHaveBeenCalledTimes(1);
+    expect(recordFailure).toHaveBeenCalledWith(db, "o2", "org deletion row o2 has a null org_id");
+    expect(lines).toEqual([`  org o2: failed (org deletion row o2 has a null org_id)`]);
+  });
+
+  test("sweep does not count an org row that answers retry", async () => {
+    const db = stubDb();
+    // An org purge that answers "retry" is not a failure — it is deferred to the
+    // next sweep (purges need at least two sweeps by design), so neither failed
+    // nor orgFailed moves.
+    const claim = vi
+      .fn()
+      .mockResolvedValueOnce(deletionRow("o3", "org"))
+      .mockResolvedValueOnce(undefined);
+    const purge = vi.fn().mockResolvedValueOnce("retry");
+
+    const result = await sweep(db, () => {}, claim, purge);
+
+    expect(result).toEqual({ purged: 0, failed: 0, orgFailed: 0 });
+    expect(purge).toHaveBeenCalledTimes(1);
+    expect(recordFailure).not.toHaveBeenCalled();
+  });
+
+  test("sweep does not count a user row in orgFailed", async () => {
+    const db = stubDb();
+    // A user row fails (it is released as not implemented), but user failures
+    // stay exit 0 (#736) and never count towards orgFailed.
+    const claim = vi
+      .fn()
+      .mockResolvedValueOnce(deletionRow("u1", "user", null))
+      .mockResolvedValueOnce(undefined);
+    const purge = vi.fn();
+
+    const result = await sweep(db, () => {}, claim, purge);
+
+    expect(result).toEqual({ purged: 0, failed: 1, orgFailed: 0 });
+    expect(purge).not.toHaveBeenCalled();
   });
 
   test("sweep records a thrown purge error and continues to the next row", async () => {
@@ -253,6 +311,27 @@ describe("purge CLI (PT-9g3, D231)", () => {
     expect(recordFailure).toHaveBeenCalledTimes(1);
     expect(recordFailure).toHaveBeenCalledWith(db, "org-row", "org boom");
     expect(lines).toEqual([`  org org-row: failed (org boom)`, `  campaign after: purged`]);
+  });
+
+  test("sweep counts a thrown org purge in orgFailed and a thrown campaign purge only in failed", async () => {
+    const db = stubDb();
+    // o1 throws (counts for both failed and orgFailed), c1 throws (failed only),
+    // c2 purges, then the claim stub returns undefined and the loop ends.
+    const claim = vi
+      .fn()
+      .mockResolvedValueOnce(deletionRow("o1", "org"))
+      .mockResolvedValueOnce(deletionRow("c1"))
+      .mockResolvedValueOnce(deletionRow("c2"))
+      .mockResolvedValueOnce(undefined);
+    const purge = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("org boom"))
+      .mockRejectedValueOnce(new Error("camp boom"))
+      .mockResolvedValueOnce("purged");
+
+    const result = await sweep(db, () => {}, claim, purge);
+
+    expect(result).toEqual({ purged: 1, failed: 2, orgFailed: 1 });
   });
 
   test("sweep stops after MAX_CLAIMS_PER_SWEEP claims in one run", async () => {
@@ -379,6 +458,102 @@ describe("purge CLI (PT-9g3, D231)", () => {
       ]);
       expect(after).toHaveBeenCalledTimes(1);
       expect(after).toHaveBeenCalledWith(db, expect.anything());
+      expect(db.end).toHaveBeenCalled();
+    });
+
+    test("main sweep fails after housekeeping when an org purge threw", async () => {
+      const db = stubDb();
+      const open = vi.fn(() => db);
+      const lines: string[] = [];
+      const after = vi.fn(async () => 0);
+      // claimDue yields one org row then nothing; purgeOrg is reached via the
+      // default `purgeRow` and rejects — an org refusal, not a retry.
+      vi.mocked(claimDue)
+        .mockResolvedValueOnce(deletionRow("o9", "org"))
+        .mockResolvedValueOnce(undefined);
+      vi.mocked(purgeOrg).mockRejectedValueOnce(new Error("org refused"));
+
+      // Baseline: nothing has run yet.
+      expect(purgeOrg).not.toHaveBeenCalled();
+      expect(after).not.toHaveBeenCalled();
+      expect(db.end).not.toHaveBeenCalled();
+
+      await expect(main("sweep", false, open, (line) => lines.push(line), after)).rejects.toThrow(
+        "1 org purge(s) failed; see the lines above.",
+      );
+
+      // Housekeeping ran BEFORE the throw, and the connection was closed.
+      expect(after).toHaveBeenCalledTimes(1);
+      expect(db.end).toHaveBeenCalled();
+      expect(lines).toEqual([
+        `  org o9: failed (org refused)`,
+        `  Purged 0 deletion row(s), 1 failed.`,
+      ]);
+    });
+
+    test("main sweep names both when an org purge and a housekeeping step failed", async () => {
+      const db = stubDb();
+      const open = vi.fn(() => db);
+      const after = vi.fn(async () => 2);
+      vi.mocked(claimDue)
+        .mockResolvedValueOnce(deletionRow("o9", "org"))
+        .mockResolvedValueOnce(undefined);
+      vi.mocked(purgeOrg).mockRejectedValueOnce(new Error("org refused"));
+
+      expect(purgeOrg).not.toHaveBeenCalled();
+      expect(after).not.toHaveBeenCalled();
+      expect(db.end).not.toHaveBeenCalled();
+
+      await expect(main("sweep", false, open, () => {}, after)).rejects.toThrow(
+        "1 org purge(s) failed and 2 housekeeping step(s) failed; see the lines above.",
+      );
+
+      expect(after).toHaveBeenCalledTimes(1);
+      expect(db.end).toHaveBeenCalled();
+    });
+
+    test("main sweep still exits clean when only a campaign purge failed", async () => {
+      const db = stubDb();
+      const open = vi.fn(() => db);
+      const lines: string[] = [];
+      const after = vi.fn(async () => 0);
+      vi.mocked(claimDue)
+        .mockResolvedValueOnce(deletionRow("c9", "campaign", "acme", "c-uuid"))
+        .mockResolvedValueOnce(undefined);
+      vi.mocked(purgeCampaign).mockRejectedValueOnce(new Error("camp refused"));
+
+      expect(purgeOrg).not.toHaveBeenCalled();
+      expect(after).not.toHaveBeenCalled();
+      expect(db.end).not.toHaveBeenCalled();
+
+      // Resolves: a campaign failure is retried after its lease and stays exit 0 (OD2).
+      await main("sweep", false, open, (line) => lines.push(line), after);
+
+      expect(after).toHaveBeenCalledTimes(1);
+      expect(db.end).toHaveBeenCalled();
+      expect(lines).toEqual([
+        `  campaign c9: failed (camp refused)`,
+        `  Purged 0 deletion row(s), 1 failed.`,
+      ]);
+    });
+
+    test("main sweep exits clean when an org purge answers retry", async () => {
+      const db = stubDb();
+      const open = vi.fn(() => db);
+      const after = vi.fn(async () => 0);
+      vi.mocked(claimDue)
+        .mockResolvedValueOnce(deletionRow("o5", "org"))
+        .mockResolvedValueOnce(undefined);
+      vi.mocked(purgeOrg).mockResolvedValueOnce("retry");
+
+      expect(after).not.toHaveBeenCalled();
+      expect(db.end).not.toHaveBeenCalled();
+
+      // Resolves: a "retry" org purge is deferred, not a failure (OD1).
+      await main("sweep", false, open, () => {}, after);
+
+      expect(purgeOrg).toHaveBeenCalledTimes(1);
+      expect(after).toHaveBeenCalledTimes(1);
       expect(db.end).toHaveBeenCalled();
     });
 

@@ -590,7 +590,7 @@ test("a purge interrupted after freeing objects but before the row transaction c
     // A second sweep finds nothing due: the interrupted attempt left no
     // duplicate effect.
     const again = await sweep(harness.db, () => {});
-    expect(again).toEqual({ purged: 0, failed: 0 });
+    expect(again).toEqual({ purged: 0, failed: 0, orgFailed: 0 });
   });
 }, 120_000);
 
@@ -610,6 +610,6 @@ test("a purge interrupted after the row transaction but before markPurged conver
     await assertConverged(harness, campaignId, slug, memStore);
 
     const again = await sweep(harness.db, () => {});
-    expect(again).toEqual({ purged: 0, failed: 0 });
+    expect(again).toEqual({ purged: 0, failed: 0, orgFailed: 0 });
   });
 }, 120_000);
