@@ -19,9 +19,14 @@ spec:
   startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
+  # backoffLimit: 0 — never retry inside the sweep. A replacement pod would
+  # start seconds later, inside the failed row's five-minute lease (claimDue
+  # skips it), find nothing due, exit 0 and mark the Job Complete, hiding an org
+  # purge failure. The next 10-minute tick is the retry; this failed pod is the
+  # run that the CronJob marks red.
   jobTemplate:
     spec:
-      backoffLimit: 1
+      backoffLimit: 0
       activeDeadlineSeconds: 540
       template:
         spec:

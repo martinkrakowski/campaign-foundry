@@ -99,12 +99,19 @@ describe("staging purge sweep", () => {
       "  startingDeadlineSeconds: 300",
       "  successfulJobsHistoryLimit: 1",
       "  failedJobsHistoryLimit: 3",
-      "      backoffLimit: 1",
+      "      backoffLimit: 0",
       "      activeDeadlineSeconds: 540",
       "          restartPolicy: Never",
     ]) {
       expect(text).toContain(`\n${line}\n`);
     }
+  });
+  test("purge cronjob never retries a failed sweep inside the lease", () => {
+    const text = read(CRON);
+    expect(text).toContain("\n      backoffLimit: 0\n");
+    // A retry count of any magnitude would relaunch inside the lease; the Job
+    // is not allowed to retry at all (backoffLimit: 0).
+    expect(text).not.toMatch(/backoffLimit: [1-9]/);
   });
   test("purge cronjob runs the same command as the purge sweep script", () => {
     expect(read(CRON)).toContain(

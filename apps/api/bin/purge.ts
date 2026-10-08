@@ -91,6 +91,10 @@ export async function purgeRow(
  * a "retry" row waits out its lease (5 minutes, `PURGE_LEASE_MS`), so an
  * org purge needs at least two sweeps. `user` rows are released as not
  * implemented until PT-9l ships.
+ *
+ * Org failures are counted in `orgFailed` separately because `main` turns a
+ * non-zero count into a non-zero exit, while campaign failures are retried and
+ * stay at exit 0 (#736).
  */
 export async function sweep(
   db: SqlClient,
@@ -101,9 +105,10 @@ export async function sweep(
     orgId: string,
     row: Pick<DeletionRow, "id" | "subject" | "kind" | "requestedBy">,
   ) => Promise<"purged" | "retry"> = purgeRow,
-): Promise<{ purged: number; failed: number }> {
+): Promise<{ purged: number; failed: number; orgFailed: number }> {
   let purged = 0;
   let failed = 0;
+  let orgFailed = 0;
   for (let claims = 0; claims < MAX_CLAIMS_PER_SWEEP; claims++) {
     const row = await claim(db);
     if (!row) break;
@@ -126,6 +131,7 @@ export async function sweep(
       const message = `${row.kind} deletion row ${row.id} has a null org_id`;
       await recordFailure(db, row.id, message);
       failed++;
+      if (row.kind === "org") orgFailed++;
       log(`  ${row.kind} ${row.id}: failed (${message})`);
       continue;
     }
@@ -139,12 +145,13 @@ export async function sweep(
       log(`  ${row.kind} ${row.id}: ${outcome}`);
     } catch (error) {
       failed++;
+      if (row.kind === "org") orgFailed++;
       const message = error instanceof Error ? error.message : String(error);
       await recordFailure(db, row.id, message);
       log(`  ${row.kind} ${row.id}: failed (${message})`);
     }
   }
-  return { purged, failed };
+  return { purged, failed, orgFailed };
 }
 
 export async function main(
@@ -168,12 +175,18 @@ export async function main(
       }
       return;
     }
-    const { purged, failed } = await sweep(db, log);
+    const { purged, failed, orgFailed } = await sweep(db, log);
     log(`  Purged ${purged} deletion row(s), ${failed} failed.`);
     const stepsFailed = await after(db, log);
+    // An org purge that THREW — including a refusal that throws, such as an org
+    // that is not tombstoned — fails the run AFTER the other steps ran; one that
+    // answers "retry" does not (#736: campaign failures do not fail the run).
+    const problems: string[] = [];
+    if (orgFailed > 0) problems.push(`${orgFailed} org purge(s) failed`);
     if (stepsFailed > 0) {
-      throw new Error(`${stepsFailed} housekeeping step(s) failed; see the lines above.`);
+      problems.push(`${stepsFailed} housekeeping step(s) failed`);
     }
+    if (problems.length > 0) throw new Error(`${problems.join(" and ")}; see the lines above.`);
   } finally {
     await db.end();
   }

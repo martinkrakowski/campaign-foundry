@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "lane": "FU-sweep-exit-status",
+  "mutations": [
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "    if (orgFailed > 0) problems.push(",
+      "after": "    if (orgFailed > 9999) problems.push(",
+      "because": "The org-failure guard is lowered to dead: an org purge failure no longer fails the run, so `main` resolves instead of throwing. The test `main sweep fails after housekeeping when an org purge threw` asserts `await expect(main(\"sweep\", false, open, (line) => lines.push(line), after)).rejects.toThrow(\"1 org purge(s) failed; see the lines above.\");` — with the mutant the run resolves and the `.rejects.toThrow(...)` mismatch fails the test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge.test.ts",
+        "-t",
+        "main sweep fails after housekeeping when an org purge threw",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "    } catch (error) {\n      failed++;\n      if (row.kind === \"org\") orgFailed++;",
+      "after": "    } catch (error) {\n      failed++;\n      if (row.kind !== \"user\") orgFailed++;",
+      "because": "A thrown campaign purge now counts towards orgFailed (`row.kind !== \"user\"` is true for campaigns), so `main` throws `1 org purge(s) failed...` instead of resolving. The test `main sweep still exits clean when only a campaign purge failed` asserts `await main(\"sweep\", false, open, (line) => lines.push(line), after);` (expects resolution) — with the mutant it rejects and the un-awaited `await main(...)` fails the test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge.test.ts",
+        "-t",
+        "main sweep still exits clean when only a campaign purge failed",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "    const stepsFailed = await after(db, log);",
+      "after": "    const stepsFailed = orgFailed > 0 ? 0 : await after(db, log);",
+      "because": "When an org purge failed (orgFailed > 0), `after` is short-circuited and never called, so housekeeping is skipped before the throw. The test `main sweep fails after housekeeping when an org purge threw` asserts `expect(after).toHaveBeenCalledTimes(1);` — with the mutant `after` is not called and that assertion fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge.test.ts",
+        "-t",
+        "main sweep fails after housekeeping when an org purge threw",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
