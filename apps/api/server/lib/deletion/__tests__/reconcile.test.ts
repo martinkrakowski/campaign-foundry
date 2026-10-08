@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
-import type { ObjectStorePort } from "@campaignfoundry/CampaignOrchestration";
+import type { ListedObject, ObjectStorePort } from "@campaignfoundry/CampaignOrchestration";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import type { SqlClient, SqlQuery } from "../../db/sql-client.js";
 import { campaignPrefix, inputKey } from "../../object-store/object-keys.js";
@@ -210,10 +210,11 @@ describe("reconcile (D239)", () => {
     await store.put(inputKey2, new Uint8Array([1]));
     clock = NOW;
 
-    const spy = vi.spyOn(store, "list").mockImplementation(async (prefix) => {
-      const listed = await InMemoryObjectStore.prototype.list.call(store, prefix);
+    const spy = vi.spyOn(store, "listPages").mockImplementation(async function* (
+      prefix: string,
+    ): AsyncGenerator<readonly ListedObject[]> {
+      yield* InMemoryObjectStore.prototype.listPages.call(store, prefix);
       await seedCampaign(db, ORG, "late", { id: C1 });
-      return listed;
     });
 
     const plan = await planReconcile(db, store, ORG, NOW);
@@ -295,7 +296,9 @@ describe("reconcile (D239)", () => {
 
     for (const key of cannotPlant) {
       const stub = {
-        list: async () => [{ key, size: 1, lastModified: new Date(NOW - 5 * HOUR) }],
+        listPages: async function* () {
+          yield [{ key, size: 1, lastModified: new Date(NOW - 5 * HOUR) }];
+        },
         deletePrefix: vi.fn(),
         delete: vi.fn(),
       } as unknown as ObjectStorePort;
@@ -318,13 +321,15 @@ describe("reconcile (D239)", () => {
 
   test("reconcile aborts when the store lists a key outside the org prefix", async () => {
     const stub = {
-      list: async () => [
-        {
-          key: `org/other/campaign/${C1}/inputs/${A1}`,
-          size: 1,
-          lastModified: new Date(NOW - 5 * HOUR),
-        },
-      ],
+      listPages: async function* () {
+        yield [
+          {
+            key: `org/other/campaign/${C1}/inputs/${A1}`,
+            size: 1,
+            lastModified: new Date(NOW - 5 * HOUR),
+          },
+        ];
+      },
       deletePrefix: vi.fn(),
       delete: vi.fn(),
     } as unknown as ObjectStorePort;
@@ -644,5 +649,114 @@ describe("reconcile (D239)", () => {
     expect(describeStep({ kind: "input", key: "k2", outcome: "skipped" })).toBe(
       "  skipped input k2 (a row appeared)",
     );
+  });
+
+  test("reconcile keeps an orphan prefix whose fresh object arrives on a later page", async () => {
+    const paged = new InMemoryObjectStore({ now: () => clock, listPageSize: 1 });
+    async function putAt(key: string, at: number): Promise<void> {
+      clock = at;
+      await paged.put(key, new Uint8Array([1]));
+      clock = NOW;
+    }
+    const c1 = campaignPrefix(ORG, C1);
+    const c2 = campaignPrefix(ORG, C2);
+    await putAt(`${c1}renders/alpha/1x1/v1.png`, NOW - 5 * HOUR);
+    await putAt(`${c2}renders/alpha/1x1/v1.png`, NOW - 5 * HOUR);
+    await putAt(`${c1}renders/alpha/1x1/v2.png`, NOW - 10 * 60_000);
+
+    const plan = await planReconcile(db, paged, ORG, NOW);
+    expect(plan.prefixes).toEqual([{ campaignId: C2, objects: 1 }]);
+  });
+
+  test("reconcile counts an orphan prefix across pages", async () => {
+    const paged = new InMemoryObjectStore({ now: () => clock, listPageSize: 1 });
+    async function putAt(key: string, at: number): Promise<void> {
+      clock = at;
+      await paged.put(key, new Uint8Array([1]));
+      clock = NOW;
+    }
+    const c1 = campaignPrefix(ORG, C1);
+    const c2 = campaignPrefix(ORG, C2);
+    await seedCampaign(db, ORG, "live", { id: C2 });
+    await putAt(`${c1}renders/alpha/1x1/v1.png`, NOW - 5 * HOUR);
+    await putAt(`${c2}renders/alpha/1x1/v1.png`, NOW - 5 * HOUR);
+    await putAt(`${c1}renders/alpha/1x1/v2.png`, NOW - 5 * HOUR);
+    await putAt(`${c1}renders/alpha/1x1/v3.png`, NOW - 5 * HOUR);
+
+    const plan = await planReconcile(db, paged, ORG, NOW);
+    expect(plan.prefixes).toEqual([{ campaignId: C1, objects: 3 }]);
+    expect(plan.inputs).toEqual([]);
+  });
+
+  test("reconcile plans an orphan input found on a later page", async () => {
+    const paged = new InMemoryObjectStore({ now: () => clock, listPageSize: 1 });
+    async function putAt(key: string, at: number): Promise<void> {
+      clock = at;
+      await paged.put(key, new Uint8Array([1]));
+      clock = NOW;
+    }
+    const campaignId = await seedCampaign(db, ORG, "live", { id: C1, tombstoned: false });
+    await seedAsset(db, ORG, campaignId, A1);
+    const prefix = campaignPrefix(ORG, C1);
+    await putAt(`${prefix}inputs/${A1}`, NOW - 5 * HOUR);
+    await putAt(`${prefix}renders/alpha/1x1/v1.png`, NOW - 5 * HOUR);
+    await putAt(`${prefix}inputs/${A2}`, NOW - 5 * HOUR);
+
+    const plan = await planReconcile(db, paged, ORG, NOW);
+    expect(plan.inputs).toEqual([{ campaignId: C1, assetId: A2 }]);
+  });
+
+  test("reconcile aborts on an odd key on a later page and deletes nothing", async () => {
+    const badKey = `org/local/campaign/${C1}/renders/a//b`;
+    const goodKey = `${campaignPrefix(ORG, C1)}renders/good.png`;
+    const stub = {
+      listPages: async function* () {
+        yield [{ key: goodKey, size: 1, lastModified: new Date(NOW - 5 * HOUR) }];
+        yield [{ key: badKey, size: 1, lastModified: new Date(NOW - 5 * HOUR) }];
+      },
+      deletePrefix: vi.fn(),
+      delete: vi.fn(),
+    } as unknown as ObjectStorePort;
+    await expect(
+      reconcileOrgs(db, stub, ["local"], { apply: true, now: () => NOW }),
+    ).rejects.toThrow("outside the object key alphabet");
+    expect(stub.deletePrefix).not.toHaveBeenCalled();
+    expect(stub.delete).not.toHaveBeenCalled();
+  });
+
+  test("reconcile reads the rows only after the last page", async () => {
+    const paged = new InMemoryObjectStore({ now: () => clock, listPageSize: 1 });
+    async function putAt(key: string, at: number): Promise<void> {
+      clock = at;
+      await paged.put(key, new Uint8Array([1]));
+      clock = NOW;
+    }
+    const c1 = campaignPrefix(ORG, C1);
+    await putAt(`${c1}inputs/${A1}`, NOW - 5 * HOUR);
+    await putAt(`${c1}inputs/${A2}`, NOW - 5 * HOUR);
+    await putAt(`${c1}renders/alpha/1x1/v1.png`, NOW - 5 * HOUR);
+
+    const events: string[] = [];
+    vi.spyOn(paged, "listPages").mockImplementation(async function* (
+      prefix: string,
+    ): AsyncGenerator<readonly ListedObject[]> {
+      for await (const page of InMemoryObjectStore.prototype.listPages.call(paged, prefix)) {
+        events.push("page");
+        yield page;
+      }
+    });
+
+    const { sql, calls } = recording(db);
+    const sqlWithEvents: SqlQuery = {
+      query: (text: string, params: readonly unknown[] = []) => {
+        events.push("query");
+        return sql.query(text, params);
+      },
+      exec: (text: string) => sql.exec(text),
+    } as SqlQuery;
+
+    await planReconcile(sqlWithEvents, paged, ORG, NOW);
+    expect(calls.length).toBe(2);
+    expect(events).toEqual(["page", "page", "page", "query", "query"]);
   });
 });

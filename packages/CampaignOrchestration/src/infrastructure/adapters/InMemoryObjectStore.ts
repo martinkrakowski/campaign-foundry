@@ -59,9 +59,10 @@ export interface InMemoryObjectStoreOptions {
  * `ObjectStorePort` in a Map (PT-4a) — the fake every use case test runs
  * against, and the one half of the conformance suite that needs no server.
  *
- * It pages `list` at `listPageSize` the way a real store pages on
- * `NextContinuationToken` and then joins the pages, so a caller never sees the
- * page size and the loop a real bucket forces is walked offline too.
+ * It exposes `listPages` at `listPageSize` the way a real store pages on
+ * `NextContinuationToken`, and `list` joins those pages. A caller that only
+ * counts or filters walks a whole org page by page without holding the whole
+ * listing, and a caller that needs them all still gets them via `list`.
  *
  * `presignGet` returns a URL of the real one's SHAPE — same path, same
  * `X-Amz-Expires` and `response-content-*` parameters, same host — with a
@@ -130,8 +131,12 @@ export class InMemoryObjectStore implements ObjectStorePort {
     this.objects.delete(key);
   }
 
-  async list(prefix: ObjectKey): Promise<readonly ListedObject[]> {
+  listPages(prefix: ObjectKey): AsyncIterable<readonly ListedObject[]> {
     assertObjectKey(prefix);
+    return this.pages(prefix);
+  }
+
+  private async *pages(prefix: ObjectKey): AsyncGenerator<readonly ListedObject[]> {
     const matched = [...this.objects.entries()]
       .filter(([key]) => key.startsWith(prefix))
       .map(([key, stored]) => ({
@@ -140,14 +145,20 @@ export class InMemoryObjectStore implements ObjectStorePort {
         etag: stored.etag,
         lastModified: stored.lastModified,
       }));
-    const listed: ListedObject[] = [];
     for (let start = 0; start < matched.length; start += this.listPageSize) {
-      listed.push(...matched.slice(start, start + this.listPageSize));
+      yield matched.slice(start, start + this.listPageSize);
     }
+  }
+
+  async list(prefix: ObjectKey): Promise<readonly ListedObject[]> {
+    assertObjectKey(prefix);
+    const listed: ListedObject[] = [];
+    for await (const page of this.listPages(prefix)) listed.push(...page);
     return listed;
   }
 
   async deletePrefix(prefix: ObjectKey): Promise<void> {
+    // No cap here: this is a Map, not the production store (see S3ObjectStore).
     assertObjectKey(prefix);
     for (const [key] of [...this.objects.entries()]) {
       if (key.startsWith(prefix)) this.objects.delete(key);

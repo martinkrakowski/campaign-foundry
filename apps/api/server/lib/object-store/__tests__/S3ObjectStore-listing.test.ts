@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import type { ListedObject } from "@campaignfoundry/CampaignOrchestration";
 import type { S3Settings } from "../../config.js";
 import { S3ObjectStore } from "../S3ObjectStore.js";
 
@@ -47,8 +48,18 @@ function entry(key: string, size: number, etag?: string): string {
   ].join("");
 }
 
-function store(fetchImpl: typeof fetch, listPageSize?: number): S3ObjectStore {
-  return new S3ObjectStore({ settings: SETTINGS, fetchImpl, listPageSize, now: () => NOW });
+function store(
+  fetchImpl: typeof fetch,
+  listPageSize?: number,
+  deletePrefixMaxKeys?: number,
+): S3ObjectStore {
+  return new S3ObjectStore({
+    settings: SETTINGS,
+    fetchImpl,
+    listPageSize,
+    deletePrefixMaxKeys,
+    now: () => NOW,
+  });
 }
 
 describe("S3ObjectStore.list", () => {
@@ -317,6 +328,143 @@ describe("S3ObjectStore.list", () => {
         "DELETE /campaign-foundry-test/campaigns/c1/renders/b.png",
       ],
     );
+  });
+
+  test("listPages yields one page per response and sends the continuation token", async () => {
+    const { requests, fetchImpl } = canned(
+      xmlResponse(
+        result(
+          entry("campaigns/c1/renders/a.png", 1),
+          entry("campaigns/c1/renders/b.png", 2),
+          "<IsTruncated>true</IsTruncated>",
+          "<NextContinuationToken>t1</NextContinuationToken>",
+        ),
+      ),
+      xmlResponse(
+        result(entry("campaigns/c1/renders/c.png", 3), "<IsTruncated>false</IsTruncated>"),
+      ),
+    );
+    const pages: (readonly ListedObject[])[] = [];
+    for await (const page of store(fetchImpl, 2).listPages("campaigns/c1/renders/"))
+      pages.push(page);
+    expect(pages.map((page) => page.length)).toEqual([2, 1]);
+    expect(requests).toHaveLength(2);
+    expect(new URL(requests[1]?.url ?? "").searchParams.get("continuation-token")).toBe("t1");
+  });
+
+  test("listPages fetches a page only when the caller asks for it", async () => {
+    const { requests, fetchImpl } = canned(
+      xmlResponse(
+        result(
+          entry("campaigns/c1/renders/a.png", 1),
+          entry("campaigns/c1/renders/b.png", 2),
+          "<IsTruncated>true</IsTruncated>",
+          "<NextContinuationToken>t1</NextContinuationToken>",
+        ),
+      ),
+      xmlResponse(
+        result(entry("campaigns/c1/renders/c.png", 3), "<IsTruncated>false</IsTruncated>"),
+      ),
+    );
+    expect(requests).toHaveLength(0);
+    const iterator = store(fetchImpl, 2).listPages("campaigns/c1/renders/")[Symbol.asyncIterator]();
+    await iterator.next();
+    expect(requests).toHaveLength(1);
+  });
+
+  test("listPages skips an empty truncated page and yields no page for an empty listing", async () => {
+    const { requests, fetchImpl } = canned(
+      xmlResponse(
+        result(
+          "<IsTruncated>true</IsTruncated>",
+          "<NextContinuationToken>t1</NextContinuationToken>",
+        ),
+      ),
+      xmlResponse(
+        result(entry("campaigns/c1/renders/a.png", 1), "<IsTruncated>false</IsTruncated>"),
+      ),
+    );
+    const pages: (readonly ListedObject[])[] = [];
+    for await (const page of store(fetchImpl, 2).listPages("campaigns/c1/renders/"))
+      pages.push(page);
+    expect(pages.map((page) => page.length)).toEqual([1]);
+    expect(requests).toHaveLength(2);
+
+    const { fetchImpl: emptyOnly } = canned(xmlResponse(result()));
+    const emptyPages: (readonly ListedObject[])[] = [];
+    for await (const page of store(emptyOnly, 2).listPages("campaigns/c1/renders/")) {
+      emptyPages.push(page);
+    }
+    expect(emptyPages).toEqual([]);
+  });
+
+  test("listPages on the S3 adapter refuses an empty prefix and sends no request", () => {
+    const { requests, fetchImpl } = canned(xmlResponse(result("<IsTruncated>false</IsTruncated>")));
+    expect(() => store(fetchImpl, 2).listPages("")).toThrow(/Refusing an object key/);
+    expect(requests).toHaveLength(0);
+  });
+
+  test("list still answers with every entry of every page", async () => {
+    const { fetchImpl } = canned(
+      xmlResponse(
+        result(
+          entry("campaigns/c1/renders/a.png", 1),
+          entry("campaigns/c1/renders/b.png", 2),
+          "<IsTruncated>true</IsTruncated>",
+          "<NextContinuationToken>t1</NextContinuationToken>",
+        ),
+      ),
+      xmlResponse(
+        result(entry("campaigns/c1/renders/c.png", 3), "<IsTruncated>false</IsTruncated>"),
+      ),
+    );
+    const listed = await store(fetchImpl, 2).list("campaigns/c1/renders/");
+    expect(listed.map((entry) => entry.key)).toEqual([
+      "campaigns/c1/renders/a.png",
+      "campaigns/c1/renders/b.png",
+      "campaigns/c1/renders/c.png",
+    ]);
+  });
+
+  test("deletePrefix refuses a prefix holding more keys than the cap and deletes nothing", async () => {
+    const { requests, fetchImpl } = canned(
+      xmlResponse(
+        result(
+          entry("campaigns/c1/renders/a.png", 1),
+          entry("campaigns/c1/renders/b.png", 2),
+          "<IsTruncated>true</IsTruncated>",
+          "<NextContinuationToken>t1</NextContinuationToken>",
+        ),
+      ),
+      xmlResponse(
+        result(entry("campaigns/c1/renders/c.png", 3), "<IsTruncated>false</IsTruncated>"),
+      ),
+    );
+    const operation = store(fetchImpl, 2, 2).deletePrefix("campaigns/c1/renders/");
+    await expect(operation).rejects.toThrow("Refusing deletePrefix");
+    const error = await operation.catch((thrown: unknown) => thrown);
+    expect((error as Error).message).toContain("more than 2 keys");
+    expect((error as Error).message).not.toContain("campaigns/c1/renders/");
+    expect((error as Error).message).not.toContain("a.png");
+    expect((error as Error).message).not.toContain("b.png");
+    expect((error as Error).message).not.toContain("c.png");
+    expect(requests.every((request) => request.method === "GET")).toBe(true);
+  });
+
+  test("deletePrefix deletes a prefix holding exactly the cap", async () => {
+    const { requests, fetchImpl } = canned(
+      xmlResponse(
+        result(
+          entry("campaigns/c1/renders/a.png", 1),
+          entry("campaigns/c1/renders/b.png", 2),
+          "<IsTruncated>false</IsTruncated>",
+        ),
+      ),
+      new Response(null, { status: 204 }),
+      new Response(null, { status: 204 }),
+    );
+    await store(fetchImpl, 2, 2).deletePrefix("campaigns/c1/renders/");
+    expect(requests.filter((request) => request.method === "DELETE")).toHaveLength(2);
   });
 });
 

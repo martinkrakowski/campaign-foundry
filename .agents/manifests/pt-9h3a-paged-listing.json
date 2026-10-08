@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "lane": "PT-9h3a-paged-listing",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "      byCampaign.set(campaignId, group);\n    }\n  }\n  return byCampaign;",
+      "after": "      byCampaign.set(campaignId, group);\n    }\n    break;\n  }\n  return byCampaign;",
+      "because": "the for-await over listing pages breaks after its first page, so an object on a later page never reaches the aggregate. `reconcile keeps an orphan prefix whose fresh object arrives on a later page` plants a fresh C1 render on page 3 and asserts expect(plan.prefixes).toEqual([{ campaignId: C2, objects: 1 }]), which fails because the stale C1 (not C2) is planned.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile keeps an orphan prefix whose fresh object arrives on a later page",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/reconcile.ts",
+      "before": "if (!old) group.fresh = true;",
+      "after": "if (!old) group.fresh = false;",
+      "because": "a fresh object marks the campaign stale instead of fresh, so it no longer protects it: the fresh C1 render on page 3 leaves group.fresh false and C1 is planned. `reconcile keeps an orphan prefix whose fresh object arrives on a later page` asserts expect(plan.prefixes).toEqual([{ campaignId: C2, objects: 1 }]), which fails because C1 appears too.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/reconcile.test.ts",
+        "-t",
+        "reconcile keeps an orphan prefix whose fresh object arrives on a later page",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "packages/CampaignOrchestration/src/infrastructure/adapters/InMemoryObjectStore.ts",
+      "before": "    for (let start = 0; start < matched.length; start += this.listPageSize) {\n      yield matched.slice(start, start + this.listPageSize);\n    }",
+      "after": "    for (let start = 0; start < matched.length; start += matched.length) {\n      yield matched.slice(start, matched.length);\n    }",
+      "because": "the fake answers in one page: it yields the whole remainder and then stops, so five objects with listPageSize 2 come back as a single page. `listPages yields pages no larger than the page size` asserts expect(pages.map((page) => page.length)).toEqual([2, 2, 1]), which fails on that assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "node",
+        "packages/CampaignOrchestration/src/infrastructure/adapters/__tests__/InMemoryObjectStore.test.ts",
+        "-t",
+        "listPages yields pages no larger than the page size",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/object-store/S3ObjectStore.ts",
+      "before": "if (keys.length > this.deletePrefixMaxKeys) {",
+      "after": "if (false) {",
+      "because": "the cap check is removed, so a prefix holding more keys than deletePrefixMaxKeys is no longer refused and deletePrefix resolves instead of rejecting. `deletePrefix refuses a prefix holding more keys than the cap and deletes nothing` has await expect(operation).rejects.toThrow(\"Refusing deletePrefix\"), which fails on that rejects assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/object-store/__tests__/S3ObjectStore-listing.test.ts",
+        "-t",
+        "deletePrefix refuses a prefix holding more keys than the cap and deletes nothing",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/expire-cache.ts",
+      "before": "        kept++;\n      }\n    }\n  }",
+      "after": "        kept++;\n      }\n    }\n    break;\n  }",
+      "because": "the for-await over listPages breaks after the first page, so objects on later pages are never counted. `cache expiry counts entries on every page` plants an expired, a young and an unrecognised entry (each on its own page) and asserts expect(plan).toEqual({ orgId: \"local\", expired: [D1], kept: 1, unrecognised: 1 }), which fails on that line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/expire-cache.test.ts",
+        "-t",
+        "cache expiry counts entries on every page",
+        "--tagsFilter",
+        "!golden-bytes && !cpu-bound"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

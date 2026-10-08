@@ -18,6 +18,16 @@ import type { S3Settings } from "../config.js";
 const DEFAULT_LIST_PAGE_SIZE = 1000;
 
 /**
+ * `deletePrefix` holds every key under the prefix before it deletes one (all or
+ * nothing), so the prefix must fit in memory. A key is at most a few hundred
+ * characters, 100 to 200 bytes of heap each, so a million keys is 100 to 200 MB:
+ * past that the delete is REFUSED whole instead of dying half-way. Revisit a
+ * paged delete when an org approaches this (PT-9h3a).
+ */
+export const DELETE_PREFIX_MAX_KEYS = 1_000_000;
+const DELETE_PREFIX_MAX_KEYS_PROBLEM = "deletePrefixMaxKeys must be a positive integer.";
+
+/**
  * `listPageSize` has to be a positive integer, and this is the one message both
  * adapters use for it: the page size is how the two are held to the same
  * conformance, so a refusal that differs between them is a refusal one of them
@@ -55,8 +65,10 @@ export interface S3ObjectStoreOptions {
    * single failing call would hang for the better part of a minute.
    */
   readonly fetchImpl?: typeof fetch;
-  /** `max-keys` per ListObjectsV2 page; `list` joins the pages. */
+  /** `max-keys` per ListObjectsV2 page; `list` joins the pages, `listPages` yields them. */
   readonly listPageSize?: number;
+  /** The most keys `deletePrefix` will hold; injected so the refusal is testable. */
+  readonly deletePrefixMaxKeys?: number;
   /** The clock `presignGet` signs from. Injected so D204's windows are testable. */
   readonly now?: () => number;
 }
@@ -83,6 +95,7 @@ export class S3ObjectStore implements ObjectStorePort {
   private readonly client: AwsClient;
   private readonly fetchImpl: typeof fetch;
   private readonly listPageSize: number;
+  private readonly deletePrefixMaxKeys: number;
   private readonly now: () => number;
   private readonly endpoint: string;
   private readonly publicEndpoint: string;
@@ -105,6 +118,11 @@ export class S3ObjectStore implements ObjectStorePort {
       throw new Error(LIST_PAGE_SIZE_PROBLEM);
     }
     this.listPageSize = pageSize;
+    const maxKeys = options.deletePrefixMaxKeys ?? DELETE_PREFIX_MAX_KEYS;
+    if (!Number.isInteger(maxKeys) || maxKeys < 1) {
+      throw new Error(DELETE_PREFIX_MAX_KEYS_PROBLEM);
+    }
+    this.deletePrefixMaxKeys = maxKeys;
     this.now = options.now ?? (() => Date.now());
     this.endpoint = settings.endpoint.replace(/\/+$/, "");
     this.publicEndpoint = settings.publicEndpoint.replace(/\/+$/, "");
@@ -187,9 +205,12 @@ export class S3ObjectStore implements ObjectStorePort {
     }
   }
 
-  async list(prefix: ObjectKey): Promise<readonly ListedObject[]> {
+  listPages(prefix: ObjectKey): AsyncIterable<readonly ListedObject[]> {
     assertObjectKey(prefix);
-    const listed: ListedObject[] = [];
+    return this.pages(prefix);
+  }
+
+  private async *pages(prefix: ObjectKey): AsyncGenerator<readonly ListedObject[]> {
     let continuationToken: string | undefined;
     do {
       const url = new URL(`${this.endpoint}/${this.bucket}`);
@@ -201,9 +222,15 @@ export class S3ObjectStore implements ObjectStorePort {
       const response = await this.send("list", url, "GET", {});
       if (!response.ok) await this.fail("list", response);
       const page = parseListObjectsV2(await this.read("list", () => response.text()));
-      listed.push(...page.contents);
+      if (page.contents.length > 0) yield page.contents;
       continuationToken = page.truncated ? page.nextContinuationToken : undefined;
     } while (continuationToken !== undefined);
+  }
+
+  async list(prefix: ObjectKey): Promise<readonly ListedObject[]> {
+    assertObjectKey(prefix);
+    const listed: ListedObject[] = [];
+    for await (const page of this.listPages(prefix)) listed.push(...page);
     return listed;
   }
 
@@ -212,7 +239,15 @@ export class S3ObjectStore implements ObjectStorePort {
     // One DELETE per key: the multi-object delete is a POST to `?delete` with an
     // XML body, and a second hand-written XML shape is a second parser to own
     // and to prove against a hostile body.
-    const keys = (await this.list(prefix)).map((object) => object.key);
+    const keys: ObjectKey[] = [];
+    for await (const page of this.listPages(prefix)) {
+      for (const object of page) keys.push(object.key);
+      if (keys.length > this.deletePrefixMaxKeys) {
+        throw new Error(
+          `Refusing deletePrefix: more than ${this.deletePrefixMaxKeys} keys are under this prefix and nothing was deleted. Delete narrower prefixes one at a time, or raise deletePrefixMaxKeys deliberately.`,
+        );
+      }
+    }
     // ALL OR NOTHING, and the check comes before the first delete rather than
     // inside the loop. A key from the store is not a key this adapter wrote: a
     // proxy, a replication target or a second writer can put one under this
