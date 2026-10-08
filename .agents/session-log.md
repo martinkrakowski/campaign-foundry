@@ -7044,3 +7044,79 @@ The recurring class, six times in one wave, was a test or mutation that could no
 - **For the owner to confirm (fleet session's decision under delegation):** `erase:user` prints the erased user's id in its two exit-3 messages, on stderr only, so an incomplete erasure can be finished from the tool (#741). Reversing it is one small PR.
 - **Refused by the orchestrator session's permission layer, still queued for the owner:** adding "Build, Typecheck, Lint & Test" as a required status check on main (prepared as a separate ruleset so the existing no-force-push ruleset gains no bypass); closing wave `platform-and-tenancy-w05` on the waves page.
 - **Deferred, recorded on their PRs:** the released-slug leftover on the file store (after PT-9 closes); `console.warn` in the rollback helper (four tests assert it; moving to the structured logger is a visible change); the over-copy for a ref ending in a bare slash (since #716); a shape rule for user ids instead of the non-user list; the dry run of `purge:org` printing no org name; PT-9h3.
+
+---
+
+## 2026-10-08 — Wave platform-and-tenancy-w08: the paged listing (PT-9h3 closed), the sweep's exit status, and three follow-ups (#749 through #753)
+
+Orchestrator's wave record. Four lanes on the Laguna S 2.1 seat in the `cf-lanes` container, at most two at a time; base `5fc253a1`. A fresh orchestrator session, started from the w07 handover. Instructions reached it through the fleet session, whose messages the owner said to treat as his own. Times are UTC, from the wave event log (`~/.waves/wave-platform-and-tenancy-w08/events.jsonl`). Counts in the tables are read from that log and from `git log`, not from memory.
+
+### What merged
+
+| PR | Merge SHA | Lane | Subject |
+|---|---|---|---|
+| #749 | eb619397 | (plan row) | docs(planning): add the PT-9h3a paged-listing row and record deletePrefix as deliberately unpaged |
+| #750 | d6f69098 | FU-test-pins | test(deletion): pin third-campaign audio and beat-background copies and the sweep continuing past a failed org row |
+| #751 | 45ac4346 | PT-9h3a-paged-listing | feat(object-store): listPages reads a prefix page by page, and the sweep no longer holds a whole listing |
+| #752 | 565a6726 | FU-listing-guards | fix(object-store): a truncated listing with an empty continuation token is refused, not followed |
+| #753 | 201a83b8 | FU-sweep-exit-status | fix(deletion): the sweep exits non-zero when an org purge fails or is refused |
+
+**PT-9h3 is closed by #751.** The standing rule now reads: no production schedule of `purge:sweep` until the owner says so (its technical precondition, the paged listing, has landed).
+
+### Decisions taken in the wave, and by whom
+
+- **`deletePrefix` stays all-or-nothing and unpaged, with a cap of 1,000,000 keys on the S3 adapter** (fleet session under the owner's delegation, 2026-10-08). A two-pass paged delete was offered and declined: it would add a "partially deleted" state to the path that frees an org's bytes. Trigger to revisit, in the plan row: an org approaching the cap, or a production bucket's real sizes.
+- **The cap's refusal prints neither the prefix nor a key** (orchestrator, against the fleet session's first wording, on the Opus brief review: the adapter's own comment and a sibling test forbid it). Reported; not reversed.
+- **The sweep exits non-zero on an org purge that throws** (owner, relayed 2026-10-08). Decided inside the lane and stated in #753: campaign-row failures still exit 0 (as #736 chose), an org row answering `retry` does not count, `user` rows do not count.
+- **The staging CronJob no longer retries a failed sweep** (`backoffLimit: 1` to `0`; orchestrator, on the Fable finding below; reported to the fleet session, no answer before the merge). It takes effect at the owner's next `yarn deploy:staging`. One line to put back.
+- **Owner's rule, 2026-10-08:** no Grok model through OpenRouter for the pipeline (lane seats, agents, gates, reviews, PR bots, workflows); Grok is used through the `grok` CLI only. The product's own OpenRouter image generator, whose default is a Grok image model, is explicitly allowed and is not to be changed.
+
+### Reviews, and what each layer found
+
+| PR | Brief review | Pre-merge review | Bots | Fix rounds | Fixed | Refuted | Deferred |
+|---|---|---|---|---|---|---|---|
+| #750 | none (tests only) | orchestrator read the diff | Qodo: 1 | 1 | 1 | 0 | 0 |
+| #751 | Opus: 1 blocker, 4 should-fix, 4 nits (all applied before dispatch) | Grok CLI (before 18:00): 0 bugs, 3 suggestions, 1 nit. Fable (the lane's one pass): 0 bugs, merge-ready | Qodo: 2 | 0 | 0 | 1 | 1 |
+| #752 | none | orchestrator read the diff | none | 1 | 1 | 0 | 0 |
+| #753 | none | Fable (the lane's one pass): 1 bug, 3 nits | Qodo: 1 (already fixed by the round) | 1 | 4 | 0 | 0 |
+
+- **Opus on the #751 brief** found the one thing that would have stopped the lane at step 1: a gap-proof grep that also matched test files, in a brief that says to stop when a proof fails. It also caught that the re-pointed cache-failure test had to throw the bare string `"boom"`, or `bin/purge.ts`'s `String(error)` branch would lose its only test and CI's 100% gate would fail on a file the lane's own coverage command did not include.
+- **Fable on #751** was asked by name for the reconciler's three invariants and for whether the per-campaign aggregate can decide "all old" from a partial listing. Each holds, each with a test that fails if it breaks; the aggregate is only read after the last page.
+- **Grok and Fable both** found a hang that predates the wave: a listing body with `IsTruncated` true and an EMPTY continuation token was followed for ever. Fixed in #752.
+- **Fable on #753** found that the lane's stated outcome did not hold: the code exited 1, but the CronJob's one retry started inside the failed row's five-minute lease, skipped the row, exited 0, and Kubernetes marked the Job complete. No test could have shown it; it needed the deploy manifest read beside `claimDue`. Fixed in the round (`backoffLimit: 0`, with the gate test that pins it).
+- **The second-host check** (the Mac, with `STORE_BACKEND=postgres` set by hand) found that #752's first pin of the `reconcile failed (…)` line was one environment's text; CI's Postgres job would have failed it. The pin is now the line's shape with a non-empty reason.
+- **Qodo on #750**: the four new tests asserted the remapped ref's owner but not its name, so a ref remapped onto a copied sibling would have passed. Fixed.
+- **Refuted (#751, Qodo):** "the in-memory fake builds the whole match list before paging". The fake is the whole store in memory already; the contract it must reproduce is held by the conformance suite. **Deferred (#751, Qodo):** "an org above the cap can never free its files": accurate, and the decision above.
+
+### Defects in the plan or the handover, not the code
+
+- **PT-9h3 had no plan row.** It existed as two session-log lines and one code comment. Added as #749 before any dispatch.
+- **The "rollback helper to the structured logger" leftover had a false premise.** `src/infrastructure/logging/logger.ts`, the path `AGENTS.md` names, does not exist; no logging library is a dependency; `apps/api/server` has 34 `console.*` calls in 22 non-test files. Not dispatched. Whether the project gets a structured logger is the owner's decision.
+- **Of the test-pinning gaps the handover listed from #739 and #742**, most were already closed by #743, #745 and #742's own rounds. Three were open: two closed in #750, one in #752.
+
+### The seat ran out of credit mid-wave
+
+At 18:40 the Laguna seat answered OpenRouter `402` ("This request would exceed your available credits given your current in-flight requests"), with two lanes running. A third stream, started just after, hit it at its end as well. The orchestrator stopped dispatching and reported; the owner added credit about 19:00 and the fleet session released the lanes, one at a time first.
+
+- A lane ended by a 402 exits 0 with finish reason `tool-calls` and no commit: it reads like any stalled lane. The last line of the stream is the only place that says why. Check it before diagnosing a stall.
+- Twice a lane had finished its edits and its checks and was cut off before `git commit`. The orchestrator read each diff against the brief, committed it unchanged, and re-ran the checks on the Mac. The later fix briefs say "commit FIRST, then report".
+- PR-Agent's two checks on #752 failed in the same half hour ("could not generate a review") and passed on a re-run after the credit was added. That it was the same limit is inferred from the timing; no 402 was found in the Action log. While they failed, nothing could merge, the wave record included.
+
+### What the orchestrator got wrong
+
+- **A zsh variable used as a command prefix** (`E="env -u …"; $E yarn …`) does not word-split, so one Mac verification ran its static checks and silently skipped every test and replay. Caught by reading the output (`command not found`), re-run with `unset`. The handover already said `ssh m` runs zsh; the same is true of the Mac's own shell.
+- **`wave:status --push` printed nothing to say a push was sent**, so the nine corrective events for older waves could not be confirmed from this side; the fleet session confirmed them by reading the page. A one-line confirmation with the server's receive time is owed to the tool.
+- **One brief went out with a leftover half-sentence** ("… is NOT acceptable …; use …") from drafting its manifest item, and a second was caught before dispatch. Harmless; read the assembled brief once before copying it to the lane.
+
+### Housekeeping done for older waves
+
+Nine lanes read "no-pr" on the waves page: their `merge settled` events carried the PR number inside `--detail` instead of `--pr`. Each PR was checked as merged with the recorded SHA, and one corrective event per lane was appended (hardening-w06 #624; cf-followups-w01 #719 to #722; cf-followups-w02 #723, #724, #726; platform-and-tenancy-w05 #623).
+
+### What stays the owner's own run, and what is deferred
+
+- **Not run by anyone in this wave:** any `--apply`; `yarn deploy:staging`; any `purge:*` script against a real database. The next staging deploy applies `backoffLimit: 0` to `cf-purge-sweep` (#753).
+- **Standing rule:** no production schedule of `purge:sweep` until the owner says so.
+- **For the owner to confirm or reverse:** the CronJob's lost retry (#753); the cap's refusal not naming the prefix (#751).
+- **Open, the owner's decision:** a structured logger for the project (and with it the rollback helper's `console.warn`); whether a campaign purge that fails on every run should also fail the sweep (#753, "Challenge this").
+- **Deferred, unchanged:** the released-slug leftover on the file store; the over-copy for a ref ending in a bare slash (since #716, a defect that needs a fix, not a pin); a shape rule for user ids; the dry run of `purge:org` printing no org name; the required status check on main, refused by the previous session's permission layer and not attempted in this one, still queued for the owner.
+- **Owed to the tooling:** `wave:status --push` confirming what it sent.
