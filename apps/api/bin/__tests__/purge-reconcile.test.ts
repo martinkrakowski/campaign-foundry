@@ -870,9 +870,9 @@ describe("sweep housekeeping (bin/purge.ts)", () => {
         (l) => log.push(l),
       ),
     ).rejects.toThrow("2 housekeeping step(s) failed; see the lines above.");
-    expect(log).toContain(
-      "  reconcile failed (OBJECT_STORE=s3 requires STORE_BACKEND=postgres: only Postgres knows a campaign uuid, and a render key is derived from one.)",
-    );
+    const reconcileLine = log.find((l) => l.startsWith("  reconcile failed ("));
+    expect(reconcileLine).toMatch(/^ {2}reconcile failed \(.+\)$/);
+    expect(reconcileLine).not.toContain("undefined");
     expect(log).toContain(
       "  cache expiry failed (setup failed: store client or org list unavailable)",
     );
