@@ -428,7 +428,15 @@ export default defineEventHandler(async (event) => {
         // Every OTHER campaign the source named, in the order the resolve found them.
         // Under `s3` this is what carries a THIRD campaign's id over (carry item 2); off
         // it is the loop this line replaces, remapping paths prefix for prefix.
-        const copied = await copyBriefRefs(scope, brief, resolved.copyFrom, targetSlug);
+        // A third campaign is copied for the asset names the brief names (`copyOnly`),
+        // not its whole library.
+        const copied = await copyBriefRefs(
+          scope,
+          brief,
+          resolved.copyFrom,
+          targetSlug,
+          resolved.copyOnly,
+        );
         createdIds.push(...copied.createdIds);
         brief = copied.brief;
         // PT-9j (D237 c, PT-9i residual E): the SOURCE's own copy above was gated before it ran
