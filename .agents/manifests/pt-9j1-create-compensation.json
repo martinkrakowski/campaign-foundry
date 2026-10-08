@@ -3,9 +3,9 @@
   "lane": "PT-9j1-create-compensation",
   "mutations": [
     {
-      "file": "apps/api/server/routes/campaigns/index.post.ts",
-      "before": "              await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);",
-      "after": "              await Promise.resolve(createdIds);",
+      "file": "apps/api/server/lib/campaign-rollback.ts",
+      "before": "        await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);",
+      "after": "        await Promise.resolve(createdIds);",
       "because": "The free is gone but the error is still thrown, the status and body are still today's and the release still runs, so only the state assertion catches it: the objects under the minted campaign prefix survive (the row cascade at release hides the rows, which is why the test lists OBJECTS).",
       "command": [
         "env",
@@ -23,9 +23,9 @@
       "verdict": "caught"
     },
     {
-      "file": "apps/api/server/routes/campaigns/index.post.ts",
-      "before": "              await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);",
-      "after": "              await getAssetStore(scope).deleteAssets(targetSlug);",
+      "file": "apps/api/server/lib/campaign-rollback.ts",
+      "before": "        await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);",
+      "after": "        await getAssetStore(scope).deleteAssets(targetSlug);",
       "because": "the row's own mutation, in the shape that compiles: the whole campaign instead of createdIds. Under s3 deleteAssets takes no campaign-row lock and no version check, so the winning Save's version-named row and object are removed and the version dangles.",
       "command": [
         "env",
@@ -123,9 +123,9 @@
       "verdict": "caught"
     },
     {
-      "file": "apps/api/server/routes/campaigns/index.post.ts",
-      "before": "        if (createdIds.length > 0) {",
-      "after": "        if (createdIds.length >= 0) {",
+      "file": "apps/api/server/lib/campaign-rollback.ts",
+      "before": "  if (createdIds.length > 0) {",
+      "after": "  if (createdIds.length >= 0) {",
       "because": "The guard no longer skips an empty createdIds: the free is called with nothing to free (a needless store call on every failure that copied nothing), which only the 'free was never called' assertion sees.",
       "command": [
         "env",

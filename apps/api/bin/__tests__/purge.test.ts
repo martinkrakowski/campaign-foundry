@@ -144,12 +144,11 @@ describe("purge CLI (PT-9g3, D231)", () => {
     ]);
   });
 
-  test("sweep releases an org or user deletion row as not yet implemented", async () => {
+  test("sweep releases a user deletion row as not yet implemented", async () => {
     const db = stubDb();
     const lines: string[] = [];
     const claim = vi
       .fn()
-      .mockResolvedValueOnce(deletionRow("o1", "org", "acme"))
       .mockResolvedValueOnce(deletionRow("u1", "user", null))
       .mockResolvedValueOnce(undefined);
     const purge = vi.fn(); // must never be called for these kinds
@@ -157,23 +156,15 @@ describe("purge CLI (PT-9g3, D231)", () => {
     const { purged, failed } = await sweep(db, (line) => lines.push(line), claim, purge);
 
     expect(purged).toBe(0);
-    expect(failed).toBe(2);
+    expect(failed).toBe(1);
     expect(purge).not.toHaveBeenCalled();
-    expect(recordFailure).toHaveBeenCalledTimes(2);
-    expect(recordFailure).toHaveBeenCalledWith(
-      db,
-      "o1",
-      "org purge is not implemented yet (PT-9l/9m).",
-    );
+    expect(recordFailure).toHaveBeenCalledTimes(1);
     expect(recordFailure).toHaveBeenCalledWith(
       db,
       "u1",
       "user purge is not implemented yet (PT-9l/9m).",
     );
-    expect(lines).toEqual([
-      `  org o1: failed (org purge is not implemented yet (PT-9l/9m).)`,
-      `  user u1: failed (user purge is not implemented yet (PT-9l/9m).)`,
-    ]);
+    expect(lines).toEqual([`  user u1: failed (user purge is not implemented yet (PT-9l/9m).)`]);
   });
 
   test("sweep records a data error and continues for a campaign row with a null org_id", async () => {
