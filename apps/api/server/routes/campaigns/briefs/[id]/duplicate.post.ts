@@ -13,7 +13,7 @@ import {
   type ResolvedBriefRefs,
 } from "../../../../lib/brief-asset-refs.js";
 import { isExistsError, SYMLINK_WRITE_ERROR } from "../../../../lib/brief-files.js";
-import { objectStore } from "../../../../lib/config.js";
+import { rollbackReservedCampaign } from "../../../../lib/campaign-rollback.js";
 import { assertSafeId, parseBrief } from "../../../../lib/load-brief.js";
 import {
   copyPool,
@@ -376,40 +376,8 @@ export default defineEventHandler(async (event) => {
           return getBriefStore(scope).createBrief(brief, { teamId: sourceTeamId });
         });
       } catch (error) {
-        // The pool lives inside the same reserved directory `releaseCampaign`
-        // removes on fs (D177/D179): deleted first (a no-op if nothing was
-        // ever written), or its own `rmdir` would refuse a non-empty directory.
-        await withPoolLock(scope, targetSlug, () => deletePool(scope, targetSlug));
-        // The assets go BEFORE the release, by SLUG (PT-4b): `ObjectAssetStore` can only resolve
-        // the slug into the uuid its prefix is built from while the campaign row exists, and
-        // `FsAssetStore` keeps the files under `assets/inputs/<slug>/`.
-        //
-        // Only the ids THIS request created are freed (PT-9j, D237 a), never the whole campaign:
-        // under `s3` `freeUnreferencedAssets` locks the campaign row and keeps every id a
-        // committed version names, so a Save that won this slug keeps what it references and
-        // the rest of this request's copies still go. `FsAssetStore` cannot check that, so off
-        // `s3` the `hasVersion` question PT-4b introduced is still asked first: a second
-        // writer that has already versioned this slug owns its files, and NOT freeing is the safe
-        // direction. `campaignMeta` that throws or answers `undefined` is "not known to be
-        // safe" and frees nothing, and neither it nor the free may replace the original error.
-        if (createdIds.length > 0) {
-          try {
-            if (
-              objectStore() === "s3" ||
-              (await briefs.campaignMeta(targetSlug))?.hasVersion === false
-            ) {
-              await getAssetStore(scope).freeUnreferencedAssets(targetSlug, createdIds);
-            }
-          } catch (cleanup) {
-            console.warn(
-              `[campaigns] could not free the assets of "${targetSlug}" after a failed duplicate: ${errorMessage(cleanup)}`,
-            );
-          }
-        }
-        // `releaseCampaign` carries the same guard, independently: it refuses
-        // once a real, versioned brief exists for the slug (a concurrent Save
-        // won it).
-        await getBriefStore(scope).releaseCampaign(targetSlug);
+        // Undo the reservation and what this request copied: see `rollbackReservedCampaign`.
+        await rollbackReservedCampaign(scope, briefs, targetSlug, createdIds, "duplicate");
         throw error;
       }
     });
