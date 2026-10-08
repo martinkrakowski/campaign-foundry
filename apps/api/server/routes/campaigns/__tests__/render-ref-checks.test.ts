@@ -633,8 +633,12 @@ describe("the same two routes on pg + fs (staging) — the team check only (PT-4
 });
 
 describe("the same two routes on fs (no teams) — untouched (PT-4k2a, D210 d)", () => {
+  let delivery: ReturnType<typeof deliverySpy>;
+
   beforeEach(() => {
     setCapabilities({ motion: true });
+    delivery = deliverySpy();
+    setRunDelivery(delivery);
   });
 
   afterEach(async () => {
