@@ -94,13 +94,14 @@ export function render(
       parts.push(blockText);
       continue;
     }
-    const trimmed = cutTo40Lines(blockText);
-    if (trimmed !== blockText) {
-      const trimmedTokens = Math.ceil(trimmed.length / 4);
+    const trimmedText = cutTo40Lines(block.text);
+    if (trimmedText !== block.text) {
+      const trimmedBlockText = renderBlock({ ...block, text: trimmedText });
+      const trimmedTokens = Math.ceil(trimmedBlockText.length / 4);
       if (runningTokens + trimmedTokens <= maxTokens) {
         runningTokens += trimmedTokens;
         written++;
-        parts.push(trimmed);
+        parts.push(trimmedBlockText);
         continue;
       }
     }

@@ -105,10 +105,39 @@ describe("tier share and trimming", () => {
     const full = render(base, [big], 999999);
     const maxTokens = full.totalTokens - 1;
     const result = render(base, [big], maxTokens);
-    expect(result.text).toContain("cut at 40 lines for budget");
+    expect(result.text).toContain("cut at 40 lines for budget\n```");
+    expect(result.text.endsWith("```")).toBe(true);
     expect(result.text).toContain("bigFn");
     expect(result.blocksWritten).toBe(1);
     expect(result.blocksDropped).toBe(0);
+  });
+
+  test("a block trimmed for budget still closes its fence", () => {
+    const base = "base";
+    const longText = Array.from({ length: 100 }, (_, i) => `// line ${i}`).join("\n");
+    const big = (symbol: string) =>
+      makeBlock({ text: longText, symbol, startLine: 1, endLine: 100 });
+    const headerTokens = render(base, [], 999999).totalTokens;
+    const fullTokens = render(base, [big("a1")], 999999).totalTokens - headerTokens;
+    const trimBudget = fullTokens + headerTokens - 1;
+    const trimmedTokens = render(base, [big("a1")], trimBudget).totalTokens - headerTokens;
+    const maxTokens = headerTokens + 2 * trimmedTokens + 10;
+    const result = render(base, [big("a1"), big("a2")], maxTokens);
+    expect(result.blocksWritten).toBe(2);
+    expect(result.blocksDropped).toBe(0);
+    expect(result.text).toContain("cut at 40 lines for budget\n```");
+    const headersInsideFences: string[] = [];
+    let insideFence = false;
+    for (const line of result.text.split("\n")) {
+      if (/^`+$/.test(line)) {
+        insideFence = !insideFence;
+      } else if (insideFence && line.startsWith("## ")) {
+        headersInsideFences.push(line);
+      }
+    }
+    expect(headersInsideFences).toEqual([]);
+    expect(insideFence).toBe(false);
+    expect(result.text).toContain("## packages/repo/foo.ts:1-100 a2");
   });
 
   test("the output never exceeds the token budget with trimmed blocks and tier shares", () => {
