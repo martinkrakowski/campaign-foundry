@@ -281,17 +281,20 @@ describe("tier 4 collects an unchanged writer of the same table in a changed fil
       tableNames: new Set(["audit_log"]),
     };
     const blocks = collectBlocks(sources, diff);
-    const tier4 = blocks.filter((b) => b.tier === 4);
-    expect(tier4).toHaveLength(2);
-    const writeBlock = tier4.find((b) => b.symbol === "writeAudit")!;
-    expect(writeBlock.tier).toBe(4);
+    const tier7 = blocks.filter((b) => b.tier === 7);
+    expect(tier7).toHaveLength(3);
+    const writeBlock = tier7.find((b) => b.symbol === "writeAudit")!;
+    expect(writeBlock.tier).toBe(7);
     expect(writeBlock.path).toBe("packages/repo/audit.ts");
     expect(writeBlock.why).toBe(
-      "unchanged in packages/repo/audit.ts, also touches table audit_log",
+      "unchanged in packages/repo/audit.ts, 1 line(s) from a changed hunk",
     );
     expect(writeBlock.text).toContain("writeAudit");
-    const alsoBlock = tier4.find((b) => b.symbol === "alsoWritesAudit")!;
-    expect(alsoBlock.tier).toBe(4);
+    const alsoBlock = tier7.find((b) => b.symbol === "alsoWritesAudit")!;
+    expect(alsoBlock.tier).toBe(7);
+    expect(alsoBlock.why).toBe(
+      "unchanged in packages/repo/audit.ts, 1 line(s) from a changed hunk",
+    );
   });
 });
 
@@ -497,6 +500,36 @@ describe("collect blocks", () => {
     expect(blocks[3]?.path).toBe("packages/repo/b.ts");
     expect(blocks[3]?.startLine).toBe(2);
   });
+
+  test("the unchanged functions of a changed file rank after port implementations and before helpers", () => {
+    const sources = new Map([
+      ["ports/user.port.ts", "interface IUserRepo { findById(id: string): void; }"],
+      [
+        "packages/repo/repo.ts",
+        "class UserRepo implements IUserRepo {\n  findById(id: string) { return this.dbQuery(id); }\n}",
+      ],
+      ["packages/repo/auth.ts", "export const assertAllowed = (u: User) => u.role === 'admin';"],
+      ["packages/app/api.ts", "// changed in the hunk\nfunction staleHandler() { return 1; }"],
+    ]);
+    const diff: DiffInfo = {
+      files: [
+        fileEntry(
+          "packages/app/api.ts",
+          ["findById", "assertAllowed"],
+          [],
+          [{ baseStart: 1, baseCount: 1 }],
+        ),
+      ],
+      calledNames: new Set(["findById", "assertAllowed"]),
+      tableNames: new Set(),
+    };
+    const blocks = collectBlocks(sources, diff);
+    expect(blocks.map((b) => b.tier)).toEqual([1, 7, 2]);
+    expect(blocks[0]?.symbol).toBe("UserRepo.findById");
+    expect(blocks[1]?.symbol).toBe("staleHandler");
+    expect(blocks[1]?.why).toBe("unchanged in packages/app/api.ts, 1 line(s) from a changed hunk");
+    expect(blocks[2]?.symbol).toBe("assertAllowed");
+  });
 });
 
 describe("a declaration with no body is skipped and the rest is still collected", () => {
@@ -537,7 +570,7 @@ describe("table name filtering", () => {
     };
     const blocks = collectBlocks(sources, diff);
     expect(blocks.filter((b) => b.tier === 4)).toEqual([]);
-    expect(blocks.some((b) => b.symbol === "logUser")).toBe(false);
+    expect(blocks.some((b) => b.symbol === "logUser" && b.tier === 4)).toBe(false);
   });
 
   test("a table the base migrations create is still treated as a table", () => {
@@ -562,5 +595,175 @@ describe("table name filtering", () => {
     expect(tier6).toHaveLength(1);
     expect(tier6[0]?.symbol).toBe("orders");
     expect(tier6[0]?.path).toBe("apps/api/server/lib/db/migrations/0001.sql");
+  });
+});
+
+describe("tier 7 collects the unchanged functions of a changed file, nearest the hunk first", () => {
+  test("a changed file with no hunk contributes no unchanged-function block", () => {
+    // A mode-only change: the diff lists the file and has no changed line in it.
+    const sources = new Map([["packages/app/src/api.ts", "function first() {\n  return 1;\n}"]]);
+    const diff: DiffInfo = {
+      files: [fileEntry("packages/app/src/api.ts", [], [], [])],
+      calledNames: new Set(),
+      tableNames: new Set(),
+    };
+    const blocks = collectBlocks(sources, diff);
+    expect(blocks.filter((b) => b.tier === 7)).toEqual([]);
+    expect(blocks.some((b) => b.why.includes("Infinity"))).toBe(false);
+  });
+
+  test("the unchanged functions of a changed file are collected, nearest the hunk first", () => {
+    const sources = new Map([
+      [
+        "packages/app/src/api.ts",
+        "const helper = () => 1;\nfunction first() {\n  return 1;\n}\nfunction second() {\n  return 2;\n}\nfunction third() {\n  return 3;\n}\n// end",
+      ],
+    ]);
+    const diff: DiffInfo = {
+      files: [fileEntry("packages/app/src/api.ts", [], [], [{ baseStart: 5, baseCount: 1 }])],
+      calledNames: new Set(),
+      tableNames: new Set(),
+    };
+    const blocks = collectBlocks(sources, diff);
+    const tier7 = blocks.filter((b) => b.tier === 7);
+    expect(tier7).toHaveLength(2);
+    expect(tier7[0]?.symbol).toBe("first");
+    expect(tier7[0]?.startLine).toBe(2);
+    expect(tier7[0]?.endLine).toBe(4);
+    expect(tier7[0]?.why).toBe(
+      "unchanged in packages/app/src/api.ts, 1 line(s) from a changed hunk",
+    );
+    expect(tier7[0]?.text).toContain("first");
+    expect(tier7[1]?.symbol).toBe("third");
+    expect(tier7[1]?.startLine).toBe(8);
+    expect(tier7[1]?.endLine).toBe(10);
+    expect(tier7[1]?.why).toBe(
+      "unchanged in packages/app/src/api.ts, 3 line(s) from a changed hunk",
+    );
+    expect(tier7[1]?.text).toContain("third");
+    expect(tier7.some((b) => b.symbol === "second")).toBe(false);
+  });
+
+  test("a function that partly overlaps a hunk is not collected as unchanged", () => {
+    const sources = new Map([
+      [
+        "packages/app/src/api.ts",
+        "function before() {\n  return 1;\n}\n" +
+          "function partiallyCovered() {\n  // changed\n  return 2;\n}\n" +
+          "function after() {\n  return 3;\n}\n" +
+          "// end",
+      ],
+    ]);
+    const diff: DiffInfo = {
+      files: [fileEntry("packages/app/src/api.ts", [], [], [{ baseStart: 4, baseCount: 2 }])],
+      calledNames: new Set(),
+      tableNames: new Set(),
+    };
+    const blocks = collectBlocks(sources, diff);
+    const tier7 = blocks.filter((b) => b.tier === 7);
+    expect(tier7.some((b) => b.symbol === "partiallyCovered")).toBe(false);
+    expect(tier7.some((b) => b.symbol === "before")).toBe(true);
+    expect(tier7.some((b) => b.symbol === "after")).toBe(true);
+  });
+
+  test("a changed file that is not in the base tree contributes nothing", () => {
+    const sources = new Map([["packages/app/src/other.ts", "function other() { return 0; }"]]);
+    const diff: DiffInfo = {
+      files: [fileEntry("packages/app/src/api.ts", [], [], [{ baseStart: 1, baseCount: 1 }])],
+      calledNames: new Set(),
+      tableNames: new Set(),
+    };
+    const blocks = collectBlocks(sources, diff);
+    const tier7 = blocks.filter((b) => b.tier === 7);
+    expect(tier7).toHaveLength(0);
+  });
+});
+
+describe("tier 8 collects the exported functions of same-directory siblings of a changed route or component", () => {
+  test("the exported functions of a same-directory sibling of a changed route are collected", () => {
+    const sources = new Map([
+      [
+        "apps/api/server/routes/users.post.ts",
+        "export function create() { return 1; }\n" +
+          "export const update = () => 2;\n" +
+          "function privateFn() { return 3; }\n" +
+          "class Service { run() {} }",
+      ],
+      ["apps/api/server/routes/users.delete.ts", "export function remove() { return 4; }"],
+    ]);
+    const diff: DiffInfo = {
+      files: [
+        fileEntry("apps/api/server/routes/users.get.ts", [], [], [{ baseStart: 1, baseCount: 1 }]),
+        fileEntry(
+          "apps/api/server/routes/users.delete.ts",
+          [],
+          [],
+          [{ baseStart: 1, baseCount: 1 }],
+        ),
+        fileEntry("apps/api/server/routes/config", [], [], [{ baseStart: 1, baseCount: 1 }]),
+      ],
+      calledNames: new Set(),
+      tableNames: new Set(),
+    };
+    const blocks = collectBlocks(sources, diff);
+    const tier8 = blocks.filter((b) => b.tier === 8);
+    expect(tier8).toHaveLength(2);
+    expect(tier8.find((b) => b.symbol === "create")).toBeDefined();
+    expect(tier8.find((b) => b.symbol === "update")).toBeDefined();
+    expect(tier8.some((b) => b.symbol === "remove")).toBe(false);
+    expect(tier8.some((b) => b.symbol === "privateFn")).toBe(false);
+  });
+
+  test("a sibling in a sub-directory or outside routes and web is not collected", () => {
+    const sources = new Map([
+      ["apps/api/server/routes/v1/helper.ts", "export function sub() { return 1; }"],
+      ["apps/api/server/routes/foo.test.ts", "export function testFn() { return 3; }"],
+      ["packages/app/src/api.ts", "function api() {}"],
+      ["packages/app/src/helper.ts", "export function outside() { return 2; }"],
+    ]);
+    const diff: DiffInfo = {
+      files: [
+        fileEntry("apps/api/server/routes/api.get.ts", [], [], [{ baseStart: 1, baseCount: 1 }]),
+        fileEntry("packages/app/src/api.ts", [], [], [{ baseStart: 1, baseCount: 1 }]),
+      ],
+      calledNames: new Set(),
+      tableNames: new Set(),
+    };
+    const blocks = collectBlocks(sources, diff);
+    expect(blocks.filter((b) => b.tier === 8)).toHaveLength(0);
+  });
+
+  test("siblings with the same stem come before the others and no more than six are taken", () => {
+    const longDecl = Array.from({ length: 50 }, (_, i) => `  const v${i} = ${i};`).join("\n");
+    const sources = new Map([
+      ["apps/api/server/routes/echo.ts", "export function echo() { return 7; }"],
+      ["apps/api/server/routes/assets.delete.ts", "export function del() { return 2; }"],
+      ["apps/api/server/routes/delta.ts", "export function delta() { return 6; }"],
+      ["apps/api/server/routes/alpha.ts", "export function alpha() { return 3; }"],
+      ["apps/api/server/routes/charlie.ts", "export function charlie() { return 5; }"],
+      ["apps/api/server/routes/assets.long.ts", `export function longFn() {\n${longDecl}\n}`],
+      ["apps/api/server/routes/beta.ts", "export function beta() { return 4; }"],
+      ["apps/api/server/routes/assets.post.ts", "export function post() { return 1; }"],
+    ]);
+    const diff: DiffInfo = {
+      files: [
+        fileEntry("apps/api/server/routes/assets.get.ts", [], [], [{ baseStart: 1, baseCount: 1 }]),
+      ],
+      calledNames: new Set(),
+      tableNames: new Set(),
+    };
+    const blocks = collectBlocks(sources, diff);
+    const tier8 = blocks.filter((b) => b.tier === 8);
+    expect(tier8).toHaveLength(6);
+    expect(tier8[0]?.symbol).toBe("del");
+    expect(tier8[1]?.symbol).toBe("longFn");
+    expect(tier8[2]?.symbol).toBe("post");
+    expect(tier8[3]?.symbol).toBe("alpha");
+    expect(tier8[4]?.symbol).toBe("beta");
+    expect(tier8[5]?.symbol).toBe("charlie");
+    expect(tier8.some((b) => b.symbol === "delta")).toBe(false);
+    expect(tier8.some((b) => b.symbol === "echo")).toBe(false);
+    const longBlock = tier8.find((b) => b.symbol === "longFn");
+    expect(longBlock?.text).toContain("cut at 40 lines for budget");
   });
 });
