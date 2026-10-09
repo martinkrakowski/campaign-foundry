@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "lane": "FU-gate-failed-summary",
+  "mutations": [
+    {
+      "file": "scripts/gate.sh",
+      "before": "    | grep -E '^[[:space:]]*(Test Files|Tests)[[:space:]]+[1-9][0-9]* failed'",
+      "after": "    | grep -E '(Test Files|Tests)[[:space:]]+[1-9][0-9]* failed'",
+      "because": "the start-of-line anchor on the failed-tests pattern is dropped. Without the `^` anchor the pattern matches 'Tests 3 failed' anywhere in a line, so a green run that merely holds those words (a test title, a log line) is failed by the scan — violating N2. The mutates the clean-run test, which goes red on a non-zero status it expected to be 0.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/gate/__tests__/gate.test.ts",
+        "-t",
+        "a clean summary and a title that holds the word failed do not fail the gate"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate.sh",
+      "before": "    exit 96",
+      "after": "    :",
+      "because": "the scan result is ignored when deciding the gate's result: dropping the exit 96 so a step that exits 0 while its output reports failed tests is no longer promoted. The mutates the failed-tests scan test, which goes red on the status it expected to be 96.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/gate/__tests__/gate.test.ts",
+        "-t",
+        "a test step that exits 0 while its output reports failed tests fails the gate with code 96"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate.sh",
+      "before": "  if [ \"$code\" -eq 0 ] && [ \"${summary_failed:-0}\" -eq 1 ]; then",
+      "after": "  if [ \"${summary_failed:-0}\" -eq 1 ]; then",
+      "because": "the scan overrides a failing step's own code: dropping the exit-0 guard so a step that exits 3 while its output reports failed tests is promoted to 96 instead of keeping its own code. The mutates the failing-step test, which goes red on the status it expected to be 3.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/gate/__tests__/gate.test.ts",
+        "-t",
+        "a failing test step fails the gate with its own code whatever the scan finds"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
