@@ -3,7 +3,7 @@ import { basename, extname, join, relative, resolve } from "node:path";
 import { resolveAssetPath } from "@campaignfoundry/CreativeGeneration";
 import { blocksImport } from "./classify.js";
 import { hashBytes, isErrno, isExistsError } from "../brief-files.js";
-import type { AssetStorePort } from "../ports/asset-store.port.js";
+import type { AssetEntry, AssetStorePort } from "../ports/asset-store.port.js";
 import type { ScannedCampaign } from "./scan.js";
 import type { StepContext } from "./steps.js";
 
@@ -111,7 +111,7 @@ export interface WrittenAsset {
 async function reusedId(assets: AssetStorePort, slug: string, name: string): Promise<string> {
   const entries = await assets.listAssets(slug);
   const entry = entries.find((e) => e.name === name);
-  return entry!.id!;
+  return (entry as AssetEntry).id as string;
 }
 
 /**
@@ -120,6 +120,10 @@ async function reusedId(assets: AssetStorePort, slug: string, name: string): Pro
  * existing bytes are compared by sha256: equal bytes reuse that row (its id taken
  * from `listAssets`, never a guessed one), different bytes advance to the next candidate.
  */
+export function missingAsset(slug: string, name: string): Error {
+  return new Error(`asset ${name} of ${slug} has a row but its bytes cannot be read`);
+}
+
 export async function writeOrReuse(
   assets: AssetStorePort,
   slug: string,
@@ -133,19 +137,20 @@ export async function writeOrReuse(
     try {
       const written = await assets.writeAsset(slug, candidate, bytes);
       return {
-        id: written.id!,
+        id: written.id as string,
         name: candidate,
-        key: (await assets.assetObjectKey(slug, candidate))!,
+        key: (await assets.assetObjectKey(slug, candidate)) as string,
         reused: false,
       };
     } catch (error) {
       if (!isExistsError(error)) throw error;
       const existing = await assets.readAsset(slug, candidate);
-      if (hashBytes(existing!) === sourceSha) {
+      if (existing === undefined) throw missingAsset(slug, candidate);
+      if (hashBytes(existing) === sourceSha) {
         return {
           id: await reusedId(assets, slug, candidate),
           name: candidate,
-          key: (await assets.assetObjectKey(slug, candidate))!,
+          key: (await assets.assetObjectKey(slug, candidate)) as string,
           reused: true,
         };
       }

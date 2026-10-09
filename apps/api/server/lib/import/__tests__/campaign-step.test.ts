@@ -18,6 +18,7 @@ import { resolveRefTargets } from "../asset-step.js";
 import { importTenant } from "../import-tenant.js";
 import { getAssetStore, getBriefStore } from "../../ports/index.js";
 import { objectStoreClient } from "../../object-store/index.js";
+import type { AssetStorePort } from "../../ports/asset-store.port.js";
 import type { BriefStorePort } from "../../ports/brief-store.port.js";
 import type { SqlClient } from "../../db/sql-client.js";
 import type { ScannedCampaign } from "../scan.js";
@@ -1557,6 +1558,76 @@ describe("campaign-step: edge cases", () => {
       const result = (await importCampaign(deps, ctx, forged, expected)) as CampaignResult;
       expect(result.outcome).toBe("refused");
       expect(result.reason).toMatch(/changed since the digest/);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  function noReadAssets(base: AssetStorePort): AssetStorePort {
+    return new Proxy(base, {
+      get(target, prop, receiver) {
+        if (prop === "readAsset") return () => Promise.resolve(undefined);
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  }
+
+  test("an asset row whose bytes cannot be read refuses the campaign and names the asset", async () => {
+    const root = makeRoot();
+    try {
+      await seedCampaign(root, "camp", PNG2);
+      const { ctx, scanned, expected } = buildScanned(root, "camp", {
+        id: "camp",
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
+        ],
+      });
+      const deps: ImportDeps = {
+        briefs: getBriefStore(importTenant("local")),
+        assets: noReadAssets(getAssetStore(importTenant("local"))),
+      };
+      const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+      expect(result.outcome).toBe("refused");
+      expect(result.partial).toBeUndefined();
+      expect(result.reason).toMatch(
+        /asset logo\.png of camp has a row but its bytes cannot be read/,
+      );
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a write-path reuse that cannot read the existing bytes refuses partial and names the asset", async () => {
+    const root = makeRoot();
+    try {
+      const briefs = getBriefStore(importTenant("local"));
+      const realAssets = getAssetStore(importTenant("local"));
+      await briefs.createCampaign("camp");
+      await realAssets.writeAsset("camp", "logo.png", PNG2);
+      const { ctx, scanned, expected } = buildScanned(root, "camp", {
+        id: "camp",
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
+        ],
+      });
+      const deps: ImportDeps = { briefs, assets: noReadAssets(realAssets) };
+      const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+      expect(result.outcome).toBe("refused");
+      expect(result.partial).toBe(true);
+      expect(result.reason).toMatch(
+        /asset logo\.png of camp has a row but its bytes cannot be read/,
+      );
     } finally {
       dropRoot(root);
     }

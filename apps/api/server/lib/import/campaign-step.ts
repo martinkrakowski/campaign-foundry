@@ -9,6 +9,7 @@ import { UUID_PATTERN } from "../object-store/object-keys.js";
 import {
   candidateAt,
   countUnreferencedInputs,
+  missingAsset,
   resolveRefTargets,
   type RefTarget,
   type UnreferencedInputs,
@@ -16,7 +17,7 @@ import {
 } from "./asset-step.js";
 import { getAssetStore, getBriefStore } from "../ports/index.js";
 import type { AssetStorePort } from "../ports/asset-store.port.js";
-import type { BriefStorePort } from "../ports/brief-store.port.js";
+import type { BriefStorePort, StoredBrief } from "../ports/brief-store.port.js";
 import { parseBriefText } from "../load-brief.js";
 import { importTenant } from "./import-tenant.js";
 import { rewriteBriefRefs } from "./ref-rewrite.js";
@@ -177,7 +178,8 @@ async function reuseIdAt(
     const existing = byName.get(candidate);
     if (existing === undefined) return { missing: candidate };
     const stored = await assets.readAsset(slug, candidate);
-    if (hashBytes(stored!) === sourceSha) return existing;
+    if (stored === undefined) throw missingAsset(slug, candidate);
+    if (hashBytes(stored) === sourceSha) return existing;
   }
 }
 
@@ -211,7 +213,8 @@ export async function probeCampaign(
   }
   const rewritten = rewriteBriefRefs(files.brief, scanned.slug, refToId);
   const stored = await briefs.findBriefById(scanned.slug);
-  if (dumpBrief(rewritten) === dumpBrief(stored!.brief)) return { kind: "unchanged" };
+  if (dumpBrief(rewritten) === dumpBrief((stored as StoredBrief).brief))
+    return { kind: "unchanged" };
   return {
     kind: "refused",
     reason: `campaign ${scanned.slug} body differs from the rewritten source`,
