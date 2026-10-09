@@ -40,10 +40,20 @@
 # gates in two worktrees would each be handed a slot and each would write
 # manifests the other is reading.
 #
-# A coverage threshold failure fails the gate even when vitest exits 0: the
-# test:cov step's output is captured, replayed for the human, and scanned for
-# `ERROR: Coverage` — a piped read (M3) reported exit 0 while coverage failed,
-# and the scan is what stops the same failure arriving through a pipe.
+# A test runner that loses its exit code down a pipe reports failures on stdout
+# rather than in its status: the gate scans the test:cov step's captured output
+# for that case on every run, because a piped read can mask a real result. Two
+# scans live side by side in run_test_cov. The coverage scan still looks for
+# `ERROR: Coverage` (M3) — a threshold failure must fail the gate even when
+# vitest exits 0 — and a failed-tests scan now catches the same hazard for
+# vitest's own output: a step that exits 0 while its output holds `Test Files
+# <n> failed`, `Tests <n> failed` (n > 0), or vitest's sentence that it caught
+# unhandled errors. Neither scan can turn a real failure into a pass: a step
+# that exits non-zero fails the gate on its own code, unchanged (N1); only a 0
+# exit is promoted. When both fire on one step the stronger fact wins — the
+# failed-tests rule is named first and coverage is still mentioned — and the
+# gate exits 96. The test:cov step keeps its NAME under a profile, so both scans
+# wrap its command there too.
 #
 # `--profile <name>` is for a host whose tests cannot all be green (D187). It
 # replaces ONE cell — the test:cov step's command — with a `yarn vitest run`
