@@ -272,6 +272,102 @@ describe("yarn gate", () => {
     expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
   });
 
+  test("a test step that exits 0 while vitest reports unhandled errors fails the gate with code 96", () => {
+    const r = runGate(
+      ["--lane", "lane-b"],
+      stepsEnv([
+        [
+          "test:cov",
+          'printf "Vitest caught 1 unhandled error during the test run.\\nThis might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.\\n"',
+        ],
+      ]),
+    );
+    expect(r.status).toBe(96);
+    expect(r.stdout).toContain("<== test:cov: exit 0");
+    expect(r.stderr).toContain(
+      "gate: FAILED — step 'test:cov' exited 0 but its output reports unhandled errors",
+    );
+    expect(r.stderr).toContain("Vitest caught 1 unhandled error during the test run.");
+    expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
+  });
+
+  test("a clean summary and a title that holds the word failed do not fail the gate", () => {
+    const r = runGate(
+      ["--lane", "lane-b"],
+      stepsEnv([
+        [
+          "test:cov",
+          'printf " Test Files  3 passed (3)\\n      Tests  0 failed | 12 passed (12)\\n \\xe2\\x9c\\x93 a refund that failed is retried  12ms\\nstdout | x > Tests 3 failed earlier in this log line\\n[h3] [unhandled] H3Error: boom\\nUnhandled Rejection is handled by the app\\n"',
+        ],
+      ]),
+    );
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("<== test:cov: exit 0");
+    expect(r.stderr).not.toContain("exited 0 but its output reports");
+    expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
+  });
+
+  test("a failing test step fails the gate with its own code whatever the scan finds", () => {
+    // The scan runs on test:cov (so the summary is present and matched), but a
+    // non-zero exit keeps today's path and the step's own code — the scan can
+    // never override a step that already failed (N1).
+    const withSummary = runGate(
+      ["--lane", "lane-b"],
+      stepsEnv([
+        [
+          "test:cov",
+          'sh -c \'printf " Test Files  1 failed | 3 passed (4)\\n      Tests  1 failed | 10 passed (11)\\n"; exit 3\'',
+        ],
+      ]),
+    );
+    expect(withSummary.status).toBe(3);
+    expect(withSummary.stderr).toContain("FAILED at step 'test:cov' (exit 3)");
+    expect(withSummary.stderr).not.toContain("exited 0 but its output reports");
+
+    // No summary, same exit code: identical result.
+    const withoutSummary = runGate(
+      ["--lane", "lane-b"],
+      stepsEnv([["test:cov", 'sh -c "exit 3"']]),
+    );
+    expect(withoutSummary.status).toBe(3);
+    expect(withoutSummary.stderr).toContain("FAILED at step 'test:cov' (exit 3)");
+    expect(withoutSummary.stderr).not.toContain("exited 0 but its output reports");
+  });
+
+  test("the failed summary is found through ANSI colour codes", () => {
+    // Vitest colour-wraps its summary; the ESC bytes are real, the newlines are
+    // printf escapes, so the gate must strip colour before anchoring (N2/N3).
+    const C = "\u001b";
+    const cmd = `printf '${C}[31m Test Files  1 failed | 3 passed (4)${C}[0m\\n${C}[32m      Tests  1 failed | 10 passed (11)${C}[0m\\n'`;
+    const r = runGate(
+      ["--lane", "lane-b"],
+      stepsEnv([["test:cov", cmd]]),
+    );
+    expect(r.status).toBe(96);
+    expect(r.stdout).toContain("<== test:cov: exit 0");
+    expect(r.stderr).toContain("exited 0 but its output reports failed tests");
+    expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
+  });
+
+  test("the output scan applies under a profile as well", () => {
+    // The profile keeps the step's NAME, so run_test_cov still wraps whatever
+    // command the profile resolved to — the scan must fire there too.
+    const r = runGate(
+      ["--lane", "lane-b", "--profile", "midnight"],
+      {
+        ...stepsEnv([
+          [
+            "test:cov",
+            'printf " Test Files  1 failed | 3 passed (4)\\n      Tests  1 failed | 10 passed (11)\\n"',
+          ],
+        ]),
+        CF_GATE_TEST_PRINT_LISTING: "1",
+      },
+    );
+    expect(r.status).toBe(96);
+    expect(r.stderr).toContain("exited 0 but its output reports failed tests");
+  });
+
   test("a failing nitro prepare fails the guard, even with a stale manifest present", () => {
     const dir = scratch();
     const manifest = join(dir, "nitro-routes.d.ts");
