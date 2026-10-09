@@ -348,6 +348,30 @@ describe("resolveBriefAssetRefs copyOnly on pg plus fs (staging: D210 d, r2)", (
 
     expect(resolved.copyOnly).toEqual(new Map([[FRIEND, ["logo.png"]]]));
   });
+
+  test("resolveBriefAssetRefs on pg plus fs records an empty name list for a campaign named only by a bare-slash ref", async () => {
+    // A ref whose name collapses to nothing (`assets/inputs/<FRIEND>//`) is the
+    // sole ref into FRIEND — there is no companion name-bearing ref. The campaign
+    // still has to land in `copyOnly` with an empty name list so `copyBriefRefs`
+    // copies it with `only: []` (nothing) rather than treating it as "no entry".
+    const brief: CampaignBrief = {
+      ...storedBrief(RUN),
+      products: [
+        {
+          id: "p1",
+          name: "P1",
+          primaryColor: "#1473E3",
+          logoPath: DEMO_REF,
+          inputAsset: `assets/inputs/${FRIEND}//`,
+        },
+      ],
+    };
+
+    const resolved = await save(brief);
+
+    expect(resolved.copyFrom).toEqual([FRIEND]);
+    expect(resolved.copyOnly).toEqual(new Map([[FRIEND, []]]));
+  });
 });
 
 describe("resolveBriefAssetRefs copyOnly on fs (no teams: D210 d)", () => {
