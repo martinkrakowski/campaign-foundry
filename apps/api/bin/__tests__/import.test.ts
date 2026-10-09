@@ -283,7 +283,9 @@ describe("import CLI (PT-8a)", () => {
     const text = out.join("\n");
     expect(text).toContain("0  nothing was refused and nothing is partial");
     expect(text).toContain("1  at least one campaign is partial, or the run itself failed");
-    expect(text).toContain("3  nothing is partial and at least one campaign was refused before any write");
+    expect(text).toContain(
+      "3  nothing is partial and at least one campaign was refused before any write",
+    );
   });
 
   test("without injected IO the output goes to the process's own streams", async () => {

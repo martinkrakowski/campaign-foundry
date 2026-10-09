@@ -95,10 +95,7 @@ function isUnderRoot(abs: string, root: string): boolean {
  * (and joined with the base name) against the real roots; a parent that does not
  * exist is refused by name rather than silently accepted.
  */
-export async function checkResultPath(
-  path: string,
-  ctx: StepContext,
-): Promise<string | undefined> {
+export async function checkResultPath(path: string, ctx: StepContext): Promise<string | undefined> {
   const abs = resolve(path);
   const parent = dirname(abs);
   let realParent: string;
@@ -140,7 +137,8 @@ export async function describeResultRefusal(path: string): Promise<string> {
   } catch {
     return `--result ${JSON.stringify(path)} already exists`;
   }
-  const interrupted = `the result file ${JSON.stringify(path)} exists and has no summary ` +
+  const interrupted =
+    `the result file ${JSON.stringify(path)} exists and has no summary ` +
     `line: it is the record of an interrupted run. Keep it, and give this run a new --result path.`;
   if (text.trim().length === 0) return interrupted;
 
