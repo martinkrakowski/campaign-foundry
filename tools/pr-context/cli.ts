@@ -117,9 +117,12 @@ export async function runCli(io: PrContextCliIo): Promise<number> {
         `${dropped} dropped for budget, ${ms} ms -> ${args.out}`,
     );
   } catch (error) {
-    const msg = errorMessage(error);
+    const msg = errorMessage(error).replace(/\s+/g, " ").slice(0, 200);
     const result = render(args.base, [], 0);
-    await io.writeFile(args.out, `${result.text}\ncollector failed: ${msg.slice(0, 200)}`);
+    const line = hasSecret(msg)
+      ? "collector failed: (message withheld)"
+      : `collector failed: ${msg}`;
+    await io.writeFile(args.out, `${result.text}\n${line}`);
   }
   return 0;
 }

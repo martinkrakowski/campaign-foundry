@@ -226,7 +226,7 @@ describe("argument parsing edge cases", () => {
       ["ls-tree -r -z " + BASE]: [
         `100644 blob ${BLOB_PORT}\tpackages/repo/src/repo.port.ts`,
         `100644 blob ${BLOB_REPO}\tpackages/repo/src/repo.ts`,
-      ].join("\n"),
+      ].join("\x00"),
       ["cat-file --batch"]: catFileResponse([
         { sha: BLOB_PORT, content: portContent },
         { sha: BLOB_REPO, content: repoContent },
@@ -294,7 +294,7 @@ describe("argument parsing edge cases", () => {
       ["ls-tree -r -z " + BASE]: [
         `100644 blob ${BLOB_PORT}\tpackages/repo/src/repo.port.ts`,
         `100644 blob ${BLOB_REPO}\tpackages/repo/src/repo.ts`,
-      ].join("\n"),
+      ].join("\x00"),
       // Only BLOB_PORT is returned — BLOB_REPO is missing
       ["cat-file --batch"]: catFileResponse([
         { sha: BLOB_PORT, content: "interface IRepo { save(d: string): void; }" },
@@ -338,6 +338,34 @@ describe("argument parsing edge cases", () => {
     expect(code).toBe(0);
     expect(log.written).toHaveLength(1);
     expect(log.written[0]?.content).toContain("collector failed: string error");
+  });
+
+  test("a failure message is written on one line and never carries a secret-shaped string", async () => {
+    const secret = [PRIVATE_KEY_HEADER, "MIIEvQ", "ID"].join("\n");
+    const git: GitIo = {
+      run: async () => {
+        throw new Error(`git error line 1\n${secret}\ngit error line 3`);
+      },
+      runBytes: async () => {
+        throw new Error(`git error line 1\n${secret}\ngit error line 3`);
+      },
+    };
+    const log = makeWritten();
+    const code = await runCli({
+      argv: ["--base", BASE, "--head", HEAD, "--out", "/tmp/out.md"],
+      git,
+      writeFile: log.writeFile,
+      log: () => undefined,
+      logError: () => undefined,
+    });
+    expect(code).toBe(0);
+    expect(log.written).toHaveLength(1);
+    const content = log.written[0]?.content ?? "";
+    expect(content).toContain("collector failed: (message withheld)");
+    expect(content).not.toContain(PRIVATE_KEY_HEADER);
+    expect(content).not.toContain("MIIEvQ");
+    const failedLine = content.split("\n").find((l) => l.startsWith("collector failed:"));
+    expect(failedLine).toBe("collector failed: (message withheld)");
   });
 });
 
