@@ -74,3 +74,54 @@ describe("render", () => {
     expect(a.text).toBe(b.text);
   });
 });
+
+describe("tier share and trimming", () => {
+  test("one tier cannot take more than half the budget while another tier still has a block that fits", () => {
+    const base = "base";
+    const headerTokens = render(base, [], 999999).totalTokens;
+    const oneBlock = render(base, [makeBlock({ tier: 1, text: "x".repeat(100) })], 999999);
+    const blockTokens = oneBlock.totalTokens - headerTokens;
+    const maxTokens = headerTokens + 3 * blockTokens;
+    const result = render(
+      base,
+      [
+        makeBlock({ tier: 1, text: "x".repeat(100), symbol: "t1a" }),
+        makeBlock({ tier: 1, text: "x".repeat(100), symbol: "t1b" }),
+        makeBlock({ tier: 1, text: "x".repeat(100), symbol: "t1c" }),
+        makeBlock({ tier: 1, text: "x".repeat(100), symbol: "t1d" }),
+        makeBlock({ tier: 2, text: "x".repeat(100), symbol: "t2a" }),
+      ],
+      maxTokens,
+    );
+    expect(result.text).toContain("t2a");
+    expect(result.text).not.toContain("t1c");
+  });
+
+  test("a block that does not fit is written cut to 40 lines before it is dropped", () => {
+    const base = "base";
+    const headerTokens = render(base, [], 999999).totalTokens;
+    const longText = Array.from({ length: 50 }, (_, i) => `// line ${i}`).join("\n");
+    const big = makeBlock({ text: longText, symbol: "bigFn" });
+    const full = render(base, [big], 999999);
+    const maxTokens = full.totalTokens - 1;
+    const result = render(base, [big], maxTokens);
+    expect(result.text).toContain("cut at 40 lines for budget");
+    expect(result.text).toContain("bigFn");
+    expect(result.blocksWritten).toBe(1);
+    expect(result.blocksDropped).toBe(0);
+  });
+
+  test("the output never exceeds the token budget with trimmed blocks and tier shares", () => {
+    const base = "base";
+    const longText = Array.from({ length: 50 }, (_, i) => `// line ${i}`).join("\n");
+    const blocks = [
+      makeBlock({ tier: 1, text: longText, symbol: "big1" }),
+      makeBlock({ tier: 1, text: longText, symbol: "big2" }),
+      makeBlock({ tier: 2, text: longText, symbol: "big3" }),
+    ];
+    for (const budget of [200, 500, 1000]) {
+      const result = render(base, blocks, budget);
+      expect(Math.ceil(result.text.length / 4)).toBeLessThanOrEqual(budget);
+    }
+  });
+});

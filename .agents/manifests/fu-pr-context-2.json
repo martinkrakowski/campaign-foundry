@@ -57,6 +57,14 @@
       "because": "Step 1: tier 7 must skip decls that overlap a hunk; removing the overlap check lets a partly-overlapping function be collected as unchanged",
       "command": ["yarn", "vitest", "run", "tools/pr-context", "-t", "a function that partly overlaps a hunk is not collected as unchanged"],
       "verdict": "caught"
+    },
+    {
+      "file": "tools/pr-context/lib/render.ts",
+      "before": "  const tierShare = Math.floor(maxTokens / 2);",
+      "after": "  const tierShare = Number.MAX_SAFE_INTEGER;",
+      "because": "Step 2: the per-tier share caps each tier at 50%% of maxTokens in pass 1 so a later tier still gets a write; setting it to infinity lets one tier exhaust the whole budget and a later tier gets no block, which test D asserts against",
+      "command": ["yarn", "vitest", "run", "tools/pr-context", "-t", "one tier cannot take more than half the budget while another tier still has a block that fits"],
+      "verdict": "caught"
     }
   ]
 }

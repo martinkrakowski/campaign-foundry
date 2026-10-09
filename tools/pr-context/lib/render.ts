@@ -39,6 +39,12 @@ function renderBlock(block: CollectedBlock): string {
   );
 }
 
+function cutTo40Lines(text: string): string {
+  const lines = text.split("\n");
+  if (lines.length <= 40) return text;
+  return lines.slice(0, 40).join("\n") + "\n// … cut at 40 lines for budget";
+}
+
 export function render(
   base: string,
   blocks: readonly CollectedBlock[],
@@ -55,16 +61,50 @@ export function render(
   const headerChars = `${HEADER[0]}${base}\n${HEADER[1]}\n${HEADER[2]}\n${countsEstimate}`.length;
   let runningTokens = Math.ceil(headerChars / 4);
 
+  const tierShare = Math.floor(maxTokens / 2);
+
+  // Pass 1: take blocks in rank order, but stop a tier at its 50% share.
+  const deferred: CollectedBlock[] = [];
+  const tierTokens = new Map<number, number>();
   for (const block of blocks) {
     const blockText = renderBlock(block);
     const tokens = Math.ceil(blockText.length / 4);
     if (runningTokens + tokens > maxTokens) {
-      dropped++;
+      deferred.push(block);
       continue;
     }
+    const tierTotal = (tierTokens.get(block.tier) ?? 0) + tokens;
+    if (tierTotal > tierShare) {
+      deferred.push(block);
+      continue;
+    }
+    tierTokens.set(block.tier, tierTotal);
     runningTokens += tokens;
     written++;
     parts.push(blockText);
+  }
+
+  // Pass 2: fill what is left of the budget in rank order from deferred blocks.
+  for (const block of deferred) {
+    const blockText = renderBlock(block);
+    const tokens = Math.ceil(blockText.length / 4);
+    if (runningTokens + tokens <= maxTokens) {
+      runningTokens += tokens;
+      written++;
+      parts.push(blockText);
+      continue;
+    }
+    const trimmed = cutTo40Lines(blockText);
+    if (trimmed !== blockText) {
+      const trimmedTokens = Math.ceil(trimmed.length / 4);
+      if (runningTokens + trimmedTokens <= maxTokens) {
+        runningTokens += trimmedTokens;
+        written++;
+        parts.push(trimmed);
+        continue;
+      }
+    }
+    dropped++;
   }
 
   const header = [
