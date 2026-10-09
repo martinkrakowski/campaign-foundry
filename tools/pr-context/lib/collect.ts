@@ -112,7 +112,7 @@ function collectDecls(project: Project): Decl[] {
           startLine: method.getStartLineNumber(),
           endLine: method.getEndLineNumber(),
           text: cutTo120Lines(method.getText()),
-          bodyText: body ? body.getText() : method.getText(),
+          bodyText: body.getText(),
           className,
           implementsNames,
           kind: "method",
@@ -147,6 +147,7 @@ function collectDecls(project: Project): Decl[] {
         /* istanbul ignore next -- VariableDeclarations for arrow constants always have names when the initializer is an ArrowFunction */
         if (!name) continue;
         const arrowBody = init.getBody();
+        /* istanbul ignore next -- arrow functions always have a body */
         if (!arrowBody) continue;
         decls.push({
           filePath,
@@ -466,12 +467,32 @@ function tier6(
   return blocks;
 }
 
+function buildMigrationTables(sources: Map<string, string>): Set<string> {
+  const tables = new Set<string>();
+  const pattern = /\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?"?([a-z_][a-z0-9_]*)"?\s*\(/gi;
+  for (const [path, content] of sources) {
+    if (!path.endsWith(".sql")) continue;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(content)) !== null) {
+      tables.add(match[1]!.toLowerCase());
+    }
+  }
+  return tables;
+}
+
 export function collectBlocks(sources: Map<string, string>, diff: DiffInfo): CollectedBlock[] {
   const project = buildProject(sources);
   const decls = collectDecls(project);
   const interfaces = collectInterfaces(project);
   const nameReach = buildNameReach(diff);
   const tableReach = buildTableReach(diff);
+  // Only table names the base migrations actually CREATE TABLE count; a name
+  // that appears after "from" in a comment is not a table. N5.
+  const migrationTables = buildMigrationTables(sources);
+  const validTableNames = new Set(
+    [...diff.tableNames].filter((t) => migrationTables.has(t.toLowerCase())),
+  );
+  const filteredDiff: DiffInfo = { ...diff, tableNames: validTableNames };
 
   const accepted: CollectedBlock[] = [];
   const seen = new Set<string>();
@@ -480,14 +501,14 @@ export function collectBlocks(sources: Map<string, string>, diff: DiffInfo): Col
   acceptBlocks(accepted, seen, sortCandidates(tier1(decls, interfaces, nameReach)), diff);
   acceptBlocks(accepted, seen, sortCandidates(tier2(decls, nameReach)), diff);
   acceptBlocks(accepted, seen, sortCandidates(tier3(decls, changedSymbols, nameReach)), diff);
-  acceptBlocks(accepted, seen, sortCandidates(tier4(decls, diff, nameReach)), diff);
+  acceptBlocks(accepted, seen, sortCandidates(tier4(decls, filteredDiff, nameReach)), diff);
   acceptBlocks(
     accepted,
     seen,
     sortCandidates(tier5(decls, changedSymbols, interfaces, nameReach)),
     diff,
   );
-  acceptBlocks(accepted, seen, sortCandidates(tier6(sources, diff, tableReach)), diff);
+  acceptBlocks(accepted, seen, sortCandidates(tier6(sources, filteredDiff, tableReach)), diff);
 
   return accepted;
 }
