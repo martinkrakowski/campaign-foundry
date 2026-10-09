@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,11 +30,7 @@ import {
   describeResultRefusal,
   type CampaignEntry,
 } from "../apply.js";
-import {
-  importCampaignStep,
-  type HashedContext,
-  type CampaignResult,
-} from "../campaign-step.js";
+import { importCampaignStep, type HashedContext, type CampaignResult } from "../campaign-step.js";
 import { importTenant } from "../import-tenant.js";
 import { getAssetStore, getBriefStore, setAssetStore, setBriefStore } from "../../ports/index.js";
 import { objectStoreClient } from "../../object-store/index.js";
@@ -159,7 +163,14 @@ function planArgv(root: string, output: string, extra: readonly string[]): strin
 function parseResult(path: string): {
   header: { kind: string; switchedAt: string; orgId: string; digest: string };
   campaigns: CampaignEntry[];
-  summary?: { kind: string; created: number; completed: number; unchanged: number; refused: number; partial: boolean };
+  summary?: {
+    kind: string;
+    created: number;
+    completed: number;
+    unchanged: number;
+    refused: number;
+    partial: boolean;
+  };
 } {
   const lines = readFileSync(path, "utf8")
     .split("\n")
@@ -683,9 +694,13 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         `select id from asset where campaign_id=$1`,
         [entry!.minted.campaignId],
       );
-      expect(entry!.minted.assets.map((a) => a.id).sort()).toEqual(dbAssets.map((a) => a.id).sort());
+      expect(entry!.minted.assets.map((a) => a.id).sort()).toEqual(
+        dbAssets.map((a) => a.id).sort(),
+      );
       const listed = await env.objects.list(orgPrefix("local"));
-      expect(entry!.minted.assets.map((a) => a.key).sort()).toEqual(listed.map((o) => o.key).sort());
+      expect(entry!.minted.assets.map((a) => a.key).sort()).toEqual(
+        listed.map((o) => o.key).sort(),
+      );
     } finally {
       dropRoot(root);
       rmSync(result, { force: true });
@@ -720,9 +735,13 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         `select id, name from asset where org_id=$1`,
         ["local"],
       );
-      expect(entry!.minted.assets.map((a) => a.id).sort()).toEqual(dbAssets.map((a) => a.id).sort());
+      expect(entry!.minted.assets.map((a) => a.id).sort()).toEqual(
+        dbAssets.map((a) => a.id).sort(),
+      );
       const listed = await env.objects.list(orgPrefix("local"));
-      expect(entry!.minted.assets.map((a) => a.key).sort()).toEqual(listed.map((o) => o.key).sort());
+      expect(entry!.minted.assets.map((a) => a.key).sort()).toEqual(
+        listed.map((o) => o.key).sort(),
+      );
 
       // A second apply reuses the asset, so it is not listed as minted.
       env.reinstall();
@@ -812,7 +831,9 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
 
         // The file is still JSON Lines: a header and the first two campaigns, and
         // nothing past them (no summary line — the run never finished).
-        const lines = readFileSync(result, "utf8").split("\n").filter((l) => l.length > 0);
+        const lines = readFileSync(result, "utf8")
+          .split("\n")
+          .filter((l) => l.length > 0);
         expect(lines).toHaveLength(3);
         expect(JSON.parse(lines[0]).kind).toBe("header");
         expect(JSON.parse(lines[1]).kind).toBe("campaign");
@@ -840,14 +861,20 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         expectedHashes: new Map(),
       } as HashedContext;
       const step = vi.fn(
-        async (_ctx: StepContext, _campaign: PlannedCampaign): Promise<{ outcome: CampaignOutcome }> => ({
+        async (
+          _ctx: StepContext,
+          _campaign: PlannedCampaign,
+        ): Promise<{ outcome: CampaignOutcome }> => ({
           outcome: "created",
         }),
       );
       await writer.header();
       await applyCampaigns(
         hashedCtx,
-        [{ slug: "a", sourcePath: "x" }, { slug: "b", sourcePath: "y" }],
+        [
+          { slug: "a", sourcePath: "x" },
+          { slug: "b", sourcePath: "y" },
+        ],
         [step],
         async (entry: CampaignEntry) => writer.add(entry),
       );
@@ -874,11 +901,9 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       // The campaign mints to the DB and object store, then the result-line
       // append throws: the campaign's ids are still on stdout, but its line
       // is never written.
-      const spy = vi
-        .spyOn(ResultWriter.prototype, "add")
-        .mockImplementation(async function () {
-          throw new Error("simulated kill: result line not written");
-        });
+      const spy = vi.spyOn(ResultWriter.prototype, "add").mockImplementation(async function () {
+        throw new Error("simulated kill: result line not written");
+      });
       const { out, deps } = io();
       try {
         expect(
@@ -890,7 +915,9 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
 
       // The first result file holds only the header: the campaign's line was
       // never appended (no summary line either — the run never finished).
-      const firstLines = readFileSync(first, "utf8").split("\n").filter((l) => l.length > 0);
+      const firstLines = readFileSync(first, "utf8")
+        .split("\n")
+        .filter((l) => l.length > 0);
       expect(firstLines).toHaveLength(1);
       expect(JSON.parse(firstLines[0])).toMatchObject({ kind: "header", digest: real });
 
@@ -943,17 +970,18 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       // already on disk, and the run stops.
       const originalAdd = ResultWriter.prototype.add;
       let calls = 0;
-      const spy = vi.spyOn(ResultWriter.prototype, "add").mockImplementation(
-        async function (this: ResultWriter, entry: CampaignEntry) {
-          calls++;
-          if (calls === 3) {
-            const error: NodeJS.ErrnoException = new Error("no space left on device");
-            error.code = "ENOSPC";
-            throw error;
-          }
-          return originalAdd.call(this, entry);
-        },
-      );
+      const spy = vi.spyOn(ResultWriter.prototype, "add").mockImplementation(async function (
+        this: ResultWriter,
+        entry: CampaignEntry,
+      ) {
+        calls++;
+        if (calls === 3) {
+          const error: NodeJS.ErrnoException = new Error("no space left on device");
+          error.code = "ENOSPC";
+          throw error;
+        }
+        return originalAdd.call(this, entry);
+      });
       const { err, deps } = io();
       try {
         expect(
@@ -965,7 +993,9 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         expect(err[0]).toContain("ENOSPC");
 
         // The earlier lines are intact; nothing past the second campaign.
-        const lines = readFileSync(result, "utf8").split("\n").filter((l) => l.length > 0);
+        const lines = readFileSync(result, "utf8")
+          .split("\n")
+          .filter((l) => l.length > 0);
         expect(lines).toHaveLength(3);
         expect(JSON.parse(lines[0]).kind).toBe("header");
         expect(JSON.parse(lines[1]).kind).toBe("campaign");
@@ -1056,11 +1086,9 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         ...ctxWith(root, output),
         expectedHashes: new Map(),
       };
-      const step = vi.fn(
-        async (): Promise<CampaignResult> => {
-          throw new Error("step blew up");
-        },
-      );
+      const step = vi.fn(async (): Promise<CampaignResult> => {
+        throw new Error("step blew up");
+      });
       const entries: CampaignEntry[] = [];
       const counts = await applyCampaigns(
         hashedCtx,
@@ -1102,11 +1130,9 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       const writer = new ResultWriter(handle, SWITCHED_AT, "local", "digest");
       const closeSpy = vi.spyOn(writer, "close");
       await writer.header();
-      const step = vi.fn(
-        async (): Promise<CampaignResult> => {
-          throw new Error("step blew up");
-        },
-      );
+      const step = vi.fn(async (): Promise<CampaignResult> => {
+        throw new Error("step blew up");
+      });
       const counts = await applyCampaigns(
         { ...ctxWith(result, result), expectedHashes: new Map() },
         [{ slug: "camp", sourcePath: join(result, "camp.yaml") }],
@@ -1118,7 +1144,9 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       await writer.summary(counts);
       await writer.close();
       expect(closeSpy).toHaveBeenCalled();
-      const lines = readFileSync(result, "utf8").split("\n").filter((l) => l.length > 0);
+      const lines = readFileSync(result, "utf8")
+        .split("\n")
+        .filter((l) => l.length > 0);
       expect(lines).toHaveLength(3);
       expect(JSON.parse(lines[0]).kind).toBe("header");
       expect(JSON.parse(lines[1]).kind).toBe("campaign");
@@ -1481,13 +1509,14 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       env.reinstall();
       const originalAdd = ResultWriter.prototype.add;
       let calls = 0;
-      const spy = vi.spyOn(ResultWriter.prototype, "add").mockImplementation(
-        async function (this: ResultWriter, entry: CampaignEntry) {
-          calls++;
-          if (calls === 3) throw "simulated non-error write failure";
-          return originalAdd.call(this, entry);
-        },
-      );
+      const spy = vi.spyOn(ResultWriter.prototype, "add").mockImplementation(async function (
+        this: ResultWriter,
+        entry: CampaignEntry,
+      ) {
+        calls++;
+        if (calls === 3) throw "simulated non-error write failure";
+        return originalAdd.call(this, entry);
+      });
       const { err, deps } = io();
       try {
         expect(
