@@ -75,7 +75,7 @@ function fakeDeps(overrides: Partial<PushDeps> = {}): Recorded {
   const deps: PushDeps = {
     run: async (args, stdin) => {
       runs.push({ args, stdin });
-      return { code: 0, stderr: "" };
+      return { code: 0, stdout: "", stderr: "" };
     },
     sleep: async (ms) => {
       sleeps.push(ms);
@@ -555,7 +555,11 @@ describe("pushStatus", () => {
   test("a push failure is news every time and is never de-duplicated", async () => {
     const { deps, warns } = fakeDeps({
       warned: new Set<string>(),
-      run: async () => ({ code: 2, stderr: "waves push: the envelope is not valid:" }),
+      run: async () => ({
+        code: 2,
+        stdout: "",
+        stderr: "waves push: the envelope is not valid:",
+      }),
     });
     const status = statusOf([wave("W", [freshLane()])]);
     await pushStatus(deps, status, none);
@@ -586,8 +590,9 @@ describe("pushStatus", () => {
         { id: "other", derived: { alive: true }, disagreements: [] },
       ],
     });
-    expect(warns).toHaveLength(1);
+    expect(warns).toHaveLength(2);
     expect(warns[0]).toContain('"-lead"');
+    expect(warns[1]).toBe("waves push: W: pushed (the client printed no receive time)");
   });
 
   test("a wave whose every lane is refused is not pushed, and run is never called for it", async () => {
@@ -646,7 +651,7 @@ describe("pushStatus", () => {
       watch: 299,
       lastCycleMs: 250_000,
     });
-    expect(over.warns).toHaveLength(1);
+    expect(over.warns).toHaveLength(2);
     expect(over.runs[0]?.args).toContain("300");
 
     const under = fakeDeps();
@@ -655,7 +660,7 @@ describe("pushStatus", () => {
       watch: 10,
       lastCycleMs: 250_000,
     });
-    expect(under.warns).toEqual([]);
+    expect(under.warns).toEqual(["waves push: W: pushed (the client printed no receive time)"]);
     expect(under.runs[0]?.args).toContain("250");
   });
 
@@ -684,6 +689,7 @@ describe("pushStatus", () => {
     const { deps, warns } = fakeDeps({
       run: async () => ({
         code: 2,
+        stdout: "",
         stderr: "\n  waves push: the envelope is not valid:\n  lanes[0].seat\n\n",
       }),
     });
@@ -695,12 +701,18 @@ describe("pushStatus", () => {
 
   test("three stderr lines is the whole excerpt, and 300 characters is the hard cut", async () => {
     const { deps, warns } = fakeDeps({
-      run: async () => ({ code: 1, stderr: `one\ntwo\nthree\nfour\n${"x".repeat(400)}` }),
+      run: async () => ({
+        code: 1,
+        stdout: "",
+        stderr: `one\ntwo\nthree\nfour\n${"x".repeat(400)}`,
+      }),
     });
     await pushStatus(deps, statusOf([wave("W", [lane()])]), named("W"));
     expect(warns[0]).toBe("waves push: W: exit 1: one | two | three");
 
-    const long = fakeDeps({ run: async () => ({ code: 1, stderr: "y".repeat(500) }) });
+    const long = fakeDeps({
+      run: async () => ({ code: 1, stdout: "", stderr: "y".repeat(500) }),
+    });
     await pushStatus(long.deps, statusOf([wave("W", [lane()])]), named("W"));
     expect(long.warns[0]).toBe(`waves push: W: exit 1: ${"y".repeat(300)}`);
   });
@@ -711,9 +723,11 @@ describe("pushStatus", () => {
       run: async (args) => {
         const id = String(args[2]);
         seen.push(id);
-        if (id === "A") return { code: 2, stderr: "waves push: the envelope is not valid:" };
+        if (id === "A") {
+          return { code: 2, stdout: "", stderr: "waves push: the envelope is not valid:" };
+        }
         if (id === "B") throw new Error("spawn waves ENOENT");
-        return { code: 0, stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
       },
     });
     const pushed = await pushStatus(
@@ -725,6 +739,7 @@ describe("pushStatus", () => {
     expect(warns).toEqual([
       "waves push: A: exit 2: waves push: the envelope is not valid:",
       "waves push: B: spawn waves ENOENT",
+      "waves push: C: pushed (the client printed no receive time)",
     ]);
     expect(pushed).toBe(1);
   });
@@ -742,7 +757,7 @@ describe("pushStatus", () => {
   test("it resolves with the number of waves the service took", async () => {
     const codes: Record<string, number> = { A: 0, B: 2, C: 0 };
     const { deps } = fakeDeps({
-      run: async (args) => ({ code: codes[String(args[2])] ?? 0, stderr: "" }),
+      run: async (args) => ({ code: codes[String(args[2])] ?? 0, stdout: "", stderr: "" }),
     });
     const pushed = await pushStatus(
       deps,
@@ -750,6 +765,59 @@ describe("pushStatus", () => {
       named("A", "B", "C"),
     );
     expect(pushed).toBe(2);
+  });
+
+  test("a push the service took says the client's line with the receive time", async () => {
+    const { deps, warns } = fakeDeps({
+      run: async () => ({
+        code: 0,
+        stdout: "pushed campaign-foundry/w1 at 2026-10-09T00:00:00.000Z\n",
+        stderr: "",
+      }),
+    });
+    const pushed = await pushStatus(deps, statusOf([wave("W", [freshLane()])]), named("W"));
+    expect(warns).toEqual([
+      "waves push: W: pushed campaign-foundry/w1 at 2026-10-09T00:00:00.000Z",
+    ]);
+    expect(pushed).toBe(1);
+  });
+
+  test("a push the service took with nothing on stdout still says it was pushed", async () => {
+    const empty = fakeDeps({ run: async () => ({ code: 0, stdout: "", stderr: "" }) });
+    await pushStatus(empty.deps, statusOf([wave("W", [freshLane()])]), named("W"));
+    expect(empty.warns).toEqual(["waves push: W: pushed (the client printed no receive time)"]);
+
+    const blank = fakeDeps({ run: async () => ({ code: 0, stdout: "  \n", stderr: "" }) });
+    await pushStatus(blank.deps, statusOf([wave("W", [freshLane()])]), named("W"));
+    expect(blank.warns).toEqual(["waves push: W: pushed (the client printed no receive time)"]);
+  });
+
+  test("a refused push says the refusal and no confirming line", async () => {
+    const { deps, warns } = fakeDeps({
+      run: async () => ({ code: 2, stdout: "pushed x/y at z", stderr: "nope" }),
+    });
+    const pushed = await pushStatus(deps, statusOf([wave("W", [freshLane()])]), named("W"));
+    expect(warns).toEqual(["waves push: W: exit 2: nope"]);
+    expect(warns.some((text) => text.includes("pushed x/y"))).toBe(false);
+    expect(pushed).toBe(0);
+  });
+
+  test("the confirming line is said on every tick, not once", async () => {
+    const { deps, warns } = fakeDeps({
+      warned: new Set<string>(),
+      run: async () => ({
+        code: 0,
+        stdout: "pushed campaign-foundry/w1 at 2026-10-09T00:00:00.000Z\n",
+        stderr: "",
+      }),
+    });
+    const status = statusOf([wave("W", [freshLane()])]);
+    await pushStatus(deps, status, named("W"));
+    await pushStatus(deps, status, named("W"));
+    expect(warns).toEqual([
+      "waves push: W: pushed campaign-foundry/w1 at 2026-10-09T00:00:00.000Z",
+      "waves push: W: pushed campaign-foundry/w1 at 2026-10-09T00:00:00.000Z",
+    ]);
   });
 
   test("no selected wave means run is never called at all", async () => {
@@ -761,13 +829,13 @@ describe("pushStatus", () => {
   test("a --watch near the cap warns once, because the service will read the waves stale", async () => {
     const over = fakeDeps();
     await pushStatus(over.deps, statusOf([wave("W", [lane()])]), { waves: ["W"], watch: 299 });
-    expect(over.warns).toHaveLength(1);
+    expect(over.warns).toHaveLength(2);
     expect(over.warns[0]).toContain("stale between pushes");
     expect(over.runs[0]?.args).toEqual(["push", "--wave", "W", "--stdin", "--interval", "300"]);
 
     const exact = fakeDeps();
     await pushStatus(exact.deps, statusOf([wave("W", [lane()])]), { waves: ["W"], watch: 298 });
-    expect(exact.warns).toEqual([]);
+    expect(exact.warns).toEqual(["waves push: W: pushed (the client printed no receive time)"]);
     expect(exact.runs[0]?.args).toContain("300");
   });
 
@@ -828,7 +896,7 @@ let lastCall: ExecCall;
  * closed-pipe test able to fail.
  */
 function stubExec(
-  outcome: (call: ExecCall) => [ExecError | null, string],
+  outcome: (call: ExecCall) => [ExecError | null, string, string?],
   onTick?: (call: ExecCall) => void,
   withStdin = true,
 ): void {
@@ -850,8 +918,8 @@ function stubExec(
       lastCall = { file, args, options, stdin, written };
       queueMicrotask(() => {
         onTick?.(lastCall);
-        const [error, stderr] = outcome(lastCall);
-        callback(error, "", stderr);
+        const [error, stdout = "", stderr = ""] = outcome(lastCall);
+        callback(error, stdout, stderr);
       });
       return lastCall;
     },
@@ -902,15 +970,32 @@ describe("realPushDeps — the process-level wiring", () => {
 
   test("a client with no stdin pipe still settles from the callback", async () => {
     stubExec(() => [null, ""], undefined, false);
-    await expect(deps.run([], "{}")).resolves.toEqual({ code: 0, stderr: "" });
+    await expect(deps.run([], "{}")).resolves.toEqual({ code: 0, stdout: "", stderr: "" });
     expect(lastCall.stdin).toBeNull();
   });
 
   test("a non-zero exit resolves with the code and its stderr — it is an answer, not a failure", async () => {
-    stubExec(() => [execExit(2), "waves push: the envelope is not valid:"]);
+    stubExec(() => [execExit(2), "", "waves push: the envelope is not valid:"]);
     await expect(deps.run([], "{}")).resolves.toEqual({
       code: 2,
+      stdout: "",
       stderr: "waves push: the envelope is not valid:",
+    });
+  });
+
+  test("the client's stdout reaches the caller on exit 0 and on a numeric exit", async () => {
+    stubExec(() => [null, "pushed campaign-foundry/w1 at 2026-10-09T00:00:00.000Z\n", ""]);
+    await expect(deps.run([], "{}")).resolves.toEqual({
+      code: 0,
+      stdout: "pushed campaign-foundry/w1 at 2026-10-09T00:00:00.000Z\n",
+      stderr: "",
+    });
+
+    stubExec(() => [execExit(2), "pushed x/y at z", "nope"]);
+    await expect(deps.run([], "{}")).resolves.toEqual({
+      code: 2,
+      stdout: "pushed x/y at z",
+      stderr: "nope",
     });
   });
 
@@ -929,12 +1014,16 @@ describe("realPushDeps — the process-level wiring", () => {
 
   test("a closed stdin pipe is not an uncaught exception (the client exits before reading)", async () => {
     stubExec(
-      () => [execExit(2), "usage: waves push"],
+      () => [execExit(2), "", "usage: waves push"],
       (call) => {
         call.stdin?.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
       },
     );
-    await expect(deps.run([], "{}")).resolves.toEqual({ code: 2, stderr: "usage: waves push" });
+    await expect(deps.run([], "{}")).resolves.toEqual({
+      code: 2,
+      stdout: "",
+      stderr: "usage: waves push",
+    });
     expect(lastCall.stdin?.listenerCount("error")).toBe(1);
   });
 
