@@ -1,4 +1,4 @@
-import { open } from "node:fs/promises";
+import { open, readFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { digestSourceFiles, planDigest, type DigestFile } from "./digest.js";
@@ -104,6 +104,44 @@ export function checkResultPath(path: string, ctx: StepContext): string | undefi
  */
 export async function openResult(path: string): Promise<FileHandle> {
   return open(path, "wx");
+}
+
+/**
+ * Classify an existing `--result` path so `apply` can refuse with a message that
+ * tells the operator whether the file looks like an interrupted run (D229): an
+ * empty file, or one whose first line is a `header` and which has no `summary`
+ * line. Anything else — a completed run (it has a summary) or foreign content —
+ * is simply "already exists". The file is never read past this check, never
+ * deleted, never overwritten.
+ */
+export async function describeResultRefusal(path: string): Promise<string> {
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch {
+    return `--result ${JSON.stringify(path)} already exists`;
+  }
+  const interrupted = `the result file ${JSON.stringify(path)} exists and has no summary ` +
+    `line: it is the record of an interrupted run. Keep it, and give this run a new --result path.`;
+  if (text.trim().length === 0) return interrupted;
+
+  const lines = text.split("\n").filter((line) => line.length > 0);
+  let hasHeader = false;
+  let hasSummary = false;
+  for (const line of lines) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      // Not JSON Lines: neither an interrupted run nor ours to interpret.
+      return `--result ${JSON.stringify(path)} already exists`;
+    }
+    const kind = (parsed as { kind?: unknown })?.kind;
+    if (kind === "header") hasHeader = true;
+    else if (kind === "summary") hasSummary = true;
+  }
+  if (hasHeader && !hasSummary) return interrupted;
+  return `--result ${JSON.stringify(path)} already exists`;
 }
 
 /** One campaign's row in the result file (D229/D221). */

@@ -445,6 +445,73 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
     }
   });
 
+  test("apply names an interrupted run's result file and refuses to overwrite it", async () => {
+    const { root, output } = sampleTree();
+    const result = freshResult("11b");
+    try {
+      const real = await replannedDigest(root, output);
+      // Seed an interrupted run: a header and a campaign line, with no summary.
+      const handle = await open(result, "wx");
+      const writer = new ResultWriter(handle, SWITCHED_AT, "local", real);
+      await writer.header();
+      await writer.add({
+        slug: "camp",
+        outcome: "created",
+        minted: { campaignId: "dead", assets: [] },
+        unreferencedInputs: { count: 0, names: [] },
+      });
+      await writer.close();
+      const seed = readFileSync(result, "utf8");
+
+      env.reinstall();
+      const { err, deps } = io();
+      expect(
+        await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+      ).toBe(1);
+      expect(err[0]).toBe(
+        `the result file ${JSON.stringify(result)} exists and has no summary line: ` +
+          "it is the record of an interrupted run. Keep it, and give this run a new --result path.",
+      );
+      // The file is neither deleted nor rewritten.
+      expect(readFileSync(result, "utf8")).toBe(seed);
+      expect(await counts(env)).toEqual({ campaigns: 0, assets: 0, versions: 0, puts: 0 });
+    } finally {
+      dropRoot(root);
+      rmSync(result, { force: true });
+    }
+  });
+
+  test("a complete result file is refused as already existing", async () => {
+    const { root, output } = sampleTree();
+    const result = freshResult("11c");
+    try {
+      const real = await replannedDigest(root, output);
+      const handle = await open(result, "wx");
+      const writer = new ResultWriter(handle, SWITCHED_AT, "local", real);
+      await writer.header();
+      await writer.add({
+        slug: "camp",
+        outcome: "unchanged",
+        minted: { assets: [] },
+        unreferencedInputs: { count: 0, names: [] },
+      });
+      await writer.summary({ created: 0, completed: 0, unchanged: 1, refused: 0, partial: false });
+      await writer.close();
+      const seed = readFileSync(result, "utf8");
+
+      env.reinstall();
+      const { err, deps } = io();
+      expect(
+        await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+      ).toBe(1);
+      expect(err[0]).toBe(`--result ${JSON.stringify(result)} already exists`);
+      expect(readFileSync(result, "utf8")).toBe(seed);
+    } finally {
+      dropRoot(root);
+      rmSync(result, { force: true });
+    }
+  });
+
   test("apply refuses a result path under the project root or the output root", async () => {
     const { root, output } = sampleTree();
     try {

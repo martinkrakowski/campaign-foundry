@@ -1,14 +1,15 @@
 import { pathToFileURL } from "node:url";
+import { existsSync } from "node:fs";
 import { writeFile, type FileHandle } from "node:fs/promises";
 import { errorMessage } from "@campaignfoundry/shared";
 import { database, resetDatabase } from "../server/lib/db/database.js";
 import { databaseSettings, storeBackend, objectStore } from "../server/lib/config.js";
-import { isExistsError } from "../server/lib/brief-files.js";
 import { resolveSource, type SourceFlags } from "../server/lib/import/source.js";
 import {
   applyCampaigns,
   applyGuards,
   checkResultPath,
+  describeResultRefusal,
   openResult,
   planProbes,
   replan,
@@ -281,13 +282,11 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
       );
       return 1;
     }
-    try {
-      handle = await openResult(flags.result!);
-    } catch (error) {
-      if (!isExistsError(error)) throw error;
-      io.stderr(`--result ${JSON.stringify(flags.result)} already exists`);
+    if (existsSync(flags.result!)) {
+      io.stderr(await describeResultRefusal(flags.result!));
       return 1;
     }
+    handle = await openResult(flags.result!);
     const writer = new ResultWriter(handle, switchedAtIso, ctx.orgId, replanned.digest);
     const hashedCtx: HashedContext = { ...ctx, expectedHashes: replanned.expectedHashes };
     const resultPath = flags.result;
