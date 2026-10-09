@@ -452,4 +452,23 @@ describe("copy-referenced-only on pg plus fs (PT-9k, D238)", () => {
     expect(res.status).toBe(201);
     expect((await namesOf(targetSlug)).sort()).toEqual(["logo.png"]);
   });
+
+  test("save route on pg plus fs copies nothing from a campaign named only by a bare-slash ref", async () => {
+    const sourceSlug = unique("source-bare");
+    const targetSlug = unique("target-bare");
+    await ownerStore.createCampaign(sourceSlug, { teamId: "t1" });
+    await store().writeAsset(sourceSlug, "logo.png", PNG);
+    await store().writeAsset(sourceSlug, "alt.png", PNG_ALT);
+    await store().writeAsset(sourceSlug, "bg.png", PNG_ALT2);
+    await ownerStore.createCampaign(targetSlug, { teamId: "t1" });
+    const baseline = (await namesOf(sourceSlug)).sort();
+    const copy = vi.spyOn(FsAssetStore.prototype, "copyAssets");
+
+    const res = await post(ONLY_T1, baseBrief(targetSlug, `assets/inputs/${sourceSlug}//`));
+    expect(res.status).toBe(201);
+
+    expect(await namesOf(targetSlug)).toEqual([]);
+    expect(copy).toHaveBeenCalledWith(sourceSlug, targetSlug, { only: [] });
+    expect((await namesOf(sourceSlug)).sort()).toEqual(baseline);
+  });
 });
