@@ -605,31 +605,30 @@ run_test_cov() {
   if grep -q "ERROR: Coverage" "$COVLOG"; then
     cov_failed=1
   fi
-  # Scan the captured output for a test runner that reported failures while
-  # exiting 0: a pipe can hide the failure code the same way coverage can
-  # (M3). The scan only applies to test:cov and only matters for an exit 0 —
-  # a step that already failed keeps today's path (N1). ANSI colour is stripped
-  # first (POSIX sh has no $[..]) so the patterns anchor on vitest's own
-  # summary lines / unhandled-error sentence at the start of a line.
-  if [ "$code" -eq 0 ]; then
-    ESC=$(printf '\033')
-    CLEANED=$(sed "s/${ESC}\[[0-9;]*m//g" "$COVLOG")
+  # Scan the captured output for a test runner that reported failures or
+  # unhandled errors: a pipe can hide the failure code the same way coverage
+  # can (M3). The scan only applies to test:cov; whether it promotes the step
+  # is decided where the gate picks its result, gated on an exit 0 THERE so a
+  # step that already failed keeps today's path and code (N1). ANSI colour is
+  # stripped first (POSIX sh has no $[..]) so the patterns anchor on vitest's
+  # own summary lines / unhandled-error sentence at the start of a line.
+  ESC=$(printf '\033')
+  CLEANED=$(sed "s/${ESC}\[[0-9;]*m//g" "$COVLOG")
+  line=$(printf '%s\n' "$CLEANED" \
+    | grep -E '^[[:space:]]*(Test Files|Tests)[[:space:]]+[1-9][0-9]* failed' \
+    | head -n1)
+  if [ -n "$line" ]; then
+    summary_failed=1
+    summary_kind="failed tests"
+    summary_reason="$line"
+  else
     line=$(printf '%s\n' "$CLEANED" \
-      | grep -E '^[[:space:]]*(Test Files|Tests)[[:space:]]+[1-9][0-9]* failed' \
+      | grep -E '^[[:space:]]*Vitest caught [0-9][0-9]* unhandled error' \
       | head -n1)
     if [ -n "$line" ]; then
       summary_failed=1
-      summary_kind="failed tests"
+      summary_kind="unhandled errors"
       summary_reason="$line"
-    else
-      line=$(printf '%s\n' "$CLEANED" \
-        | grep -E '^[[:space:]]*Vitest caught [0-9][0-9]* unhandled error' \
-        | head -n1)
-      if [ -n "$line" ]; then
-        summary_failed=1
-        summary_kind="unhandled errors"
-        summary_reason="$line"
-      fi
     fi
   fi
   rm -f "$COVLOG"
