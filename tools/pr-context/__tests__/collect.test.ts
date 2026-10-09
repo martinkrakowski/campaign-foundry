@@ -500,6 +500,36 @@ describe("collect blocks", () => {
     expect(blocks[3]?.path).toBe("packages/repo/b.ts");
     expect(blocks[3]?.startLine).toBe(2);
   });
+
+  test("the unchanged functions of a changed file rank after port implementations and before helpers", () => {
+    const sources = new Map([
+      ["ports/user.port.ts", "interface IUserRepo { findById(id: string): void; }"],
+      [
+        "packages/repo/repo.ts",
+        "class UserRepo implements IUserRepo {\n  findById(id: string) { return this.dbQuery(id); }\n}",
+      ],
+      ["packages/repo/auth.ts", "export const assertAllowed = (u: User) => u.role === 'admin';"],
+      ["packages/app/api.ts", "// changed in the hunk\nfunction staleHandler() { return 1; }"],
+    ]);
+    const diff: DiffInfo = {
+      files: [
+        fileEntry(
+          "packages/app/api.ts",
+          ["findById", "assertAllowed"],
+          [],
+          [{ baseStart: 1, baseCount: 1 }],
+        ),
+      ],
+      calledNames: new Set(["findById", "assertAllowed"]),
+      tableNames: new Set(),
+    };
+    const blocks = collectBlocks(sources, diff);
+    expect(blocks.map((b) => b.tier)).toEqual([1, 7, 2]);
+    expect(blocks[0]?.symbol).toBe("UserRepo.findById");
+    expect(blocks[1]?.symbol).toBe("staleHandler");
+    expect(blocks[1]?.why).toBe("unchanged in packages/app/api.ts, 1 line(s) from a changed hunk");
+    expect(blocks[2]?.symbol).toBe("assertAllowed");
+  });
 });
 
 describe("a declaration with no body is skipped and the rest is still collected", () => {
