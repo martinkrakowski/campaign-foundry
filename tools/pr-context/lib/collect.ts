@@ -1,6 +1,6 @@
 import { Project, Node, SyntaxKind } from "ts-morph";
 import type { DiffInfo } from "./diff.js";
-import { safePath } from "./paths.js";
+import { safePath, isCollectable } from "./paths.js";
 
 export interface CollectedBlock {
   readonly tier: number;
@@ -46,6 +46,12 @@ function cutTo120Lines(text: string): string {
   const l = text.split("\n");
   if (l.length <= 120) return text;
   return l.slice(0, 120).join("\n") + "\n// … cut at 120 lines";
+}
+
+function cutTo40Lines(text: string): string {
+  const lines = text.split("\n");
+  if (lines.length <= 40) return text;
+  return lines.slice(0, 40).join("\n") + "\n// … cut at 40 lines for budget";
 }
 
 function escapeRegex(s: string): string {
@@ -480,7 +486,11 @@ function buildMigrationTables(sources: Map<string, string>): Set<string> {
   return tables;
 }
 
-function distanceToHunk(start: number, end: number, range: { baseStart: number; baseCount: number }): number {
+function distanceToHunk(
+  start: number,
+  end: number,
+  range: { baseStart: number; baseCount: number },
+): number {
   const hEnd = range.baseStart + range.baseCount - 1;
   if (end < range.baseStart) return range.baseStart - end;
   if (start > hEnd) return start - hEnd;
@@ -526,6 +536,61 @@ function tier7(decls: Decl[], diff: DiffInfo): BlockCandidate[] {
   });
 }
 
+function isRouteOrWebPath(path: string): boolean {
+  return path.startsWith("apps/api/server/routes/") || path.startsWith("apps/web/src/");
+}
+
+function getStem(baseName: string): string {
+  const dotIndex = baseName.indexOf(".");
+  return dotIndex === -1 ? baseName : baseName.slice(0, dotIndex);
+}
+
+// Tier 8 ranks last: same-directory siblings of a changed route or component.
+function tier8(decls: Decl[], sources: Map<string, string>, diff: DiffInfo): BlockCandidate[] {
+  const changedPaths = new Set(diff.files.map((f) => f.path));
+  const blocks: BlockCandidate[] = [];
+  for (const file of diff.files) {
+    if (!isRouteOrWebPath(file.path)) continue;
+    const dir = file.path.substring(0, file.path.lastIndexOf("/"));
+    const changedStem = getStem(file.path.split("/").pop()!);
+    const siblings: string[] = [];
+    for (const sibling of sources.keys()) {
+      if (!isCollectable(sibling)) continue;
+      if (sibling === file.path) continue;
+      if (changedPaths.has(sibling)) continue;
+      const siblingDir = sibling.substring(0, sibling.lastIndexOf("/"));
+      if (siblingDir !== dir) continue;
+      siblings.push(sibling);
+    }
+    siblings.sort((a, b) => {
+      const aSame = getStem(a.split("/").pop()!) === changedStem;
+      const bSame = getStem(b.split("/").pop()!) === changedStem;
+      if (aSame && !bSame) return -1;
+      if (!aSame && bSame) return 1;
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+    for (let i = 0; i < Math.min(siblings.length, 6); i++) {
+      const siblingPath = siblings[i]!;
+      for (const decl of decls) {
+        if (decl.filePath !== siblingPath) continue;
+        if (decl.kind === "method") continue;
+        if (!decl.isExported) continue;
+        blocks.push({
+          tier: 8,
+          path: decl.filePath,
+          startLine: decl.startLine,
+          endLine: decl.endLine,
+          symbol: symbolFor(decl),
+          why: `sibling of ${safePath(file.path)} in the same directory`,
+          text: cutTo40Lines(decl.text),
+          reach: 0,
+        });
+      }
+    }
+  }
+  return blocks;
+}
+
 export function collectBlocks(sources: Map<string, string>, diff: DiffInfo): CollectedBlock[] {
   const project = buildProject(sources);
   const decls = collectDecls(project);
@@ -556,6 +621,7 @@ export function collectBlocks(sources: Map<string, string>, diff: DiffInfo): Col
     diff,
   );
   acceptBlocks(accepted, seen, sortCandidates(tier6(sources, filteredDiff, tableReach)), diff);
+  acceptBlocks(accepted, seen, tier8(decls, sources, diff), diff);
 
   return accepted;
 }
