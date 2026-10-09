@@ -364,6 +364,14 @@ COVLOG=""
 cov_failed=0
 release_failed=0
 release_attempted=0
+# Set by run_test_cov only for the test:cov step: the captured output reports
+# failed tests (`summary_kind=failed tests`) or vitest caught unhandled errors
+# (`summary_kind=unhandled errors`) while the step itself exited 0. The scan
+# can only turn a 0 exit into a failure (N1); it never moves a failed step's
+# code. summary_reason holds the first matched log line.
+summary_failed=0
+summary_kind=""
+summary_reason=""
 
 release_lock() {
   # A release child has already been started, by the end-of-run release or by an
@@ -587,6 +595,33 @@ run_test_cov() {
   if grep -q "ERROR: Coverage" "$COVLOG"; then
     cov_failed=1
   fi
+  # Scan the captured output for a test runner that reported failures while
+  # exiting 0: a pipe can hide the failure code the same way coverage can
+  # (M3). The scan only applies to test:cov and only matters for an exit 0 —
+  # a step that already failed keeps today's path (N1). ANSI colour is stripped
+  # first (POSIX sh has no $[..]) so the patterns anchor on vitest's own
+  # summary lines / unhandled-error sentence at the start of a line.
+  if [ "$code" -eq 0 ]; then
+    ESC=$(printf '\033')
+    CLEANED=$(sed "s/${ESC}\[[0-9;]*m//g" "$COVLOG")
+    line=$(printf '%s\n' "$CLEANED" \
+      | grep -E '^[[:space:]]*(Test Files|Tests)[[:space:]]+[1-9][0-9]* failed' \
+      | head -n1)
+    if [ -n "$line" ]; then
+      summary_failed=1
+      summary_kind="failed tests"
+      summary_reason="$line"
+    else
+      line=$(printf '%s\n' "$CLEANED" \
+        | grep -E '^[[:space:]]*Vitest caught [0-9][0-9]* unhandled error' \
+        | head -n1)
+      if [ -n "$line" ]; then
+        summary_failed=1
+        summary_kind="unhandled errors"
+        summary_reason="$line"
+      fi
+    fi
+  fi
   rm -f "$COVLOG"
   COVLOG=""
   return "$code"
@@ -677,6 +712,9 @@ while IFS="$TAB" read -r name cmd; do
     fi
   fi
   cov_failed=0
+  summary_failed=0
+  summary_kind=""
+  summary_reason=""
   case "$name" in
     test:cov)
       # The profile's two lines print HERE, immediately before the tests, and
@@ -699,6 +737,19 @@ while IFS="$TAB" read -r name cmd; do
       ;;
   esac
   printf '<== %s: exit %s\n' "$name" "$code"
+  # A step that exited 0 but whose output reports failed tests or unhandled
+  # errors (a runner that lost its exit code down a pipe) fails the gate with
+  # its own code 96. The scan can only turn a 0 into a failure (N1): a step
+  # that already failed keeps today's path and exit code. When both the
+  # failed-tests and coverage rules fire on the same exit-0 step, the stronger
+  # fact is named first and coverage is still mentioned as today.
+  if [ "$code" -eq 0 ] && [ "${summary_failed:-0}" -eq 1 ]; then
+    printf '%s\n' "gate: FAILED — step 'test:cov' exited 0 but its output reports $summary_kind ($summary_reason)" >&2
+    if [ "$cov_failed" -eq 1 ]; then
+      printf '%s\n' "gate: FAILED — step 'test:cov' — a coverage threshold failure was reported (vitest exited $code)" >&2
+    fi
+    exit 96
+  fi
   if [ "$cov_failed" -eq 1 ]; then
     printf '%s\n' "gate: FAILED at step 'test:cov' — a coverage threshold failure was reported (vitest exited $code)" >&2
     exit 1

@@ -253,6 +253,25 @@ describe("yarn gate", () => {
     expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
   });
 
+  test("a test step that exits 0 while its output reports failed tests fails the gate with code 96", () => {
+    const r = runGate(
+      ["--lane", "lane-b"],
+      stepsEnv([
+        [
+          "test:cov",
+          'printf " Test Files  1 failed | 3 passed (4)\\n      Tests  1 failed | 10 passed (11)\\n"',
+        ],
+      ]),
+    );
+    expect(r.status).toBe(96);
+    expect(r.stdout).toContain("<== test:cov: exit 0");
+    expect(r.stderr).toContain(
+      "gate: FAILED — step 'test:cov' exited 0 but its output reports failed tests",
+    );
+    expect(r.stderr).toContain("1 failed | 3 passed (4)");
+    expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
+  });
+
   test("a failing nitro prepare fails the guard, even with a stale manifest present", () => {
     const dir = scratch();
     const manifest = join(dir, "nitro-routes.d.ts");
