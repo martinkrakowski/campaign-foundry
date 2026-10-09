@@ -32,8 +32,18 @@ import { makeRoot, writeAt } from "./tree.js";
  * them reported as SKIPPED on `TEST_PG_URL` rather than failing the CI Postgres
  * job by throwing on a real database.
  */
-export const ON_A_REAL_TEST_SERVER =
-  process.env["TEST_PG_URL"] !== undefined && process.env["TEST_PG_URL"] !== "";
+export const ON_A_REAL_TEST_SERVER = isOnARealTestServer();
+
+/**
+ * The ONE test for "a real test server is configured", read from the environment
+ * each time it is asked: the skip flag above and the harness's own guard both use
+ * it, so they cannot disagree. An empty value is not a server, which is also how
+ * `testDatabaseBackend()` reads it.
+ */
+export function isOnARealTestServer(): boolean {
+  const url = process.env["TEST_PG_URL"];
+  return url !== undefined && url !== "";
+}
 
 export class CountingObjects implements ObjectStorePort {
   putCount = 0;
@@ -175,7 +185,7 @@ export async function useApplyEnvironment(): Promise<{
   objects: CountingObjects;
   reinstall: () => void;
 }> {
-  if (process.env.TEST_PG_URL !== undefined) {
+  if (isOnARealTestServer()) {
     throw new Error("useApplyEnvironment refuses TEST_PG_URL; this harness runs only on PGlite.");
   }
   saveEnv();
