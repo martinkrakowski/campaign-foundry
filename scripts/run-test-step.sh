@@ -25,7 +25,11 @@ scan=${here:+$here/}test-output-scan.sh
 
 status_file=$(mktemp "${TMPDIR:-/tmp}/rt-step.XXXXXX") || exit 2
 log=$(mktemp "${TMPDIR:-/tmp}/rt-step-log.XXXXXX") || { rm -f "$status_file"; exit 2; }
-trap 'rm -f "$status_file" "$log"' EXIT INT TERM HUP
+# A signal ends the step with the conventional code (the EXIT trap still cleans
+# up); a trap that only removed the files would let a cancelled step run on.
+trap 'rm -f "$status_file" "$log"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
 
 ( "$@" 2>&1; echo $? >"$status_file" ) | tee "$log"
 
