@@ -12,9 +12,12 @@ import {
   type ImportDeps,
 } from "../campaign-step.js";
 import { hashBytes } from "../../brief-files.js";
+import { collectRefs } from "../../asset-files.js";
+import { isAssetId } from "../../ports/asset-store.port.js";
 import { resolveRefTargets } from "../asset-step.js";
 import { importTenant } from "../import-tenant.js";
 import { getAssetStore, getBriefStore } from "../../ports/index.js";
+import { objectStoreClient } from "../../object-store/index.js";
 import type { BriefStorePort } from "../../ports/brief-store.port.js";
 import type { SqlClient } from "../../db/sql-client.js";
 import type { ScannedCampaign } from "../scan.js";
@@ -153,6 +156,42 @@ describe("campaign-step: preflight", () => {
       dropRoot(root);
     }
   });
+
+  test("a brief absent from the reviewed digest is refused", async () => {
+    const root = makeRoot();
+    try {
+      const { ctx, scanned, expected } = buildScanned(root, "camp", {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      expected.delete(relative(ctx.projectRoot, scanned.sourcePath));
+      const result = await preflight(ctx, scanned, expected);
+      expect(result.ok).toBe(false);
+      expect(result.ok === false ? result.reason : "").toMatch(/not in the reviewed digest/);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a ref target absent from the reviewed digest is refused", async () => {
+    const root = makeRoot();
+    try {
+      const { ctx, scanned, expected } = buildScanned(root, "camp", {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      for (const key of expected.keys()) if (key.startsWith("assets/")) expected.delete(key);
+      const result = await preflight(ctx, scanned, expected);
+      expect(result.ok).toBe(false);
+      expect(result.ok === false ? result.reason : "").toMatch(/not in the reviewed digest/);
+    } finally {
+      dropRoot(root);
+    }
+  });
 });
 
 describe("campaign-step: probe", () => {
@@ -229,6 +268,68 @@ async function importIt(
 ): Promise<{ ctx: StepContext; scanned: ScannedCampaign; expected: Map<string, string>; deps: ImportDeps }> {
   const { ctx, scanned, expected } = buildScanned(root, overrides.id, overrides);
   return { ctx, scanned, expected, deps: makeDeps() };
+}
+
+/** A 1x1 PNG whose bytes differ from `PNG`, for collision/suffix tests. */
+const PNG2 = Buffer.concat([PNG, Buffer.from("second-bytes")]);
+
+/**
+ * Write `firstRef`/`secondRef` (both `assets/inputs/...`) with the given bytes,
+ * build a two-product brief naming them, and run `importCampaign` once.
+ */
+async function importTwoLogos(
+  root: string,
+  firstRef: string,
+  secondRef: string,
+  firstBytes: Buffer,
+  secondBytes: Buffer,
+): Promise<{ ctx: StepContext; scanned: ScannedCampaign; expected: Map<string, string>; deps: ImportDeps; result: CampaignResult }> {
+  const ctx = ctxWith(root);
+  writeAt(root, firstRef, firstBytes);
+  writeAt(root, secondRef, secondBytes);
+  const overrides: BriefOverrides = {
+    id: "camp",
+    products: [
+      { id: "p1", name: "P1", primaryColor: "#111111", logoPath: firstRef },
+      { id: "p2", name: "P2", primaryColor: "#222222", logoPath: secondRef },
+    ],
+  };
+  const sourcePath = writeBrief(root, "camp.yaml", overrides);
+  const brief = briefBody(overrides);
+  const draft: ScannedCampaign = { slug: "camp", sourcePath, name: null, type: null, brief, refs: [], sample: false };
+  const scanned: ScannedCampaign = { ...draft, refs: classifyRefs(ctx, draft) };
+  const expected = new Map<string, string>();
+  expected.set(relative(ctx.projectRoot, sourcePath), hashBytes(readFileSync(sourcePath)));
+  for (const target of resolveRefTargets(ctx, scanned)) {
+    expected.set(relative(ctx.projectRoot, target.path), hashBytes(readFileSync(target.path)));
+  }
+  const deps = makeDeps();
+  const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+  return { ctx, scanned, expected, deps, result };
+}
+
+/** `importIt` + the single `importCampaign` call, returning the result. */
+async function run(
+  root: string,
+  overrides: BriefOverrides,
+): Promise<{ ctx: StepContext; scanned: ScannedCampaign; expected: Map<string, string>; deps: ImportDeps; result: CampaignResult }> {
+  const { ctx, scanned, expected, deps } = await importIt(root, overrides);
+  const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+  return { ctx, scanned, expected, deps, result };
+}
+
+/** Seed a versionful campaign row + asset row + brief_version, returning the asset id. */
+async function seedCampaign(root: string, slug: string, assetBytes: Buffer): Promise<string> {
+  const { assets, briefs } = makeDeps();
+  await briefs.createCampaign(slug, { name: null, type: null });
+  const written = await assets.writeAsset(slug, "logo.png", assetBytes);
+  const id = written.id!;
+  const brief = briefBody({
+    id: slug,
+    products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: id }],
+  });
+  await briefs.createBrief(brief);
+  return id;
 }
 
 describe("campaign-step: importCampaign", () => {
@@ -566,6 +667,56 @@ describe("campaign-step: refusals before the first write (N3)", () => {
   });
 });
 
+describe("campaign-step: brief integrity (N4, N5, D220)", () => {
+  let env: Awaited<ReturnType<typeof useApplyEnvironment>>;
+  beforeEach(async () => {
+    env = await useApplyEnvironment();
+  });
+  afterEach(async () => {
+    await restoreApplyEnvironment();
+  });
+
+  test("no path ref remains in any imported brief", async () => {
+    const root = makeRoot();
+    try {
+      const { deps } = await run(root, {
+        id: "camp",
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+            inputAsset: "assets/inputs/camp/input.png",
+          },
+        ],
+      });
+      const stored = await deps.briefs.findBriefById("camp");
+      expect(stored).toBeDefined();
+      expect(collectRefs(stored!.brief).every(isAssetId)).toBe(true);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a slug is imported exactly as the brief names it", async () => {
+    const root = makeRoot();
+    try {
+      const { deps } = await run(root, {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      const meta = await deps.briefs.campaignMeta("camp");
+      expect(meta).toBeDefined();
+      expect(meta!.slug).toBe("camp");
+    } finally {
+      dropRoot(root);
+    }
+  });
+});
+
 describe("campaign-step: importCampaignStep", () => {
   let env: Awaited<ReturnType<typeof useApplyEnvironment>>;
   beforeEach(async () => {
@@ -626,6 +777,348 @@ describe("campaign-step: importCampaignStep", () => {
         ["local", scanned.slug],
       );
       expect(rows[0]?.actor).toBe("import:pt-8");
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("the campaign row carries the campaign meta name and type, or null without one, with team_id null", async () => {
+    const root = makeRoot();
+    try {
+      writeAt(
+        root,
+        join("briefs/camp/campaign.json"),
+        JSON.stringify({ name: "Summer Hydration", type: "social-post" }),
+      );
+      const { ctx, scanned, expected } = buildScanned(root, "camp", {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      const hashedCtx: HashedContext = { ...ctx, expectedHashes: expected };
+      const deps: ImportDeps = {
+        briefs: getBriefStore(importTenant("local")),
+        assets: getAssetStore(importTenant("local")),
+      };
+      const result = (await importCampaignStep(hashedCtx, {
+        slug: scanned.slug,
+        sourcePath: scanned.sourcePath,
+      })) as CampaignResult;
+      expect(result.outcome).toBe("created");
+      const row = (
+        await env.db.query<{ name: string | null; type: string | null; team_id: string | null }>(
+          `select name, type, team_id from campaign where org_id=$1 and slug=$2`,
+          ["local", "camp"],
+        )
+      ).rows[0];
+      expect(row?.name).toBe("Summer Hydration");
+      expect(row?.type).toBe("social-post");
+      expect(row?.team_id).toBeNull();
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a campaign.json with non-string meta stores null name and type", async () => {
+    const root = makeRoot();
+    try {
+      writeAt(root, join("briefs/camp/campaign.json"), JSON.stringify({ name: 123, type: true }));
+      const { ctx, scanned, expected } = buildScanned(root, "camp", {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      const hashedCtx: HashedContext = { ...ctx, expectedHashes: expected };
+      await importCampaignStep(hashedCtx, { slug: scanned.slug, sourcePath: scanned.sourcePath });
+      const row = (
+        await env.db.query<{ name: string | null; type: string | null }>(
+          `select name, type from campaign where org_id=$1 and slug=$2`,
+          ["local", "camp"],
+        )
+      ).rows[0];
+      expect(row?.name).toBeNull();
+      expect(row?.type).toBeNull();
+    } finally {
+      dropRoot(root);
+    }
+  });
+});
+
+describe("campaign-step: asset names (D219/D221)", () => {
+  let env: Awaited<ReturnType<typeof useApplyEnvironment>>;
+  beforeEach(async () => {
+    env = await useApplyEnvironment();
+  });
+  afterEach(async () => {
+    await restoreApplyEnvironment();
+  });
+
+  test("two different files with one name take the plain name and the root suffix", async () => {
+    const root = makeRoot();
+    try {
+      const { deps, result } = await importTwoLogos(
+        root,
+        "assets/inputs/camp/logo.png",
+        "assets/inputs/logo.png",
+        PNG,
+        PNG2,
+      );
+      expect(result.outcome).toBe("created");
+      const entries = await deps.assets.listAssets("camp");
+      expect(entries.map((e) => e.name).sort()).toEqual(["logo-root.png", "logo.png"]);
+      const stored = await deps.briefs.findBriefById("camp");
+      expect(stored).toBeDefined();
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a different own file with a taken name takes the slug suffix", async () => {
+    const root = makeRoot();
+    try {
+      const { deps, result } = await importTwoLogos(
+        root,
+        "assets/inputs/logo.png",
+        "assets/inputs/camp/logo.png",
+        PNG,
+        PNG2,
+      );
+      expect(result.outcome).toBe("created");
+      const entries = await deps.assets.listAssets("camp");
+      expect(entries.map((e) => e.name).sort()).toEqual(["logo-camp.png", "logo.png"]);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("identical bytes under one name reuse one asset row", async () => {
+    const root = makeRoot();
+    try {
+      const { ctx, scanned, expected, deps, result } = await importTwoLogos(
+        root,
+        "assets/inputs/camp/logo.png",
+        "assets/inputs/logo.png",
+        PNG,
+        PNG,
+      );
+      expect(result.outcome).toBe("created");
+      const second = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+      expect(second.outcome).toBe("unchanged");
+      const entries = await deps.assets.listAssets("camp");
+      expect(entries).toHaveLength(1);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a second importCampaign reports unchanged for a campaign whose refs took a suffixed name", async () => {
+    const root = makeRoot();
+    try {
+      const { ctx, scanned, expected, deps, result } = await importTwoLogos(
+        root,
+        "assets/inputs/camp/logo.png",
+        "assets/inputs/logo.png",
+        PNG,
+        PNG2,
+      );
+      expect(result.outcome).toBe("created");
+      const second = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+      expect(second.outcome).toBe("unchanged");
+      expect(second.minted.assets.length).toBe(0);
+      const entries = await deps.assets.listAssets("camp");
+      expect(entries.map((e) => e.name).sort()).toEqual(["logo-root.png", "logo.png"]);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("an other-campaign ref imports that one file and no other", async () => {
+    const root = makeRoot();
+    try {
+      writeAt(root, "assets/inputs/other/logo.png", PNG);
+      writeAt(root, "assets/inputs/other/extra.png", PNG2);
+      const { deps, result } = await run(root, {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/other/logo.png" },
+        ],
+      });
+      expect(result.outcome).toBe("created");
+      const entries = await deps.assets.listAssets("camp");
+      expect(entries.map((e) => e.name).sort()).toEqual(["logo.png"]);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a root-level ref becomes an asset of the referencing campaign", async () => {
+    const root = makeRoot();
+    try {
+      const { deps, result } = await run(root, {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/logo.png" },
+        ],
+      });
+      expect(result.outcome).toBe("created");
+      const entries = await deps.assets.listAssets("camp");
+      expect(entries.map((e) => e.name)).toEqual(["logo.png"]);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("an input no ref names is counted and not written", async () => {
+    const root = makeRoot();
+    try {
+      writeAt(root, "assets/inputs/camp/extra.png", PNG2);
+      const { deps, result } = await run(root, {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      expect(result.outcome).toBe("created");
+      expect(result.unreferencedInputs.names).toEqual(["extra.png"]);
+      expect(result.unreferencedInputs.count).toBe(1);
+      const entries = await deps.assets.listAssets("camp");
+      expect(entries.map((e) => e.name)).toEqual(["logo.png"]);
+    } finally {
+      dropRoot(root);
+    }
+  });
+});
+
+describe("campaign-step: integrity (N9, N10)", () => {
+  let env: Awaited<ReturnType<typeof useApplyEnvironment>>;
+  beforeEach(async () => {
+    env = await useApplyEnvironment();
+  });
+  afterEach(async () => {
+    await restoreApplyEnvironment();
+  });
+
+  test("a file changed after the hashes were taken refuses the campaign before any write", async () => {
+    const root = makeRoot();
+    try {
+      const { ctx, scanned, expected, deps } = await importIt(root, {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      writeAt(root, "assets/inputs/camp/logo.png", PNG2);
+      const changedTarget = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+      expect(changedTarget.outcome).toBe("refused");
+      expect(changedTarget.reason).toMatch(/changed since the digest/);
+      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+      expect(env.objects.putCount).toBe(0);
+
+      const fresh = writeBrief(root, "camp.yaml", {
+        id: "camp",
+        campaignMessage: "tweaked",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      const rescanned: ScannedCampaign = { ...scanned, brief: briefBody({ id: "camp", campaignMessage: "tweaked", products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" }] }), sourcePath: fresh };
+      const changedBrief = (await importCampaign(deps, ctx, rescanned, expected)) as CampaignResult;
+      expect(changedBrief.outcome).toBe("refused");
+      expect(changedBrief.reason).toMatch(/changed since the digest/);
+      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("the import tests query only the wrapped PGlite and reach only the in-memory object store", async () => {
+    const root = makeRoot();
+    try {
+      const { result } = await run(root, {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      expect(result.outcome).toBe("created");
+      expect(env.queries.length).toBeGreaterThan(0);
+      expect(objectStoreClient()).toBe(env.objects);
+      expect(process.env.DATABASE_URL).toBe("postgres://nobody@unused.invalid:5432/none");
+    } finally {
+      dropRoot(root);
+    }
+  });
+});
+
+describe("campaign-step: edge cases", () => {
+  let env: Awaited<ReturnType<typeof useApplyEnvironment>>;
+  beforeEach(async () => {
+    env = await useApplyEnvironment();
+  });
+  afterEach(async () => {
+    await restoreApplyEnvironment();
+  });
+
+  test("a non-EEXIST createCampaign failure is rethrown", async () => {
+    const root = makeRoot();
+    try {
+      const { ctx, scanned, expected } = buildScanned(root, "camp", {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      const real = getBriefStore(importTenant("local"));
+      const briefs: BriefStorePort = new Proxy(real, {
+        get(target, prop, receiver) {
+          if (prop === "createCampaign") return () => Promise.reject(new Error("db on fire"));
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const deps: ImportDeps = { briefs, assets: getAssetStore(importTenant("local")) };
+      await expect(importCampaign(deps, ctx, scanned, expected)).rejects.toThrow("db on fire");
+      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("an unreadable campaign.json is surfaced by the step", async () => {
+    const root = makeRoot();
+    try {
+      writeAt(root, join("briefs/camp/campaign.json"), "{ not valid json");
+      const { ctx, scanned, expected } = buildScanned(root, "camp", {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      const hashedCtx: HashedContext = { ...ctx, expectedHashes: expected };
+      await expect(
+        importCampaignStep(hashedCtx, { slug: scanned.slug, sourcePath: scanned.sourcePath }),
+      ).rejects.toThrow();
+      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a ref whose bytes no stored asset matches refuses as missing", async () => {
+    const root = makeRoot();
+    try {
+      await seedCampaign(root, "camp", PNG2);
+      const { ctx, scanned, expected, deps } = await importIt(root, {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+      expect(result.outcome).toBe("refused");
+      expect(result.reason).toMatch(/is not in the store/);
     } finally {
       dropRoot(root);
     }

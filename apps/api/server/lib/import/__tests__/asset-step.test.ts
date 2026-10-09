@@ -90,6 +90,17 @@ describe("asset-step: unreferenced inputs", () => {
       dropRoot(root);
     }
   });
+
+  test("a non-directory input path rethrows the read error", () => {
+    const root = makeRoot();
+    try {
+      writeAt(root, "assets/inputs/camp", "not a directory");
+      const ctx = ctxWith(root);
+      expect(() => countUnreferencedInputs(ctx, "camp", [])).toThrow();
+    } finally {
+      dropRoot(root);
+    }
+  });
 });
 
 describe("asset-step: resolveRefTargets", () => {
@@ -117,6 +128,33 @@ describe("asset-step: resolveRefTargets", () => {
       const targets = resolveRefTargets(ctx, scanned);
       expect(targets).toHaveLength(1);
       expect(targets[0].ref).toBe("assets/inputs/camp/logo.png");
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("an other-safe-assets ref resolves from the literal root", () => {
+    const root = makeRoot();
+    try {
+      const ctx = ctxWith(root);
+      writeAt(root, "assets/promo.png", PNG);
+      const sourcePath = writeBrief(root, "camp.yaml", {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/promo.png" },
+        ],
+      });
+      const brief = briefBody({
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/promo.png" },
+        ],
+      });
+      const draft: ScannedCampaign = { slug: "camp", sourcePath, name: null, type: null, brief, refs: [], sample: false };
+      const scanned: ScannedCampaign = { ...draft, refs: classifyRefs(ctx, draft) };
+      const targets = resolveRefTargets(ctx, scanned);
+      expect(targets).toHaveLength(1);
+      expect(targets[0].from).toBe("root");
     } finally {
       dropRoot(root);
     }
