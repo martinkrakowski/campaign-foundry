@@ -357,8 +357,18 @@ export const importCampaignStep: ImportStep = async (ctx, campaign): Promise<Cam
       unreferencedInputs: { count: 0, names: [] },
     };
   }
-  const raw = readFileSync(campaign.sourcePath, "utf8");
-  const brief = parseBriefText(campaign.sourcePath, raw);
+  let brief: CampaignBrief;
+  try {
+    const raw = readFileSync(campaign.sourcePath, "utf8");
+    brief = parseBriefText(campaign.sourcePath, raw);
+  } catch (error) {
+    return {
+      outcome: "refused",
+      reason: `${relative(ctx.projectRoot, campaign.sourcePath)}: ${errorMessage(error)}`,
+      minted: { assets: [] },
+      unreferencedInputs: { count: 0, names: [] },
+    };
+  }
   const draft: ScannedCampaign = {
     slug: campaign.slug,
     sourcePath: campaign.sourcePath,

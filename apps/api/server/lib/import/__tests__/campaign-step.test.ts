@@ -1022,6 +1022,55 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: importCampaignStep", () =
       dropRoot(root);
     }
   });
+
+  test("the step refuses a brief it cannot parse and writes nothing", async () => {
+    const root = makeRoot();
+    try {
+      const sourcePath = writeHtmlLayerBrief(root, "camp.yaml", "camp");
+      writeAt(root, "assets/inputs/camp/logo.png", PNG);
+      const ctx = ctxWith(root);
+      const expected = new Map<string, string>();
+      expected.set(relative(ctx.projectRoot, sourcePath), hashBytes(readFileSync(sourcePath)));
+      const hashedCtx: HashedContext = { ...ctx, expectedHashes: expected };
+      const result = (await importCampaignStep(hashedCtx, {
+        slug: "camp",
+        sourcePath,
+      })) as CampaignResult;
+      expect(result.outcome).toBe("refused");
+      expect(result.reason).toMatch(/camp\.yaml/);
+      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("the step refuses a brief file that is gone and writes nothing", async () => {
+    const root = makeRoot();
+    try {
+      const { ctx, scanned, expected } = buildScanned(root, "camp", {
+        id: "camp",
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
+        ],
+      });
+      rmSync(scanned.sourcePath);
+      const hashedCtx: HashedContext = { ...ctx, expectedHashes: expected };
+      const result = (await importCampaignStep(hashedCtx, {
+        slug: scanned.slug,
+        sourcePath: scanned.sourcePath,
+      })) as CampaignResult;
+      expect(result.outcome).toBe("refused");
+      expect(result.reason).toMatch(/camp\.yaml/);
+      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+    } finally {
+      dropRoot(root);
+    }
+  });
 });
 
 describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: asset names (D219/D221)", () => {
