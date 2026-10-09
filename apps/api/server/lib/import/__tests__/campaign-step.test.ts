@@ -1343,4 +1343,36 @@ describe("campaign-step: edge cases", () => {
       dropRoot(root);
     }
   });
+
+  test("the body imported is the body whose bytes were hashed", async () => {
+    const root = makeRoot();
+    try {
+      const { ctx, scanned, expected, deps } = await importIt(root, {
+        id: "camp",
+        campaignMessage: "from-file",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      // `scanned.brief` carries a DIFFERENT campaignMessage but the SAME refs:
+      // the parse from the hashed bytes must win over this one.
+      const forged: ScannedCampaign = {
+        ...scanned,
+        brief: briefBody({
+          id: "camp",
+          campaignMessage: "from-scanned",
+          products: [
+            { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          ],
+        }),
+      };
+      const result = (await importCampaign(deps, ctx, forged, expected)) as CampaignResult;
+      expect(result.outcome).toBe("created");
+      const stored = await deps.briefs.findBriefById("camp");
+      expect(stored).toBeDefined();
+      expect(stored!.brief.campaignMessage).toBe("from-file");
+    } finally {
+      dropRoot(root);
+    }
+  });
 });

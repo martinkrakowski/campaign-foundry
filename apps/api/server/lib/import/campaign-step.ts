@@ -3,6 +3,7 @@ import { join, relative } from "node:path";
 import { isReservedCampaignId, type CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { dumpBrief, errorMessage } from "@campaignfoundry/shared";
 import { blocksImport, classifyRefs } from "./classify.js";
+import { collectRefs } from "../asset-files.js";
 import { hashBytes, isErrno, isExistsError } from "../brief-files.js";
 import { UUID_PATTERN } from "../object-store/object-keys.js";
 import {
@@ -56,6 +57,13 @@ export type PreflightResult =
   | { readonly ok: true; readonly preflight: Preflight }
   | { readonly ok: false; readonly reason: string };
 
+/** True when two briefs name a different set of refs (collectRefs order, N10). */
+function refsDiffer(a: CampaignBrief, b: CampaignBrief): boolean {
+  const ra = collectRefs(a);
+  const rb = collectRefs(b);
+  return ra.length !== rb.length || !ra.every((ref, i) => ref === rb[i]);
+}
+
 /**
  * All checks that must pass BEFORE the first write (N3, D222): a reserved slug
  * (D181) or a uuid-shaped slug (N6); any ref `classifyRefs` marked unsafe,
@@ -89,6 +97,18 @@ export async function preflight(
   if (expectedBrief !== hashBytes(briefBytes)) {
     return { ok: false, reason: `${briefKey} changed since the digest` };
   }
+  let brief: CampaignBrief;
+  try {
+    brief = parseBriefText(scanned.sourcePath, briefBytes.toString("utf8"));
+  } catch (error) {
+    return { ok: false, reason: `${briefKey}: ${errorMessage(error)}` };
+  }
+  // N10: import the body whose bytes were hashed (this read), never a parse from
+  // another read. If the on-disk brief changed between the step's parse and this
+  // one, its ref set differs — refuse instead of storing the other body.
+  if (refsDiffer(brief, scanned.brief)) {
+    return { ok: false, reason: `${briefKey} changed since the digest` };
+  }
   const targets = resolveRefTargets(ctx, scanned);
   const targetBytes = new Map<string, Buffer>();
   for (const target of targets) {
@@ -103,7 +123,7 @@ export async function preflight(
     }
     targetBytes.set(target.ref, bytes);
   }
-  return { ok: true, preflight: { brief: scanned.brief, targets, targetBytes } };
+  return { ok: true, preflight: { brief, targets, targetBytes } };
 }
 
 export type ProbeDecision =
