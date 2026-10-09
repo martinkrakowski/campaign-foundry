@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "lane": "FU-ci-output-scan",
+  "mutations": [
+    {
+      "file": "scripts/test-output-scan.sh",
+      "before": "  | grep -E '^[[:space:]]*(Test Files|Tests)[[:space:]]+[1-9][0-9]* failed'",
+      "after": "  | grep -E '(Test Files|Tests)[[:space:]]+[1-9][0-9]* failed'",
+      "because": "the start-of-line anchor (^) on the failed-tests pattern is dropped. Without the anchor the pattern matches 'Tests 3 failed' anywhere in a line, so a clean log that merely mentions failure in words (a test title, a mid-line log entry) is failed by the scan — violating N1. The mutates the clean-log test, which goes red on a non-zero status it expected to be 0.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/gate/__tests__/test-output-scan.test.ts",
+        "-t",
+        "a clean log and logs that only mention failure in words exit 0 and print nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/gate.sh",
+      "before": "    printf '%s\\n' \"gate: FAILED — the test output scan could not run (exit $scan_code)\" >&2\n    exit 2",
+      "after": "    :",
+      "because": "the scan-failure branch is replaced with a no-op: the gate silently ignores a non-96 non-zero scan exit instead of failing loudly with exit 2, so a scan that cannot run (e.g. the script is missing) is read as clean — violating N4. The mutates the 'a scan that cannot run' gate test, which goes red on a non-zero status it expected to be 2.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/gate/__tests__/gate.test.ts",
+        "-t",
+        "a scan that cannot run fails the gate and is not read as clean"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
