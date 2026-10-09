@@ -19,6 +19,7 @@ import {
   planProbes,
   ResultWriter,
   openResult,
+  describeResultRefusal,
   type CampaignEntry,
 } from "../apply.js";
 import {
@@ -1445,6 +1446,62 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       expect(probes[0]!.reason).toBeDefined();
     } finally {
       dropRoot(root);
+    }
+  });
+
+  test("describeResultRefusal reports 'already exists' when the result path is absent", async () => {
+    const path = freshResult("XR");
+    try {
+      expect(await describeResultRefusal(path)).toBe(
+        `--result ${JSON.stringify(path)} already exists`,
+      );
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  test("describeResultRefusal reports an interrupted run when the result file is empty", async () => {
+    const path = freshResult("XE");
+    try {
+      writeFileSync(path, "");
+      expect(await describeResultRefusal(path)).toBe(
+        `the result file ${JSON.stringify(path)} exists and has no summary ` +
+          "line: it is the record of an interrupted run. Keep it, and give this run a new --result path.",
+      );
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  test("a non-Error result-write failure still surfaces as a 'could not write the result file' error", async () => {
+    const { root, output } = threeCampaignTree();
+    const result = freshResult("XN");
+    try {
+      const real = await replannedDigest(root, output);
+      env.reinstall();
+      const originalAdd = ResultWriter.prototype.add;
+      let calls = 0;
+      const spy = vi.spyOn(ResultWriter.prototype, "add").mockImplementation(
+        async function (this: ResultWriter, entry: CampaignEntry) {
+          calls++;
+          if (calls === 3) throw "simulated non-error write failure";
+          return originalAdd.call(this, entry);
+        },
+      );
+      const { err, deps } = io();
+      try {
+        expect(
+          await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+        ).toBe(1);
+        expect(err.length).toBe(1);
+        expect(err[0]).toContain("could not write the result file");
+        expect(err[0]).toContain(result);
+      } finally {
+        spy.mockRestore();
+      }
+    } finally {
+      dropRoot(root);
+      rmSync(result, { force: true });
     }
   });
 });
