@@ -16,25 +16,41 @@
 # POSIX sh, and tested under dash — the runners' /bin/sh.
 
 log=${1:-}
-if [ -z "$log" ] || [ ! -r "$log" ]; then
+if [ -z "$log" ] || [ ! -f "$log" ] || [ ! -r "$log" ]; then
   printf 'usage: sh scripts/test-output-scan.sh <log file>\n' >&2
   exit 2
 fi
 
 ESC=$(printf '\033')
-CLEANED=$(sed "s/${ESC}\[[0-9;]*m//g" "$log")
+CLEANED=$(sed "s/${ESC}\[[0-9;]*m//g" "$log") || {
+  printf 'test-output-scan: could not read %s\n' "$log" >&2
+  exit 2
+}
 
-line=$(printf '%s\n' "$CLEANED" \
-  | grep -E '^[[:space:]]*(Test Files|Tests)[[:space:]]+[1-9][0-9]* failed' \
-  | head -n1)
+# grep exits 1 for "no match" (a clean log) and above 1 for an error; an error
+# is a scan that could not run, never a clean result.
+grep_ran() {
+  if [ "$1" -gt 1 ]; then
+    printf 'test-output-scan: grep failed (exit %s)\n' "$1" >&2
+    exit 2
+  fi
+}
+
+found=$(printf '%s\n' "$CLEANED" \
+  | grep -E '^[[:space:]]*(Test Files|Tests)[[:space:]]+[1-9][0-9]* failed'
+)
+grep_ran $?
+line=$(printf '%s\n' "$found" | head -n1)
 if [ -n "$line" ]; then
   printf 'failed tests: %s\n' "$line"
   exit 96
 fi
 
-line=$(printf '%s\n' "$CLEANED" \
-  | grep -E '^[[:space:]]*Vitest caught [0-9][0-9]* unhandled error' \
-  | head -n1)
+found=$(printf '%s\n' "$CLEANED" \
+  | grep -E '^[[:space:]]*Vitest caught [0-9][0-9]* unhandled error'
+)
+grep_ran $?
+line=$(printf '%s\n' "$found" | head -n1)
 if [ -n "$line" ]; then
   printf 'unhandled errors: %s\n' "$line"
   exit 96

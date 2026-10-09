@@ -20,9 +20,22 @@ describe("ci.yml test steps", () => {
     const stripped = src.split(prefix).join("");
     expect(stripped).not.toContain("run-test-step");
 
-    // the underlying commands are still present, un-prefixed (lossless)
-    expect(stripped).toContain("yarn test:cov");
-    expect(stripped).toContain("yarn vitest run --project api");
+    // the wrapped commands are the WHOLE commands, arguments included: a
+    // dropped shard, reporter or threshold argument fails here.
+    const shardCommand = [
+      "sh scripts/run-test-step.sh yarn test:cov",
+      "--shard=${{ matrix.shard }}/${{ strategy.job-total }}",
+      "--reporter=default",
+      "--reporter=blob",
+      "--reporter=github-actions",
+      "--coverage.reporter=text-summary",
+      "--coverage.thresholds.lines=0",
+      "--coverage.thresholds.functions=0",
+      "--coverage.thresholds.branches=0",
+      "--coverage.thresholds.statements=0",
+    ].join("\n          ");
+    expect(src).toContain(`run: >-\n          ${shardCommand}\n        env:`);
+    expect(src).toContain('run: "sh scripts/run-test-step.sh yarn vitest run --project api"\n');
   });
 
   test("no workflow expression in ci.yml lost a brace", () => {

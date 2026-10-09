@@ -79,6 +79,17 @@ describe("scripts/test-output-scan.sh", () => {
     chmodSync(unreadable, 0o644);
   });
 
+  test("a log path that is a directory exits 2 and is not read as clean", () => {
+    // A directory is "readable", and BSD sed exits 0 on one: without the
+    // regular-file check the scan would print nothing and exit 0.
+    const dir = mkdtempSync(join(tmpdir(), "cf-scan-"));
+    dirs.push(dir);
+    const r = spawnSync("sh", [scanSh, dir], { encoding: "utf8" });
+    expect(r.status).toBe(2);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toContain("usage:");
+  });
+
   test("the summary is found through colour codes", () => {
     const C = "\u001b";
     const log = tempLog(

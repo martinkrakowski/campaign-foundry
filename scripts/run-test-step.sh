@@ -32,6 +32,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM HUP
 
 ( "$@" 2>&1; echo $? >"$status_file" ) | tee "$log"
+tee_status=$?
 
 status=$(cat "$status_file" 2>/dev/null)
 if [ -z "$status" ]; then
@@ -41,6 +42,13 @@ fi
 
 if [ "$status" -ne 0 ]; then
   exit "$status"
+fi
+
+# The pipeline's status is tee's: a log it could not write is an incomplete
+# capture, and scanning it could pass a run whose summary never reached the file.
+if [ "$tee_status" -ne 0 ]; then
+  printf 'run-test-step: FAILED — the output could not be captured for the scan (tee exit %s)\n' "$tee_status" >&2
+  exit 2
 fi
 
 if [ ! -r "$scan" ]; then

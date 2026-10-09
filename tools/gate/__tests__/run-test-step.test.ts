@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -116,6 +116,23 @@ describe("scripts/run-test-step.sh", () => {
     expect(readdirSync(tmp)).toHaveLength(0);
     rmSync(tmp, { recursive: true, force: true });
     rmSync(scriptDir, { recursive: true, force: true });
+  });
+
+  test("a capture that tee could not write fails the step with code 2", () => {
+    // A tee that drains its input and fails: the command exits 0 with a failed
+    // summary, the log is empty, and an empty log must not read as a clean run.
+    const bin = freshDir();
+    const fakeTee = join(bin, "tee");
+    writeFileSync(fakeTee, "#!/bin/sh\ncat >/dev/null\nexit 1\n");
+    chmodSync(fakeTee, 0o755);
+    const r = spawnSync(
+      "sh",
+      [script, "sh", "-c", "printf '%s\\n' '      Tests  1 failed | 10 passed (11)'; exit 0"],
+      { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } },
+    );
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("the output could not be captured for the scan");
+    rmSync(bin, { recursive: true, force: true });
   });
 
   test("the wrapper parses under sh and dash", () => {
