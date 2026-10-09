@@ -86,7 +86,9 @@ however well covered; and a PR body whose stated gate or audit does not match th
 
 [pr_code_suggestions]
 # Inline and line-anchored, not a collapsed summary table.
-committable_code_suggestions = true
+# The 0.42.0 spelling, on purpose: the correctness reviewer still runs 0.42.0, and 0.47.0
+# accepts this spelling as a deprecated alias of committable_code_suggestions.
+commitable_code_suggestions = true
 # Silence when there is nothing to say; an empty guide on every PR trains people to ignore
 # the bot.
 publish_output_no_suggestions = false
