@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "lane": "PT-8b1-import-campaign-step",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/asset-step.ts",
+      "before": "      if (hashBytes(existing!) === sourceSha) {",
+      "after": "      if (true) {",
+      "because": "N2/D221: writeOrReuse must compare bytes on EEXIST and only reuse when they match; dropping the sha256 compare makes it treat an EEXIST as a reuse of differing bytes, so two same-basename files of different bytes both map to one id.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/campaign-step.test.ts", "-t", "two different files with one name take the plain name and the root suffix"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/campaign-step.ts",
+      "before": "  const rewritten = rewriteBriefRefs(files.brief, scanned.slug, refToId);\n  const stored = await briefs.findBriefById(scanned.slug);\n  if (dumpBrief(rewritten) === dumpBrief(stored!.brief)) return { kind: \"unchanged\" };",
+      "after": "  const stored = await briefs.findBriefById(scanned.slug);\n  if (dumpBrief(files.brief) === dumpBrief(stored!.brief)) return { kind: \"unchanged\" };",
+      "because": "PT-8-3/N2: probeCampaign must compare the REWRITTEN body (refs rewritten to ids) to the stored body; comparing the raw source body (still path refs) never matches a stored brief and falsely reports unchanged on a rerun.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/campaign-step.test.ts", "-t", "a second importCampaign reports unchanged for a campaign whose refs took a suffixed name"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/campaign-step.ts",
+      "before": "      if (isExistsError(error)) {\n        return { outcome: \"refused\", reason: \"refused: slug reserved\", minted: { assets: [] }, unreferencedInputs: unreferenced };\n      }",
+      "after": "      if (isExistsError(error)) {\n        throw error;\n      }",
+      "because": "PT-8-4/N3: an EEXIST at createCampaign is the plan's \"slug reserved\" signal and must be returned as refused (nothing else written); rethrowing lets the exclusive-create collision escape as an unhandled failure.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/campaign-step.test.ts", "-t", "an EEXIST at createCampaign is listed as refused: slug reserved and nothing else is written"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/ref-rewrite.ts",
+      "before": "    if (!isAssetId(ref)) {\n      throw new Error(`ref survived rewrite as a path, not an asset id: ${ref}`);\n    }",
+      "after": "    if (!isAssetId(ref)) {\n      /* N4 assertion skipped */\n    }",
+      "because": "N4/D222: rewriteBriefRefs must throw when a path ref survives the rewrite; skipping the isAssetId assertion lets a path-shaped ref reach createBrief and into the stored brief.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/ref-rewrite.test.ts", "-t", "the ref rewrite throws and createBrief is not called when a path survives"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/campaign-step.ts",
+      "before": "  if (UUID_PATTERN.test(scanned.slug)) {\n    return { ok: false, reason: `a uuid-shaped slug is refused: ${scanned.slug}` };\n  }",
+      "after": "  if (UUID_PATTERN.test(scanned.slug)) {\n    /* N6 uuid check skipped */\n  }",
+      "because": "N6/D218: a uuid-shaped slug is refused before any write; skipping the check lets an import mint a campaign under a uuid instead of refusing it.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/campaign-step.test.ts", "-t", "a uuid-shaped slug is refused and nothing is written"],
+      "verdict": "caught"
+    }
+  ]
+}

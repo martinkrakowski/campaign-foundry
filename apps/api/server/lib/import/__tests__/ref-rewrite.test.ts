@@ -57,4 +57,14 @@ describe("rewriteBriefRefs", () => {
     expect(rewritten.audio).toBeUndefined();
     expect(rewritten.products[0].logoPath).toBe(LOGO_ID);
   });
+
+  test("the ref rewrite throws and createBrief is not called when a path survives", () => {
+    const brief = briefBody({
+      id: "acme",
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/logo.png" },
+      ],
+    });
+    expect(() => rewriteBriefRefs(brief, "acme", new Map())).toThrow("logo.png");
+  });
 });
