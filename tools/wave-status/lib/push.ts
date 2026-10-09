@@ -33,13 +33,14 @@ export const WAVES_BIN = resolve(
 
 export interface PushRun {
   readonly code: number;
+  readonly stdout: string;
   readonly stderr: string;
 }
 
 export interface PushDeps {
   /**
    * Runs the waves client with these arguments and this stdin; resolves with its
-   * exit code and stderr. Rejects only when the process could not be started.
+   * exit code, stdout and stderr. Rejects only when the process could not be started.
    */
   readonly run: (args: readonly string[], stdin: string) => Promise<PushRun>;
   readonly sleep: (ms: number) => Promise<void>;
@@ -297,6 +298,19 @@ function unrunnableLine(waveId: string, message: string): string {
   return `waves push: ${waveId}: ${excerpt(message)}`;
 }
 
+/**
+ * A push the service took: the wave, and the line the client printed to confirm
+ * the received time. The client prints exactly one such line on success; a push
+ * that exited 0 with no printed receive time is named so the silence is not
+ * mistook for a push that said nothing at all.
+ */
+function pushedLine(waveId: string, stdout: string): string {
+  const received = excerpt(stdout);
+  return received === ""
+    ? `waves push: ${waveId}: pushed (the client printed no receive time)`
+    : `waves push: ${waveId}: ${received}`;
+}
+
 /** D197: a push failure warns and never fails a stage, so a warn that throws is swallowed here. */
 function quietly(warn: (text: string) => void, text: string): void {
   try {
@@ -370,7 +384,10 @@ export async function pushStatus(
     try {
       const run = await deps.run(args, stdin);
       if (run.code !== 0) warn(refusedLine(wave.id, run.code, run.stderr));
-      else pushed += 1;
+      else {
+        warn(pushedLine(wave.id, run.stdout));
+        pushed += 1;
+      }
     } catch (error: unknown) {
       warn(unrunnableLine(wave.id, error instanceof Error ? error.message : String(error)));
     }
@@ -397,16 +414,16 @@ export function realPushDeps(env: NodeJS.ProcessEnv, logError: (text: string) =>
     run: (args, stdin) =>
       new Promise<PushRun>((settle, reject) => {
         const options = { env: childEnv(env), timeout: 60_000 };
-        const child = execFile(WAVES_BIN, args, options, (error, _stdout, stderr) => {
+        const child = execFile(WAVES_BIN, args, options, (error, stdout, stderr) => {
           if (error === null) {
-            settle({ code: 0, stderr });
+            settle({ code: 0, stdout, stderr });
             return;
           }
           // A non-zero exit is an answer the client means — code 2 carries the
           // reason on stderr. Only a process that could not start at all rejects,
           // including one the timeout killed.
           if (typeof error.code === "number") {
-            settle({ code: error.code, stderr });
+            settle({ code: error.code, stdout, stderr });
             return;
           }
           reject(error);
