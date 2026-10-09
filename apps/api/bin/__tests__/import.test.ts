@@ -276,6 +276,16 @@ describe("import CLI (PT-8a)", () => {
     expect(err).toEqual(["verify: not yet implemented"]);
   });
 
+  test("apply --help prints a usage holding the three exit-code lines", async () => {
+    const { out, err, deps } = io();
+    expect(await main(["apply", "--help"], deps)).toBe(0);
+    expect(err).toEqual([]);
+    const text = out.join("\n");
+    expect(text).toContain("0  nothing was refused and nothing is partial");
+    expect(text).toContain("1  at least one campaign is partial, or the run itself failed");
+    expect(text).toContain("3  nothing is partial and at least one campaign was refused before any write");
+  });
+
   test("without injected IO the output goes to the process's own streams", async () => {
     // The defaults are a real code path: `yarn import` spawns this CLI with no deps, so
     // the arrows behind the default parameter have to work, not just typecheck.

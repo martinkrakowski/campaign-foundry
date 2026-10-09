@@ -47,6 +47,18 @@ export const USAGE =
   "usage: yarn import plan --switched-at <iso> [--project-root <dir>] [--output-root <dir>]" +
   " [--org <id>] [--include-samples] [--out <path>]";
 
+/**
+ * The `apply` usage and its exit-code contract, printed by `apply --help`
+ * (D229/D221). A job definition reads the codes, so they are stated here verbatim.
+ */
+export const APPLY_USAGE =
+  "usage: yarn import apply --switched-at <iso> --project-root <dir> --output-root <dir>" +
+  " --org <id> --expect <digest> --result <path> [--include-samples]" +
+  "\nexit codes:\n" +
+  "  0  nothing was refused and nothing is partial\n" +
+  "  1  at least one campaign is partial, or the run itself failed\n" +
+  "  3  nothing is partial and at least one campaign was refused before any write";
+
 /** argv's flags, as {@link resolveSource} takes them — plus the flag each subcommand owns. */
 type ParsedFlags = SourceFlags & {
   readonly out?: string;
@@ -244,6 +256,10 @@ const RESULT_REQUIRED = "apply needs --result <path>";
  * the first write; the database is closed once in `finally`, as `plan` does.
  */
 async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
+  if (argv.includes("--help")) {
+    io.stdout(APPLY_USAGE);
+    return 0;
+  }
   let handle: FileHandle | undefined;
   try {
     const flags = parseFlags("apply", argv);
