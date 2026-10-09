@@ -399,6 +399,9 @@ describe("hasSecret (N5)", () => {
   test("plain code is not flagged", () => {
     expect(hasSecret("function save() { return data; }")).toBe(false);
   });
+  test("an ordinary hyphenated word is not read as a secret", () => {
+    expect(hasSecret("disk-usage-monitoring-service")).toBe(false);
+  });
 });
 
 describe("secret scan withholds the output (N5)", () => {

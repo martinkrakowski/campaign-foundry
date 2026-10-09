@@ -73,8 +73,8 @@ export function errorMessage(error: unknown): string {
 const SECRET_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
   /AKIA[0-9A-Z]{16}/,
-  /gh[pousr]_[A-Za-z0-9]{20,}/,
-  /sk-[A-Za-z0-9_-]{20,}/,
+  /(?:^|[^A-Za-z0-9_-])gh[pousr]_[A-Za-z0-9]{20,}/,
+  /(?:^|[^A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}/,
   /xox[baprs]-[A-Za-z0-9-]{10,}/,
 ];
 
