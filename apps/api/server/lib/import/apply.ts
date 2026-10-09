@@ -1,6 +1,6 @@
-import { open, readFile } from "node:fs/promises";
+import { open, readFile, realpath } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { digestSourceFiles, planDigest, type DigestFile } from "./digest.js";
 import { assemblePlan } from "./plan.js";
 import type { PlanAssembled } from "./plan.js";
@@ -88,10 +88,29 @@ function isUnderRoot(abs: string, root: string): boolean {
  * Refuse a result path that lands under the project or output root (N4): the result
  * is written by this run, but it must never be a file the digest covers, so a
  * result under a source root would both be digested and be overwritten by it.
+ *
+ * The comparison is over REAL paths (N8b2-3): a `--result` whose parent directory
+ * is a symbolic link into the project or output tree passes a lexical check but
+ * would let the result file masquerade as a brief. The parent is `realpath`-ed
+ * (and joined with the base name) against the real roots; a parent that does not
+ * exist is refused by name rather than silently accepted.
  */
-export function checkResultPath(path: string, ctx: StepContext): string | undefined {
+export async function checkResultPath(
+  path: string,
+  ctx: StepContext,
+): Promise<string | undefined> {
   const abs = resolve(path);
-  if (isUnderRoot(abs, ctx.projectRoot) || isUnderRoot(abs, ctx.outputRoot)) {
+  const parent = dirname(abs);
+  let realParent: string;
+  try {
+    realParent = await realpath(parent);
+  } catch {
+    return `--result ${JSON.stringify(path)} has no existing parent directory: ${JSON.stringify(parent)}`;
+  }
+  const realTarget = join(realParent, basename(abs));
+  const realProject = await realpath(ctx.projectRoot);
+  const realOutput = await realpath(ctx.outputRoot);
+  if (isUnderRoot(realTarget, realProject) || isUnderRoot(realTarget, realOutput)) {
     return `--result ${JSON.stringify(path)} is under the project or output root`;
   }
   return undefined;

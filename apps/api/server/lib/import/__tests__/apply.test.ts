@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -541,6 +541,29 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       }
     } finally {
       dropRoot(root);
+    }
+  });
+
+  test("apply refuses a result path whose parent is a symbolic link into the project root", async () => {
+    const { root, output } = sampleTree();
+    const linkDir = mkdtempSync(join(tmpdir(), "cf-link-"));
+    const link = join(linkDir, "into-root");
+    try {
+      symlinkSync(root, link);
+      const real = await replannedDigest(root, output);
+      env.reinstall();
+      const { err, deps } = io();
+      const result = join(link, "result.json");
+      expect(
+        await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+      ).toBe(1);
+      expect(err).toEqual([
+        `--result ${JSON.stringify(result)} is under the project or output root`,
+      ]);
+      expect(await counts(env)).toEqual({ campaigns: 0, assets: 0, versions: 0, puts: 0 });
+    } finally {
+      dropRoot(root);
+      rmSync(linkDir, { recursive: true, force: true });
     }
   });
 
