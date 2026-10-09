@@ -281,17 +281,20 @@ describe("tier 4 collects an unchanged writer of the same table in a changed fil
       tableNames: new Set(["audit_log"]),
     };
     const blocks = collectBlocks(sources, diff);
-    const tier4 = blocks.filter((b) => b.tier === 4);
-    expect(tier4).toHaveLength(2);
-    const writeBlock = tier4.find((b) => b.symbol === "writeAudit")!;
-    expect(writeBlock.tier).toBe(4);
+    const tier7 = blocks.filter((b) => b.tier === 7);
+    expect(tier7).toHaveLength(3);
+    const writeBlock = tier7.find((b) => b.symbol === "writeAudit")!;
+    expect(writeBlock.tier).toBe(7);
     expect(writeBlock.path).toBe("packages/repo/audit.ts");
     expect(writeBlock.why).toBe(
-      "unchanged in packages/repo/audit.ts, also touches table audit_log",
+      "unchanged in packages/repo/audit.ts, 1 line(s) from a changed hunk",
     );
     expect(writeBlock.text).toContain("writeAudit");
-    const alsoBlock = tier4.find((b) => b.symbol === "alsoWritesAudit")!;
-    expect(alsoBlock.tier).toBe(4);
+    const alsoBlock = tier7.find((b) => b.symbol === "alsoWritesAudit")!;
+    expect(alsoBlock.tier).toBe(7);
+    expect(alsoBlock.why).toBe(
+      "unchanged in packages/repo/audit.ts, 1 line(s) from a changed hunk",
+    );
   });
 });
 
@@ -537,7 +540,7 @@ describe("table name filtering", () => {
     };
     const blocks = collectBlocks(sources, diff);
     expect(blocks.filter((b) => b.tier === 4)).toEqual([]);
-    expect(blocks.some((b) => b.symbol === "logUser")).toBe(false);
+    expect(blocks.some((b) => b.symbol === "logUser" && b.tier === 4)).toBe(false);
   });
 
   test("a table the base migrations create is still treated as a table", () => {
@@ -562,5 +565,77 @@ describe("table name filtering", () => {
     expect(tier6).toHaveLength(1);
     expect(tier6[0]?.symbol).toBe("orders");
     expect(tier6[0]?.path).toBe("apps/api/server/lib/db/migrations/0001.sql");
+  });
+});
+
+describe("tier 7 collects the unchanged functions of a changed file, nearest the hunk first", () => {
+  test("the unchanged functions of a changed file are collected, nearest the hunk first", () => {
+    const sources = new Map([
+      [
+        "packages/app/src/api.ts",
+        "function first() {\n  return 1;\n}\nfunction second() {\n  return 2;\n}\nfunction third() {\n  return 3;\n}\n// end",
+      ],
+    ]);
+    const diff: DiffInfo = {
+      files: [
+        fileEntry("packages/app/src/api.ts", [], [], [{ baseStart: 4, baseCount: 1 }]),
+      ],
+      calledNames: new Set(),
+      tableNames: new Set(),
+    };
+    const blocks = collectBlocks(sources, diff);
+    const tier7 = blocks.filter((b) => b.tier === 7);
+    expect(tier7).toHaveLength(2);
+    expect(tier7[0]?.symbol).toBe("first");
+    expect(tier7[0]?.startLine).toBe(1);
+    expect(tier7[0]?.endLine).toBe(3);
+    expect(tier7[0]?.why).toBe("unchanged in packages/app/src/api.ts, 1 line(s) from a changed hunk");
+    expect(tier7[0]?.text).toContain("first");
+    expect(tier7[1]?.symbol).toBe("third");
+    expect(tier7[1]?.startLine).toBe(7);
+    expect(tier7[1]?.endLine).toBe(9);
+    expect(tier7[1]?.why).toBe("unchanged in packages/app/src/api.ts, 3 line(s) from a changed hunk");
+    expect(tier7[1]?.text).toContain("third");
+    expect(tier7.some((b) => b.symbol === "second")).toBe(false);
+  });
+
+  test("a function that partly overlaps a hunk is not collected as unchanged", () => {
+    const sources = new Map([
+      [
+        "packages/app/src/api.ts",
+        "function before() {\n  return 1;\n}\n" +
+          "function partiallyCovered() {\n  // changed\n  return 2;\n}\n" +
+          "function after() {\n  return 3;\n}\n" +
+          "// end",
+      ],
+    ]);
+    const diff: DiffInfo = {
+      files: [
+        fileEntry("packages/app/src/api.ts", [], [], [{ baseStart: 4, baseCount: 2 }]),
+      ],
+      calledNames: new Set(),
+      tableNames: new Set(),
+    };
+    const blocks = collectBlocks(sources, diff);
+    const tier7 = blocks.filter((b) => b.tier === 7);
+    expect(tier7.some((b) => b.symbol === "partiallyCovered")).toBe(false);
+    expect(tier7.some((b) => b.symbol === "before")).toBe(true);
+    expect(tier7.some((b) => b.symbol === "after")).toBe(true);
+  });
+
+  test("a changed file that is not in the base tree contributes nothing", () => {
+    const sources = new Map([
+      ["packages/app/src/other.ts", "function other() { return 0; }"],
+    ]);
+    const diff: DiffInfo = {
+      files: [
+        fileEntry("packages/app/src/api.ts", [], [], [{ baseStart: 1, baseCount: 1 }]),
+      ],
+      calledNames: new Set(),
+      tableNames: new Set(),
+    };
+    const blocks = collectBlocks(sources, diff);
+    const tier7 = blocks.filter((b) => b.tier === 7);
+    expect(tier7).toHaveLength(0);
   });
 });

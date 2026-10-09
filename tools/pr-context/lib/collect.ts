@@ -480,6 +480,52 @@ function buildMigrationTables(sources: Map<string, string>): Set<string> {
   return tables;
 }
 
+function distanceToHunk(start: number, end: number, range: { baseStart: number; baseCount: number }): number {
+  const hEnd = range.baseStart + range.baseCount - 1;
+  if (end < range.baseStart) return range.baseStart - end;
+  if (start > hEnd) return start - hEnd;
+  return 0;
+}
+
+// Tier 7 ranks second: after tier 1 (port implementations) and before the
+// helpers tier (tier 2). Numbered 7 so existing tier numbers and tests
+// do not move.
+function tier7(decls: Decl[], diff: DiffInfo): BlockCandidate[] {
+  const blocks: BlockCandidate[] = [];
+  for (const file of diff.files) {
+    for (const decl of decls) {
+      if (decl.filePath !== file.path) continue;
+      let overlaps = false;
+      for (const range of file.ranges) {
+        if (rangesOverlap(decl.startLine, decl.endLine, range.baseStart, range.baseCount)) {
+          overlaps = true;
+          break;
+        }
+      }
+      if (overlaps) continue;
+      if (decl.kind === "arrow" && !decl.isExported) continue;
+      let minDist = Infinity;
+      for (const range of file.ranges) {
+        minDist = Math.min(minDist, distanceToHunk(decl.startLine, decl.endLine, range));
+      }
+      blocks.push({
+        tier: 7,
+        path: decl.filePath,
+        startLine: decl.startLine,
+        endLine: decl.endLine,
+        symbol: symbolFor(decl),
+        why: `unchanged in ${safePath(file.path)}, ${minDist} line(s) from a changed hunk`,
+        text: decl.text,
+        reach: minDist,
+      });
+    }
+  }
+  return blocks.sort((a, b) => {
+    if (a.reach !== b.reach) return a.reach - b.reach;
+    return a.startLine - b.startLine;
+  });
+}
+
 export function collectBlocks(sources: Map<string, string>, diff: DiffInfo): CollectedBlock[] {
   const project = buildProject(sources);
   const decls = collectDecls(project);
@@ -499,6 +545,7 @@ export function collectBlocks(sources: Map<string, string>, diff: DiffInfo): Col
 
   const changedSymbols = findChangedSymbols(decls, diff);
   acceptBlocks(accepted, seen, sortCandidates(tier1(decls, interfaces, nameReach)), diff);
+  acceptBlocks(accepted, seen, tier7(decls, diff), diff);
   acceptBlocks(accepted, seen, sortCandidates(tier2(decls, nameReach)), diff);
   acceptBlocks(accepted, seen, sortCandidates(tier3(decls, changedSymbols, nameReach)), diff);
   acceptBlocks(accepted, seen, sortCandidates(tier4(decls, filteredDiff, nameReach)), diff);
