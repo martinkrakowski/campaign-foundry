@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "lane": "FU-push-confirm",
+  "mutations": [
+    {
+      "file": "tools/wave-status/lib/push.ts",
+      "before": "        warn(pushedLine(wave.id, run.stdout));\n        pushed += 1;",
+      "after": "        pushed += 1;",
+      "because": "A push the service took is exactly the case an operator cannot see today, so if the success branch stops saying the client's line the gap is back: test 1 resolves an exit 0 with a receive-time stdout and asserts warn saw exactly that line, and it fails when the branch is silent again.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/push.test.ts",
+        "-t",
+        "a push the service took says the client's line with the receive time"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/push.ts",
+      "before": "        warn(pushedLine(wave.id, run.stdout));",
+      "after": "        once(pushedLine(wave.id, run.stdout));",
+      "because": "The confirming line is news each tick and does not go through once or warned, so under --watch it repeats every interval by design; routing it through once instead of warn silences the second tick, and test 4 calls pushStatus twice with one shared warned set and asserts the line twice, failing on the single line it then sees.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/push.test.ts",
+        "-t",
+        "the confirming line is said on every tick, not once"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/wave-status/lib/push.ts",
+      "before": "            settle({ code: 0, stdout, stderr });",
+      "after": "            settle({ code: 0, stdout: \"\", stderr });",
+      "because": "The client's stdout is the only place the receive time exists, so realPushDeps must pass the callback's stdout through in both settled cases; passing an empty string instead makes run resolve without the client's line, and test 5 stubs a stdout and asserts run resolves with it on exit 0 and on a numeric exit, failing on the empty stdout it then sees.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/wave-status/lib/__tests__/push.test.ts",
+        "-t",
+        "the client's stdout reaches the caller on exit 0 and on a numeric exit"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

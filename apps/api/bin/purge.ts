@@ -307,10 +307,14 @@ export async function runOrgPurge(
           [org],
         )
       ).rows[0]!.n;
+      const orgName = (
+        await db.query<{ name: string }>(`select name from org where id = $1`, [org])
+      ).rows[0]!.name;
       const orgTombstoned = row.deleted_at !== null;
       log(
         `  org ${org}: ${live} live campaign(s), ${tombstoned} tombstoned, ${members} member(s), ${teams} team(s), ${invitations} invitation(s), ${keys} provider key(s)`,
       );
+      log(`  name: ${JSON.stringify(orgName)}`);
       log(`  state: ${orgTombstoned ? "tombstoned" : "live"}`);
       log(
         "  Dry run: nothing changed. Re-run with --apply to tombstone the org and queue its purge, then run yarn purge:sweep.",

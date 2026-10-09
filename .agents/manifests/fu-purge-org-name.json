@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "FU-purge-org-name",
+  "mutations": [
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "      log(`  name: ${JSON.stringify(orgName)}`);",
+      "after": "      log(`  name: ${orgName}`);",
+      "because": "Removing JSON.stringify logs the raw name instead of JSON.stringify(name). Test 2 seeds a name with a real newline (Acme, newline, '  state: tombstoned'); without escaping the name line at index 1 has a real newline instead of a literal backslash-n, so expect(lines[1]).toBe(...) at line 125 fails on the assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-org.test.ts",
+        "-t",
+        "org CLI dry run quotes a name that holds a newline so it stays one line"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/purge.ts",
+      "before": "      log(`  name: ${JSON.stringify(orgName)}`);\n      log(`  state: ${orgTombstoned ? \"tombstoned\" : \"live\"}`);",
+      "after": "      log(`  state: ${orgTombstoned ? \"tombstoned\" : \"live\"}`);\n      log(`  name: ${JSON.stringify(orgName)}`);",
+      "because": "Swapping the two log lines emits the name line after state instead of before it. Test 1 expects the name at index 1 (between counts at index 0 and state at index 2), so expect(lines).toEqual([...]) at line 133 fails on the assertion line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/purge-org.test.ts",
+        "-t",
+        "org CLI dry run prints the name of the org on its own line between the counts and the state"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
