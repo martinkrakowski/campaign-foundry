@@ -97,7 +97,7 @@ export function failOnNth<T extends AnyStore>(store: T, method: keyof T, n: numb
         return (...args: unknown[]): unknown => {
           calls++;
           if (calls === n) throw new Error("injected");
-          return (value as (...args: unknown[]) => unknown)(...args);
+          return (value as (...args: unknown[]) => unknown).apply(target, args);
         };
       }
       return typeof value === "function" ? value.bind(target) : value;
