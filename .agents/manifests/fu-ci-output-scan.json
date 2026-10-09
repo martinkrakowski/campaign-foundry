@@ -31,6 +31,36 @@
         "a scan that cannot run fails the gate and is not read as clean"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "scripts/run-test-step.sh",
+      "before": "if [ \"$status\" -ne 0 ]; then\n  exit \"$status\"\nfi\n",
+      "after": ": # scan always runs, even when the command failed\n",
+      "because": "mutation 3: the command-exit guard is dropped so the scan runs and decides the step's outcome even when the command failed, hiding that command's own exit code; pinned by W1 \"a failing command fails the step with its own exit code even when its output holds a failed summary\".",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/gate/__tests__/run-test-step.test.ts",
+        "-t",
+        "a failing command fails the step with its own exit code even when its output holds a failed summary"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/run-test-step.sh",
+      "before": "    exit 96\n",
+      "after": "    exit 0\n",
+      "because": "mutation 4: the scan's exit 96 is lowered to exit 0 so the step ignores a scan that reports failed tests while the command exited 0; pinned by W3 \"a command that exits 0 while its output reports failed tests fails the step with code 96\".",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "tools/gate/__tests__/run-test-step.test.ts",
+        "-t",
+        "a command that exits 0 while its output reports failed tests fails the step with code 96"
+      ],
+      "verdict": "caught"
     }
   ]
 }

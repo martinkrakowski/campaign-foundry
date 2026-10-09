@@ -399,7 +399,7 @@ describe("yarn gate", () => {
     const r = spawnSync("sh", [tempGate, "--lane", "lane-b"], {
       encoding: "utf8",
       env: gateEnv(dir, stepsEnv([["test:cov", "true"]])),
-      timeout: 15_000,
+      timeout: scaled(15_000),
     });
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("the test output scan could not run");
