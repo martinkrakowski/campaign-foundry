@@ -242,13 +242,23 @@ export async function importCampaign(
 
   const { brief, targets, targetBytes, name, type } = pf.preflight;
   const unreferenced = countUnreferencedInputs(ctx, scanned.slug, targets);
-  const probe = await probeCampaign(deps.briefs, deps.assets, ctx, scanned, {
-    brief,
-    targets,
-    targetBytes,
-    name,
-    type,
-  });
+  let probe: ProbeDecision;
+  try {
+    probe = await probeCampaign(deps.briefs, deps.assets, ctx, scanned, {
+      brief,
+      targets,
+      targetBytes,
+      name,
+      type,
+    });
+  } catch (error) {
+    return {
+      outcome: "refused",
+      reason: errorMessage(error),
+      minted: { assets: [] },
+      unreferencedInputs: unreferenced,
+    };
+  }
   if (probe.kind === "unchanged")
     return { outcome: "unchanged", minted: { assets: [] }, unreferencedInputs: unreferenced };
   if (probe.kind === "refused")
@@ -276,7 +286,12 @@ export async function importCampaign(
           unreferencedInputs: unreferenced,
         };
       }
-      throw error;
+      return {
+        outcome: "refused",
+        reason: errorMessage(error),
+        minted: { assets: [] },
+        unreferencedInputs: unreferenced,
+      };
     }
   }
 

@@ -1330,7 +1330,7 @@ describe("campaign-step: edge cases", () => {
     await restoreApplyEnvironment();
   });
 
-  test("a non-EEXIST createCampaign failure is rethrown", async () => {
+  test("a createCampaign failure that is not EEXIST refuses the campaign without partial", async () => {
     const root = makeRoot();
     try {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
@@ -1353,8 +1353,44 @@ describe("campaign-step: edge cases", () => {
         },
       });
       const deps: ImportDeps = { briefs, assets: getAssetStore(importTenant("local")) };
-      await expect(importCampaign(deps, ctx, scanned, expected)).rejects.toThrow("db on fire");
+      const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+      expect(result.outcome).toBe("refused");
+      expect(result.reason).toBe("db on fire");
+      expect(result.partial).toBeUndefined();
       expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+      expect(env.objects.putCount).toBe(0);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a probe that throws refuses the campaign without partial", async () => {
+    const root = makeRoot();
+    try {
+      const { ctx, scanned, expected } = buildScanned(root, "camp", {
+        id: "camp",
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
+        ],
+      });
+      await (getBriefStore(importTenant("local")) as BriefStorePort).createCampaign("camp");
+      const briefs: BriefStorePort = new Proxy(getBriefStore(importTenant("local")), {
+        get(target, prop, receiver) {
+          if (prop === "campaignMeta") return () => Promise.reject(new Error("meta read failed"));
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const deps: ImportDeps = { briefs, assets: getAssetStore(importTenant("local")) };
+      const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+      expect(result.outcome).toBe("refused");
+      expect(result.reason).toBe("meta read failed");
+      expect(result.partial).toBeUndefined();
     } finally {
       dropRoot(root);
     }
