@@ -1,19 +1,11 @@
 import { spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  existsSync,
-  mkdtempSync,
-  writeFileSync,
-  rmSync,
-} from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 
-const scanSh = fileURLToPath(
-  new URL("../../../scripts/test-output-scan.sh", import.meta.url),
-);
+const scanSh = fileURLToPath(new URL("../../../scripts/test-output-scan.sh", import.meta.url));
 
 const dirs: string[] = [];
 
