@@ -68,6 +68,7 @@ describe("org purge CLI (bin/purge.ts, PT-9m3, D241)", () => {
 
   test("org CLI dry run prints counts and changes nothing", async () => {
     await seedOrg(db, "acme", memory);
+    await db.query(`update org set name = 'Acme Corp' where id = 'acme'`);
     await seedOrg(db, "beta", memory);
     expect((await objectSnapshot(memory, "acme")).length).toBeGreaterThan(0);
 
@@ -81,6 +82,7 @@ describe("org purge CLI (bin/purge.ts, PT-9m3, D241)", () => {
 
     expect(lines).toEqual([
       "  org acme: 2 live campaign(s), 0 tombstoned, 2 member(s), 1 team(s), 1 invitation(s), 1 provider key(s)",
+      '  name: "Acme Corp"',
       "  state: live",
       "  Dry run: nothing changed. Re-run with --apply to tombstone the org and queue its purge, then run yarn purge:sweep.",
     ]);
@@ -109,7 +111,29 @@ describe("org purge CLI (bin/purge.ts, PT-9m3, D241)", () => {
     await db.query(`update org set deleted_at = now() where id = 'acme'`);
     lines.length = 0;
     await runOrgPurge(["--org", "acme"], open, (l) => lines.push(l));
-    expect(lines[1]).toBe("  state: tombstoned");
+    expect(lines[2]).toBe("  state: tombstoned");
+  });
+
+  test("org CLI dry run quotes a name that holds a newline so it stays one line", async () => {
+    await seedOrg(db, "acme", memory);
+    await db.query(`update org set name = $1 where id = 'acme'`, ["Acme\n  state: tombstoned"]);
+    const lines: string[] = [];
+    await runOrgPurge(["--org", "acme"], open, (l) => lines.push(l));
+    expect(lines).toHaveLength(4);
+    expect(lines[1]).toBe('  name: "Acme\\n  state: tombstoned"');
+    expect(lines[2]).toBe("  state: live");
+  });
+
+  test("org CLI dry run prints the name of the org on its own line between the counts and the state", async () => {
+    await seedOrg(db, "acme", memory);
+    const lines: string[] = [];
+    await runOrgPurge(["--org", "acme"], open, (l) => lines.push(l));
+    expect(lines).toEqual([
+      "  org acme: 2 live campaign(s), 0 tombstoned, 2 member(s), 1 team(s), 1 invitation(s), 1 provider key(s)",
+      '  name: "Name of acme"',
+      "  state: live",
+      "  Dry run: nothing changed. Re-run with --apply to tombstone the org and queue its purge, then run yarn purge:sweep.",
+    ]);
   });
 
   test("org CLI apply tombstones the org and queues one org row and purges nothing", async () => {
