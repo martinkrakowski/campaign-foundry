@@ -4,16 +4,19 @@ import {
   candidateNames,
   countUnreferencedInputs,
   type RefTarget,
+  resolveRefTargets,
   writeOrReuse,
 } from "../asset-step.js";
+import { classifyRefs } from "../classify.js";
 import { importTenant } from "../import-tenant.js";
+import type { ScannedCampaign } from "../scan.js";
 import type { StepContext } from "../steps.js";
 import { getAssetStore, getBriefStore } from "../../ports/index.js";
 import {
   restoreApplyEnvironment,
   useApplyEnvironment,
 } from "./fixtures/apply-harness.js";
-import { PNG, dropRoot, linkAt, makeRoot, writeAt } from "./fixtures/tree.js";
+import { PNG, briefBody, dropRoot, linkAt, makeRoot, writeAt, writeBrief } from "./fixtures/tree.js";
 
 function ctxWith(root: string): StepContext {
   return {
@@ -72,6 +75,48 @@ describe("asset-step: unreferenced inputs", () => {
       const result = countUnreferencedInputs(ctx, "camp", targets);
       expect(result.names).toEqual(["extra.png"]);
       expect(result.count).toBe(1);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a slug with no input directory counts as zero unreferenced inputs", () => {
+    const root = makeRoot();
+    try {
+      const ctx = ctxWith(root);
+      expect(countUnreferencedInputs(ctx, "nope", []).names).toEqual([]);
+      expect(countUnreferencedInputs(ctx, "nope", []).count).toBe(0);
+    } finally {
+      dropRoot(root);
+    }
+  });
+});
+
+describe("asset-step: resolveRefTargets", () => {
+  test("a ref classify marks missing is not returned as a write target", () => {
+    const root = makeRoot();
+    try {
+      const ctx = ctxWith(root);
+      const sourcePath = writeBrief(root, "camp.yaml", {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/missing.png" },
+          { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      writeAt(root, join("assets/inputs/camp/logo.png"), PNG);
+      const brief = briefBody({
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/missing.png" },
+          { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      const draft: ScannedCampaign = { slug: "camp", sourcePath, name: null, type: null, brief, refs: [], sample: false };
+      const scanned: ScannedCampaign = { ...draft, refs: classifyRefs(ctx, draft) };
+      const targets = resolveRefTargets(ctx, scanned);
+      expect(targets).toHaveLength(1);
+      expect(targets[0].ref).toBe("assets/inputs/camp/logo.png");
     } finally {
       dropRoot(root);
     }

@@ -15,6 +15,7 @@ import { hashBytes } from "../../brief-files.js";
 import { resolveRefTargets } from "../asset-step.js";
 import { importTenant } from "../import-tenant.js";
 import { getAssetStore, getBriefStore } from "../../ports/index.js";
+import type { BriefStorePort } from "../../ports/brief-store.port.js";
 import type { SqlClient } from "../../db/sql-client.js";
 import type { ScannedCampaign } from "../scan.js";
 import type { StepContext } from "../steps.js";
@@ -23,7 +24,7 @@ import {
   restoreApplyEnvironment,
   useApplyEnvironment,
 } from "./fixtures/apply-harness.js";
-import { MP3, PNG, type BriefOverrides, briefBody, dropRoot, makeRoot, writeAt, writeBrief } from "./fixtures/tree.js";
+import { MP3, NOT_A_PNG, PNG, type BriefOverrides, briefBody, dropRoot, makeRoot, writeAt, writeBrief } from "./fixtures/tree.js";
 
 function ctxWith(root: string): StepContext {
   return {
@@ -353,6 +354,69 @@ describe("campaign-step: interruption and resumability (N2)", () => {
       dropRoot(root);
     }
   });
+
+  async function threeInputs(): Promise<{ root: string; overrides: BriefOverrides }> {
+    const root = makeRoot();
+    return {
+      root,
+      overrides: {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/a.png" },
+          { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "assets/inputs/camp/b.png" },
+          { id: "p3", name: "P3", primaryColor: "#333333", logoPath: "assets/inputs/camp/c.png" },
+        ],
+      },
+    };
+  }
+
+  test("an importCampaign interrupted after the second asset is completed by the next run", async () => {
+    const { root, overrides } = await threeInputs();
+    try {
+      const { ctx, scanned, expected } = buildScanned(root, "camp", overrides);
+      const deps: ImportDeps = {
+        briefs: getBriefStore(importTenant("local")),
+        assets: failOnNth(getAssetStore(importTenant("local")), "writeAsset", 3),
+      };
+      const first = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+      expect(first.outcome).toBe("refused");
+      expect(first.partial).toBe(true);
+
+      const again = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+      expect(again.outcome).toBe("completed");
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("an importCampaign interrupted before createBrief is completed by the next run", async () => {
+    const root = makeRoot();
+    try {
+      const { ctx, scanned, expected } = buildScanned(root, "camp", {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      const deps: ImportDeps = {
+        briefs: getBriefStore(importTenant("local")),
+        assets: getAssetStore(importTenant("local")),
+      };
+      // First call to createBrief fails (injected); rerun succeeds (counter moves past 1).
+      const wrapped = failOnNth(deps.briefs, "createBrief", 1);
+      const first = (await importCampaign({ briefs: wrapped, assets: deps.assets }, ctx, scanned, expected)) as CampaignResult;
+      expect(first.outcome).toBe("refused");
+      expect(first.partial).toBe(true);
+      expect(first.minted.assets.length).toBe(1);
+
+      const again = (await importCampaign({ briefs: wrapped, assets: deps.assets }, ctx, scanned, expected)) as CampaignResult;
+      expect(again.outcome).toBe("completed");
+      const versions = (await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`)).rows[0]!.n;
+      expect(versions).toBe(1);
+    } finally {
+      dropRoot(root);
+    }
+  });
 });
 
 describe("campaign-step: refusals before the first write (N3)", () => {
@@ -399,6 +463,103 @@ describe("campaign-step: refusals before the first write (N3)", () => {
       expect(result.outcome).toBe("refused");
       expect(result.reason).toMatch(/reserved/);
       expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a uuid-shaped slug is refused and nothing is written", async () => {
+    const root = makeRoot();
+    try {
+      const { ctx, scanned, expected } = buildScanned(root, "11111111-1111-1111-1111-111111111111", {
+        id: "11111111-1111-1111-1111-111111111111",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/11111111-1111-1111-1111-111111111111/logo.png" },
+        ],
+      });
+      const deps = makeDeps();
+      const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+      expect(result.outcome).toBe("refused");
+      expect(result.reason).toMatch(/uuid/);
+      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a ref refused by the upload rules when the step runs refuses the campaign with no row left", async () => {
+    const root = makeRoot();
+    try {
+      const { ctx, scanned, expected } = buildScanned(root, "camp", {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      writeAt(root, join("assets/inputs/camp/logo.png"), NOT_A_PNG);
+      const rescanned: ScannedCampaign = { ...scanned, refs: classifyRefs(ctx, scanned) };
+      const deps = makeDeps();
+      const result = (await importCampaign(deps, ctx, rescanned, expected)) as CampaignResult;
+      expect(result.outcome).toBe("refused");
+      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+      expect(env.objects.putCount).toBe(0);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("an EEXIST at createCampaign is listed as refused: slug reserved and nothing else is written", async () => {
+    const root = makeRoot();
+    try {
+      const { ctx, scanned, expected } = buildScanned(root, "camp", {
+        id: "camp",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      const briefs = getBriefStore(importTenant("local"));
+      const assets = getAssetStore(importTenant("local"));
+      await briefs.createCampaign("camp", { name: null, type: null });
+      const blind: BriefStorePort = new Proxy(briefs, {
+        get(target, prop, receiver) {
+          if (prop === "campaignMeta") return () => Promise.resolve(undefined);
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const deps: ImportDeps = { briefs: blind, assets };
+      const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+      expect(result.outcome).toBe("refused");
+      expect(result.reason).toBe("refused: slug reserved");
+      expect((await campaignCounts(env.db, env.objects.putCount)).assets).toBe(0);
+      expect(env.objects.putCount).toBe(0);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a slug used by a campaign with a different body is refused and not renamed", async () => {
+    const root = makeRoot();
+    try {
+      const over = (message: string) => ({
+        id: "camp",
+        campaignMessage: message,
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      const { ctx: c1, scanned: s1, expected: e1 } = buildScanned(root, "camp", over("Hello"));
+      const deps = makeDeps();
+      expect((await importCampaign(deps, c1, s1, e1)).outcome).toBe("created");
+
+      const { ctx: c2, scanned: s2, expected: e2 } = buildScanned(root, "camp", over("A different message"));
+      const again = (await importCampaign(deps, c2, s2, e2)) as CampaignResult;
+      expect(again.outcome).toBe("refused");
+      expect(
+        (await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`)).rows[0]!.n,
+      ).toBe(1);
+      const slugs = (await env.db.query<{ slug: string }>(`select slug from campaign where org_id=$1`, ["local"])).rows;
+      expect(slugs.map((r) => r.slug)).toEqual(["camp"]);
     } finally {
       dropRoot(root);
     }
