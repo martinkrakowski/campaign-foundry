@@ -11,6 +11,7 @@ const HEAD = "cafebabecafebabecafebabecafebabecafebabe";
 const BLOB_PORT = "1111111111111111111111111111111111111111";
 const BLOB_REPO = "2222222222222222222222222222222222222222";
 const BLOB_API = "3333333333333333333333333333333333333333";
+const HEAD_ONLY_BLOB = "9999999999999999999999999999999999999999";
 
 function catFileResponse(blobs: Array<{ sha: string; content: string }>): string {
   let result = "";
@@ -29,11 +30,15 @@ function makeGit(responses: Record<string, string>): GitIo & { calls: GitCall[] 
     calls,
     run: async (args, stdin) => {
       calls.push({ args, stdin });
-      return responses[args.join(" ")] ?? "";
+      const key = args.join(" ");
+      if (!(key in responses)) throw new Error(`no scripted answer for '${key}'`);
+      return responses[key]!;
     },
     runBytes: async (args, stdin) => {
       calls.push({ args, stdin });
-      return Buffer.from(responses[args.join(" ")] ?? "", "utf8");
+      const key = args.join(" ");
+      if (!(key in responses)) throw new Error(`no scripted answer for '${key}'`);
+      return Buffer.from(responses[key]!, "utf8");
     },
   };
 }
@@ -72,10 +77,13 @@ describe("collected code is read from the base tree and never from the head", ()
         `100644 blob ${BLOB_API}\tpackages/app/src/api.ts`,
         `120000 blob ${HEAD}\tsymlink/everywhere`,
       ].join("\x00"),
+      ["ls-tree -r -z " + HEAD]:
+        `100644 blob ${HEAD_ONLY_BLOB}\tpackages/x/src/new.ts`,
       ["cat-file --batch"]: catFileResponse([
         { sha: BLOB_PORT, content: portContent },
         { sha: BLOB_REPO, content: repoContent },
         { sha: BLOB_API, content: 'SqlRepo.save("hello");' },
+        { sha: HEAD_ONLY_BLOB, content: "function newHeadOnly() {}" },
       ]),
       ["diff --unified=0 --no-color --no-ext-diff --no-renames " + BASE + " " + HEAD]:
         "diff --git a/packages/app/src/api.ts b/packages/app/src/api.ts\n" +
@@ -88,21 +96,24 @@ describe("collected code is read from the base tree and never from the head", ()
       git,
       writeFile: log.writeFile,
       log: () => undefined,
-      logError: (text) => {
-        void text;
-      },
+      logError: (text) => { void text; },
     });
 
     expect(code).toBe(0);
     const catFileCall = git.calls.find((c) => c.args[0] === "cat-file");
-    expect(catFileCall?.stdin).not.toContain(HEAD);
-    // A head-only blob is never read — only base blobs are in cat-file stdin
-    expect(catFileCall?.stdin).not.toContain(BLOB_API.replace("3", "9"));
-    // Head appears only in the diff call args, never in cat-file/show
-    const diffCall = git.calls.find((c) => c.args[0] === "diff");
-    expect(diffCall?.args).toContain(HEAD);
+    expect(catFileCall).toBeDefined();
+    expect(catFileCall!.stdin).toContain(BLOB_PORT);
+    expect(catFileCall!.stdin).toContain(BLOB_REPO);
+    expect(catFileCall!.stdin).toContain(BLOB_API);
+    // No head-only blob in the cat-file stdin
+    expect(catFileCall!.stdin).not.toContain(HEAD_ONLY_BLOB);
+    // No git call other than diff has HEAD among its arguments
+    for (const call of git.calls) {
+      if (call.args[0] !== "diff") {
+        expect(call.args).not.toContain(HEAD);
+      }
+    }
     expect(git.calls.filter((c) => c.args[0] === "show")).toHaveLength(0);
-    // Output file was written with the header
     expect(log.written).toHaveLength(1);
     expect(log.written[0]?.content).toContain("Reference code from the base commit");
   });
