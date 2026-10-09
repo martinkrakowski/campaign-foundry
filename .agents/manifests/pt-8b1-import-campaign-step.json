@@ -4,7 +4,7 @@
   "mutations": [
     {
       "file": "apps/api/server/lib/import/asset-step.ts",
-      "before": "      if (hashBytes(existing!) === sourceSha) {",
+      "before": "      if (hashBytes(existing) === sourceSha) {",
       "after": "      if (true) {",
       "because": "N2/D221: writeOrReuse must compare bytes on EEXIST and only reuse when they match; dropping the sha256 compare makes it treat an EEXIST as a reuse of differing bytes, so two same-basename files of different bytes both map to one id.",
       "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/campaign-step.test.ts", "-t", "two different files with one name take the plain name and the root suffix"],
@@ -12,8 +12,8 @@
     },
     {
       "file": "apps/api/server/lib/import/campaign-step.ts",
-      "before": "  const rewritten = rewriteBriefRefs(files.brief, scanned.slug, refToId);\n  const stored = await briefs.findBriefById(scanned.slug);\n  if (dumpBrief(rewritten) === dumpBrief(stored!.brief)) return { kind: \"unchanged\" };",
-      "after": "  const stored = await briefs.findBriefById(scanned.slug);\n  if (dumpBrief(files.brief) === dumpBrief(stored!.brief)) return { kind: \"unchanged\" };",
+      "before": "  const rewritten = rewriteBriefRefs(files.brief, scanned.slug, refToId);\n  const stored = await briefs.findBriefById(scanned.slug);\n  if (dumpBrief(rewritten) === dumpBrief((stored as StoredBrief).brief))\n    return { kind: \"unchanged\" };",
+      "after": "  const stored = await briefs.findBriefById(scanned.slug);\n  if (dumpBrief(files.brief) === dumpBrief((stored as StoredBrief).brief))\n    return { kind: \"unchanged\" };",
       "because": "PT-8-3/N2: probeCampaign must compare the REWRITTEN body (refs rewritten to ids) to the stored body; comparing the raw source body (still path refs) never matches a stored brief and falsely reports unchanged on a rerun.",
       "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/campaign-step.test.ts", "-t", "a second importCampaign reports unchanged for a campaign whose refs took a suffixed name"],
       "verdict": "caught"
@@ -40,6 +40,22 @@
       "after": "  if (UUID_PATTERN.test(scanned.slug)) {\n    /* N6 uuid check skipped */\n  }",
       "because": "N6/D218: a uuid-shaped slug is refused before any write; skipping the check lets an import mint a campaign under a uuid instead of refusing it.",
       "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/campaign-step.test.ts", "-t", "a uuid-shaped slug is refused and nothing is written"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/campaign-step.ts",
+      "before": "    brief = parseBriefText(scanned.sourcePath, briefBytes.toString(\"utf8\"));",
+      "after": "    brief = scanned.brief;",
+      "because": "N10: preflight must parse the brief from the bytes it hashed and return THAT body; returning scanned.brief (a parse from the step's earlier, separate read) lets a body changed between the two reads be imported.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/campaign-step.test.ts", "-t", "the body imported is the body whose bytes were hashed"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/campaign-step.ts",
+      "before": "    if (expected.get(metaKey) !== hashBytes(metaBytes)) {",
+      "after": "    if (false) {",
+      "because": "D220/N10: briefs/<slug>/campaign.json must be hashed like the brief; skipping the hash check lets a name/type changed after the review be imported.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/campaign-step.test.ts", "-t", "a campaign meta file changed after the hashes were taken refuses the campaign before any write"],
       "verdict": "caught"
     }
   ]
