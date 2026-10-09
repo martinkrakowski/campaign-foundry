@@ -42,8 +42,13 @@ describe("scripts/run-test-step.sh", () => {
   test("a command that exits 0 while its output reports failed tests fails the step with code 96", () => {
     const fake = "printf '%s\\n' '      Tests  1 failed | 10 passed (11)'; exit 0";
 
+    // Off Actions: the variable is REMOVED, not inherited — this suite itself
+    // runs under GITHUB_ACTIONS=true in CI.
+    const offActions = { ...process.env };
+    delete offActions.GITHUB_ACTIONS;
     const plain = spawnSync("sh", [script, "sh", "-c", fake], {
       encoding: "utf8",
+      env: offActions,
     });
     expect(plain.status).toBe(96);
     expect(plain.stderr).toContain("run-test-step: FAILED");
