@@ -34,8 +34,19 @@ describe("paths outside the allow list and paths on the deny list are never coll
     "apps/api/server/.env.production",
     "apps/api/server/secrets/token.key",
     "packages/x/src/feature.test.tsx",
-    "packages/x/src/.env/config.ts",
-  ];
+     "packages/x/src/.env/config.ts",
+     "apps/api/server/Certs/ca.pem",
+     "packages/x/src/Secrets.ts",
+     "packages/x/src/credentials.ts",
+     "packages/x/src/foo.spec.ts",
+     "packages/x/src/foo.stories.tsx",
+     "packages/x/src/fixtures/data.ts",
+     "packages/x/src/__mocks__/data.ts",
+     "packages/x/src/generated/types.ts",
+     "packages/x/src/vendor/lib.ts",
+     "packages/x/src/test/helper.ts",
+     "packages/x/src/tests/helper.ts",
+   ];
 
   const accepted = [
     "packages/x/src/a.ts",

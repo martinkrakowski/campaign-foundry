@@ -20,23 +20,36 @@ export function isRegularMode(mode: string): boolean {
 }
 
 /** Path segments that always deny, even inside an allowed root (deny wins). */
-const DENY_SEGMENTS = new Set(["__tests__", "certs", "secrets", "deploy", ".github"]);
+const DENY_SEGMENTS = new Set([
+  "__tests__", "certs", "secrets", "deploy", ".github",
+  "fixtures", "__mocks__", "__fixtures__", "generated", "vendor", "test", "tests",
+]);
 
-/** File-level suffixes that always deny. */
-const DENY_SUFFIXES = [".d.ts", ".test.ts", ".test.tsx", ".pem", ".key", ".p12", ".crt"];
+const DENY_SUFFIXES = [
+  ".d.ts", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx", ".stories.tsx",
+  ".pem", ".key", ".p12", ".crt",
+];
 
-/** True when any single path segment is on the deny list or starts with `.env`. */
 function hasDeniedSegment(path: string): boolean {
   for (const segment of path.split("/")) {
-    if (DENY_SEGMENTS.has(segment)) return true;
-    if (segment.startsWith(".env")) return true;
+    const lower = segment.toLowerCase();
+    if (DENY_SEGMENTS.has(lower)) return true;
+    if (lower.startsWith(".env")) return true;
   }
   return false;
 }
 
-/** True when the file name ends with a denied suffix. */
 function hasDeniedSuffix(path: string): boolean {
   return DENY_SUFFIXES.some((suf) => path.endsWith(suf));
+}
+
+function hasDeniedBaseName(path: string): boolean {
+  const name = path.split("/").pop();
+  if (name === undefined) return false;
+  const dot = name.lastIndexOf(".");
+  const base = dot === -1 ? name : name.slice(0, dot);
+  const lower = base.toLowerCase();
+  return lower === "secrets" || lower === "credentials";
 }
 
 /** True when the file name ends in `.ts` or `.tsx`. */
@@ -53,6 +66,7 @@ function endsWithTs(name: string): boolean {
 export function isCollectable(path: string): boolean {
   if (hasDeniedSegment(path)) return false;
   if (hasDeniedSuffix(path)) return false;
+  if (hasDeniedBaseName(path)) return false;
   const s = path.split("/");
   const last = s[s.length - 1];
 
