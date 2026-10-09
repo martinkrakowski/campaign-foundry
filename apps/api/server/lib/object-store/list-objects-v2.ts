@@ -94,9 +94,6 @@ function tagText(xml: string, tag: string): string | undefined {
  * sorting by `lastModified` gets an order decided by `NaN` comparisons. Each
  * message names the FIELD, never the value — the value came from the store and
  * has not earned a place in a log.
- *
- * An empty `NextContinuationToken` is refused like a missing one, because
- * following it would repeat the first page for ever.
  */
 export function parseListObjectsV2(xml: string): ListObjectsV2Page {
   if (/<!DOCTYPE/i.test(xml) || /<!ENTITY/i.test(xml)) {
@@ -132,7 +129,7 @@ export function parseListObjectsV2(xml: string): ListObjectsV2Page {
 
   const truncated = tagText(xml, "IsTruncated") === "true";
   const nextContinuationToken = tagText(xml, "NextContinuationToken");
-  if (truncated && (nextContinuationToken === undefined || nextContinuationToken === "")) {
+  if (truncated && nextContinuationToken === undefined) {
     throw new Error("Refusing a truncated listing with no NextContinuationToken.");
   }
   return { contents, truncated, nextContinuationToken };
