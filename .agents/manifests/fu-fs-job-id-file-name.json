@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "FU-fs-job-id-file-name",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/fs-job-store.ts",
+      "before": "      if (parsed.id !== id) return undefined;\n      return parsed;",
+      "after": "      return parsed;",
+      "because": "removing the id check re-introduces the bug: a record whose id does not match its file name is read as the wrong job, so listJobs names it",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-job-store.test.ts",
+        "-t",
+        "listJobs leaves out a record whose id is not its file name"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-job-store.ts",
+      "before": "      if (parsed.id !== id) return undefined;\n      return parsed;",
+      "after": "      return parsed;",
+      "because": "removing the id check re-introduces the bug: getStoredJob hands back a record under another job's id",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-job-store.test.ts",
+        "-t",
+        "getStoredJob answers undefined for a file whose record names another job"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

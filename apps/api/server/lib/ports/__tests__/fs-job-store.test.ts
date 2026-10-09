@@ -530,6 +530,92 @@ describe("FsJobStore", () => {
     expect(list[0].id).toBe(id);
   });
 
+  test("listJobs leaves out a record whose id is not its file name", async () => {
+    // Two real jobs written through the store (the exact JSON shape writeJobEntry
+    // produces), then one file is overwritten with the other's content so its
+    // `id` field no longer matches the identity in its file name.
+    const a = await store.createJob("camp-a", "job-a");
+    const b = await store.createJob("camp-b", "job-b");
+    const bContent = readFileSync(store.jobPath(b), "utf8");
+    writeFileSync(store.jobPath(a), bContent);
+
+    const list = await store.listJobs();
+    expect(list).toHaveLength(1);
+    expect(list.map((j) => j.id)).toEqual([b]);
+  });
+
+  test("getStoredJob answers undefined for a file whose record names another job", async () => {
+    const a = await store.createJob("camp-a", "job-a");
+    const b = await store.createJob("camp-b", "job-b");
+    // Overwrite A.json with B's content so its record names a different job.
+    const bContent = readFileSync(store.jobPath(b), "utf8");
+    writeFileSync(store.jobPath(a), bContent);
+
+    // Read through a FRESH store instance on the same directory: the original
+    // instance's memory cache still holds A's unchanged entry and would answer
+    // for us there, masking the disk-level mismatch we are proving.
+    const fresh = new FsJobStore(dir);
+    expect(await fresh.getStoredJob(a)).toBeUndefined();
+    const bRecord = await fresh.getStoredJob(b);
+    expect(bRecord).toBeDefined();
+    expect(bRecord?.id).toBe(b);
+    expect(bRecord?.campaignId).toBe("camp-b");
+  });
+
+  test("a mismatched record is left on disk untouched", async () => {
+    const a = await store.createJob("camp-a", "job-a");
+    const b = await store.createJob("camp-b", "job-b");
+    const bContent = readFileSync(store.jobPath(b), "utf8");
+    writeFileSync(store.jobPath(a), bContent);
+    const aBytes = readFileSync(store.jobPath(a));
+
+    // Drive both read paths that previously could have treated A.json as B:
+    // listJobs (iterates every file) and getStoredJob. Use a fresh store so the
+    // original instance's memory cache does not shadow the disk read.
+    const fresh = new FsJobStore(dir);
+    await fresh.listJobs();
+    expect(await fresh.getStoredJob(a)).toBeUndefined();
+
+    // A.json is unchanged: still B's content, still mis-named.
+    expect(readFileSync(store.jobPath(a))).toEqual(aBytes);
+    // B.json is untouched too.
+    expect(readFileSync(store.jobPath(b), "utf8")).toEqual(bContent);
+  });
+
+  test("deleting the jobs a listing names never removes another job's file", async () => {
+    const a = await store.createJob("camp-a", "job-a");
+    const b = await store.createJob("camp-b", "job-b");
+    const bContent = readFileSync(store.jobPath(b), "utf8");
+    writeFileSync(store.jobPath(a), bContent);
+
+    // Snapshot, for each file by its OWN id, the id its content claims. This is
+    // the ground truth about what `deleteJob(id)` would actually be unlinking.
+    const heldByFile: Record<string, string> = {};
+    for (const id of [a, b]) {
+      heldByFile[id] = JSON.parse(readFileSync(store.jobPath(id), "utf8") as string).id;
+    }
+
+    // As purge-campaign-fs.ts does: filter a campaign's jobs, take their ids.
+    const fresh = new FsJobStore(dir);
+    const listed = await fresh.listJobs();
+    const idsToDelete = listed.filter((job) => job.campaignId === "camp-b").map((job) => job.id);
+
+    // The listing must not double-name a file it is not (no duplicate ids), and
+    // no deleteJob call may target an id whose own file held a different id.
+    expect(new Set(idsToDelete).size).toBe(idsToDelete.length);
+
+    const deleteSpy = vi.spyOn(fresh, "deleteJob");
+    for (const id of idsToDelete) await fresh.deleteJob(id);
+    for (const id of deleteSpy.mock.calls.map((c) => c[0] as string)) {
+      expect(heldByFile[id]).toBe(id);
+    }
+
+    // The genuinely-named B file was removed by its own id; the mis-named A.json
+    // was never named by any listing and is therefore left on disk as an orphan.
+    expect(() => readFileSync(store.jobPath(b))).toThrow();
+    expect(readFileSync(store.jobPath(a), "utf8")).toEqual(bContent);
+  });
+
   const canDenyRead = process.platform !== "win32" && process.getuid?.() !== 0;
 
   test.skipIf(!canDenyRead)(
