@@ -539,7 +539,10 @@ describe("FsJobStore", () => {
     const bContent = readFileSync(store.jobPath(b), "utf8");
     writeFileSync(store.jobPath(a), bContent);
 
-    const list = await store.listJobs();
+    // A FRESH store, as the tests below use: the original instance still caches job A,
+    // and on a file system with coarse mtimes the overwrite can carry the cached mtime, so
+    // the cache would answer and this test would fail with the fix in place.
+    const list = await new FsJobStore(dir).listJobs();
     expect(list).toHaveLength(1);
     expect(list.map((j) => j.id)).toEqual([b]);
   });
