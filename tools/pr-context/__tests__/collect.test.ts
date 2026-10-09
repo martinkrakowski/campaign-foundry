@@ -533,9 +533,11 @@ describe("table name filtering", () => {
 
   test("a table the base migrations create is still treated as a table", () => {
     const sources = new Map([
-      ["packages/app/src/api.ts",
+      [
+        "packages/app/src/api.ts",
         'function writeOrder(o) { db.insertInto("orders"); return o; }\n' +
-        "function changedFn() { return 1; }"],
+          "function changedFn() { return 1; }",
+      ],
       ["apps/api/server/lib/db/migrations/0001.sql", "CREATE TABLE orders (\n  id SERIAL\n);"],
       ["apps/api/server/lib/db/migrations/0002.sql", "CREATE TABLE products (\n  id SERIAL\n);"],
     ]);

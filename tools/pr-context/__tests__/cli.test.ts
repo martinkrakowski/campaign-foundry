@@ -560,17 +560,25 @@ describe("argument and output path handling", () => {
 describe("collector failure output handling", () => {
   test("a collector failure whose output path cannot be written still exits 0", async () => {
     const git: GitIo = {
-      run: async () => { throw new Error("git exploded"); },
-      runBytes: async () => { throw new Error("git exploded"); },
+      run: async () => {
+        throw new Error("git exploded");
+      },
+      runBytes: async () => {
+        throw new Error("git exploded");
+      },
     };
     const errs: string[] = [];
     const code = await runCli({
       argv: ["--base", BASE, "--head", HEAD, "--out", "/no/such/dir/out.md"],
       git,
-      writeFile: async () => { throw new Error("ENOENT: no such file or directory"); },
+      writeFile: async () => {
+        throw new Error("ENOENT: no such file or directory");
+      },
       isSymlink: async () => false,
       log: () => undefined,
-      logError: (text) => { errs.push(text); },
+      logError: (text) => {
+        errs.push(text);
+      },
     });
     expect(code).toBe(0);
     expect(errs.some((e) => e.includes("could not write"))).toBe(true);
@@ -578,18 +586,26 @@ describe("collector failure output handling", () => {
 
   test("a collector failure never writes through a symbolic link", async () => {
     const git: GitIo = {
-      run: async () => { throw new Error("git exploded"); },
-      runBytes: async () => { throw new Error("git exploded"); },
+      run: async () => {
+        throw new Error("git exploded");
+      },
+      runBytes: async () => {
+        throw new Error("git exploded");
+      },
     };
     let written = false;
     const errs: string[] = [];
     const code = await runCli({
       argv: ["--base", BASE, "--head", HEAD, "--out", "/tmp/out.md"],
       git,
-      writeFile: async () => { written = true; },
+      writeFile: async () => {
+        written = true;
+      },
       isSymlink: async () => true,
       log: () => undefined,
-      logError: (text) => { errs.push(text); },
+      logError: (text) => {
+        errs.push(text);
+      },
     });
     expect(code).toBe(0);
     expect(written).toBe(false);
