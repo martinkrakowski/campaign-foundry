@@ -78,6 +78,27 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Writes `text` to `path`, refusing to write through a symlink and collapsing
+ * any failure to ONE stderr line. Returns true on success, false on failure.
+ * The caller always exits 0 after calling — the collector never fails a review.
+ */
+export async function writeOutput(
+  io: PrContextCliIo,
+  path: string,
+  text: string,
+): Promise<boolean> {
+  try {
+    if (await io.isSymlink(path)) throw new Error("is a symbolic link");
+    await io.writeFile(path, text);
+    return true;
+  } catch (error) {
+    const msg = errorMessage(error).replace(/\s+/g, " ").slice(0, 200);
+    io.logError(`pr:context: could not write ${path}: ${msg}`);
+    return false;
+  }
+}
+
 /** Secret-shaped patterns that must never appear in the output. N5. */
 const SECRET_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
@@ -116,18 +137,9 @@ export async function runCli(io: PrContextCliIo): Promise<number> {
       ? render(args.base, [], 0).text +
         "\nwithheld: a secret-shaped string was found in the collected code"
       : result.text;
-    // The output file is never written through a symlink; a write failure is
-    // printed on stderr and exits 0 — the collector never fails a review.
-    try {
-      if (await io.isSymlink(args.out)) {
-        throw new Error("is a symbolic link");
-      }
-      await io.writeFile(args.out, outputText);
-    } catch (error) {
-      const msg = errorMessage(error).replace(/\s+/g, " ").slice(0, 200);
-      io.logError(`pr:context: could not write ${args.out}: ${msg}`);
-      return 0;
-    }
+    // writeOutput handles symlinks and write failures: the collector never
+    // fails a review, so a write error exits 0 with one stderr line.
+    if (!(await writeOutput(io, args.out, outputText))) return 0;
     const ms = Date.now() - start;
     const written = secretFound ? 0 : result.blocksWritten;
     const tokens = secretFound ? 0 : result.totalTokens;
@@ -142,7 +154,7 @@ export async function runCli(io: PrContextCliIo): Promise<number> {
     const line = hasSecret(msg)
       ? "collector failed: (message withheld)"
       : `collector failed: ${msg}`;
-    await io.writeFile(args.out, `${result.text}\n${line}`);
+    await writeOutput(io, args.out, `${result.text}\n${line}`);
   }
   return 0;
 }
