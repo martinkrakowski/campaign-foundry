@@ -73,6 +73,14 @@
       "because": "Step 3: tier 8 must restrict siblings to the same directory; removing the directory check lets a file in a sub-directory be collected, which test H asserts against",
       "command": ["yarn", "vitest", "run", "tools/pr-context", "-t", "a sibling in a sub-directory or outside routes and web is not collected"],
       "verdict": "caught"
+    },
+    {
+      "file": "tools/pr-context/lib/render.ts",
+      "before": "      const trimmedBlockText = renderBlock({ ...block, text: trimmedText });",
+      "after": "      const trimmedBlockText = cutTo40Lines(blockText);",
+      "because": "Fix 1: the budget cut must trim the block's CODE text and the trimmed block is then rendered normally, so the fence opens and closes around the cut; trimming the rendered block instead cuts the rendered block itself and its closing fence is gone, which the test that asserts every opening fence closes before the next header fails.",
+      "command": ["yarn", "vitest", "run", "tools/pr-context", "-t", "a block trimmed for budget still closes its fence"],
+      "verdict": "caught"
     }
   ]
 }
