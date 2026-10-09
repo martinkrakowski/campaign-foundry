@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import vitestConfig from "../../../vitest.config";
 import { gateEnv } from "./gate-env.js";
+import { scaled } from "./wait-scale.js";
 
 // D183 (lane HX3-gate-in-repo) — `yarn gate`. Every test drives the real
 // script with CF_GATE_STEPS (one name<TAB>command line per step) and a fresh
@@ -136,7 +137,7 @@ function runGateAsyncIn(
 }
 
 /** Poll until the path exists — the handshake for the script's test pauses. */
-async function waitForFile(path: string, timeoutMs = 10_000): Promise<void> {
+async function waitForFile(path: string, timeoutMs = scaled(10_000)): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!existsSync(path)) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${path}`);
@@ -354,99 +355,115 @@ describe("yarn gate", () => {
     expect(r.status).toBe(0);
   });
 
-  test("a lock lost during a locked step fails the gate as lock lost", () => {
-    // The step removes the lock out from under the gate; the heartbeat's next
-    // tick fails, the loop dies leaving its marker, and the boundary check
-    // after the step must fail the gate — not release a phantom and go green.
-    const r = runGate(
-      ["--lane", "lane-b"],
-      {
-        CF_GATE_HEARTBEAT_SECONDS: "1",
-        ...stepsEnv([["test:cov", 'rm -rf "$TMPDIR/cf-gate.lock"; sleep 2']]),
-      },
-      15_000,
-    );
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("lock lost after step 'test:cov'");
-    expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
-  }, 15_000);
+  test(
+    "a lock lost during a locked step fails the gate as lock lost",
+    () => {
+      // The step removes the lock out from under the gate; the heartbeat's next
+      // tick fails, the loop dies leaving its marker, and the boundary check
+      // after the step must fail the gate — not release a phantom and go green.
+      const r = runGate(
+        ["--lane", "lane-b"],
+        {
+          CF_GATE_HEARTBEAT_SECONDS: "1",
+          ...stepsEnv([["test:cov", 'rm -rf "$TMPDIR/cf-gate.lock"; sleep 2']]),
+        },
+        15_000,
+      );
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("lock lost after step 'test:cov'");
+      expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
+    },
+    scaled(15_000),
+  );
 
-  test("a lock replaced by another holder fails the gate as lock lost, and the replacement survives cleanup", () => {
-    // The reclaim scenario end to end: the lock is replaced by a fresh holder
-    // while the gate is mid-step. The gate must fail as lock lost, and its
-    // cleanup must leave the replacement's lock exactly as it found it.
-    const dir = scratch();
-    const lock = join(dir, "cf-gate.lock");
-    const replace = [
-      'rm -rf "$TMPDIR/cf-gate.lock"',
-      'mkdir "$TMPDIR/cf-gate.lock"',
-      'printf "lane-c\\n" > "$TMPDIR/cf-gate.lock/owner"',
-      `printf "${process.pid}\\n" > "$TMPDIR/cf-gate.lock/pid"`,
-      'printf "$(date +%s)\\n" > "$TMPDIR/cf-gate.lock/started"',
-      'printf "$(date +%s)\\n" > "$TMPDIR/cf-gate.lock/beat"',
-      "sleep 2",
-    ].join("; ");
-    const r = runGate(
-      ["--lane", "lane-b"],
-      {
-        TMPDIR: dir,
-        CF_GATE_HEARTBEAT_SECONDS: "1",
-        ...stepsEnv([["test:cov", replace]]),
-      },
-      15_000,
-    );
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("lock lost after step 'test:cov'");
-    expect(readFileSync(join(lock, "owner"), "utf8").trim()).toBe("lane-c");
-    expect(existsSync(lock)).toBe(true);
-  }, 15_000);
+  test(
+    "a lock replaced by another holder fails the gate as lock lost, and the replacement survives cleanup",
+    () => {
+      // The reclaim scenario end to end: the lock is replaced by a fresh holder
+      // while the gate is mid-step. The gate must fail as lock lost, and its
+      // cleanup must leave the replacement's lock exactly as it found it.
+      const dir = scratch();
+      const lock = join(dir, "cf-gate.lock");
+      const replace = [
+        'rm -rf "$TMPDIR/cf-gate.lock"',
+        'mkdir "$TMPDIR/cf-gate.lock"',
+        'printf "lane-c\\n" > "$TMPDIR/cf-gate.lock/owner"',
+        `printf "${process.pid}\\n" > "$TMPDIR/cf-gate.lock/pid"`,
+        'printf "$(date +%s)\\n" > "$TMPDIR/cf-gate.lock/started"',
+        'printf "$(date +%s)\\n" > "$TMPDIR/cf-gate.lock/beat"',
+        "sleep 2",
+      ].join("; ");
+      const r = runGate(
+        ["--lane", "lane-b"],
+        {
+          TMPDIR: dir,
+          CF_GATE_HEARTBEAT_SECONDS: "1",
+          ...stepsEnv([["test:cov", replace]]),
+        },
+        15_000,
+      );
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("lock lost after step 'test:cov'");
+      expect(readFileSync(join(lock, "owner"), "utf8").trim()).toBe("lane-c");
+      expect(existsSync(lock)).toBe(true);
+    },
+    scaled(15_000),
+  );
 
-  test("a lock lost between locked steps fails the gate at the next step's boundary", async () => {
-    // The pause hook holds the gate before each locked step; the handshake
-    // removes the lock in exactly the between-steps window the check covers.
-    const dir = scratch();
-    const marker = join(dir, "paused-before-step");
-    const pending = runGateAsyncIn(dir, ["--lane", "lane-b"], {
-      ...stepsEnv([
-        ["test:cov", "true"],
-        ["verify-manifests", "true"],
-      ]),
-      CF_GATE_TEST_PAUSE_BEFORE_STEP: marker,
-    });
-    await waitForFile(marker);
-    rmSync(marker);
-    await waitForFile(marker);
-    rmSync(join(dir, "cf-gate.lock"), { recursive: true, force: true });
-    rmSync(marker);
-    const r = await pending;
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("lock lost before step 'verify-manifests'");
-    expect(existsSync(join(dir, "cf-gate.lock"))).toBe(false);
-  }, 15_000);
-
-  test("a failed release is reported by the gate, which does not report green", () => {
-    // The last locked step makes the lock directory read-only, so the gate's
-    // release cannot remove it: the gate must report the failed release and
-    // exit non-zero, never print the tally over a lingering lock.
-    const dir = scratch();
-    const lock = join(dir, "cf-gate.lock");
-    const r = runGate(
-      ["--lane", "lane-b"],
-      {
-        TMPDIR: dir,
+  test(
+    "a lock lost between locked steps fails the gate at the next step's boundary",
+    async () => {
+      // The pause hook holds the gate before each locked step; the handshake
+      // removes the lock in exactly the between-steps window the check covers.
+      const dir = scratch();
+      const marker = join(dir, "paused-before-step");
+      const pending = runGateAsyncIn(dir, ["--lane", "lane-b"], {
         ...stepsEnv([
           ["test:cov", "true"],
-          ["verify-manifests", 'chmod 555 "$TMPDIR/cf-gate.lock"'],
+          ["verify-manifests", "true"],
         ]),
-      },
-      15_000,
-    );
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("FAILED to release the lock");
-    expect(existsSync(lock)).toBe(true);
-    // Let the cleanup remove the scratch dir again.
-    chmodSync(lock, 0o755);
-  }, 15_000);
+        CF_GATE_TEST_PAUSE_BEFORE_STEP: marker,
+      });
+      await waitForFile(marker);
+      rmSync(marker);
+      await waitForFile(marker);
+      rmSync(join(dir, "cf-gate.lock"), { recursive: true, force: true });
+      rmSync(marker);
+      const r = await pending;
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("lock lost before step 'verify-manifests'");
+      expect(existsSync(join(dir, "cf-gate.lock"))).toBe(false);
+    },
+    scaled(15_000),
+  );
+
+  test(
+    "a failed release is reported by the gate, which does not report green",
+    () => {
+      // The last locked step makes the lock directory read-only, so the gate's
+      // release cannot remove it: the gate must report the failed release and
+      // exit non-zero, never print the tally over a lingering lock.
+      const dir = scratch();
+      const lock = join(dir, "cf-gate.lock");
+      const r = runGate(
+        ["--lane", "lane-b"],
+        {
+          TMPDIR: dir,
+          ...stepsEnv([
+            ["test:cov", "true"],
+            ["verify-manifests", 'chmod 555 "$TMPDIR/cf-gate.lock"'],
+          ]),
+        },
+        15_000,
+      );
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("FAILED to release the lock");
+      expect(existsSync(lock)).toBe(true);
+      // Let the cleanup remove the scratch dir again.
+      chmodSync(lock, 0o755);
+    },
+    scaled(15_000),
+  );
 
   test("a run where every step passes prints the full tally", () => {
     const r = runGate(
