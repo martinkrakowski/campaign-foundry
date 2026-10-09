@@ -43,7 +43,7 @@ repo_context_files = [
 repo_context_from_default_branch = true
 repo_context_max_lines = 3000
 ai_timeout = 600
-# Hunk context. Verified against configuration.toml at the pinned v0.42.0 rather than
+# Hunk context. Verified against configuration.toml at the pinned v0.47.0 (unchanged from v0.42.0) rather than
 # assumed: the defaults are 5 before and 1 after (each +3 built in), with
 # allow_dynamic_context already true and expanding up to 10 lines to an enclosing scope.
 # So the reviewers were never as blind as "unset keys" would suggest. Raised anyway,
@@ -86,7 +86,7 @@ however well covered; and a PR body whose stated gate or audit does not match th
 
 [pr_code_suggestions]
 # Inline and line-anchored, not a collapsed summary table.
-commitable_code_suggestions = true
+committable_code_suggestions = true
 # Silence when there is nothing to say; an empty guide on every PR trains people to ignore
 # the bot.
 publish_output_no_suggestions = false
