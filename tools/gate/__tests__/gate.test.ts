@@ -316,7 +316,7 @@ describe("yarn gate", () => {
       stepsEnv([
         [
           "test:cov",
-          'sh -c \'printf " Test Files  1 failed | 3 passed (4)\\n      Tests  1 failed | 10 passed (11)\\n"; exit 3\'',
+          "sh -c 'printf \" Test Files  1 failed | 3 passed (4)\\n      Tests  1 failed | 10 passed (11)\\n\"; exit 3'",
         ],
       ]),
     );
@@ -339,10 +339,7 @@ describe("yarn gate", () => {
     // printf escapes, so the gate must strip colour before anchoring (N2/N3).
     const C = "\u001b";
     const cmd = `printf '${C}[31m Test Files  1 failed | 3 passed (4)${C}[0m\\n${C}[32m      Tests  1 failed | 10 passed (11)${C}[0m\\n'`;
-    const r = runGate(
-      ["--lane", "lane-b"],
-      stepsEnv([["test:cov", cmd]]),
-    );
+    const r = runGate(["--lane", "lane-b"], stepsEnv([["test:cov", cmd]]));
     expect(r.status).toBe(96);
     expect(r.stdout).toContain("<== test:cov: exit 0");
     expect(r.stderr).toContain("exited 0 but its output reports failed tests");
@@ -352,18 +349,15 @@ describe("yarn gate", () => {
   test("the output scan applies under a profile as well", () => {
     // The profile keeps the step's NAME, so run_test_cov still wraps whatever
     // command the profile resolved to — the scan must fire there too.
-    const r = runGate(
-      ["--lane", "lane-b", "--profile", "midnight"],
-      {
-        ...stepsEnv([
-          [
-            "test:cov",
-            'printf " Test Files  1 failed | 3 passed (4)\\n      Tests  1 failed | 10 passed (11)\\n"',
-          ],
-        ]),
-        CF_GATE_TEST_PRINT_LISTING: "1",
-      },
-    );
+    const r = runGate(["--lane", "lane-b", "--profile", "midnight"], {
+      ...stepsEnv([
+        [
+          "test:cov",
+          'printf " Test Files  1 failed | 3 passed (4)\\n      Tests  1 failed | 10 passed (11)\\n"',
+        ],
+      ]),
+      CF_GATE_TEST_PRINT_LISTING: "1",
+    });
     expect(r.status).toBe(96);
     expect(r.stderr).toContain("exited 0 but its output reports failed tests");
   });
