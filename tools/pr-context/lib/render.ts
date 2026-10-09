@@ -52,8 +52,7 @@ export function render(
   // token cost is charged first. The counts line length varies, so use a
   // safe upper bound for the budget check.
   const countsEstimate = "# 999 block(s), 999 dropped for budget";
-  const headerChars =
-    `${HEADER[0]}${base}\n${HEADER[1]}\n${HEADER[2]}\n${countsEstimate}`.length;
+  const headerChars = `${HEADER[0]}${base}\n${HEADER[1]}\n${HEADER[2]}\n${countsEstimate}`.length;
   let runningTokens = Math.ceil(headerChars / 4);
 
   for (const block of blocks) {

@@ -84,8 +84,8 @@ describe("listBaseTree", () => {
 
   test("a header with fewer than three space-separated fields is skipped", async () => {
     const git = scriptedGit({
-      "ls-tree -r -z base": "100644\tpackages/x/src/a.ts\x00100644 blob def\tpackages/x/src/b.ts\x00",
-
+      "ls-tree -r -z base":
+        "100644\tpackages/x/src/a.ts\x00100644 blob def\tpackages/x/src/b.ts\x00",
     });
     const entries = await listBaseTree(git, "base");
     expect(entries).toHaveLength(1);

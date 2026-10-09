@@ -21,13 +21,31 @@ export function isRegularMode(mode: string): boolean {
 
 /** Path segments that always deny, even inside an allowed root (deny wins). */
 const DENY_SEGMENTS = new Set([
-  "__tests__", "certs", "secrets", "deploy", ".github",
-  "fixtures", "__mocks__", "__fixtures__", "generated", "vendor", "test", "tests",
+  "__tests__",
+  "certs",
+  "secrets",
+  "deploy",
+  ".github",
+  "fixtures",
+  "__mocks__",
+  "__fixtures__",
+  "generated",
+  "vendor",
+  "test",
+  "tests",
 ]);
 
 const DENY_SUFFIXES = [
-  ".d.ts", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx", ".stories.tsx",
-  ".pem", ".key", ".p12", ".crt",
+  ".d.ts",
+  ".test.ts",
+  ".test.tsx",
+  ".spec.ts",
+  ".spec.tsx",
+  ".stories.tsx",
+  ".pem",
+  ".key",
+  ".p12",
+  ".crt",
 ];
 
 function hasDeniedSegment(path: string): boolean {
@@ -80,27 +98,27 @@ export function isCollectable(path: string): boolean {
   // apps/web/src/**/*.ts|tsx
   if (s[0] === "apps" && s[1] === "web" && s[2] === "src" && endsWithTs(last)) return true;
   // apps/api/server/lib/db/migrations/*.sql  (single segment only)
-    if (
-      s[0] === "apps" &&
-      s[1] === "api" &&
-      s[2] === "server" &&
-      s[3] === "lib" &&
-      s[4] === "db" &&
-      s[5] === "migrations" &&
-      s.length === 7 &&
-      last.endsWith(".sql")
-    ) {
-      return true;
-    }
-
-    return false;
+  if (
+    s[0] === "apps" &&
+    s[1] === "api" &&
+    s[2] === "server" &&
+    s[3] === "lib" &&
+    s[4] === "db" &&
+    s[5] === "migrations" &&
+    s.length === 7 &&
+    last.endsWith(".sql")
+  ) {
+    return true;
   }
 
-  const SAFE_PATH_RE = /^[A-Za-z0-9_./@()[\]-]+$/;
-  const WITHHELD_PATH = "a changed file (name withheld: unusual characters)";
+  return false;
+}
 
-  /** Escape a path taken from the diff so it can land in the output safely. */
-  export function safePath(path: string): string {
-    if (path.length > 200 || !SAFE_PATH_RE.test(path)) return WITHHELD_PATH;
-    return path;
-  }
+const SAFE_PATH_RE = /^[A-Za-z0-9_./@()[\]-]+$/;
+const WITHHELD_PATH = "a changed file (name withheld: unusual characters)";
+
+/** Escape a path taken from the diff so it can land in the output safely. */
+export function safePath(path: string): string {
+  if (path.length > 200 || !SAFE_PATH_RE.test(path)) return WITHHELD_PATH;
+  return path;
+}

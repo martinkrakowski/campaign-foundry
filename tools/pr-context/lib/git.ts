@@ -32,13 +32,18 @@ export function realGit(cwd: string): GitIo {
   return {
     run: (args, stdin) =>
       new Promise<string>((resolve, reject) => {
-        const child = execFile("git", [...args], { cwd, maxBuffer: MAX_BUFFER }, (error, stdout) => {
-          if (error === null) {
-            resolve(stdout.toString());
-            return;
-          }
-          reject(error);
-        });
+        const child = execFile(
+          "git",
+          [...args],
+          { cwd, maxBuffer: MAX_BUFFER },
+          (error, stdout) => {
+            if (error === null) {
+              resolve(stdout.toString());
+              return;
+            }
+            reject(error);
+          },
+        );
         if (stdin !== undefined && child.stdin) {
           child.stdin.write(stdin);
           child.stdin.end();

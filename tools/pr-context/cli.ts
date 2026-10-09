@@ -50,8 +50,7 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
       if (val === undefined) throw new Error("--max-tokens requires a value");
       maxTokens = Number.parseInt(val, 10);
       if (Number.isNaN(maxTokens)) throw new Error(`--max-tokens ${val} is not a number`);
-    }
-    else if (arg === "--repo") i++;
+    } else if (arg === "--repo") i++;
     else throw new Error(`unknown argument '${arg}'`);
   }
   if (!base) throw new Error("--base is required");

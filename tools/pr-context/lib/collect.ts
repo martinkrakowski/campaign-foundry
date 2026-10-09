@@ -334,7 +334,7 @@ function tier3(
         startLine: c.startLine,
         endLine: c.endLine,
         symbol: symbolFor(c),
-          why: `calls ${symbol.name}, which this change edits in ${safePath(symbol.filePath)}`,
+        why: `calls ${symbol.name}, which this change edits in ${safePath(symbol.filePath)}`,
         text: c.text,
         reach,
       });
@@ -368,7 +368,7 @@ function tier4(
             startLine: decl.startLine,
             endLine: decl.endLine,
             symbol: symbolFor(decl),
-          why: `unchanged in ${safePath(file.path)}, also touches table ${table}`,
+            why: `unchanged in ${safePath(file.path)}, also touches table ${table}`,
             text: decl.text,
             reach: nameReach.get(decl.name)?.size ?? 0,
           });
