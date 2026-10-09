@@ -1,10 +1,11 @@
 import { pathToFileURL } from "node:url";
-import { writeFile } from "node:fs/promises";
+import { writeFile, type FileHandle } from "node:fs/promises";
 import { errorMessage } from "@campaignfoundry/shared";
 import { database, resetDatabase } from "../server/lib/db/database.js";
 import { databaseSettings, storeBackend } from "../server/lib/config.js";
+import { isExistsError } from "../server/lib/brief-files.js";
 import { resolveSource, type SourceFlags } from "../server/lib/import/source.js";
-import { applyGuards } from "../server/lib/import/apply.js";
+import { applyGuards, checkResultPath, openResult, replan } from "../server/lib/import/apply.js";
 import { scanBriefs } from "../server/lib/import/scan.js";
 import { assemblePlan } from "../server/lib/import/plan.js";
 import { assembleCensus } from "../server/lib/import/census.js";
@@ -237,7 +238,34 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
       io.stderr(outcome.reason);
       return 1;
     }
-    return 0;
+    const { ctx, switchedAtIso } = outcome.source;
+    const pathProblem = checkResultPath(flags.result ?? "", ctx);
+    if (pathProblem !== undefined) {
+      io.stderr(pathProblem);
+      return 1;
+    }
+    const replanned = await replan(ctx);
+    if (replanned.digest !== flags.expect) {
+      io.stderr(
+        `--expect ${flags.expect} does not match the re-planned digest ${replanned.digest}`,
+      );
+      return 1;
+    }
+    let handle: FileHandle | undefined;
+    try {
+      handle = await openResult(flags.result!);
+    } catch (error) {
+      if (!isExistsError(error)) throw error;
+      io.stderr(`--result ${JSON.stringify(flags.result)} already exists`);
+      return 1;
+    }
+    try {
+      // The campaign loop and result writing are wired in the next step; the
+      // result file is opened here so the `wx` guard is exercised end to end.
+      return 0;
+    } finally {
+      await handle.close();
+    }
   } catch (error) {
     io.stderr(errorMessage(error));
     return 1;

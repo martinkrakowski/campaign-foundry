@@ -1,4 +1,5 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test, beforeEach, afterEach } from "vitest";
 import { main } from "../../../../bin/import.js";
@@ -8,6 +9,7 @@ import type { StepContext } from "../steps.js";
 import { replan } from "../apply.js";
 
 const SWITCHED_AT = "2026-10-01T00:00:00Z";
+const PNG2 = Buffer.concat([PNG, Buffer.from("second-bytes")]);
 
 /** Counts the rows the harness's PGlite holds and the `put` calls on the wrapped store. */
 async function counts(env: Awaited<ReturnType<typeof useApplyEnvironment>>): Promise<{
@@ -53,6 +55,43 @@ function io(): {
     err,
     deps: { stdout: (line) => out.push(line), stderr: (line) => err.push(line) },
   };
+}
+
+function ctxWith(root: string, output: string, includeSamples = false): StepContext {
+  return {
+    orgId: "local",
+    switchedAt: new Date(SWITCHED_AT),
+    projectRoot: root,
+    outputRoot: output,
+    includeSamples,
+    fsOnly: false,
+  };
+}
+
+/** The digest `apply` would re-plan for this tree — so a test can pass the real one to `--expect`. */
+async function replannedDigest(root: string, output: string): Promise<string> {
+  return (await replan(ctxWith(root, output))).digest;
+}
+
+/** A result path in the OS temp dir, never under the sample tree (N4). */
+function freshResult(label: string): string {
+  return join(tmpdir(), `cf-apply-${label}-${process.pid}.json`);
+}
+
+/** `apply` against this suite's temp tree, with any flags appended. */
+function applyArgv(root: string, output: string, extra: readonly string[]): string[] {
+  return [
+    "apply",
+    "--project-root",
+    root,
+    "--output-root",
+    output,
+    "--switched-at",
+    SWITCHED_AT,
+    "--org",
+    "local",
+    ...extra,
+  ];
 }
 
 describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
@@ -233,5 +272,92 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       dropRoot(root);
     }
   });
+
+  test("apply with a digest that is not the re-planned digest refuses and writes nothing", async () => {
+    const { root, output } = sampleTree();
+    const result = freshResult("4");
+    try {
+      const real = await replannedDigest(root, output);
+      const wrong = real.slice(0, 63) + (real.at(-1) === "0" ? "1" : "0");
+      env.reinstall();
+      const { err, deps } = io();
+      expect(
+        await main(applyArgv(root, output, ["--expect", wrong, "--result", result]), deps),
+      ).toBe(1);
+      expect(err).toEqual([
+        `--expect ${wrong} does not match the re-planned digest ${real}`,
+      ]);
+      expect(await counts(env)).toEqual({ campaigns: 0, assets: 0, versions: 0, puts: 0 });
+      expect(env.objects.putCount).toBe(0);
+      expect(existsSync(result)).toBe(false);
+    } finally {
+      dropRoot(root);
+      rmSync(result, { force: true });
+    }
+  });
+
+  test("a source file changed after the plan makes apply refuse the old digest", async () => {
+    const { root, output } = sampleTree();
+    const result = freshResult("6");
+    try {
+      const real = await replannedDigest(root, output);
+      writeAt(root, "assets/inputs/camp/logo.png", PNG2);
+      env.reinstall();
+      const { err, deps } = io();
+      expect(
+        await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+      ).toBe(1);
+      expect(err[0]).toMatch(/does not match/);
+      expect(await counts(env)).toEqual({ campaigns: 0, assets: 0, versions: 0, puts: 0 });
+      expect(env.objects.putCount).toBe(0);
+    } finally {
+      dropRoot(root);
+      rmSync(result, { force: true });
+    }
+  });
+
+  test("apply refuses a result path that already exists", async () => {
+    const { root, output } = sampleTree();
+    const result = freshResult("11");
+    writeFileSync(result, "existing content");
+    try {
+      const real = await replannedDigest(root, output);
+      env.reinstall();
+      const { err, deps } = io();
+      expect(
+        await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+      ).toBe(1);
+      expect(err[0]).toBe(`--result ${JSON.stringify(result)} already exists`);
+      expect(await counts(env)).toEqual({ campaigns: 0, assets: 0, versions: 0, puts: 0 });
+      expect(env.objects.putCount).toBe(0);
+      expect(readFileSync(result, "utf8")).toBe("existing content");
+    } finally {
+      dropRoot(root);
+      rmSync(result, { force: true });
+    }
+  });
+
+  test("apply refuses a result path under the project root or the output root", async () => {
+    const { root, output } = sampleTree();
+    try {
+      const real = await replannedDigest(root, output);
+      for (const rel of ["result.json", "output/result.json"]) {
+        const result = join(root, rel);
+        env.reinstall();
+        const { err, deps } = io();
+        expect(
+          await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+        ).toBe(1);
+        expect(err).toEqual([
+          `--result ${JSON.stringify(result)} is under the project or output root`,
+        ]);
+        expect(await counts(env)).toEqual({ campaigns: 0, assets: 0, versions: 0, puts: 0 });
+      }
+    } finally {
+      dropRoot(root);
+    }
+  });
 });
+
+
 
