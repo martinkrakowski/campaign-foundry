@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "lane": "FU-pr-context",
+  "mutations": [
+    {
+      "file": "tools/pr-context/lib/paths.ts",
+      "before": "  return REGULAR_MODES.has(mode);",
+      "after": "  return REGULAR_MODES.has(mode) || mode === \"120000\";",
+      "because": "N2: a symlink's mode is 120000 and must be skipped so its target is never read. Accepting 120000 lets a symlink at a collectable path pass listBaseTree, and the test that feeds a symlink at packages/x/src/symlink.ts and asserts only the regular file is kept sees two entries and fails.",
+      "command": ["yarn", "vitest", "run", "tools/pr-context", "-t", "a symlink entry in the base tree is skipped"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/pr-context/lib/paths.ts",
+      "before": "  if (hasDeniedSegment(path)) return false;",
+      "after": "  void hasDeniedSegment(path);",
+      "because": "N4: the deny list wins — a .env segment under an allowed root must be refused. Removing the hasDeniedSegment check lets packages/x/src/.env/config.ts through (it matches the packages/<name>/src rule), and the test that asserts this path is refused sees it collected and fails.",
+      "command": ["yarn", "vitest", "run", "tools/pr-context", "-t", "paths outside the allow list and paths on the deny list are never collected"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/pr-context/cli.ts",
+      "before": "  return SECRET_PATTERNS.some((p) => p.test(text));",
+      "after": "  return false;",
+      "because": "N5: a secret-shaped string must fail closed — the output is withheld. Hardcoding false lets a PRIVATE KEY in a base blob reach the output file, and the test that plants one and asserts the file holds 'withheld:' sees the secret string and fails.",
+      "command": ["yarn", "vitest", "run", "tools/pr-context", "-t", "a secret-shaped string in the collected code withholds every block"],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/pr-context/cli.ts",
+      "before": "    const entries = await listBaseTree(io.git, args.base);",
+      "after": "    const entries = await listBaseTree(io.git, args.head);",
+      "because": "N1: collected bytes come from the BASE tree only — the head commit appears only in the diff. Reading the tree at head makes ls-tree return head blobs; the test that asserts no cat-file stdin contains the head commit sees the head's blobs read and fails.",
+      "command": ["yarn", "vitest", "run", "tools/pr-context", "-t", "collected code is read from the base tree and never from the head"],
+      "verdict": "caught"
+    }
+  ]
+}
