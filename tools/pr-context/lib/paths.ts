@@ -45,6 +45,7 @@ function hasDeniedSuffix(path: string): boolean {
 
 function hasDeniedBaseName(path: string): boolean {
   const name = path.split("/").pop();
+  /* istanbul ignore next -- split always returns at least one element */
   if (name === undefined) return false;
   const dot = name.lastIndexOf(".");
   const base = dot === -1 ? name : name.slice(0, dot);

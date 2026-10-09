@@ -46,6 +46,7 @@ describe("paths outside the allow list and paths on the deny list are never coll
      "packages/x/src/vendor/lib.ts",
      "packages/x/src/test/helper.ts",
      "packages/x/src/tests/helper.ts",
+     "packages/x/src/Makefile",
    ];
 
   const accepted = [
