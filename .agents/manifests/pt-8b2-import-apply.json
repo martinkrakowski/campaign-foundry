@@ -38,8 +38,8 @@
     },
     {
       "file": "apps/api/server/lib/import/apply.ts",
-      "before": "        campaigns: this.#entries,\n",
-      "after": "        campaigns: this.#entries.map((e) => ({ ...e, minted: { campaignId: e.minted.campaignId, assets: [] } })),\n",
+      "before": "    await this.#append({ kind: \"campaign\", ...entry });\n",
+      "after": "    await this.#append({ kind: \"campaign\", ...entry, minted: { campaignId: entry.minted.campaignId, assets: [] } });\n",
       "because": "Leaving the minted assets out of the result file violates N4/D229. Title 16's `expect(entry.minted.assets.map((a) => a.id).sort()).toEqual(...)` fails on the mutant because the array is empty.",
       "command": [
         "yarn",
@@ -54,10 +54,10 @@
       "verdict": "caught"
     },
     {
-      "file": "apps/api/server/lib/import/apply.ts",
-      "before": "  return open(path, \"wx\");\n",
-      "after": "  return open(path, \"w\");\n",
-      "because": "Opening the result with `w` truncates an existing file instead of refusing, violating N4/D229. Title 11 exits 1 on the baseline (wx throws EEXIST) and proceeds on the mutant, caught on `expect(await main(...)).toBe(1)`.",
+      "file": "apps/api/bin/import.ts",
+      "before": "    if (existsSync(flags.result!)) {\n      io.stderr(await describeResultRefusal(flags.result!));\n      return 1;\n    }\n    handle = await openResult(flags.result!);",
+      "after": "    handle = await openResult(flags.result!);",
+      "because": "Removing the `existsSync` guard before `openResult` lets the result reach `open(path, \"wx\")`, which throws EEXIST into the apply catch block — a different error than the `describeResultRefusal` refusal. Title 11 exits 1 on both baseline and mutant, but the error line changes from the 'already exists' refusal to the EEXIST message, caught on `expect(err[0]).toBe(...)` at apply.test.ts:450.",
       "command": [
         "yarn",
         "vitest",
@@ -67,6 +67,40 @@
         "apps/api/server/lib/import/__tests__/apply.test.ts",
         "-t",
         "apply refuses a result path that already exists"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "    await this.#handle.write(buf, 0, buf.length);\n",
+      "after": "    await this.#handle.write(buf, 0, buf.length, 0);\n",
+      "because": "Writing each campaign line from position 0 instead of the current position overwrites earlier lines, violating N4/D229. Title 16's `expect(writes.every((c) => c.length === 3)).toBe(true)` fails on the mutant because the position argument makes each write call pass 4 args (buf, offset, length, position) instead of 3.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply.test.ts",
+        "-t",
+        "the result file is appended one line per campaign and never rewritten"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "      try {\n        result = (await step(ctx, campaign)) as CampaignResult;\n      } catch (error) {\n        // A thrown step becomes this campaign's entry, not a run abort (N8b2):\n        // refused, the error named, partial (a throw proves nothing kept), empty\n        // minted; the loop then continues with the next campaign.\n        result = {\n          outcome: \"refused\",\n          reason: errorMessage(error),\n          partial: true,\n          minted: { assets: [] },\n          unreferencedInputs: { count: 0, names: [] },\n        };\n      }",
+      "after": "      result = (await step(ctx, campaign)) as CampaignResult;",
+      "because": "Removing the try around the step lets a thrown error abort the run instead of recording it as refused+partial, violating N8b2. The step throws at apply.test.ts:1061, propagating through applyCampaigns at apply.ts:225; the test fails before reaching `expect(step).toHaveBeenCalledTimes(2)`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply.test.ts",
+        "-t",
+        "a step that throws is recorded as refused and partial and the next campaign still runs"
       ],
       "verdict": "caught"
     }
