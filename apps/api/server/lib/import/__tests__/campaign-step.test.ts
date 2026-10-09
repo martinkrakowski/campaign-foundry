@@ -287,7 +287,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: probe", () => {
 
 async function campaignCounts(
   db: SqlClient,
-  putCount: number,
+  objects: { putCount: number; deleteCount: number },
 ): Promise<{ campaigns: number; assets: number; versions: number; objects: number }> {
   const campaigns = (
     await db.query<{ n: number }>(`select count(*)::int as n from campaign where org_id=$1`, [
@@ -299,7 +299,9 @@ async function campaignCounts(
   ).rows[0]!.n;
   const versions = (await db.query<{ n: number }>(`select count(*)::int as n from brief_version`))
     .rows[0]!.n;
-  return { campaigns, assets, versions, objects: putCount };
+  // Net objects: reuses cost a put + a best-effort delete (D227/Known limit), so
+  // `putCount` overcounts until discards are subtracted.
+  return { campaigns, assets, versions, objects: objects.putCount - objects.deleteCount };
 }
 
 function makeDeps(): ImportDeps {
@@ -458,13 +460,13 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: importCampaign", () => {
         ],
       });
       expect((await importCampaign(deps, ctx, scanned, expected)).outcome).toBe("created");
-      const before = await campaignCounts(env.db, env.objects.putCount);
+      const before = await campaignCounts(env.db, env.objects);
 
       const second = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
       expect(second.outcome).toBe("unchanged");
       expect(second.minted.assets.length).toBe(0);
       expect(second.minted.campaignId).toBeUndefined();
-      expect(await campaignCounts(env.db, env.objects.putCount)).toEqual(before);
+      expect(await campaignCounts(env.db, env.objects)).toEqual(before);
       expect(env.objects.putCount).toBe(before.objects);
     } finally {
       dropRoot(root);
@@ -504,17 +506,12 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: interruption and resumabi
 
       const again = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
       expect(again.outcome).toBe("completed");
-      const rows = (
-        await env.db.query<{ n: number }>(
-          `select count(*)::int as n from campaign where org_id=$1`,
-          ["local"],
-        )
-      ).rows[0]!.n;
-      expect(rows).toBe(1);
-      const versions = (
-        await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`)
-      ).rows[0]!.n;
-      expect(versions).toBe(1);
+      const counts = await campaignCounts(env.db, env.objects);
+      expect(counts).toEqual({ campaigns: 1, assets: 1, versions: 1, objects: 1 });
+      expect(counts.assets).toBe(counts.objects);
+      const entries = await deps.assets.listAssets("camp");
+      expect(entries.map((e) => e.name).sort()).toEqual(["logo.png"]);
+      expect(again.minted.assets).toHaveLength(1);
       const meta = await briefs.campaignMeta("camp");
       expect(meta).toBeDefined();
     } finally {
@@ -584,6 +581,15 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: interruption and resumabi
 
       const again = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
       expect(again.outcome).toBe("completed");
+      const counts = await campaignCounts(env.db, env.objects);
+      expect(counts.campaigns).toBe(1);
+      expect(counts.versions).toBe(1);
+      expect(counts.assets).toBe(3);
+      expect(counts.assets).toBe(counts.objects);
+      const entries = await deps.assets.listAssets("camp");
+      expect(entries.map((e) => e.name).sort()).toEqual(["a.png", "b.png", "c.png"]);
+      expect(again.minted.assets).toHaveLength(1);
+      expect(again.minted.assets[0].name).toBe("c.png");
     } finally {
       dropRoot(root);
     }
@@ -626,10 +632,12 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: interruption and resumabi
         expected,
       )) as CampaignResult;
       expect(again.outcome).toBe("completed");
-      const versions = (
-        await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`)
-      ).rows[0]!.n;
-      expect(versions).toBe(1);
+      const counts = await campaignCounts(env.db, env.objects);
+      expect(counts).toEqual({ campaigns: 1, assets: 1, versions: 1, objects: 1 });
+      expect(counts.assets).toBe(counts.objects);
+      const entries = await deps.assets.listAssets("camp");
+      expect(entries.map((e) => e.name).sort()).toEqual(["logo.png"]);
+      expect(again.minted.assets).toHaveLength(0);
     } finally {
       dropRoot(root);
     }
@@ -666,7 +674,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)(
         const deps = makeDeps();
         const result = (await importCampaign(deps, ctx, rescanned, expected)) as CampaignResult;
         expect(result.outcome).toBe("refused");
-        expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+        expect((await campaignCounts(env.db, env.objects)).campaigns).toBe(0);
         expect(env.objects.putCount).toBe(0);
       } finally {
         dropRoot(root);
@@ -691,7 +699,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)(
         const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
         expect(result.outcome).toBe("refused");
         expect(result.reason).toMatch(/reserved/);
-        expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+        expect((await campaignCounts(env.db, env.objects)).campaigns).toBe(0);
       } finally {
         dropRoot(root);
       }
@@ -719,7 +727,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)(
         const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
         expect(result.outcome).toBe("refused");
         expect(result.reason).toMatch(/uuid/);
-        expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+        expect((await campaignCounts(env.db, env.objects)).campaigns).toBe(0);
       } finally {
         dropRoot(root);
       }
@@ -744,7 +752,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)(
         const deps = makeDeps();
         const result = (await importCampaign(deps, ctx, rescanned, expected)) as CampaignResult;
         expect(result.outcome).toBe("refused");
-        expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+        expect((await campaignCounts(env.db, env.objects)).campaigns).toBe(0);
         expect(env.objects.putCount).toBe(0);
       } finally {
         dropRoot(root);
@@ -779,7 +787,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)(
         const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
         expect(result.outcome).toBe("refused");
         expect(result.reason).toBe("refused: slug reserved");
-        expect((await campaignCounts(env.db, env.objects.putCount)).assets).toBe(0);
+        expect((await campaignCounts(env.db, env.objects)).assets).toBe(0);
         expect(env.objects.putCount).toBe(0);
       } finally {
         dropRoot(root);
@@ -1038,7 +1046,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: importCampaignStep", () =
       })) as CampaignResult;
       expect(result.outcome).toBe("refused");
       expect(result.reason).toMatch(/camp\.yaml/);
-      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+      expect((await campaignCounts(env.db, env.objects)).campaigns).toBe(0);
     } finally {
       dropRoot(root);
     }
@@ -1066,7 +1074,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: importCampaignStep", () =
       })) as CampaignResult;
       expect(result.outcome).toBe("refused");
       expect(result.reason).toMatch(/camp\.yaml/);
-      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+      expect((await campaignCounts(env.db, env.objects)).campaigns).toBe(0);
     } finally {
       dropRoot(root);
     }
@@ -1254,7 +1262,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: integrity (N9, N10)", () 
       const changedTarget = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
       expect(changedTarget.outcome).toBe("refused");
       expect(changedTarget.reason).toMatch(/changed since the digest/);
-      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+      expect((await campaignCounts(env.db, env.objects)).campaigns).toBe(0);
       expect(env.objects.putCount).toBe(0);
 
       const fresh = writeBrief(root, "camp.yaml", {
@@ -1288,7 +1296,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: integrity (N9, N10)", () 
       const changedBrief = (await importCampaign(deps, ctx, rescanned, expected)) as CampaignResult;
       expect(changedBrief.outcome).toBe("refused");
       expect(changedBrief.reason).toMatch(/changed since the digest/);
-      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+      expect((await campaignCounts(env.db, env.objects)).campaigns).toBe(0);
     } finally {
       dropRoot(root);
     }
@@ -1317,7 +1325,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: integrity (N9, N10)", () 
       const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
       expect(result.outcome).toBe("refused");
       expect(result.reason).toMatch(/changed since the digest/);
-      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+      expect((await campaignCounts(env.db, env.objects)).campaigns).toBe(0);
     } finally {
       dropRoot(root);
     }
@@ -1347,7 +1355,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: integrity (N9, N10)", () 
       const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
       expect(result.outcome).toBe("refused");
       expect(result.reason).toMatch(/changed since the digest/);
-      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+      expect((await campaignCounts(env.db, env.objects)).campaigns).toBe(0);
     } finally {
       dropRoot(root);
     }
@@ -1413,7 +1421,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: edge cases", () => {
       expect(result.outcome).toBe("refused");
       expect(result.reason).toBe("db on fire");
       expect(result.partial).toBeUndefined();
-      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+      expect((await campaignCounts(env.db, env.objects)).campaigns).toBe(0);
       expect(env.objects.putCount).toBe(0);
     } finally {
       dropRoot(root);
@@ -1474,7 +1482,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: edge cases", () => {
       })) as CampaignResult;
       expect(result.outcome).toBe("refused");
       expect(result.reason).toMatch(/campaign\.json/);
-      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+      expect((await campaignCounts(env.db, env.objects)).campaigns).toBe(0);
     } finally {
       dropRoot(root);
     }
@@ -1574,7 +1582,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: edge cases", () => {
       const deps = makeDeps();
       const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
       expect(result.outcome).toBe("refused");
-      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+      expect((await campaignCounts(env.db, env.objects)).campaigns).toBe(0);
     } finally {
       dropRoot(root);
     }
