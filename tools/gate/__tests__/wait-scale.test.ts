@@ -19,6 +19,7 @@ describe("wait-scale", () => {
     expect((await import("./wait-scale.js")).WAIT_SCALE).toBe(1);
 
     // An override wins over CI, even when CI is set.
+    vi.stubEnv("CI", "true");
     vi.stubEnv("CF_GATE_TEST_WAIT_SCALE", "5");
     vi.resetModules();
     expect((await import("./wait-scale.js")).WAIT_SCALE).toBe(5);
