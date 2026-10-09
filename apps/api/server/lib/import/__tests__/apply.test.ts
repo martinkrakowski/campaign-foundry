@@ -1,12 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test, beforeEach, afterEach } from "vitest";
+import { describe, expect, test, beforeEach, afterEach, vi } from "vitest";
 import { main } from "../../../../bin/import.js";
-import { trackedSampleTree, useApplyEnvironment, restoreApplyEnvironment, ON_A_REAL_TEST_SERVER } from "./fixtures/apply-harness.js";
+import { trackedSampleTree, useApplyEnvironment, restoreApplyEnvironment, ON_A_REAL_TEST_SERVER, failOnNth } from "./fixtures/apply-harness.js";
 import { dropRoot, makeRoot, writeAt, writeBrief, PNG } from "./fixtures/tree.js";
-import type { StepContext } from "../steps.js";
-import { replan } from "../apply.js";
+import type { StepContext, CampaignOutcome } from "../steps.js";
+import { replan, applyCampaigns, type CampaignEntry } from "../apply.js";
+import { importCampaignStep, type HashedContext } from "../campaign-step.js";
+import { importTenant } from "../import-tenant.js";
+import { getAssetStore, setAssetStore } from "../../ports/index.js";
+import { objectStoreClient } from "../../object-store/index.js";
+import { orgPrefix } from "../../object-store/object-keys.js";
 
 const SWITCHED_AT = "2026-10-01T00:00:00Z";
 const PNG2 = Buffer.concat([PNG, Buffer.from("second-bytes")]);
@@ -357,7 +362,247 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       dropRoot(root);
     }
   });
+
+  test("apply with the re-planned digest imports the campaigns", async () => {
+    const { root, output } = sampleTree();
+    const result = freshResult("5");
+    try {
+      const real = await replannedDigest(root, output);
+      env.reinstall();
+      const { out, err, deps } = io();
+      expect(await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps)).toBe(0);
+      expect(err).toEqual([]);
+      expect(out).toEqual(["camp: created", "1 created, 0 completed, 0 unchanged, 0 refused"]);
+      expect(await counts(env)).toEqual({ campaigns: 1, assets: 1, versions: 1, puts: 1 });
+    } finally {
+      dropRoot(root);
+      rmSync(result, { force: true });
+    }
+  });
+
+  test("the apply tests query only the wrapped PGlite and reach only the in-memory object store", async () => {
+    const { root, output } = sampleTree();
+    const result = freshResult("13");
+    try {
+      const real = await replannedDigest(root, output);
+      env.reinstall();
+      const { deps } = io();
+      expect(await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps)).toBe(0);
+      const c = await counts(env);
+      expect(c.campaigns).toBe(1);
+      expect(env.queries.length).toBeGreaterThan(0);
+      expect(objectStoreClient()).toBe(env.objects);
+      expect(process.env.DATABASE_URL).toBe("postgres://nobody@unused.invalid:5432/none");
+    } finally {
+      dropRoot(root);
+      rmSync(result, { force: true });
+    }
+  });
+
+  test("a second apply over the same source writes nothing and reports every campaign unchanged", async () => {
+    const { root, output } = sampleTree();
+    const first = freshResult("14a");
+    const second = freshResult("14b");
+    try {
+      const real = await replannedDigest(root, output);
+      env.reinstall();
+      const { deps } = io();
+      expect(await main(applyArgv(root, output, ["--expect", real, "--result", first]), deps)).toBe(0);
+      const before = await counts(env);
+
+      env.reinstall();
+      const { out, deps: deps2 } = io();
+      expect(await main(applyArgv(root, output, ["--expect", real, "--result", second]), deps2)).toBe(0);
+      expect(out).toEqual(["camp: unchanged", "0 created, 0 completed, 1 unchanged, 0 refused"]);
+      expect(await counts(env)).toEqual(before);
+      expect(env.objects.putCount).toBe(before.puts);
+
+      const json = JSON.parse(readFileSync(second, "utf8"));
+      expect(json.campaigns.map((c: { outcome: string }) => c.outcome)).toEqual(["unchanged"]);
+      expect(json.campaigns[0]!.minted.assets).toEqual([]);
+    } finally {
+      dropRoot(root);
+      rmSync(first, { force: true });
+      rmSync(second, { force: true });
+    }
+  });
+
+  test("an interrupted apply lists the rows and objects it left in the result file", async () => {
+    const root = makeRoot();
+    const output = join(root, "output");
+    mkdirSync(output, { recursive: true });
+    const result = freshResult("15");
+    try {
+      writeBrief(root, "three.yaml", {
+        id: "three",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/three/a.png" },
+          { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "assets/inputs/three/b.png" },
+          { id: "p3", name: "P3", primaryColor: "#333333", logoPath: "assets/inputs/three/c.png" },
+        ],
+      });
+      writeAt(root, "assets/inputs/three/a.png", PNG);
+      writeAt(root, "assets/inputs/three/b.png", PNG);
+      writeAt(root, "assets/inputs/three/c.png", PNG);
+      const real = await replannedDigest(root, output);
+      env.reinstall();
+      setAssetStore(failOnNth(getAssetStore(importTenant("local")), "writeAsset", 3));
+      const { err, deps } = io();
+      expect(await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps)).toBe(1);
+      expect(err).toEqual([]);
+
+      const json = JSON.parse(readFileSync(result, "utf8")) as {
+        campaigns: { slug: string; outcome: string; partial: boolean; minted: { campaignId: string; assets: { id: string; name: string; key: string }[] } }[];
+      };
+      const entry = json.campaigns[0];
+      expect(entry.slug).toBe("three");
+      expect(entry.outcome).toBe("refused");
+      expect(entry.partial).toBe(true);
+      expect(entry.minted.campaignId).toBeDefined();
+      expect(entry.minted.assets).toHaveLength(2);
+      const { rows: dbAssets } = await env.db.query<{ id: string }>(
+        `select id from asset where campaign_id=$1`,
+        [entry.minted.campaignId],
+      );
+      expect(entry.minted.assets.map((a) => a.id).sort()).toEqual(dbAssets.map((a) => a.id).sort());
+      const listed = await env.objects.list(orgPrefix("local"));
+      expect(entry.minted.assets.map((a) => a.key).sort()).toEqual(
+        listed.map((o) => o.key).sort(),
+      );
+    } finally {
+      dropRoot(root);
+      rmSync(result, { force: true });
+    }
+  });
+
+  test("the result file lists every campaign uuid, asset id and object key the run minted", async () => {
+    const { root, output } = sampleTree();
+    const first = freshResult("16a");
+    const second = freshResult("16b");
+    try {
+      const real = await replannedDigest(root, output);
+      env.reinstall();
+      const { out, err, deps } = io();
+      expect(await main(applyArgv(root, output, ["--expect", real, "--result", first]), deps)).toBe(0);
+      expect(err).toEqual([]);
+      const json = JSON.parse(readFileSync(first, "utf8")) as {
+        campaigns: { slug: string; outcome: string; minted: { campaignId: string; assets: { id: string; name: string; key: string }[] } }[];
+      };
+      const entry = json.campaigns[0];
+      expect(entry.slug).toBe("camp");
+      expect(out[0]).toBe("camp: created");
+      expect(entry.outcome).toBe("created");
+      const { rows: campaigns } = await env.db.query<{ id: string }>(
+        `select id from campaign where org_id=$1 and slug=$2`,
+        ["local", "camp"],
+      );
+      expect(entry.minted.campaignId).toBe(campaigns[0]!.id);
+      const { rows: dbAssets } = await env.db.query<{ id: string; name: string }>(
+        `select id, name from asset where org_id=$1`,
+        ["local"],
+      );
+      expect(entry.minted.assets.map((a) => a.id).sort()).toEqual(
+        dbAssets.map((a) => a.id).sort(),
+      );
+      const listed = await env.objects.list(orgPrefix("local"));
+      expect(entry.minted.assets.map((a) => a.key).sort()).toEqual(
+        listed.map((o) => o.key).sort(),
+      );
+
+      // A second apply reuses the asset, so it is not listed as minted.
+      env.reinstall();
+      expect(await main(applyArgv(root, output, ["--expect", real, "--result", second]), deps)).toBe(0);
+      const again = JSON.parse(readFileSync(second, "utf8")) as {
+        campaigns: { outcome: string; minted: { assets: unknown[] } }[];
+      };
+      expect(again.campaigns[0]!.outcome).toBe("unchanged");
+      expect(again.campaigns[0]!.minted.assets).toEqual([]);
+    } finally {
+      dropRoot(root);
+      rmSync(first, { force: true });
+      rmSync(second, { force: true });
+    }
+  });
+
+  test("a refused campaign does not run the later steps", async () => {
+    const { root, output } = sampleTree();
+    try {
+      const campPath = join(root, "briefs", "camp.yaml");
+      const briefsPath = writeBrief(root, "briefs.yaml", {
+        id: "briefs",
+        products: [
+          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+        ],
+      });
+      const expectedHashes = (await replan(ctxWith(root, output))).expectedHashes;
+      const hashedCtx: HashedContext = { ...ctxWith(root, output), expectedHashes };
+      const spy = vi.fn(async (): Promise<{ outcome: CampaignOutcome }> => ({ outcome: "created" }));
+      const seen: string[] = [];
+      const entries: CampaignEntry[] = [];
+      await applyCampaigns(
+        hashedCtx,
+        [
+          { slug: "camp", sourcePath: campPath },
+          { slug: "briefs", sourcePath: briefsPath },
+        ],
+        [importCampaignStep, spy],
+        async (entry: CampaignEntry) => {
+          seen.push(entry.slug);
+          entries.push(entry);
+        },
+      );
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(seen).toEqual(["camp", "briefs"]);
+      expect(entries.map((e) => e.slug)).toEqual(["camp", "briefs"]);
+      // The created campaign ran the spy; the refused one did not reach it.
+      expect(entries[0]!.outcome).toBe("created");
+      expect(entries[1]!.outcome).toBe("refused");
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a partial campaign makes apply exit 1 and a refusal before any write exits 0", async () => {
+    // A campaign that writes a row and then fails on its only asset write is
+    // partial: exit 1 (the campaign row is left, to be completed by a rerun).
+    {
+      const { root, output } = sampleTree();
+      const result = freshResult("20a");
+      try {
+        const real = await replannedDigest(root, output);
+        env.reinstall();
+        setAssetStore(failOnNth(getAssetStore(importTenant("local")), "writeAsset", 1));
+        const { deps } = io();
+        expect(
+          await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+        ).toBe(1);
+        expect((await counts(env)).campaigns).toBe(1);
+        expect(env.objects.putCount).toBe(0);
+      } finally {
+        dropRoot(root);
+        rmSync(result, { force: true });
+      }
+    }
+
+    // A campaign whose input is missing after the digest was taken is refused
+    // before any write: the run exits 0 (a per-campaign refusal is not a failure).
+    {
+      const { root, output } = sampleTree();
+      rmSync(join(root, "assets/inputs/camp/logo.png"));
+      const result = freshResult("20b");
+      try {
+        const real = await replannedDigest(root, output);
+        env.reinstall();
+        const { out, err, deps } = io();
+        expect(
+          await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+        ).toBe(0);
+        expect(err).toEqual([]);
+        expect(out).toEqual(["0 created, 0 completed, 0 unchanged, 0 refused"]);
+      } finally {
+        dropRoot(root);
+        rmSync(result, { force: true });
+      }
+    }
+  });
 });
-
-
-

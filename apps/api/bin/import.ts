@@ -5,7 +5,17 @@ import { database, resetDatabase } from "../server/lib/db/database.js";
 import { databaseSettings, storeBackend } from "../server/lib/config.js";
 import { isExistsError } from "../server/lib/brief-files.js";
 import { resolveSource, type SourceFlags } from "../server/lib/import/source.js";
-import { applyGuards, checkResultPath, openResult, replan } from "../server/lib/import/apply.js";
+import {
+  applyCampaigns,
+  applyGuards,
+  checkResultPath,
+  openResult,
+  replan,
+  ResultWriter,
+  type CampaignEntry,
+} from "../server/lib/import/apply.js";
+import { IMPORT_STEPS } from "../server/lib/import/steps.js";
+import type { HashedContext } from "../server/lib/import/campaign-step.js";
 import { scanBriefs } from "../server/lib/import/scan.js";
 import { assemblePlan } from "../server/lib/import/plan.js";
 import { assembleCensus } from "../server/lib/import/census.js";
@@ -259,13 +269,25 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
       io.stderr(`--result ${JSON.stringify(flags.result)} already exists`);
       return 1;
     }
-    try {
-      // The campaign loop and result writing are wired in the next step; the
-      // result file is opened here so the `wx` guard is exercised end to end.
-      return 0;
-    } finally {
-      await handle.close();
-    }
+    const writer = new ResultWriter(handle, switchedAtIso, ctx.orgId, replanned.digest);
+    const hashedCtx: HashedContext = { ...ctx, expectedHashes: replanned.expectedHashes };
+    const counts = await applyCampaigns(
+      hashedCtx,
+      replanned.result.campaigns,
+      IMPORT_STEPS,
+      async (entry: CampaignEntry) => {
+        io.stdout(`${entry.slug}: ${entry.outcome}${entry.reason ? `: ${entry.reason}` : ""}`);
+        writer.add(entry);
+        await writer.flush();
+      },
+    );
+    await writer.flush();
+    io.stdout(
+      `${counts.created} created, ${counts.completed} completed, ` +
+        `${counts.unchanged} unchanged, ${counts.refused} refused`,
+    );
+    await writer.close();
+    return counts.partial ? 1 : 0;
   } catch (error) {
     io.stderr(errorMessage(error));
     return 1;

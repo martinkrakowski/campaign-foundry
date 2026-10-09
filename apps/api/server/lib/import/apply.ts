@@ -6,9 +6,11 @@ import { assemblePlan } from "./plan.js";
 import type { PlanAssembled } from "./plan.js";
 import { scanBriefs } from "./scan.js";
 import type { ScanResult } from "./scan.js";
-import type { StepContext } from "./steps.js";
+import type { StepContext, CampaignOutcome, ImportStep, PlannedCampaign } from "./steps.js";
+import { IMPORT_STEPS } from "./steps.js";
 import { objectStore, storeBackend } from "../config.js";
-
+import type { UnreferencedInputs } from "./asset-step.js";
+import type { MintedAsset, CampaignResult, HashedContext } from "./campaign-step.js";
 /**
  * What `replan` hands the apply loop and the result builder: the same scan and
  * digest `plan` prints, plus the reviewed-content hashes the per-campaign step
@@ -97,4 +99,124 @@ export function checkResultPath(path: string, ctx: StepContext): string | undefi
  */
 export async function openResult(path: string): Promise<FileHandle> {
   return open(path, "wx");
+}
+
+/** One campaign's row in the result file (D229/D221). */
+export interface CampaignEntry {
+  readonly slug: string;
+  readonly outcome: CampaignOutcome;
+  readonly reason?: string;
+  readonly partial?: boolean;
+  readonly minted: { readonly campaignId?: string; readonly assets: readonly MintedAsset[] };
+  readonly unreferencedInputs: UnreferencedInputs;
+}
+
+/** What {@link applyCampaigns} returns to the caller for its exit code and summary. */
+export interface ApplyCounts {
+  readonly created: number;
+  readonly completed: number;
+  readonly unchanged: number;
+  readonly refused: number;
+  readonly partial: boolean;
+}
+
+/** Read the wider {@link CampaignResult} a step returned; a bare `{ outcome }` gets empty minted. */
+function toEntry(slug: string, result: CampaignResult): CampaignEntry {
+  return {
+    slug,
+    outcome: result.outcome,
+    reason: result.reason,
+    partial: result.partial,
+    minted: result.minted ?? { assets: [] },
+    unreferencedInputs: result.unreferencedInputs ?? { count: 0, names: [] },
+  };
+}
+
+/**
+ * Run each campaign through `steps` in plan order, feeding each a `HashedContext`
+ * (the reviewed hashes ride the context, D221), and stop a campaign's chain at
+ * the first `refused` (PT-8-3). `onResult` receives each campaign's entry as the
+ * result file must record it — after each campaign AND at the end (D229).
+ */
+export async function applyCampaigns(
+  ctx: HashedContext,
+  campaigns: readonly PlannedCampaign[],
+  steps: readonly ImportStep[] = IMPORT_STEPS,
+  onResult: (entry: CampaignEntry) => Promise<void>,
+): Promise<ApplyCounts> {
+  const tally: Record<CampaignOutcome, number> = {
+    created: 0,
+    completed: 0,
+    unchanged: 0,
+    refused: 0,
+  };
+  let partial = false;
+  for (const campaign of campaigns) {
+    let entry: CampaignEntry = {
+      slug: campaign.slug,
+      outcome: "refused",
+      minted: { assets: [] },
+      unreferencedInputs: { count: 0, names: [] },
+    };
+    for (const step of steps) {
+      const result = (await step(ctx, campaign)) as CampaignResult;
+      entry = toEntry(campaign.slug, result);
+      if (result.outcome === "refused") break;
+    }
+    if (entry.partial) partial = true;
+    tally[entry.outcome]++;
+    await onResult(entry);
+  }
+  return {
+    created: tally.created,
+    completed: tally.completed,
+    unchanged: tally.unchanged,
+    refused: tally.refused,
+    partial,
+  };
+}
+
+/**
+ * The result-file writer (N4, D229): opens once with `wx` (see {@link openResult}),
+ * then rewrites that same handle after each campaign. The JSON shape is
+ * `{ switchedAt, orgId, digest, campaigns }` — every campaign uuid, asset id and
+ * object key this run CREATED (D229), plus a campaign that failed half-way (`partial`).
+ */
+export class ResultWriter {
+  readonly #handle: FileHandle;
+  readonly #switchedAt: string;
+  readonly #orgId: string;
+  readonly #digest: string;
+  readonly #entries: CampaignEntry[] = [];
+
+  constructor(handle: FileHandle, switchedAt: string, orgId: string, digest: string) {
+    this.#handle = handle;
+    this.#switchedAt = switchedAt;
+    this.#orgId = orgId;
+    this.#digest = digest;
+  }
+
+  /** Record one campaign's entry and leave it in the buffer awaiting a flush. */
+  add(entry: CampaignEntry): void {
+    this.#entries.push(entry);
+  }
+
+  /** Rewrite the whole result file from the buffer (D229: after each campaign, and at the end). */
+  async flush(): Promise<void> {
+    const buf = Buffer.from(
+      JSON.stringify({
+        switchedAt: this.#switchedAt,
+        orgId: this.#orgId,
+        digest: this.#digest,
+        campaigns: this.#entries,
+      }) + "\n",
+      "utf8",
+    );
+    await this.#handle.write(buf, 0, buf.length, 0);
+    await this.#handle.truncate(buf.length);
+  }
+
+  async close(): Promise<void> {
+    await this.#handle.close();
+  }
 }
