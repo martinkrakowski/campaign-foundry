@@ -272,6 +272,24 @@ describe("yarn gate", () => {
     expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
   });
 
+  test("a failed summary and a coverage failure on one exit-0 step are both reported, with code 96", () => {
+    const r = runGate(
+      ["--lane", "lane-b"],
+      stepsEnv([
+        [
+          "test:cov",
+          'printf " Test Files  1 failed | 3 passed (4)\\nERROR: Coverage for statements does not meet global threshold\\n"',
+        ],
+      ]),
+    );
+    expect(r.status).toBe(96);
+    expect(r.stderr).toContain(
+      "gate: FAILED — step 'test:cov' exited 0 but its output reports failed tests",
+    );
+    expect(r.stderr).toContain("a coverage threshold failure was reported");
+    expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
+  });
+
   test("a test step that exits 0 while vitest reports unhandled errors fails the gate with code 96", () => {
     const r = runGate(
       ["--lane", "lane-b"],
