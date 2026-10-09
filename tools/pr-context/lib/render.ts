@@ -1,4 +1,5 @@
 import type { CollectedBlock } from "./collect.js";
+import { safePath } from "./paths.js";
 
 /** Result of rendering: the file text plus the counts the CLI reports. */
 export interface RenderResult {
@@ -32,7 +33,7 @@ function makeFence(text: string): string {
 function renderBlock(block: CollectedBlock): string {
   const fence = makeFence(block.text);
   return (
-    `## ${block.path}:${block.startLine}-${block.endLine} ${block.symbol}` +
+    `## ${safePath(block.path)}:${block.startLine}-${block.endLine} ${block.symbol}` +
     `\nwhy: ${block.why}` +
     `\n${fence}\n${block.text}\n${fence}`
   );

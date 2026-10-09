@@ -1,5 +1,6 @@
 import { Project, Node, SyntaxKind } from "ts-morph";
 import type { DiffInfo } from "./diff.js";
+import { safePath } from "./paths.js";
 
 export interface CollectedBlock {
   readonly tier: number;
@@ -249,7 +250,7 @@ function tier1(
             startLine: decl.startLine,
             endLine: decl.endLine,
             symbol: `${decl.className}.${name}`,
-            why: `implements ${iface.name}.${name}, called from changed lines of ${file}`,
+            why: `implements ${iface.name}.${name}, called from changed lines of ${safePath(file)}`,
             text: decl.text,
             reach,
           });
@@ -276,7 +277,7 @@ function tier2(decls: Decl[], nameReach: Map<string, Set<string>>): BlockCandida
           startLine: decl.startLine,
           endLine: decl.endLine,
           symbol: name,
-          why: `helper ${name} called from changed lines of ${file}`,
+          why: `helper ${name} called from changed lines of ${safePath(file)}`,
           text: decl.text,
           reach,
         });
@@ -333,7 +334,7 @@ function tier3(
         startLine: c.startLine,
         endLine: c.endLine,
         symbol: symbolFor(c),
-        why: `calls ${symbol.name}, which this change edits in ${symbol.filePath}`,
+          why: `calls ${symbol.name}, which this change edits in ${safePath(symbol.filePath)}`,
         text: c.text,
         reach,
       });
@@ -367,7 +368,7 @@ function tier4(
             startLine: decl.startLine,
             endLine: decl.endLine,
             symbol: symbolFor(decl),
-            why: `unchanged in ${file.path}, also touches table ${table}`,
+          why: `unchanged in ${safePath(file.path)}, also touches table ${table}`,
             text: decl.text,
             reach: nameReach.get(decl.name)?.size ?? 0,
           });

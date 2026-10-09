@@ -65,18 +65,27 @@ export function isCollectable(path: string): boolean {
   // apps/web/src/**/*.ts|tsx
   if (s[0] === "apps" && s[1] === "web" && s[2] === "src" && endsWithTs(last)) return true;
   // apps/api/server/lib/db/migrations/*.sql  (single segment only)
-  if (
-    s[0] === "apps" &&
-    s[1] === "api" &&
-    s[2] === "server" &&
-    s[3] === "lib" &&
-    s[4] === "db" &&
-    s[5] === "migrations" &&
-    s.length === 7 &&
-    last.endsWith(".sql")
-  ) {
-    return true;
+    if (
+      s[0] === "apps" &&
+      s[1] === "api" &&
+      s[2] === "server" &&
+      s[3] === "lib" &&
+      s[4] === "db" &&
+      s[5] === "migrations" &&
+      s.length === 7 &&
+      last.endsWith(".sql")
+    ) {
+      return true;
+    }
+
+    return false;
   }
 
-  return false;
-}
+  const SAFE_PATH_RE = /^[A-Za-z0-9_./@()[\]-]+$/;
+  const WITHHELD_PATH = "a changed file (name withheld: unusual characters)";
+
+  /** Escape a path taken from the diff so it can land in the output safely. */
+  export function safePath(path: string): string {
+    if (path.length > 200 || !SAFE_PATH_RE.test(path)) return WITHHELD_PATH;
+    return path;
+  }
