@@ -288,7 +288,16 @@ export class FsJobStore implements JobStorePort {
       throw error;
     }
     try {
-      return JSON.parse(raw) as StoredJob;
+      const parsed = JSON.parse(raw) as StoredJob;
+      // The file name (minus `.json`) is this job's identity: a record whose own
+      // `id` names a DIFFERENT job must never be handed back under that other
+      // id. A hand-copied `A.json` whose content says `"id": "B"` is not this job
+      // — acting on it as `B` would let `purge-campaign-fs` delete `B.json` while
+      // leaving `A.json` behind. Treat it the same as a record this file cannot
+      // supply (return undefined), but leave the file on disk untouched: do not
+      // delete, rename or rewrite it, do not throw, do not console.log it.
+      if (parsed.id !== id) return undefined;
+      return parsed;
     } catch {
       await this.deleteJob(id);
       return undefined;
