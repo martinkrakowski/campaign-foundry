@@ -13,8 +13,19 @@ import {
 } from "./fixtures/apply-harness.js";
 import { dropRoot, makeRoot, writeAt, writeBrief, briefBody, PNG } from "./fixtures/tree.js";
 import type { StepContext, CampaignOutcome, PlannedCampaign } from "../steps.js";
-import { replan, applyCampaigns, planProbes, ResultWriter, type CampaignEntry } from "../apply.js";
-import { importCampaignStep, type HashedContext } from "../campaign-step.js";
+import {
+  replan,
+  applyCampaigns,
+  planProbes,
+  ResultWriter,
+  openResult,
+  type CampaignEntry,
+} from "../apply.js";
+import {
+  importCampaignStep,
+  type HashedContext,
+  type CampaignResult,
+} from "../campaign-step.js";
 import { importTenant } from "../import-tenant.js";
 import { getAssetStore, getBriefStore, setAssetStore, setBriefStore } from "../../ports/index.js";
 import { objectStoreClient } from "../../object-store/index.js";
@@ -1011,6 +1022,88 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       expect(entries[0]!.outcome).toBe("created");
     } finally {
       dropRoot(root);
+    }
+  });
+
+  test("a step that throws is recorded as refused and partial and the next campaign still runs", async () => {
+    const { root, output } = sampleTree();
+    try {
+      const hashedCtx: HashedContext = {
+        ...ctxWith(root, output),
+        expectedHashes: new Map(),
+      };
+      const step = vi.fn(
+        async (): Promise<CampaignResult> => {
+          throw new Error("step blew up");
+        },
+      );
+      const entries: CampaignEntry[] = [];
+      const counts = await applyCampaigns(
+        hashedCtx,
+        [
+          { slug: "first", sourcePath: join(root, "briefs", "camp.yaml") },
+          { slug: "second", sourcePath: join(root, "briefs", "camp.yaml") },
+        ],
+        [step],
+        async (entry: CampaignEntry) => {
+          entries.push(entry);
+        },
+      );
+      expect(step).toHaveBeenCalledTimes(2);
+      expect(entries).toHaveLength(2);
+      expect(entries[0]).toMatchObject({
+        slug: "first",
+        outcome: "refused",
+        reason: "step blew up",
+        partial: true,
+      });
+      expect(entries[0]!.minted).toEqual({ assets: [] });
+      expect(entries[1]).toMatchObject({
+        slug: "second",
+        outcome: "refused",
+        reason: "step blew up",
+        partial: true,
+      });
+      expect(counts.refused).toBe(2);
+      expect(counts.partial).toBe(true);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("the result writer is closed when a step throws", async () => {
+    const result = freshResult("throw-close");
+    try {
+      const handle = await openResult(result);
+      const writer = new ResultWriter(handle, SWITCHED_AT, "local", "digest");
+      const closeSpy = vi.spyOn(writer, "close");
+      await writer.header();
+      const step = vi.fn(
+        async (): Promise<CampaignResult> => {
+          throw new Error("step blew up");
+        },
+      );
+      const counts = await applyCampaigns(
+        { ...ctxWith(result, result), expectedHashes: new Map() },
+        [{ slug: "camp", sourcePath: join(result, "camp.yaml") }],
+        [step],
+        async (entry: CampaignEntry) => {
+          await writer.add(entry);
+        },
+      );
+      await writer.summary(counts);
+      await writer.close();
+      expect(closeSpy).toHaveBeenCalled();
+      const lines = readFileSync(result, "utf8").split("\n").filter((l) => l.length > 0);
+      expect(lines).toHaveLength(3);
+      expect(JSON.parse(lines[0]).kind).toBe("header");
+      expect(JSON.parse(lines[1]).kind).toBe("campaign");
+      expect(JSON.parse(lines[1]).slug).toBe("camp");
+      expect(JSON.parse(lines[1]).outcome).toBe("refused");
+      expect(JSON.parse(lines[1]).partial).toBe(true);
+      expect(JSON.parse(lines[2]).kind).toBe("summary");
+    } finally {
+      rmSync(result, { force: true });
     }
   });
 

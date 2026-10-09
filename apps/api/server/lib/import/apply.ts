@@ -202,7 +202,21 @@ export async function applyCampaigns(
       unreferencedInputs: { count: 0, names: [] },
     };
     for (const step of steps) {
-      const result = (await step(ctx, campaign)) as CampaignResult;
+      let result: CampaignResult;
+      try {
+        result = (await step(ctx, campaign)) as CampaignResult;
+      } catch (error) {
+        // A thrown step becomes this campaign's entry, not a run abort (N8b2):
+        // refused, the error named, partial (a throw proves nothing kept), empty
+        // minted; the loop then continues with the next campaign.
+        result = {
+          outcome: "refused",
+          reason: errorMessage(error),
+          partial: true,
+          minted: { assets: [] },
+          unreferencedInputs: { count: 0, names: [] },
+        };
+      }
       entry = toEntry(campaign.slug, result);
       if (result.outcome === "refused") break;
     }
