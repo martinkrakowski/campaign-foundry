@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test, beforeEach, afterEach, vi } from "vitest";
@@ -11,8 +12,8 @@ import {
   failOnNth,
 } from "./fixtures/apply-harness.js";
 import { dropRoot, makeRoot, writeAt, writeBrief, briefBody, PNG } from "./fixtures/tree.js";
-import type { StepContext, CampaignOutcome } from "../steps.js";
-import { replan, applyCampaigns, planProbes, type CampaignEntry } from "../apply.js";
+import type { StepContext, CampaignOutcome, PlannedCampaign } from "../steps.js";
+import { replan, applyCampaigns, planProbes, ResultWriter, type CampaignEntry } from "../apply.js";
 import { importCampaignStep, type HashedContext } from "../campaign-step.js";
 import { importTenant } from "../import-tenant.js";
 import { getAssetStore, getBriefStore, setAssetStore, setBriefStore } from "../../ports/index.js";
@@ -57,6 +58,23 @@ function sampleTree(): { root: string; output: string } {
       { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
     ],
   });
+  return { root, output };
+}
+
+/** A three-campaign tree (shared input) so the apply loop runs three campaigns. */
+function threeCampaignTree(): { root: string; output: string } {
+  const root = makeRoot();
+  const output = join(root, "output");
+  mkdirSync(output, { recursive: true });
+  writeAt(root, "assets/inputs/logo.png", PNG);
+  for (const slug of ["alpha", "beta", "gamma"] as const) {
+    writeBrief(root, `${slug}.yaml`, {
+      id: slug,
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/logo.png" },
+      ],
+    });
+  }
   return { root, output };
 }
 
@@ -123,6 +141,34 @@ function planArgv(root: string, output: string, extra: readonly string[]): strin
     SWITCHED_AT,
     ...extra,
   ];
+}
+
+/** The decoded lines of a JSON-lines result file: header, campaign entries, optional summary. */
+function parseResult(path: string): {
+  header: { kind: string; switchedAt: string; orgId: string; digest: string };
+  campaigns: CampaignEntry[];
+  summary?: { kind: string; created: number; completed: number; unchanged: number; refused: number; partial: boolean };
+} {
+  const lines = readFileSync(path, "utf8")
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const header = lines[0] as { kind: string; switchedAt: string; orgId: string; digest: string };
+  const campaigns = lines
+    .slice(1)
+    .filter((line) => line.kind === "campaign") as unknown as CampaignEntry[];
+  const summaryLines = lines.filter((line) => line.kind === "summary");
+  const summary = summaryLines.length
+    ? (summaryLines[summaryLines.length - 1] as {
+        kind: string;
+        created: number;
+        completed: number;
+        unchanged: number;
+        refused: number;
+        partial: boolean;
+      })
+    : undefined;
+  return { header, campaigns, summary };
 }
 
 describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
@@ -431,7 +477,10 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
       ).toBe(0);
       expect(err).toEqual([]);
-      expect(out).toEqual(["camp: created", "1 created, 0 completed, 0 unchanged, 0 refused"]);
+      expect(out[0]).toBe("camp: created");
+      expect(out[1]).toMatch(/^ {2}minted: campaign .+, 1 asset\(s\)$/);
+      expect(out[2]).toBe("1 created, 0 completed, 0 unchanged, 0 refused");
+      expect(out).toHaveLength(3);
       expect(await counts(env)).toEqual({ campaigns: 1, assets: 1, versions: 1, puts: 1 });
     } finally {
       dropRoot(root);
@@ -482,9 +531,9 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       expect(await counts(env)).toEqual(before);
       expect(env.objects.putCount).toBe(before.puts);
 
-      const json = JSON.parse(readFileSync(second, "utf8"));
-      expect(json.campaigns.map((c: { outcome: string }) => c.outcome)).toEqual(["unchanged"]);
-      expect(json.campaigns[0]!.minted.assets).toEqual([]);
+      const parsed = parseResult(second);
+      expect(parsed.campaigns.map((c) => c.outcome)).toEqual(["unchanged"]);
+      expect(parsed.campaigns[0]!.minted.assets).toEqual([]);
     } finally {
       dropRoot(root);
       rmSync(first, { force: true });
@@ -518,27 +567,22 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       ).toBe(1);
       expect(err).toEqual([]);
 
-      const json = JSON.parse(readFileSync(result, "utf8")) as {
-        campaigns: {
-          slug: string;
-          outcome: string;
-          partial: boolean;
-          minted: { campaignId: string; assets: { id: string; name: string; key: string }[] };
-        }[];
-      };
-      const entry = json.campaigns[0];
-      expect(entry.slug).toBe("three");
-      expect(entry.outcome).toBe("refused");
-      expect(entry.partial).toBe(true);
-      expect(entry.minted.campaignId).toBeDefined();
-      expect(entry.minted.assets).toHaveLength(2);
+      const parsed = parseResult(result);
+      expect(parsed.header).toMatchObject({ kind: "header", orgId: "local", digest: real });
+      const entry = parsed.campaigns[0];
+      expect(entry).toBeDefined();
+      expect(entry!.slug).toBe("three");
+      expect(entry!.outcome).toBe("refused");
+      expect(entry!.partial).toBe(true);
+      expect(entry!.minted.campaignId).toBeDefined();
+      expect(entry!.minted.assets).toHaveLength(2);
       const { rows: dbAssets } = await env.db.query<{ id: string }>(
         `select id from asset where campaign_id=$1`,
-        [entry.minted.campaignId],
+        [entry!.minted.campaignId],
       );
-      expect(entry.minted.assets.map((a) => a.id).sort()).toEqual(dbAssets.map((a) => a.id).sort());
+      expect(entry!.minted.assets.map((a) => a.id).sort()).toEqual(dbAssets.map((a) => a.id).sort());
       const listed = await env.objects.list(orgPrefix("local"));
-      expect(entry.minted.assets.map((a) => a.key).sort()).toEqual(listed.map((o) => o.key).sort());
+      expect(entry!.minted.assets.map((a) => a.key).sort()).toEqual(listed.map((o) => o.key).sort());
     } finally {
       dropRoot(root);
       rmSync(result, { force: true });
@@ -557,44 +601,163 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         0,
       );
       expect(err).toEqual([]);
-      const json = JSON.parse(readFileSync(first, "utf8")) as {
-        campaigns: {
-          slug: string;
-          outcome: string;
-          minted: { campaignId: string; assets: { id: string; name: string; key: string }[] };
-        }[];
-      };
-      const entry = json.campaigns[0];
-      expect(entry.slug).toBe("camp");
+      const firstParsed = parseResult(first);
+      const entry = firstParsed.campaigns[0];
+      expect(entry).toBeDefined();
+      expect(entry!.slug).toBe("camp");
       expect(out[0]).toBe("camp: created");
-      expect(entry.outcome).toBe("created");
+      expect(out[1]).toMatch(/^ {2}minted: campaign .+, 1 asset\(s\)$/);
+      expect(entry!.outcome).toBe("created");
       const { rows: campaigns } = await env.db.query<{ id: string }>(
         `select id from campaign where org_id=$1 and slug=$2`,
         ["local", "camp"],
       );
-      expect(entry.minted.campaignId).toBe(campaigns[0]!.id);
+      expect(entry!.minted.campaignId).toBe(campaigns[0]!.id);
       const { rows: dbAssets } = await env.db.query<{ id: string; name: string }>(
         `select id, name from asset where org_id=$1`,
         ["local"],
       );
-      expect(entry.minted.assets.map((a) => a.id).sort()).toEqual(dbAssets.map((a) => a.id).sort());
+      expect(entry!.minted.assets.map((a) => a.id).sort()).toEqual(dbAssets.map((a) => a.id).sort());
       const listed = await env.objects.list(orgPrefix("local"));
-      expect(entry.minted.assets.map((a) => a.key).sort()).toEqual(listed.map((o) => o.key).sort());
+      expect(entry!.minted.assets.map((a) => a.key).sort()).toEqual(listed.map((o) => o.key).sort());
 
       // A second apply reuses the asset, so it is not listed as minted.
       env.reinstall();
       expect(
         await main(applyArgv(root, output, ["--expect", real, "--result", second]), deps),
       ).toBe(0);
-      const again = JSON.parse(readFileSync(second, "utf8")) as {
-        campaigns: { outcome: string; minted: { assets: unknown[] } }[];
-      };
-      expect(again.campaigns[0]!.outcome).toBe("unchanged");
-      expect(again.campaigns[0]!.minted.assets).toEqual([]);
+      const againParsed = parseResult(second);
+      expect(againParsed.campaigns[0]!.outcome).toBe("unchanged");
+      expect(againParsed.campaigns[0]!.minted.assets).toEqual([]);
     } finally {
       dropRoot(root);
       rmSync(first, { force: true });
       rmSync(second, { force: true });
+    }
+  });
+
+  test("the result file is appended one line per campaign and never rewritten", async () => {
+    const result = freshResult("W1");
+    try {
+      const handle = await open(result, "wx");
+      const write = vi.spyOn(handle, "write").mockClear();
+      const sync = vi.spyOn(handle, "sync").mockClear();
+      const truncate = vi.spyOn(handle, "truncate").mockClear();
+      const writer = new ResultWriter(handle, SWITCHED_AT, "local", "deadbeef");
+      const campaign = (slug: string): CampaignEntry => ({
+        slug,
+        outcome: "created",
+        minted: { campaignId: `c-${slug}`, assets: [] },
+        unreferencedInputs: { count: 0, names: [] },
+      });
+
+      await writer.header();
+      await writer.add(campaign("a"));
+      await writer.add(campaign("b"));
+      await writer.close();
+
+      // Append-only: no truncation, and every write passes only (buf, offset,
+      // length) — no position argument seeks back to 0 after the header.
+      expect(truncate).not.toHaveBeenCalled();
+      const writes = write.mock.calls;
+      expect(writes).toHaveLength(3);
+      expect(writes.every((c) => c.length === 3)).toBe(true);
+      expect(sync).toHaveBeenCalledTimes(3);
+
+      // The file is JSON Lines: header, then one line per campaign, no summary.
+      const lines = readFileSync(result, "utf8")
+        .split("\n")
+        .filter((line) => line.length > 0);
+      expect(lines).toHaveLength(3);
+      expect(JSON.parse(lines[0])).toMatchObject({
+        kind: "header",
+        switchedAt: SWITCHED_AT,
+        orgId: "local",
+        digest: "deadbeef",
+      });
+      expect(JSON.parse(lines[1])).toMatchObject({ kind: "campaign", slug: "a" });
+      expect(JSON.parse(lines[2])).toMatchObject({ kind: "campaign", slug: "b" });
+    } finally {
+      rmSync(result, { force: true });
+    }
+  });
+
+  test("a failed write of one campaign's line leaves every earlier line intact", async () => {
+    const { root, output } = threeCampaignTree();
+    const result = freshResult("W2");
+    try {
+      const real = await replannedDigest(root, output);
+      env.reinstall();
+      const originalAdd = ResultWriter.prototype.add;
+      let calls = 0;
+      const spy = vi.spyOn(ResultWriter.prototype, "add").mockImplementation(async function (
+        this: ResultWriter,
+        entry: CampaignEntry,
+      ) {
+        calls++;
+        if (calls === 3) throw new Error("simulated result write failure");
+        return originalAdd.call(this, entry);
+      });
+      const { err, deps } = io();
+      try {
+        expect(
+          await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+        ).toBe(1);
+        expect(err.length).toBeGreaterThan(0);
+        expect(err[0]).toContain("could not write the result file");
+        expect(err[0]).toContain(result);
+
+        // The file is still JSON Lines: a header and the first two campaigns, and
+        // nothing past them (no summary line — the run never finished).
+        const lines = readFileSync(result, "utf8").split("\n").filter((l) => l.length > 0);
+        expect(lines).toHaveLength(3);
+        expect(JSON.parse(lines[0]).kind).toBe("header");
+        expect(JSON.parse(lines[1]).kind).toBe("campaign");
+        expect(JSON.parse(lines[2]).kind).toBe("campaign");
+        expect(JSON.parse(lines[1]).slug).toBe("alpha");
+        expect(JSON.parse(lines[2]).slug).toBe("beta");
+        expect(lines.filter((l) => l.includes("summary"))).toHaveLength(0);
+      } finally {
+        spy.mockRestore();
+      }
+    } finally {
+      dropRoot(root);
+      rmSync(result, { force: true });
+    }
+  });
+
+  test("each campaign's line is synced before the next campaign starts", async () => {
+    const result = freshResult("W3");
+    try {
+      const handle = await open(result, "wx");
+      const sync = vi.spyOn(handle, "sync");
+      const writer = new ResultWriter(handle, SWITCHED_AT, "local", "deadbeef");
+      const hashedCtx: HashedContext = {
+        ...ctxWith("", ""),
+        expectedHashes: new Map(),
+      } as HashedContext;
+      const step = vi.fn(
+        async (_ctx: StepContext, _campaign: PlannedCampaign): Promise<{ outcome: CampaignOutcome }> => ({
+          outcome: "created",
+        }),
+      );
+      await writer.header();
+      await applyCampaigns(
+        hashedCtx,
+        [{ slug: "a", sourcePath: "x" }, { slug: "b", sourcePath: "y" }],
+        [step],
+        async (entry: CampaignEntry) => writer.add(entry),
+      );
+      await writer.summary({ created: 0, completed: 0, unchanged: 0, refused: 0, partial: false });
+      await writer.close();
+
+      // After campaign "a" is appended and synced, the step for "b" may run.
+      expect(step).toHaveBeenCalledTimes(2);
+      const syncAfterAppend = sync.mock.invocationCallOrder[1];
+      const nextStepCall = step.mock.invocationCallOrder[1];
+      expect(nextStepCall).toBeGreaterThan(syncAfterAppend);
+    } finally {
+      rmSync(result, { force: true });
     }
   });
 

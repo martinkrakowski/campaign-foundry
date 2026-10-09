@@ -243,6 +243,7 @@ const RESULT_REQUIRED = "apply needs --result <path>";
  * the first write; the database is closed once in `finally`, as `plan` does.
  */
 async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
+  let handle: FileHandle | undefined;
   try {
     const flags = parseFlags("apply", argv);
     if (typeof flags === "string") {
@@ -280,7 +281,6 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
       );
       return 1;
     }
-    let handle: FileHandle | undefined;
     try {
       handle = await openResult(flags.result!);
     } catch (error) {
@@ -290,27 +290,39 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
     }
     const writer = new ResultWriter(handle, switchedAtIso, ctx.orgId, replanned.digest);
     const hashedCtx: HashedContext = { ...ctx, expectedHashes: replanned.expectedHashes };
+    const resultPath = flags.result;
+    await writer.header();
     const counts = await applyCampaigns(
       hashedCtx,
       replanned.result.campaigns,
       IMPORT_STEPS,
       async (entry: CampaignEntry) => {
         io.stdout(`${entry.slug}: ${entry.outcome}${entry.reason ? `: ${entry.reason}` : ""}`);
-        writer.add(entry);
-        await writer.flush();
+        if (entry.minted.assets.length > 0) {
+          io.stdout(
+            `  minted: campaign ${entry.minted.campaignId}, ${entry.minted.assets.length} asset(s)`,
+          );
+        }
+        try {
+          await writer.add(entry);
+        } catch (error) {
+          throw new Error(
+            `could not write the result file ${JSON.stringify(resultPath)}: ${errorMessage(error)}`,
+          );
+        }
       },
     );
-    await writer.flush();
+    await writer.summary(counts);
     io.stdout(
       `${counts.created} created, ${counts.completed} completed, ` +
         `${counts.unchanged} unchanged, ${counts.refused} refused`,
     );
-    await writer.close();
     return counts.partial ? 1 : 0;
   } catch (error) {
     io.stderr(errorMessage(error));
     return 1;
   } finally {
+    if (handle !== undefined) await handle.close();
     await closeDatabase(io);
   }
 }

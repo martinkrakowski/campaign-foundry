@@ -183,16 +183,19 @@ export async function applyCampaigns(
 
 /**
  * The result-file writer (N4, D229): opens once with `wx` (see {@link openResult}),
- * then rewrites that same handle after each campaign. The JSON shape is
- * `{ switchedAt, orgId, digest, campaigns }` — every campaign uuid, asset id and
- * object key this run CREATED (D229), plus a campaign that failed half-way (`partial`).
+ * then APPENDS to that handle — one JSON object per line, each fsynced before the
+ * loop moves on. The file is JSON Lines:
+ *   - line 1: `{ "kind": "header", switchedAt, orgId, digest }`
+ *   - one `{ "kind": "campaign", ... }` per campaign, written as each finishes
+ *   - the LAST line, written only when the loop ends: `{ "kind": "summary", ... }`
+ * No seek, no truncate, no rewrite: a file with no summary line is, by definition,
+ * the record of an interrupted run, and every line it holds is complete and true (D229).
  */
 export class ResultWriter {
   readonly #handle: FileHandle;
   readonly #switchedAt: string;
   readonly #orgId: string;
   readonly #digest: string;
-  readonly #entries: CampaignEntry[] = [];
 
   constructor(handle: FileHandle, switchedAt: string, orgId: string, digest: string) {
     this.#handle = handle;
@@ -201,24 +204,31 @@ export class ResultWriter {
     this.#digest = digest;
   }
 
-  /** Record one campaign's entry and leave it in the buffer awaiting a flush. */
-  add(entry: CampaignEntry): void {
-    this.#entries.push(entry);
+  /** Write the header line (the first line of the result file). */
+  async header(): Promise<void> {
+    await this.#append({
+      kind: "header",
+      switchedAt: this.#switchedAt,
+      orgId: this.#orgId,
+      digest: this.#digest,
+    });
   }
 
-  /** Rewrite the whole result file from the buffer (D229: after each campaign, and at the end). */
-  async flush(): Promise<void> {
-    const buf = Buffer.from(
-      JSON.stringify({
-        switchedAt: this.#switchedAt,
-        orgId: this.#orgId,
-        digest: this.#digest,
-        campaigns: this.#entries,
-      }) + "\n",
-      "utf8",
-    );
-    await this.#handle.write(buf, 0, buf.length, 0);
-    await this.#handle.truncate(buf.length);
+  /** Append one campaign line and fsync it before the next campaign starts. */
+  async add(entry: CampaignEntry): Promise<void> {
+    await this.#append({ kind: "campaign", ...entry });
+  }
+
+  /** Write the summary line (the last line, written only when the loop ends). */
+  async summary(counts: ApplyCounts): Promise<void> {
+    await this.#append({ kind: "summary", ...counts });
+  }
+
+  /** Append one JSON object as a line at the end of the file and fsync the handle. */
+  async #append(record: Record<string, unknown>): Promise<void> {
+    const buf = Buffer.from(JSON.stringify(record) + "\n", "utf8");
+    await this.#handle.write(buf, 0, buf.length);
+    await this.#handle.sync();
   }
 
   async close(): Promise<void> {
