@@ -518,8 +518,15 @@ describe("a declaration with no body is skipped and the rest is still collected"
 
 describe("table name filtering", () => {
   test("a word after from in a comment is not treated as a table", () => {
+    // The changed hunk is line 1 only (a comment saying "from the"). `logUser` on line 2 is
+    // UNCHANGED and its body holds the word "the", so with the word accepted as a table name
+    // tier 4 would collect it; no migration creates a table called "the", so it must not.
     const sources = new Map([
-      ["packages/repo/src/audit.ts", "function logUser() { /* from the db */ return; }"],
+      [
+        "packages/repo/src/audit.ts",
+        '// rows come from the db\nfunction logUser() { return "the user"; }',
+      ],
+      ["apps/api/server/lib/db/migrations/0001.sql", "CREATE TABLE orders (\n  id SERIAL\n);"],
     ]);
     const diff: DiffInfo = {
       files: [
@@ -528,7 +535,9 @@ describe("table name filtering", () => {
       calledNames: new Set(),
       tableNames: new Set(["the"]),
     };
-    expect(collectBlocks(sources, diff)).toEqual([]);
+    const blocks = collectBlocks(sources, diff);
+    expect(blocks.filter((b) => b.tier === 4)).toEqual([]);
+    expect(blocks.some((b) => b.symbol === "logUser")).toBe(false);
   });
 
   test("a table the base migrations create is still treated as a table", () => {
