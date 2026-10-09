@@ -48,7 +48,8 @@
 # vitest exits 0 — and a failed-tests scan now catches the same hazard for
 # vitest's own output: a step that exits 0 while its output holds `Test Files
 # <n> failed`, `Tests <n> failed` (n > 0), or vitest's sentence that it caught
-# unhandled errors. Neither scan can turn a real failure into a pass: a step
+# unhandled errors. That scan lives in `scripts/test-output-scan.sh`. Neither
+# scan can turn a real failure into a pass: a step
 # that exits non-zero fails the gate on its own code, unchanged (N1); only a 0
 # exit is promoted. When both fire on one step the stronger fact wins — the
 # failed-tests rule is named first and coverage is still mentioned — and the
@@ -609,27 +610,19 @@ run_test_cov() {
   # unhandled errors: a pipe can hide the failure code the same way coverage
   # can (M3). The scan only applies to test:cov; whether it promotes the step
   # is decided where the gate picks its result, gated on an exit 0 THERE so a
-  # step that already failed keeps today's path and code (N1). ANSI colour is
-  # stripped first (POSIX sh has no $[..]) so the patterns anchor on vitest's
-  # own summary lines / unhandled-error sentence at the start of a line.
-  ESC=$(printf '\033')
-  CLEANED=$(sed "s/${ESC}\[[0-9;]*m//g" "$COVLOG")
-  line=$(printf '%s\n' "$CLEANED" \
-    | grep -E '^[[:space:]]*(Test Files|Tests)[[:space:]]+[1-9][0-9]* failed' \
-    | head -n1)
-  if [ -n "$line" ]; then
+  # step that already failed keeps today's path and code (N1). The scan itself
+  # lives in scripts/test-output-scan.sh; this block only reads its verdict —
+  # exit 96 sets the summary, any other non-zero exit fails the gate loudly
+  # (the lock is released by the EXIT trap, as for every other failure).
+  scan_out=$(sh "$HERE/test-output-scan.sh" "$COVLOG")
+  scan_code=$?
+  if [ "$scan_code" -eq 96 ]; then
     summary_failed=1
-    summary_kind="failed tests"
-    summary_reason="$line"
-  else
-    line=$(printf '%s\n' "$CLEANED" \
-      | grep -E '^[[:space:]]*Vitest caught [0-9][0-9]* unhandled error' \
-      | head -n1)
-    if [ -n "$line" ]; then
-      summary_failed=1
-      summary_kind="unhandled errors"
-      summary_reason="$line"
-    fi
+    summary_kind=${scan_out%%: *}
+    summary_reason=${scan_out#*: }
+  elif [ "$scan_code" -ne 0 ]; then
+    printf '%s\n' "gate: FAILED — the test output scan could not run (exit $scan_code)" >&2
+    exit 2
   fi
   rm -f "$COVLOG"
   COVLOG=""

@@ -3,10 +3,10 @@
   "lane": "FU-gate-failed-summary",
   "mutations": [
     {
-      "file": "scripts/gate.sh",
-      "before": "    | grep -E '^[[:space:]]*(Test Files|Tests)[[:space:]]+[1-9][0-9]* failed'",
-      "after": "    | grep -E '(Test Files|Tests)[[:space:]]+[1-9][0-9]* failed'",
-      "because": "the start-of-line anchor on the failed-tests pattern is dropped. Without the `^` anchor the pattern matches 'Tests 3 failed' anywhere in a line, so a green run that merely holds those words (a test title, a log line) is failed by the scan — violating N2. The mutates the clean-run test, which goes red on a non-zero status it expected to be 0.",
+      "file": "scripts/test-output-scan.sh",
+      "before": "  | grep -E '^[[:space:]]*(Test Files|Tests)[[:space:]]+[1-9][0-9]* failed'",
+      "after": "  | grep -E '(Test Files|Tests)[[:space:]]+[1-9][0-9]* failed'",
+      "because": "the start-of-line anchor on the failed-tests pattern is dropped. Without the `^` anchor the pattern matches 'Tests 3 failed' anywhere in a line, so a green run that merely holds those words (a test title, a log line) is failed by the scan — violating N2. This pattern moved out of scripts/gate.sh into scripts/test-output-scan.sh, so the entry is re-anchored to that file (same mutation, file changed). The mutates the clean-run test, which goes red on a non-zero status it expected to be 0.",
       "command": [
         "yarn",
         "vitest",

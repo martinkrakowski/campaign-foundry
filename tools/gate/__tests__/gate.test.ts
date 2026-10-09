@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -25,6 +26,7 @@ import { scaled } from "./wait-scale.js";
 // exits 0; busy propagates as 75.
 
 const gateSh = fileURLToPath(new URL("../../../scripts/gate.sh", import.meta.url));
+const gateLockSh = fileURLToPath(new URL("../../../scripts/gate-lock.sh", import.meta.url));
 const packageJson = fileURLToPath(new URL("../../../package.json", import.meta.url));
 
 /**
@@ -378,6 +380,30 @@ describe("yarn gate", () => {
     });
     expect(r.status).toBe(96);
     expect(r.stderr).toContain("exited 0 but its output reports failed tests");
+  });
+
+  test("a scan that cannot run fails the gate and is not read as clean", () => {
+    // Copy gate.sh and gate-lock.sh into a temp dir WITHOUT test-output-scan.sh,
+    // so run_test_cov's scan call cannot find the script. The gate must exit 2
+    // (never 0, never 96) and the lock must be released.
+    const scriptDir = mkdtempSync(join(tmpdir(), "cf-gate-temp-"));
+    dirs.push(scriptDir);
+    const tempGate = join(scriptDir, "gate.sh");
+    const tempLock = join(scriptDir, "gate-lock.sh");
+    copyFileSync(gateSh, tempGate);
+    copyFileSync(gateLockSh, tempLock);
+    chmodSync(tempGate, 0o755);
+    chmodSync(tempLock, 0o755);
+
+    const dir = scratch();
+    const r = spawnSync("sh", [tempGate, "--lane", "lane-b"], {
+      encoding: "utf8",
+      env: gateEnv(dir, stepsEnv([["test:cov", "true"]])),
+      timeout: scaled(15_000),
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("the test output scan could not run");
+    expect(existsSync(join(dir, "cf-gate.lock"))).toBe(false);
   });
 
   test("a failing nitro prepare fails the guard, even with a stale manifest present", () => {
