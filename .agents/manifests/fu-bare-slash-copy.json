@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "lane": "FU-bare-slash-copy",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "        if (!copyOnly.has(slug)) copyOnly.set(slug, []);\n",
+      "after": "        /* no entry pre-creation: restores the bare-slash defect */\n",
+      "because": "Mutant restores the defect: the entry for a non-target source campaign is created only when the normalized name is non-empty, so a bare-slash ref adds no entry and copyBriefRefs copies the whole library.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/__tests__/brief-asset-refs.copy-only.test.ts",
+        "-t",
+        "resolveBriefAssetRefs on pg plus fs records an empty name list for a campaign named only by a bare-slash ref"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/brief-asset-refs.ts",
+      "before": "        if (!copyOnly.has(slug)) copyOnly.set(slug, []);\n",
+      "after": "        /* no entry pre-creation: restores the bare-slash defect */\n",
+      "because": "Mutant restores the defect: the entry for a non-target source campaign is created only when the normalized name is non-empty, so a bare-slash ref adds no entry and copyBriefRefs copies the whole library.",
+      "command": [
+        "env",
+        "-u",
+        "TEST_PG_URL",
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/routes/campaigns/__tests__/copy-referenced-only.test.ts",
+        "-t",
+        "save route on pg plus fs copies nothing from a campaign named only by a bare-slash ref"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

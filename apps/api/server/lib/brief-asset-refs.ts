@@ -152,12 +152,20 @@ export async function resolveBriefAssetRefs(
     for (const ref of refs) {
       const match = SOURCE_PATH_REF.exec(ref);
       if (match === null) continue;
-      // Both groups are mandatory in the pattern, so neither is undefined here.
-      // `posix.normalize` alone leaves a doubled or trailing slash (`//logo.png` ->
-      // `/logo.png`, `logo.png/` -> `logo.png/`), which the fs store never matches — so
-      // strip the slashes and skip a name that collapses to nothing.
-      const name = posix.normalize(match[2] as string).replace(/^\/+|\/+$/g, "");
-      if (name !== "") noteCopyName(copyOnly, opts.target, match[1] as string, name);
+      const slug = match[1] as string;
+      // Every non-target source campaign a path ref names gets an entry in `copyOnly`,
+      // so a campaign named only by bare-slash refs is narrowed to `only: []` (copy
+      // nothing) instead of falling through as "no entry" (copy the whole library).
+      if (slug !== opts.target) {
+        if (!copyOnly.has(slug)) copyOnly.set(slug, []);
+        // Both groups are mandatory in the pattern, so neither is undefined here.
+        // `posix.normalize` alone leaves a doubled or trailing slash (`//logo.png` ->
+        // `/logo.png`, `logo.png/` -> `logo.png/`), which the fs store never matches —
+        // so strip the slashes; a name that collapses to nothing adds no name, and the
+        // entry stays empty.
+        const name = posix.normalize(match[2] as string).replace(/^\/+|\/+$/g, "");
+        if (name !== "") noteCopyName(copyOnly, opts.target, slug, name);
+      }
     }
     return { brief, copyFrom, copyOnly, foreignIds: new Set(), ownIds: new Set() };
   }
