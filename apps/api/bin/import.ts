@@ -302,12 +302,18 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
           io.stdout(
             `  minted: campaign ${entry.minted.campaignId}, ${entry.minted.assets.length} asset(s)`,
           );
+          for (const asset of entry.minted.assets) {
+            io.stdout(`    asset ${asset.id} ${asset.name} ${asset.key}`);
+          }
         }
         try {
           await writer.add(entry);
         } catch (error) {
+          const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
           throw new Error(
-            `could not write the result file ${JSON.stringify(resultPath)}: ${errorMessage(error)}`,
+            `could not write the result file ${JSON.stringify(resultPath)}` +
+              (code ? ` (${code})` : "") +
+              `: ${errorMessage(error)}`,
           );
         }
       },

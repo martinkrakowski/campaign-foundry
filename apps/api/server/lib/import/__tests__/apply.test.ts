@@ -479,8 +479,9 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       expect(err).toEqual([]);
       expect(out[0]).toBe("camp: created");
       expect(out[1]).toMatch(/^ {2}minted: campaign .+, 1 asset\(s\)$/);
-      expect(out[2]).toBe("1 created, 0 completed, 0 unchanged, 0 refused");
-      expect(out).toHaveLength(3);
+      expect(out[2]).toMatch(/^ {4}asset .+ .+ .+$/);
+      expect(out[3]).toBe("1 created, 0 completed, 0 unchanged, 0 refused");
+      expect(out).toHaveLength(4);
       expect(await counts(env)).toEqual({ campaigns: 1, assets: 1, versions: 1, puts: 1 });
     } finally {
       dropRoot(root);
@@ -757,6 +758,124 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       const nextStepCall = step.mock.invocationCallOrder[1];
       expect(nextStepCall).toBeGreaterThan(syncAfterAppend);
     } finally {
+      rmSync(result, { force: true });
+    }
+  });
+
+  test("a kill after a campaign's writes and before its result line leaves its ids in the log and the next run reports it unchanged", async () => {
+    const { root, output } = sampleTree();
+    const first = freshResult("W7a");
+    const second = freshResult("W7b");
+    try {
+      const real = await replannedDigest(root, output);
+      env.reinstall();
+      // The campaign mints to the DB and object store, then the result-line
+      // append throws: the campaign's ids are still on stdout, but its line
+      // is never written.
+      const spy = vi
+        .spyOn(ResultWriter.prototype, "add")
+        .mockImplementation(async function () {
+          throw new Error("simulated kill: result line not written");
+        });
+      const { out, deps } = io();
+      try {
+        expect(
+          await main(applyArgv(root, output, ["--expect", real, "--result", first]), deps),
+        ).toBe(1);
+      } finally {
+        spy.mockRestore();
+      }
+
+      // The first result file holds only the header: the campaign's line was
+      // never appended (no summary line either — the run never finished).
+      const firstLines = readFileSync(first, "utf8").split("\n").filter((l) => l.length > 0);
+      expect(firstLines).toHaveLength(1);
+      expect(JSON.parse(firstLines[0])).toMatchObject({ kind: "header", digest: real });
+
+      // The job's log holds the campaign uuid and every asset id and key.
+      const { rows: campaigns } = await env.db.query<{ id: string }>(
+        `select id from campaign where org_id=$1 and slug=$2`,
+        ["local", "camp"],
+      );
+      const { rows: dbAssets } = await env.db.query<{ id: string; name: string }>(
+        `select id, name from asset where org_id=$1`,
+        ["local"],
+      );
+      const listed = await env.objects.list(orgPrefix("local"));
+      const stdout = out.join("\n");
+      expect(stdout).toContain(`minted: campaign ${campaigns[0]!.id}, 1 asset(s)`);
+      expect(stdout).toContain(`asset ${dbAssets[0]!.id} ${dbAssets[0]!.name} ${listed[0]!.key}`);
+
+      // A second apply over the same source, with a new --result path, finds the
+      // campaign unchanged and writes nothing new.
+      env.reinstall();
+      const before = await counts(env);
+      const { out: againOut, err: againErr, deps: againDeps } = io();
+      expect(
+        await main(applyArgv(root, output, ["--expect", real, "--result", second]), againDeps),
+      ).toBe(0);
+      expect(againErr).toEqual([]);
+      expect(againOut).toEqual([
+        "camp: unchanged",
+        "0 created, 0 completed, 1 unchanged, 0 refused",
+      ]);
+      const again = parseResult(second);
+      expect(again.campaigns[0]!.outcome).toBe("unchanged");
+      expect(again.campaigns[0]!.minted.assets).toEqual([]);
+      expect(await counts(env)).toEqual(before);
+      expect(env.objects.putCount).toBe(before.puts);
+    } finally {
+      dropRoot(root);
+      rmSync(first, { force: true });
+      rmSync(second, { force: true });
+    }
+  });
+
+  test("a full disk on the append stops the run with exit 1 and names the result file", async () => {
+    const { root, output } = threeCampaignTree();
+    const result = freshResult("W7c");
+    try {
+      const real = await replannedDigest(root, output);
+      env.reinstall();
+      // A full disk on the third campaign's result line: the first two are
+      // already on disk, and the run stops.
+      const originalAdd = ResultWriter.prototype.add;
+      let calls = 0;
+      const spy = vi.spyOn(ResultWriter.prototype, "add").mockImplementation(
+        async function (this: ResultWriter, entry: CampaignEntry) {
+          calls++;
+          if (calls === 3) {
+            const error: NodeJS.ErrnoException = new Error("no space left on device");
+            error.code = "ENOSPC";
+            throw error;
+          }
+          return originalAdd.call(this, entry);
+        },
+      );
+      const { err, deps } = io();
+      try {
+        expect(
+          await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+        ).toBe(1);
+        expect(err.length).toBe(1);
+        expect(err[0]).toContain("could not write the result file");
+        expect(err[0]).toContain(result);
+        expect(err[0]).toContain("ENOSPC");
+
+        // The earlier lines are intact; nothing past the second campaign.
+        const lines = readFileSync(result, "utf8").split("\n").filter((l) => l.length > 0);
+        expect(lines).toHaveLength(3);
+        expect(JSON.parse(lines[0]).kind).toBe("header");
+        expect(JSON.parse(lines[1]).kind).toBe("campaign");
+        expect(JSON.parse(lines[1]).slug).toBe("alpha");
+        expect(JSON.parse(lines[2]).kind).toBe("campaign");
+        expect(JSON.parse(lines[2]).slug).toBe("beta");
+        expect(lines.filter((l) => l.includes("summary"))).toHaveLength(0);
+      } finally {
+        spy.mockRestore();
+      }
+    } finally {
+      dropRoot(root);
       rmSync(result, { force: true });
     }
   });
