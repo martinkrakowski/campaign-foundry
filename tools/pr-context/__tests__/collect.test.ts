@@ -599,6 +599,19 @@ describe("table name filtering", () => {
 });
 
 describe("tier 7 collects the unchanged functions of a changed file, nearest the hunk first", () => {
+  test("a changed file with no hunk contributes no unchanged-function block", () => {
+    // A mode-only change: the diff lists the file and has no changed line in it.
+    const sources = new Map([["packages/app/src/api.ts", "function first() {\n  return 1;\n}"]]);
+    const diff: DiffInfo = {
+      files: [fileEntry("packages/app/src/api.ts", [], [], [])],
+      calledNames: new Set(),
+      tableNames: new Set(),
+    };
+    const blocks = collectBlocks(sources, diff);
+    expect(blocks.filter((b) => b.tier === 7)).toEqual([]);
+    expect(blocks.some((b) => b.why.includes("Infinity"))).toBe(false);
+  });
+
   test("the unchanged functions of a changed file are collected, nearest the hunk first", () => {
     const sources = new Map([
       [

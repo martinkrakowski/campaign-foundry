@@ -501,6 +501,9 @@ function distanceToHunk(
 function tier7(decls: Decl[], diff: DiffInfo): BlockCandidate[] {
   const blocks: BlockCandidate[] = [];
   for (const file of diff.files) {
+    // A file the diff lists with no hunk (a mode-only change) has no changed
+    // lines to be near, so it contributes nothing here.
+    if (file.ranges.length === 0) continue;
     for (const decl of decls) {
       if (decl.filePath !== file.path) continue;
       let overlaps = false;
