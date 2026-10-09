@@ -2,7 +2,7 @@ import { pathToFileURL } from "node:url";
 import { writeFile, type FileHandle } from "node:fs/promises";
 import { errorMessage } from "@campaignfoundry/shared";
 import { database, resetDatabase } from "../server/lib/db/database.js";
-import { databaseSettings, storeBackend } from "../server/lib/config.js";
+import { databaseSettings, storeBackend, objectStore } from "../server/lib/config.js";
 import { isExistsError } from "../server/lib/brief-files.js";
 import { resolveSource, type SourceFlags } from "../server/lib/import/source.js";
 import {
@@ -10,9 +10,11 @@ import {
   applyGuards,
   checkResultPath,
   openResult,
+  planProbes,
   replan,
   ResultWriter,
   type CampaignEntry,
+  type PlanProbe,
 } from "../server/lib/import/apply.js";
 import { IMPORT_STEPS } from "../server/lib/import/steps.js";
 import type { HashedContext } from "../server/lib/import/campaign-step.js";
@@ -146,12 +148,27 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
       ),
     );
     const census = await assembleCensus(ctx, result, named);
+    const files = await digestSourceFiles(ctx, result, planned);
     const digest = planDigest({
-      files: await digestSourceFiles(ctx, result, planned),
+      files,
       orgId: ctx.orgId,
       switchedAt: ctx.switchedAt.toISOString(),
       includeSamples: ctx.includeSamples,
     });
+    // D225 read-only probes are only meaningful against the live target: a plan
+    // whose target is the file stores has no campaign rows to probe, so it
+    // reports why the probes were skipped rather than null-ing them silently.
+    const expectedHashes = new Map<string, string>();
+    for (const file of files) {
+      if (file.sha256 !== undefined) expectedHashes.set(file.rel, file.sha256);
+    }
+    let probes: readonly PlanProbe[] | null = null;
+    let probesSkipped: string | null = null;
+    if (backend === "postgres" && objectStore() === "s3") {
+      probes = await planProbes(ctx, result.campaigns, expectedHashes);
+    } else {
+      probesSkipped = "needs STORE_BACKEND=postgres and OBJECT_STORE=s3";
+    }
     const json = JSON.stringify({
       switchedAt: switchedAtIso,
       orgId: ctx.orgId,
@@ -165,6 +182,8 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
       decisions: assembled.decisions,
       census,
       digest,
+      probes,
+      probesSkipped,
     });
     // The `--out` write happens BEFORE anything is printed: a failed write
     // throws into the catch below — exit 1, nothing printed, no partial file —

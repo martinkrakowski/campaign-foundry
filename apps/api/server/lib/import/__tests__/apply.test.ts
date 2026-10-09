@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { describe, expect, test, beforeEach, afterEach, vi } from "vitest";
 import { main } from "../../../../bin/import.js";
 import { trackedSampleTree, useApplyEnvironment, restoreApplyEnvironment, ON_A_REAL_TEST_SERVER, failOnNth } from "./fixtures/apply-harness.js";
-import { dropRoot, makeRoot, writeAt, writeBrief, PNG } from "./fixtures/tree.js";
+import { dropRoot, makeRoot, writeAt, writeBrief, briefBody, PNG } from "./fixtures/tree.js";
 import type { StepContext, CampaignOutcome } from "../steps.js";
 import { replan, applyCampaigns, type CampaignEntry } from "../apply.js";
 import { importCampaignStep, type HashedContext } from "../campaign-step.js";
 import { importTenant } from "../import-tenant.js";
-import { getAssetStore, setAssetStore } from "../../ports/index.js";
+import { getAssetStore, getBriefStore, setAssetStore } from "../../ports/index.js";
 import { objectStoreClient } from "../../object-store/index.js";
 import { orgPrefix } from "../../object-store/object-keys.js";
 
@@ -95,6 +95,20 @@ function applyArgv(root: string, output: string, extra: readonly string[]): stri
     SWITCHED_AT,
     "--org",
     "local",
+    ...extra,
+  ];
+}
+
+/** `plan` against this suite's temp tree, with any flags appended. */
+function planArgv(root: string, output: string, extra: readonly string[]): string[] {
+  return [
+    "plan",
+    "--project-root",
+    root,
+    "--output-root",
+    output,
+    "--switched-at",
+    SWITCHED_AT,
     ...extra,
   ];
 }
@@ -603,6 +617,111 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         dropRoot(root);
         rmSync(result, { force: true });
       }
+    }
+  });
+
+  test("plan with a configured target writes no row and no object and the plan JSON holds probes", async () => {
+    const { root } = trackedSampleTree();
+    const output = join(root, "output");
+    mkdirSync(output, { recursive: true });
+    try {
+      env.reinstall();
+      const { out, deps } = io();
+      expect(
+        await main(planArgv(root, output, ["--include-samples", "--org", "local"]), deps),
+      ).toBe(0);
+      const plan = JSON.parse(out[3]!) as { probes: unknown; probesSkipped: unknown };
+      expect(plan.probes).not.toBeNull();
+      expect(plan.probesSkipped).toBeNull();
+      expect(await counts(env)).toEqual({ campaigns: 0, assets: 0, versions: 0, puts: 0 });
+      expect(env.objects.putCount).toBe(0);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("plan lists probes for each slug when the target is postgres and s3", async () => {
+    const root = makeRoot();
+    const output = join(root, "output");
+    mkdirSync(output, { recursive: true });
+    try {
+      for (const slug of ["absent", "completable", "unchanged", "refused"]) {
+        writeAt(root, `assets/inputs/${slug}/logo.png`, PNG);
+        writeBrief(root, `${slug}.yaml`, {
+          id: slug,
+          products: [
+            { id: "p1", name: "P1", primaryColor: "#111111", logoPath: `assets/inputs/${slug}/logo.png` },
+          ],
+        });
+      }
+      const ctx = ctxWith(root, output);
+      const expectedHashes = (await replan(ctx)).expectedHashes;
+      const hashedCtx: HashedContext = { ...ctx, expectedHashes };
+      env.reinstall();
+      // Seed the target states the probes will find: a versionless row (completable),
+      // a versionful row whose asset is missing (refused), and a fully-imported one (unchanged).
+      const briefs = getBriefStore(importTenant("local"));
+      await briefs.createCampaign("completable");
+      await briefs.createCampaign("refused");
+      await briefs.createBrief(
+        briefBody({
+          id: "refused",
+          products: [
+            { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/refused/logo.png" },
+          ],
+        }),
+      );
+      await importCampaignStep(hashedCtx, {
+        slug: "unchanged",
+        sourcePath: join(root, "briefs", "unchanged.yaml"),
+      });
+      env.reinstall();
+      const { out, deps } = io();
+      expect(
+        await main(planArgv(root, output, ["--org", "local"]), deps),
+      ).toBe(0);
+      const plan = JSON.parse(out[3]!) as {
+        probes: { slug: string; state: string; reason?: string }[];
+      };
+      expect(plan.probes).toHaveLength(4);
+      const bySlug = Object.fromEntries(plan.probes.map((p) => [p.slug, p.state]));
+      expect(bySlug).toEqual({
+        absent: "absent",
+        completable: "completable",
+        unchanged: "unchanged",
+        refused: "refused",
+      });
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("plan lists no probes and says why when the target is not postgres and s3", async () => {
+    const { root } = trackedSampleTree();
+    const output = join(root, "output");
+    mkdirSync(output, { recursive: true });
+    try {
+      // STORE_BACKEND=fs → backend fs-only → no campaign rows to probe.
+      env.reinstall();
+      process.env.STORE_BACKEND = "fs";
+      const { out, deps } = io();
+      expect(await main(planArgv(root, output, ["--include-samples"]), deps)).toBe(0);
+      const plan = JSON.parse(out[3]!) as { probes: unknown; probesSkipped: string | null };
+      expect(plan.probes).toBeNull();
+      expect(plan.probesSkipped).toBe("needs STORE_BACKEND=postgres and OBJECT_STORE=s3");
+
+      // OBJECT_STORE=fs (STORE_BACKEND=postgres) → backend is postgres but the store
+      // is not s3, so the probe is still skipped and the reason is the same.
+      env.reinstall();
+      process.env.STORE_BACKEND = "postgres";
+      process.env.OBJECT_STORE = "fs";
+      const { out: out2, deps: deps2 } = io();
+      expect(await main(planArgv(root, output, ["--include-samples", "--org", "local"]), deps2)).toBe(0);
+      const plan2 = JSON.parse(out2[3]!) as { probes: unknown; probesSkipped: string | null };
+      expect(plan2.probes).toBeNull();
+      expect(plan2.probesSkipped).toBe("needs STORE_BACKEND=postgres and OBJECT_STORE=s3");
+    } finally {
+      dropRoot(root);
     }
   });
 });

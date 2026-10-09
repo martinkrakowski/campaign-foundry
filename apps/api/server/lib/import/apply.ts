@@ -11,6 +11,11 @@ import { IMPORT_STEPS } from "./steps.js";
 import { objectStore, storeBackend } from "../config.js";
 import type { UnreferencedInputs } from "./asset-step.js";
 import type { MintedAsset, CampaignResult, HashedContext } from "./campaign-step.js";
+import { preflight, probeCampaign } from "./campaign-step.js";
+import { importTenant } from "./import-tenant.js";
+import { getBriefStore, getAssetStore } from "../ports/index.js";
+import { errorMessage } from "@campaignfoundry/shared";
+import type { ScannedCampaign } from "./scan.js";
 /**
  * What `replan` hands the apply loop and the result builder: the same scan and
  * digest `plan` prints, plus the reviewed-content hashes the per-campaign step
@@ -220,3 +225,48 @@ export class ResultWriter {
     await this.#handle.close();
   }
 }
+
+/** One campaign's read-only `plan` probe (D225). */
+export type PlanProbe = {
+  readonly slug: string;
+  readonly state: "absent" | "unchanged" | "refused" | "completable";
+  readonly reason?: string;
+};
+
+/**
+ * The read-only target probe (8b1) for every campaign `plan` reports: preflight
+ * with the reviewed hashes first, then `probeCampaign`. A preflight refusal is
+ * the probe `refused` with that reason; `versionless` is reported as
+ * `completable` (D225). Called only on the postgres+s3 target, so the org row
+ * and the brief/asset stores are already the ones `apply` would write.
+ */
+export async function planProbes(
+  ctx: StepContext,
+  campaigns: readonly ScannedCampaign[],
+  expectedHashes: ReadonlyMap<string, string>,
+): Promise<PlanProbe[]> {
+  const briefs = getBriefStore(importTenant(ctx.orgId));
+  const assets = getAssetStore(importTenant(ctx.orgId));
+  const probes: PlanProbe[] = [];
+  for (const scanned of campaigns) {
+    const pf = await preflight(ctx, scanned, expectedHashes);
+    if (!pf.ok) {
+      probes.push({ slug: scanned.slug, state: "refused", reason: pf.reason });
+      continue;
+    }
+    let decision: ReturnType<typeof probeCampaign> extends Promise<infer D> ? D : never;
+    try {
+      decision = await probeCampaign(briefs, assets, ctx, scanned, pf.preflight);
+    } catch (error) {
+      probes.push({ slug: scanned.slug, state: "refused", reason: errorMessage(error) });
+      continue;
+    }
+    probes.push({
+      slug: scanned.slug,
+      state: decision.kind === "versionless" ? "completable" : decision.kind,
+      reason: decision.kind === "refused" ? decision.reason : undefined,
+    });
+  }
+  return probes;
+}
+
