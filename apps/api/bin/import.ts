@@ -4,6 +4,7 @@ import { errorMessage } from "@campaignfoundry/shared";
 import { database, resetDatabase } from "../server/lib/db/database.js";
 import { databaseSettings, storeBackend } from "../server/lib/config.js";
 import { resolveSource, type SourceFlags } from "../server/lib/import/source.js";
+import { applyGuards } from "../server/lib/import/apply.js";
 import { scanBriefs } from "../server/lib/import/scan.js";
 import { assemblePlan } from "../server/lib/import/plan.js";
 import { assembleCensus } from "../server/lib/import/census.js";
@@ -32,8 +33,12 @@ export const USAGE =
   "usage: yarn import plan --switched-at <iso> [--project-root <dir>] [--output-root <dir>]" +
   " [--org <id>] [--include-samples] [--out <path>]";
 
-/** argv's flags, as {@link resolveSource} takes them — plus `--out`, which `plan` alone reads. */
-type PlanFlags = SourceFlags & { readonly out?: string };
+/** argv's flags, as {@link resolveSource} takes them — plus the flag each subcommand owns. */
+type ParsedFlags = SourceFlags & {
+  readonly out?: string;
+  readonly expect?: string;
+  readonly result?: string;
+};
 
 /** A refused subcommand's exact stderr, so a caller can key on it (req 4's habit). */
 const NOT_YET_IMPLEMENTED = "not yet implemented";
@@ -44,13 +49,15 @@ export interface ImportIO {
 }
 
 /** argv's flags, as {@link resolveSource} takes them. An unknown flag refuses the run. */
-function parseFlags(argv: readonly string[]): PlanFlags | string {
+function parseFlags(subcommand: string, argv: readonly string[]): ParsedFlags | string {
   let flags: {
     projectRoot?: string;
     outputRoot?: string;
     org?: string;
     switchedAt?: string;
     out?: string;
+    expect?: string;
+    result?: string;
     includeSamples: boolean;
   } = { includeSamples: false };
   for (let i = 0; i < argv.length; i++) {
@@ -68,8 +75,16 @@ function parseFlags(argv: readonly string[]): PlanFlags | string {
     else if (flag === "--output-root") flags = { ...flags, outputRoot: value };
     else if (flag === "--org") flags = { ...flags, org: value };
     else if (flag === "--switched-at") flags = { ...flags, switchedAt: value };
-    else if (flag === "--out") flags = { ...flags, out: value };
-    else return `${flag} is not a flag this command takes.`;
+    else if (flag === "--out") {
+      if (subcommand !== "plan") return `${flag} is not a flag this command takes.`;
+      flags = { ...flags, out: value };
+    } else if (flag === "--expect") {
+      if (subcommand !== "apply") return `${flag} is not a flag this command takes.`;
+      flags = { ...flags, expect: value };
+    } else if (flag === "--result") {
+      if (subcommand !== "apply") return `${flag} is not a flag this command takes.`;
+      flags = { ...flags, result: value };
+    } else return `${flag} is not a flag this command takes.`;
   }
   return flags;
 }
@@ -93,7 +108,7 @@ function parseFlags(argv: readonly string[]): PlanFlags | string {
  */
 async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
   try {
-    const flags = parseFlags(argv);
+    const flags = parseFlags("plan", argv);
     if (typeof flags === "string") {
       io.stderr(flags);
       return 1;
@@ -185,6 +200,52 @@ async function closeDatabase(io: ImportIO): Promise<void> {
   }
 }
 
+/** `apply` requires both a reviewed digest to match and a result path to write. */
+const EXPECT_REQUIRED = "apply needs --expect <digest>";
+const RESULT_REQUIRED = "apply needs --result <path>";
+
+/**
+ * `apply`: re-plan the source, refuse unless the re-planned digest equals
+ * `--expect` (N1/D225), refuse unless the target is the postgres/s3 backend with
+ * an org row (N2/D225), refuse a result path that already exists or sits under a
+ * source root (N4/D229), then run each campaign through {@link IMPORT_STEPS} and
+ * write the result file as it goes (D229/D221). Every refusal below runs before
+ * the first write; the database is closed once in `finally`, as `plan` does.
+ */
+async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
+  try {
+    const flags = parseFlags("apply", argv);
+    if (typeof flags === "string") {
+      io.stderr(flags);
+      return 1;
+    }
+    if (flags.expect === undefined) {
+      io.stderr(EXPECT_REQUIRED);
+      return 1;
+    }
+    if (flags.result === undefined) {
+      io.stderr(RESULT_REQUIRED);
+      return 1;
+    }
+    const guard = applyGuards();
+    if (guard !== undefined) {
+      io.stderr(guard);
+      return 1;
+    }
+    const outcome = await resolveSource(flags);
+    if (!outcome.ok) {
+      io.stderr(outcome.reason);
+      return 1;
+    }
+    return 0;
+  } catch (error) {
+    io.stderr(errorMessage(error));
+    return 1;
+  } finally {
+    await closeDatabase(io);
+  }
+}
+
 /**
  * `yarn import <subcommand> …` — `0` on success, `1` for every run-level refusal.
  *
@@ -197,15 +258,14 @@ export async function main(
   deps: ImportIO = { stdout: console.log, stderr: console.error },
 ): Promise<number> {
   const [subcommand, ...rest] = argv;
-  if (subcommand === undefined || subcommand !== "plan") {
-    if (subcommand === "apply" || subcommand === "verify") {
-      deps.stderr(`${subcommand}: ${NOT_YET_IMPLEMENTED}`);
-      return 1;
-    }
-    deps.stderr(USAGE);
+  if (subcommand === "plan") return plan(rest, deps);
+  if (subcommand === "apply") return apply(rest, deps);
+  if (subcommand === "verify") {
+    deps.stderr(`${subcommand}: ${NOT_YET_IMPLEMENTED}`);
     return 1;
   }
-  return plan(rest, deps);
+  deps.stderr(USAGE);
+  return 1;
 }
 
 /* istanbul ignore next -- CLI entry guard; main() is covered directly in tests */

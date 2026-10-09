@@ -270,12 +270,10 @@ describe("import CLI (PT-8a)", () => {
     }
   });
 
-  test("apply and verify refuse as not-yet-implemented, and exit 1", async () => {
-    for (const subcommand of ["apply", "verify"]) {
-      const { err, deps } = io();
-      expect(await main([subcommand], deps)).toBe(1);
-      expect(err).toEqual([`${subcommand}: not yet implemented`]);
-    }
+  test("verify refuses as not-yet-implemented, and exits 1", async () => {
+    const { err, deps } = io();
+    expect(await main(["verify"], deps)).toBe(1);
+    expect(err).toEqual(["verify: not yet implemented"]);
   });
 
   test("without injected IO the output goes to the process's own streams", async () => {
@@ -284,10 +282,10 @@ describe("import CLI (PT-8a)", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
-      expect(await main(["apply"])).toBe(1);
+      expect(await main(["verify"])).toBe(1);
       expect(await main(["inspect"])).toBe(1);
       expect(await main(planArgv())).toBe(0);
-      expect(error).toHaveBeenNthCalledWith(1, "apply: not yet implemented");
+      expect(error).toHaveBeenNthCalledWith(1, "verify: not yet implemented");
       expect(error).toHaveBeenNthCalledWith(2, USAGE);
       expect(log).toHaveBeenCalledWith(`import plan — switched-at: ${SWITCHED_AT}`);
     } finally {

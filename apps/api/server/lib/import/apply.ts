@@ -4,6 +4,7 @@ import type { PlanAssembled } from "./plan.js";
 import { scanBriefs } from "./scan.js";
 import type { ScanResult } from "./scan.js";
 import type { StepContext } from "./steps.js";
+import { objectStore, storeBackend } from "../config.js";
 
 /**
  * What `replan` hands the apply loop and the result builder: the same scan and
@@ -45,4 +46,20 @@ export async function replan(ctx: StepContext): Promise<ReplanResult> {
     if (file.sha256 !== undefined) expectedHashes.set(file.rel, file.sha256);
   }
   return { result, assembled, digest, files, expectedHashes };
+}
+
+/**
+ * The two target guards (N2, D225): `apply` writes rows and objects, so the
+ * target MUST be the postgres/object-store backend, confirmed before any write.
+ * `resolveSource` already probes the org row; this is the explicit backend gate
+ * that keeps an `apply` aimed at the file stores from touching anything.
+ */
+export function applyGuards(): string | undefined {
+  if (storeBackend() !== "postgres") {
+    return `apply needs STORE_BACKEND=postgres, and STORE_BACKEND is ${storeBackend() ?? "(unset)"}`;
+  }
+  if (objectStore() !== "s3") {
+    return `apply needs OBJECT_STORE=s3, and OBJECT_STORE is ${objectStore() ?? "(unset)"}`;
+  }
+  return undefined;
 }
