@@ -268,7 +268,7 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
       return 1;
     }
     const { ctx, switchedAtIso } = outcome.source;
-    const pathProblem = checkResultPath(flags.result ?? "", ctx);
+    const pathProblem = checkResultPath(flags.result, ctx);
     if (pathProblem !== undefined) {
       io.stderr(pathProblem);
       return 1;

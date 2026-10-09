@@ -3,13 +3,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test, beforeEach, afterEach, vi } from "vitest";
 import { main } from "../../../../bin/import.js";
-import { trackedSampleTree, useApplyEnvironment, restoreApplyEnvironment, ON_A_REAL_TEST_SERVER, failOnNth } from "./fixtures/apply-harness.js";
+import {
+  trackedSampleTree,
+  useApplyEnvironment,
+  restoreApplyEnvironment,
+  ON_A_REAL_TEST_SERVER,
+  failOnNth,
+} from "./fixtures/apply-harness.js";
 import { dropRoot, makeRoot, writeAt, writeBrief, briefBody, PNG } from "./fixtures/tree.js";
 import type { StepContext, CampaignOutcome } from "../steps.js";
-import { replan, applyCampaigns, type CampaignEntry } from "../apply.js";
+import { replan, applyCampaigns, planProbes, type CampaignEntry } from "../apply.js";
 import { importCampaignStep, type HashedContext } from "../campaign-step.js";
 import { importTenant } from "../import-tenant.js";
-import { getAssetStore, getBriefStore, setAssetStore } from "../../ports/index.js";
+import { getAssetStore, getBriefStore, setAssetStore, setBriefStore } from "../../ports/index.js";
 import { objectStoreClient } from "../../object-store/index.js";
 import { orgPrefix } from "../../object-store/object-keys.js";
 
@@ -24,12 +30,18 @@ async function counts(env: Awaited<ReturnType<typeof useApplyEnvironment>>): Pro
   puts: number;
 }> {
   const campaigns = (
-    await env.db.query<{ n: number }>(`select count(*)::int as n from campaign where org_id=$1`, ["local"])
+    await env.db.query<{ n: number }>(`select count(*)::int as n from campaign where org_id=$1`, [
+      "local",
+    ])
   ).rows[0]!.n;
   const assets = (
-    await env.db.query<{ n: number }>(`select count(*)::int as n from asset where org_id=$1`, ["local"])
+    await env.db.query<{ n: number }>(`select count(*)::int as n from asset where org_id=$1`, [
+      "local",
+    ])
   ).rows[0]!.n;
-  const versions = (await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`)).rows[0]!.n;
+  const versions = (
+    await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`)
+  ).rows[0]!.n;
   return { campaigns, assets, versions, puts: env.objects.putCount };
 }
 
@@ -139,7 +151,16 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       const { out, deps } = io();
       expect(
         await main(
-          ["plan", "--project-root", root, "--output-root", output, "--switched-at", SWITCHED_AT, "--include-samples"],
+          [
+            "plan",
+            "--project-root",
+            root,
+            "--output-root",
+            output,
+            "--switched-at",
+            SWITCHED_AT,
+            "--include-samples",
+          ],
           deps,
         ),
       ).toBe(0);
@@ -163,7 +184,19 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       const { err, deps } = io();
       expect(
         await main(
-          ["apply", "--project-root", root, "--output-root", output, "--switched-at", SWITCHED_AT, "--org", "local", "--result", "/tmp/ignored"],
+          [
+            "apply",
+            "--project-root",
+            root,
+            "--output-root",
+            output,
+            "--switched-at",
+            SWITCHED_AT,
+            "--org",
+            "local",
+            "--result",
+            "/tmp/ignored",
+          ],
           deps,
         ),
       ).toBe(1);
@@ -182,7 +215,19 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       const { err, deps } = io();
       expect(
         await main(
-          ["apply", "--project-root", root, "--output-root", output, "--switched-at", SWITCHED_AT, "--org", "local", "--expect", "0".repeat(64)],
+          [
+            "apply",
+            "--project-root",
+            root,
+            "--output-root",
+            output,
+            "--switched-at",
+            SWITCHED_AT,
+            "--org",
+            "local",
+            "--expect",
+            "0".repeat(64),
+          ],
           deps,
         ),
       ).toBe(1);
@@ -303,9 +348,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       expect(
         await main(applyArgv(root, output, ["--expect", wrong, "--result", result]), deps),
       ).toBe(1);
-      expect(err).toEqual([
-        `--expect ${wrong} does not match the re-planned digest ${real}`,
-      ]);
+      expect(err).toEqual([`--expect ${wrong} does not match the re-planned digest ${real}`]);
       expect(await counts(env)).toEqual({ campaigns: 0, assets: 0, versions: 0, puts: 0 });
       expect(env.objects.putCount).toBe(0);
       expect(existsSync(result)).toBe(false);
@@ -384,7 +427,9 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       const real = await replannedDigest(root, output);
       env.reinstall();
       const { out, err, deps } = io();
-      expect(await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps)).toBe(0);
+      expect(
+        await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+      ).toBe(0);
       expect(err).toEqual([]);
       expect(out).toEqual(["camp: created", "1 created, 0 completed, 0 unchanged, 0 refused"]);
       expect(await counts(env)).toEqual({ campaigns: 1, assets: 1, versions: 1, puts: 1 });
@@ -401,7 +446,9 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       const real = await replannedDigest(root, output);
       env.reinstall();
       const { deps } = io();
-      expect(await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps)).toBe(0);
+      expect(
+        await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+      ).toBe(0);
       const c = await counts(env);
       expect(c.campaigns).toBe(1);
       expect(env.queries.length).toBeGreaterThan(0);
@@ -421,12 +468,16 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       const real = await replannedDigest(root, output);
       env.reinstall();
       const { deps } = io();
-      expect(await main(applyArgv(root, output, ["--expect", real, "--result", first]), deps)).toBe(0);
+      expect(await main(applyArgv(root, output, ["--expect", real, "--result", first]), deps)).toBe(
+        0,
+      );
       const before = await counts(env);
 
       env.reinstall();
       const { out, deps: deps2 } = io();
-      expect(await main(applyArgv(root, output, ["--expect", real, "--result", second]), deps2)).toBe(0);
+      expect(
+        await main(applyArgv(root, output, ["--expect", real, "--result", second]), deps2),
+      ).toBe(0);
       expect(out).toEqual(["camp: unchanged", "0 created, 0 completed, 1 unchanged, 0 refused"]);
       expect(await counts(env)).toEqual(before);
       expect(env.objects.putCount).toBe(before.puts);
@@ -462,11 +513,18 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       env.reinstall();
       setAssetStore(failOnNth(getAssetStore(importTenant("local")), "writeAsset", 3));
       const { err, deps } = io();
-      expect(await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps)).toBe(1);
+      expect(
+        await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+      ).toBe(1);
       expect(err).toEqual([]);
 
       const json = JSON.parse(readFileSync(result, "utf8")) as {
-        campaigns: { slug: string; outcome: string; partial: boolean; minted: { campaignId: string; assets: { id: string; name: string; key: string }[] } }[];
+        campaigns: {
+          slug: string;
+          outcome: string;
+          partial: boolean;
+          minted: { campaignId: string; assets: { id: string; name: string; key: string }[] };
+        }[];
       };
       const entry = json.campaigns[0];
       expect(entry.slug).toBe("three");
@@ -480,9 +538,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       );
       expect(entry.minted.assets.map((a) => a.id).sort()).toEqual(dbAssets.map((a) => a.id).sort());
       const listed = await env.objects.list(orgPrefix("local"));
-      expect(entry.minted.assets.map((a) => a.key).sort()).toEqual(
-        listed.map((o) => o.key).sort(),
-      );
+      expect(entry.minted.assets.map((a) => a.key).sort()).toEqual(listed.map((o) => o.key).sort());
     } finally {
       dropRoot(root);
       rmSync(result, { force: true });
@@ -497,10 +553,16 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       const real = await replannedDigest(root, output);
       env.reinstall();
       const { out, err, deps } = io();
-      expect(await main(applyArgv(root, output, ["--expect", real, "--result", first]), deps)).toBe(0);
+      expect(await main(applyArgv(root, output, ["--expect", real, "--result", first]), deps)).toBe(
+        0,
+      );
       expect(err).toEqual([]);
       const json = JSON.parse(readFileSync(first, "utf8")) as {
-        campaigns: { slug: string; outcome: string; minted: { campaignId: string; assets: { id: string; name: string; key: string }[] } }[];
+        campaigns: {
+          slug: string;
+          outcome: string;
+          minted: { campaignId: string; assets: { id: string; name: string; key: string }[] };
+        }[];
       };
       const entry = json.campaigns[0];
       expect(entry.slug).toBe("camp");
@@ -515,17 +577,15 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         `select id, name from asset where org_id=$1`,
         ["local"],
       );
-      expect(entry.minted.assets.map((a) => a.id).sort()).toEqual(
-        dbAssets.map((a) => a.id).sort(),
-      );
+      expect(entry.minted.assets.map((a) => a.id).sort()).toEqual(dbAssets.map((a) => a.id).sort());
       const listed = await env.objects.list(orgPrefix("local"));
-      expect(entry.minted.assets.map((a) => a.key).sort()).toEqual(
-        listed.map((o) => o.key).sort(),
-      );
+      expect(entry.minted.assets.map((a) => a.key).sort()).toEqual(listed.map((o) => o.key).sort());
 
       // A second apply reuses the asset, so it is not listed as minted.
       env.reinstall();
-      expect(await main(applyArgv(root, output, ["--expect", real, "--result", second]), deps)).toBe(0);
+      expect(
+        await main(applyArgv(root, output, ["--expect", real, "--result", second]), deps),
+      ).toBe(0);
       const again = JSON.parse(readFileSync(second, "utf8")) as {
         campaigns: { outcome: string; minted: { assets: unknown[] } }[];
       };
@@ -545,12 +605,19 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       const briefsPath = writeBrief(root, "briefs.yaml", {
         id: "briefs",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const expectedHashes = (await replan(ctxWith(root, output))).expectedHashes;
       const hashedCtx: HashedContext = { ...ctxWith(root, output), expectedHashes };
-      const spy = vi.fn(async (): Promise<{ outcome: CampaignOutcome }> => ({ outcome: "created" }));
+      const spy = vi.fn(
+        async (): Promise<{ outcome: CampaignOutcome }> => ({ outcome: "created" }),
+      );
       const seen: string[] = [];
       const entries: CampaignEntry[] = [];
       await applyCampaigns(
@@ -571,6 +638,28 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       // The created campaign ran the spy; the refused one did not reach it.
       expect(entries[0]!.outcome).toBe("created");
       expect(entries[1]!.outcome).toBe("refused");
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("applyCampaigns runs the registered IMPORT_STEPS by default", async () => {
+    const { root, output } = sampleTree();
+    try {
+      const expectedHashes = (await replan(ctxWith(root, output))).expectedHashes;
+      const hashedCtx: HashedContext = { ...ctxWith(root, output), expectedHashes };
+      env.reinstall();
+      const entries: CampaignEntry[] = [];
+      await applyCampaigns(
+        hashedCtx,
+        [{ slug: "camp", sourcePath: join(root, "briefs", "camp.yaml") }],
+        undefined,
+        async (entry: CampaignEntry) => {
+          entries.push(entry);
+        },
+      );
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.outcome).toBe("created");
     } finally {
       dropRoot(root);
     }
@@ -650,7 +739,12 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         writeBrief(root, `${slug}.yaml`, {
           id: slug,
           products: [
-            { id: "p1", name: "P1", primaryColor: "#111111", logoPath: `assets/inputs/${slug}/logo.png` },
+            {
+              id: "p1",
+              name: "P1",
+              primaryColor: "#111111",
+              logoPath: `assets/inputs/${slug}/logo.png`,
+            },
           ],
         });
       }
@@ -667,7 +761,12 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         briefBody({
           id: "refused",
           products: [
-            { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/refused/logo.png" },
+            {
+              id: "p1",
+              name: "P1",
+              primaryColor: "#111111",
+              logoPath: "assets/inputs/refused/logo.png",
+            },
           ],
         }),
       );
@@ -677,9 +776,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       });
       env.reinstall();
       const { out, deps } = io();
-      expect(
-        await main(planArgv(root, output, ["--org", "local"]), deps),
-      ).toBe(0);
+      expect(await main(planArgv(root, output, ["--org", "local"]), deps)).toBe(0);
       const plan = JSON.parse(out[3]!) as {
         probes: { slug: string; state: string; reason?: string }[];
       };
@@ -716,10 +813,139 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       process.env.STORE_BACKEND = "postgres";
       process.env.OBJECT_STORE = "fs";
       const { out: out2, deps: deps2 } = io();
-      expect(await main(planArgv(root, output, ["--include-samples", "--org", "local"]), deps2)).toBe(0);
+      expect(
+        await main(planArgv(root, output, ["--include-samples", "--org", "local"]), deps2),
+      ).toBe(0);
       const plan2 = JSON.parse(out2[3]!) as { probes: unknown; probesSkipped: string | null };
       expect(plan2.probes).toBeNull();
       expect(plan2.probesSkipped).toBe("needs STORE_BACKEND=postgres and OBJECT_STORE=s3");
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("apply refuses --out as a flag it takes and writes nothing", async () => {
+    const { root, output } = sampleTree();
+    const result = freshResult("A");
+    try {
+      env.reinstall();
+      const { err, deps } = io();
+      expect(
+        await main(
+          applyArgv(root, output, [
+            "--expect",
+            "0".repeat(64),
+            "--result",
+            result,
+            "--out",
+            "/tmp/x",
+          ]),
+          deps,
+        ),
+      ).toBe(1);
+      expect(err).toEqual(["--out is not a flag this command takes."]);
+      expect(await counts(env)).toEqual({ campaigns: 0, assets: 0, versions: 0, puts: 0 });
+    } finally {
+      dropRoot(root);
+      rmSync(result, { force: true });
+    }
+  });
+
+  test("plan refuses --expect and --result as flags it takes", async () => {
+    const { root, output } = sampleTree();
+    try {
+      for (const [flag, value] of [
+        ["--expect", "deadbeef"],
+        ["--result", "/tmp/x"],
+      ] as const) {
+        env.reinstall();
+        const { err, deps } = io();
+        expect(await main(planArgv(root, output, [flag, value]), deps)).toBe(1);
+        expect(err).toEqual([`${flag} is not a flag this command takes.`]);
+        expect(await counts(env)).toEqual({ campaigns: 0, assets: 0, versions: 0, puts: 0 });
+      }
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("apply with an unwritable result path exits 1", async () => {
+    const { root, output } = sampleTree();
+    const badResult = join(tmpdir(), `cf-no-such-dir-${process.pid}`, "result.json");
+    try {
+      const real = await replannedDigest(root, output);
+      env.reinstall();
+      const { err, deps } = io();
+      expect(
+        await main(applyArgv(root, output, ["--expect", real, "--result", badResult]), deps),
+      ).toBe(1);
+      expect(err.length).toBe(1);
+      expect(await counts(env)).toEqual({ campaigns: 0, assets: 0, versions: 0, puts: 0 });
+    } finally {
+      dropRoot(root);
+      rmSync(badResult, { force: true });
+    }
+  });
+
+  test("replan fingerprints a planned render and excludes it from the reviewed hashes", async () => {
+    const root = makeRoot();
+    const output = join(root, "output");
+    try {
+      writeAt(root, "assets/inputs/camp/logo.png", PNG);
+      writeBrief(root, "camp.yaml", {
+        id: "camp",
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
+        ],
+      });
+      const renderDir = join(output, "camp");
+      mkdirSync(renderDir, { recursive: true });
+      writeAt(root, "output/camp/logo.png", PNG);
+      writeAt(
+        root,
+        "output/reports/camp.json",
+        JSON.stringify({ outputPath: "camp/logo.png", proofPath: "../../etc/passwd" }),
+      );
+      const { files, expectedHashes } = await replan(ctxWith(root, output));
+      const renderEntry = files.find((f) => f.rel === "camp/logo.png");
+      expect(renderEntry).toBeDefined();
+      expect(renderEntry!.sha256).toBeUndefined();
+      expect(renderEntry!.fingerprint).toBeDefined();
+      expect(expectedHashes.has("camp/logo.png")).toBe(false);
+      expect(expectedHashes.has("briefs/camp.yaml")).toBe(true);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("planProbes refuses a campaign whose brief is not in the reviewed digest", async () => {
+    const { root, output } = sampleTree();
+    try {
+      const ctx = ctxWith(root, output);
+      const scanned = (await replan(ctx)).result.campaigns[0]!;
+      const probes = await planProbes(ctx, [scanned], new Map());
+      expect(probes).toEqual([{ slug: "camp", state: "refused", reason: expect.any(String) }]);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("planProbes refuses a campaign when the probe itself throws", async () => {
+    const { root, output } = sampleTree();
+    try {
+      const ctx = ctxWith(root, output);
+      const { expectedHashes, result } = await replan(ctx);
+      const scanned = result.campaigns[0]!;
+      env.reinstall();
+      setBriefStore(failOnNth(getBriefStore(importTenant("local")), "campaignMeta", 1));
+      const probes = await planProbes(ctx, [scanned], expectedHashes);
+      expect(probes[0]!.state).toBe("refused");
+      expect(probes[0]!.reason).toBeDefined();
     } finally {
       dropRoot(root);
     }

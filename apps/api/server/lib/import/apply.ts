@@ -66,10 +66,10 @@ export async function replan(ctx: StepContext): Promise<ReplanResult> {
  */
 export function applyGuards(): string | undefined {
   if (storeBackend() !== "postgres") {
-    return `apply needs STORE_BACKEND=postgres, and STORE_BACKEND is ${storeBackend() ?? "(unset)"}`;
+    return `apply needs STORE_BACKEND=postgres, and STORE_BACKEND is ${storeBackend()}`;
   }
   if (objectStore() !== "s3") {
-    return `apply needs OBJECT_STORE=s3, and OBJECT_STORE is ${objectStore() ?? "(unset)"}`;
+    return `apply needs OBJECT_STORE=s3, and OBJECT_STORE is ${objectStore()}`;
   }
   return undefined;
 }
@@ -269,4 +269,3 @@ export async function planProbes(
   }
   return probes;
 }
-
