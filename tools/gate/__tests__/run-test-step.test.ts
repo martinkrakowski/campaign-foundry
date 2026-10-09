@@ -1,19 +1,11 @@
 import { spawnSync } from "node:child_process";
-import {
-  copyFileSync,
-  mkdtempSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { copyFileSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
-const script = fileURLToPath(
-  new URL("../../../scripts/run-test-step.sh", import.meta.url),
-);
+const script = fileURLToPath(new URL("../../../scripts/run-test-step.sh", import.meta.url));
 
 function freshDir(): string {
   return mkdtempSync(join(tmpdir(), "cf-rt-step-"));
@@ -23,12 +15,7 @@ describe("scripts/run-test-step.sh", () => {
   test("a failing command fails the step with its own exit code even when its output holds a failed summary", () => {
     const r = spawnSync(
       "sh",
-      [
-        script,
-        "sh",
-        "-c",
-        "printf '%s\n' '      Tests  1 failed | 10 passed (11)'; exit 3",
-      ],
+      [script, "sh", "-c", "printf '%s\n' '      Tests  1 failed | 10 passed (11)'; exit 3"],
       { encoding: "utf8" },
     );
     expect(r.status).toBe(3);
@@ -95,11 +82,10 @@ describe("scripts/run-test-step.sh", () => {
     });
 
     let tmp = freshDir();
-    let r = spawnSync(
-      "sh",
-      [script, "sh", "-c", "printf '%s\\n' ' Tests  3 passed (3)'; exit 0"],
-      { encoding: "utf8", env: env(tmp) },
-    );
+    let r = spawnSync("sh", [script, "sh", "-c", "printf '%s\\n' ' Tests  3 passed (3)'; exit 0"], {
+      encoding: "utf8",
+      env: env(tmp),
+    });
     expect(r.status).toBe(0);
     expect(readdirSync(tmp)).toHaveLength(0);
     rmSync(tmp, { recursive: true, force: true });
@@ -117,11 +103,10 @@ describe("scripts/run-test-step.sh", () => {
     const copy = join(scriptDir, "run-test-step.sh");
     copyFileSync(script, copy);
     tmp = freshDir();
-    r = spawnSync(
-      "sh",
-      [copy, "sh", "-c", "printf '%s\\n' alpha; exit 0"],
-      { encoding: "utf8", env: env(tmp) },
-    );
+    r = spawnSync("sh", [copy, "sh", "-c", "printf '%s\\n' alpha; exit 0"], {
+      encoding: "utf8",
+      env: env(tmp),
+    });
     expect(r.status).toBe(2);
     expect(readdirSync(tmp)).toHaveLength(0);
     rmSync(tmp, { recursive: true, force: true });

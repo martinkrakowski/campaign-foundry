@@ -3,9 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
-const ciYml = fileURLToPath(
-  new URL("../../../.github/workflows/ci.yml", import.meta.url),
-);
+const ciYml = fileURLToPath(new URL("../../../.github/workflows/ci.yml", import.meta.url));
 
 const prefix = "sh scripts/run-test-step.sh ";
 
