@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "FU-gate-wait-scale",
+  "mutations": [
+    {
+      "file": "tools/gate/__tests__/wait-scale.ts",
+      "before": "export function scaled(ms: number): number {\n  return Math.round(ms * WAIT_SCALE);\n}",
+      "after": "export function scaled(ms: number): number {\n  return ms;\n}",
+      "because": "Scaling is the only thing `scaled` must do, so a mutant that returns its input unchanged must be caught: it would leave the proof test's 40 ms deadline at 40 ms instead of stretching it to 120 ms under a stubbed scale of 3, letting the helper give up too soon.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/gate-lock.test.ts",
+        "-t",
+        "a wait helper allows its deadline times the scale before it gives up"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "tools/gate/__tests__/wait-scale.ts",
+      "before": "  if (process.env.CI !== undefined && process.env.CI !== \"\") {\n    return 3;\n  }",
+      "after": "  if (process.env.CI !== undefined && process.env.CI !== \"\") {\n    return 1;\n  }",
+      "because": "Under CI with no numeric override the scale must be 3 to stretch handshake deadlines on a loaded runner; a mutant that returns 1 in the CI branch would leave those deadlines at their idle length, so the 3-under-CI case of the unit test must fail.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/gate/__tests__/wait-scale.test.ts",
+        "-t",
+        "the wait scale is 3 under CI, 1 elsewhere, and the variable overrides both"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
