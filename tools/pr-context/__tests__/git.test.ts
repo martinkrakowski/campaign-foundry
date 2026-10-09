@@ -20,10 +20,13 @@ function recordingGit(): GitIo & { calls: { args: readonly string[]; stdin?: str
       calls.push({ args, stdin });
       return "";
     },
+    runBytes: async (args, stdin) => {
+      calls.push({ args, stdin });
+      return Buffer.from("");
+    },
   };
 }
 
-/** A GitIo that returns scripted output keyed by the joined argv. */
 function scriptedGit(
   script: Record<string, string>,
 ): GitIo & { calls: readonly { args: readonly string[]; stdin?: string }[] } {
@@ -35,31 +38,36 @@ function scriptedGit(
       const key = args.join(" ");
       return script[key] ?? "";
     },
+    runBytes: async (args, stdin) => {
+      calls.push({ args, stdin });
+      const key = args.join(" ");
+      return Buffer.from(script[key] ?? "", "utf8");
+    },
   };
 }
 
 describe("listBaseTree", () => {
   test("keeps regular files in allowed paths and skips everything else", async () => {
     const git = scriptedGit({
-      "ls-tree -r base123": [
+      "ls-tree -r -z base123": [
         "100644 blob aaa111\tpackages/x/src/a.ts",
         "100755 blob bbb222\tapps/api/bin/run.ts",
         "120000 blob ccc333\tsome/symlink",
         "100644 blob ddd444\tscripts/gate.sh",
         "100644 blob eee555\tpackages/x/src/feature.test.ts",
-      ].join("\n"),
+      ].join("\x00"),
     });
     const entries = await listBaseTree(git, "base123");
     expect(entries).toHaveLength(2);
     expect(entries[0]).toEqual({ path: "packages/x/src/a.ts", mode: "100644", blob: "aaa111" });
     expect(entries[1]).toEqual({ path: "apps/api/bin/run.ts", mode: "100755", blob: "bbb222" });
-    expect(git.calls[0]?.args).toEqual(["ls-tree", "-r", "base123"]);
+    expect(git.calls[0]?.args).toEqual(["ls-tree", "-r", "-z", "base123"]);
   });
 
   test("a symlink entry in the base tree is skipped", async () => {
     const git = scriptedGit({
-      "ls-tree -r base":
-        "120000 blob abc\tpackages/x/src/symlink.ts\n100644 blob def\tpackages/x/src/ok.ts\n",
+      "ls-tree -r -z base":
+        "120000 blob abc\tpackages/x/src/symlink.ts\x00100644 blob def\tpackages/x/src/ok.ts\x00",
     });
     const entries = await listBaseTree(git, "base");
     expect(entries).toHaveLength(1);
@@ -68,7 +76,7 @@ describe("listBaseTree", () => {
 
   test("malformed lines without a tab are skipped", async () => {
     const git = scriptedGit({
-      "ls-tree -r base": "garbage line without tab\n100644 blob def\tpackages/x/src/a.ts\n",
+      "ls-tree -r -z base": "garbage line without tab\x00100644 blob def\tpackages/x/src/a.ts\x00",
     });
     const entries = await listBaseTree(git, "base");
     expect(entries).toHaveLength(1);
@@ -76,7 +84,8 @@ describe("listBaseTree", () => {
 
   test("a header with fewer than three space-separated fields is skipped", async () => {
     const git = scriptedGit({
-      "ls-tree -r base": "100644\tpackages/x/src/a.ts\n100644 blob def\tpackages/x/src/b.ts\n",
+      "ls-tree -r -z base": "100644\tpackages/x/src/a.ts\x00100644 blob def\tpackages/x/src/b.ts\x00",
+
     });
     const entries = await listBaseTree(git, "base");
     expect(entries).toHaveLength(1);
@@ -84,8 +93,22 @@ describe("listBaseTree", () => {
   });
 
   test("empty output yields no entries", async () => {
-    const git = scriptedGit({ "ls-tree -r base": "" });
+    const git = scriptedGit({ "ls-tree -r -z base": "" });
     expect(await listBaseTree(git, "base")).toEqual([]);
+  });
+
+  test("the base tree is listed with NUL separators", async () => {
+    const git = scriptedGit({
+      "ls-tree -r -z base":
+        "100644 blob aaa\tpackages/x/src/a.ts\x00100644 blob bbb\tpackages/y/src/b.ts\x00",
+    });
+    const entries = await listBaseTree(git, "base");
+    expect(entries).toHaveLength(2);
+    expect(entries[0]?.blob).toBe("aaa");
+    expect(entries[0]?.path).toBe("packages/x/src/a.ts");
+    expect(entries[1]?.blob).toBe("bbb");
+    expect(entries[1]?.path).toBe("packages/y/src/b.ts");
+    expect(git.calls[0]?.args).toEqual(["ls-tree", "-r", "-z", "base"]);
   });
 });
 
@@ -105,16 +128,47 @@ describe("readBaseBlobs", () => {
     expect(git.calls[0]?.stdin).toBe("abc123\n");
   });
 
-  test("a missing blob yields empty content and advances past it", async () => {
-    const output = "notfound missing\nfound blob 5\nhello\n\n";
+  test("a missing blob header stops the read, keeping earlier blobs", async () => {
+    const output = "aaa blob 5\nhello\nnotfound missing\n";
     const git = scriptedGit({ ["cat-file --batch"]: output });
     const entries: TreeEntry[] = [
-      { path: "a.ts", mode: "100644", blob: "notfound" },
-      { path: "b.ts", mode: "100644", blob: "found" },
+      { path: "a.ts", mode: "100644", blob: "aaa" },
+      { path: "b.ts", mode: "100644", blob: "notfound" },
     ];
     const blobs = await readBaseBlobs(git, entries);
-    expect(blobs.get("notfound")).toBe("");
-    expect(blobs.get("found")).toBe("hello");
+    expect(blobs.get("aaa")).toBe("hello");
+    expect(blobs.has("notfound")).toBe(false);
+  });
+
+  test("a batch header that names another object stops the read", async () => {
+    const output = "aaa blob 5\nhello\nxxx blob 5\nworld\n\n";
+    const git = scriptedGit({ ["cat-file --batch"]: output });
+    const entries: TreeEntry[] = [
+      { path: "a.ts", mode: "100644", blob: "aaa" },
+      { path: "b.ts", mode: "100644", blob: "bbb" },
+    ];
+    const blobs = await readBaseBlobs(git, entries);
+    expect(blobs.get("aaa")).toBe("hello");
+    expect(blobs.has("bbb")).toBe(false);
+  });
+
+  test("a blob that is not valid UTF-8 does not shift the blobs after it", async () => {
+    const buf = Buffer.concat([
+      Buffer.from("aaa blob 1\n"),
+      Buffer.from([0xff]),
+      Buffer.from("\nbbb blob 5\nhello\n\n"),
+    ]);
+    const git: GitIo = {
+      run: async () => "",
+      runBytes: async () => buf,
+    };
+    const entries: TreeEntry[] = [
+      { path: "a.ts", mode: "100644", blob: "aaa" },
+      { path: "b.ts", mode: "100644", blob: "bbb" },
+    ];
+    const blobs = await readBaseBlobs(git, entries);
+    expect(blobs.get("aaa")).toBe("\ufffd");
+    expect(blobs.get("bbb")).toBe("hello");
   });
 
   test("empty entries returns an empty map without calling git", async () => {
@@ -286,5 +340,23 @@ describe("realGit", () => {
     stubExec(() => [null, buf, ""]);
     const git = realGit("/repo");
     expect(await git.run(["ls-tree", "-r", "base"])).toBe("café\n");
+  });
+
+  test("runBytes resolves with a Buffer and uses buffer encoding", async () => {
+    stubExec(() => [null, Buffer.from("data"), ""]);
+    const git = realGit("/repo");
+    const result = await git.runBytes(["cat-file", "--batch"], "input");
+    expect(Buffer.isBuffer(result)).toBe(true);
+    expect(result.toString()).toBe("data");
+    expect(lastCall.options.encoding).toBe("buffer");
+    expect(lastCall.stdin?.write).toHaveBeenCalledWith("input");
+    expect(lastCall.stdin?.end).toHaveBeenCalled();
+  });
+
+  test("runBytes rejects on a non-zero exit", async () => {
+    const err = Object.assign(new Error("exit 128"), { code: 128 });
+    stubExec(() => [err, Buffer.from(""), "fatal: bad revision"]);
+    const git = realGit("/repo");
+    await expect(git.runBytes(["cat-file", "--batch"])).rejects.toThrow("exit 128");
   });
 });

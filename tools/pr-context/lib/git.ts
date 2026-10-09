@@ -14,6 +14,7 @@ export const MAX_BUFFER = 256 * 1024 * 1024;
  */
 export interface GitIo {
   run(args: readonly string[], stdin?: string): Promise<string>;
+  runBytes(args: readonly string[], stdin?: string): Promise<Buffer>;
 }
 
 /** A blob in the base tree, as `git ls-tree` reports it. */
@@ -31,13 +32,27 @@ export function realGit(cwd: string): GitIo {
   return {
     run: (args, stdin) =>
       new Promise<string>((resolve, reject) => {
+        const child = execFile("git", [...args], { cwd, maxBuffer: MAX_BUFFER }, (error, stdout) => {
+          if (error === null) {
+            resolve(stdout.toString());
+            return;
+          }
+          reject(error);
+        });
+        if (stdin !== undefined && child.stdin) {
+          child.stdin.write(stdin);
+          child.stdin.end();
+        }
+      }),
+    runBytes: (args, stdin) =>
+      new Promise<Buffer>((resolve, reject) => {
         const child = execFile(
           "git",
           [...args],
-          { cwd, maxBuffer: MAX_BUFFER },
+          { cwd, maxBuffer: MAX_BUFFER, encoding: "buffer" },
           (error, stdout) => {
             if (error === null) {
-              resolve(stdout.toString());
+              resolve(stdout as Buffer);
               return;
             }
             reject(error);
@@ -57,9 +72,9 @@ export function realGit(cwd: string): GitIo {
  * submodules, trees) are dropped; collectable paths only. N1, N2, N4.
  */
 export async function listBaseTree(git: GitIo, base: string): Promise<TreeEntry[]> {
-  const out = await git.run(["ls-tree", "-r", base]);
+  const out = await git.run(["ls-tree", "-r", "-z", base]);
   const entries: TreeEntry[] = [];
-  for (const line of out.split("\n")) {
+  for (const line of out.split("\x00")) {
     if (line === "") continue;
     const tab = line.indexOf("\t");
     if (tab === -1) continue;
@@ -87,16 +102,17 @@ export async function readBaseBlobs(
 ): Promise<Map<string, string>> {
   if (entries.length === 0) return new Map();
   const stdin = entries.map((e) => e.blob).join("\n") + "\n";
-  const out = await git.run(["cat-file", "--batch"], stdin);
-  const buf = Buffer.from(out, "utf8");
+  const buf = await git.runBytes(["cat-file", "--batch"], stdin);
   const blobs = new Map<string, string>();
   let pos = 0;
   for (const entry of entries) {
-    const nl = buf.indexOf(0x0a, pos); // '\n'
+    const nl = buf.indexOf(0x0a, pos);
     if (nl === -1) break;
     const header = buf.subarray(pos, nl).toString("utf8");
     const parts = header.split(" ");
-    const size = Number.parseInt(parts[2] ?? "-1", 10);
+    if (parts[0] !== entry.blob) break;
+    const size = Number.parseInt(parts[2] ?? "", 10);
+    if (!Number.isInteger(size) || size < 0) break;
     const contentStart = nl + 1;
     const contentEnd = contentStart + size;
     blobs.set(entry.blob, buf.subarray(contentStart, contentEnd).toString("utf8"));

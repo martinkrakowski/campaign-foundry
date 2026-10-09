@@ -31,6 +31,10 @@ function makeGit(responses: Record<string, string>): GitIo & { calls: GitCall[] 
       calls.push({ args, stdin });
       return responses[args.join(" ")] ?? "";
     },
+    runBytes: async (args, stdin) => {
+      calls.push({ args, stdin });
+      return Buffer.from(responses[args.join(" ")] ?? "", "utf8");
+    },
   };
 }
 
@@ -62,12 +66,12 @@ describe("collected code is read from the base tree and never from the head", ()
     const repoContent = "class SqlRepo implements IRepo { save(d: string) { return d; } }";
     const log = makeWritten();
     const git = makeGit({
-      ["ls-tree -r " + BASE]: [
+      ["ls-tree -r -z " + BASE]: [
         `100644 blob ${BLOB_PORT}\tpackages/repo/src/repo.port.ts`,
         `100644 blob ${BLOB_REPO}\tpackages/repo/src/repo.ts`,
         `100644 blob ${BLOB_API}\tpackages/app/src/api.ts`,
         `120000 blob ${HEAD}\tsymlink/everywhere`,
-      ].join("\n"),
+      ].join("\x00"),
       ["cat-file --batch"]: catFileResponse([
         { sha: BLOB_PORT, content: portContent },
         { sha: BLOB_REPO, content: repoContent },
@@ -176,6 +180,9 @@ describe("collector failure handling (N6)", () => {
       run: async () => {
         throw new Error("git exploded");
       },
+      runBytes: async () => {
+        throw new Error("git exploded");
+      },
     };
     const log = makeWritten();
     const code = await runCli({
@@ -198,6 +205,9 @@ describe("collector failure handling (N6)", () => {
         run: async () => {
           throw new Error("should not be called");
         },
+        runBytes: async () => {
+          throw new Error("should not be called");
+        },
       },
       writeFile: log.writeFile,
       log: () => undefined,
@@ -213,7 +223,7 @@ describe("argument parsing edge cases", () => {
     const portContent = "interface IRepo { save(d: string): void; }";
     const repoContent = "class SqlRepo implements IRepo { save(d: string) { return d; } }";
     const git = makeGit({
-      ["ls-tree -r " + BASE]: [
+      ["ls-tree -r -z " + BASE]: [
         `100644 blob ${BLOB_PORT}\tpackages/repo/src/repo.port.ts`,
         `100644 blob ${BLOB_REPO}\tpackages/repo/src/repo.ts`,
       ].join("\n"),
@@ -281,7 +291,7 @@ describe("argument parsing edge cases", () => {
 
   test("a missing blob in cat-file response is skipped when building sources", async () => {
     const git = makeGit({
-      ["ls-tree -r " + BASE]: [
+      ["ls-tree -r -z " + BASE]: [
         `100644 blob ${BLOB_PORT}\tpackages/repo/src/repo.port.ts`,
         `100644 blob ${BLOB_REPO}\tpackages/repo/src/repo.ts`,
       ].join("\n"),
@@ -311,6 +321,9 @@ describe("argument parsing edge cases", () => {
   test("a non-Error throw inside the pipeline still writes the error file", async () => {
     const git: GitIo = {
       run: async () => {
+        throw "string error";
+      },
+      runBytes: async () => {
         throw "string error";
       },
     };
@@ -352,7 +365,7 @@ describe("hasSecret (N5)", () => {
 describe("secret scan withholds the output (N5)", () => {
   test("a secret-shaped string in the collected code withholds every block", async () => {
     const git = makeGit({
-      ["ls-tree -r " + BASE]: `100644 blob ${BLOB_REPO}\tpackages/repo/src/repo.ts`,
+      ["ls-tree -r -z " + BASE]: `100644 blob ${BLOB_REPO}\tpackages/repo/src/repo.ts`,
       ["cat-file --batch"]: catFileResponse([
         {
           sha: BLOB_REPO,
@@ -383,10 +396,10 @@ describe("secret scan withholds the output (N5)", () => {
 describe("a changed file whose name holds prose is not written into the output", () => {
   test("the why line holds the fixed text and no IGNORE", async () => {
     const git = makeGit({
-      ["ls-tree -r " + BASE]: [
+      ["ls-tree -r -z " + BASE]: [
         `100644 blob ${BLOB_PORT}\tpackages/repo/src/repo.port.ts`,
         `100644 blob ${BLOB_REPO}\tpackages/repo/src/repo.ts`,
-      ].join("\n"),
+      ].join("\x00"),
       ["cat-file --batch"]: catFileResponse([
         { sha: BLOB_PORT, content: "interface IRepo { save(d: string): void; }" },
         { sha: BLOB_REPO, content: "class SqlRepo implements IRepo { save(d: string) { return d; } }" },
@@ -406,7 +419,7 @@ describe("a changed file whose name holds prose is not written into the output",
       logError: () => undefined,
     });
     expect(code).toBe(0);
-    expect(log.written[0]?.content).not.toContain("IGNORE");
     expect(log.written[0]?.content).toContain("a changed file (name withheld: unusual characters)");
+    expect(log.written[0]?.content).not.toContain("IGNORE");
   });
 });
