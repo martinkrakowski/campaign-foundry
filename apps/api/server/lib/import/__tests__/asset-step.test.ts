@@ -12,7 +12,11 @@ import { importTenant } from "../import-tenant.js";
 import type { ScannedCampaign } from "../scan.js";
 import type { StepContext } from "../steps.js";
 import { getAssetStore, getBriefStore } from "../../ports/index.js";
-import { restoreApplyEnvironment, useApplyEnvironment } from "./fixtures/apply-harness.js";
+import {
+  ON_A_REAL_TEST_SERVER,
+  restoreApplyEnvironment,
+  useApplyEnvironment,
+} from "./fixtures/apply-harness.js";
 import {
   PNG,
   briefBody,
@@ -205,7 +209,7 @@ describe("asset-step: resolveRefTargets", () => {
   });
 });
 
-describe("asset-step: writeOrReuse", () => {
+describe.skipIf(ON_A_REAL_TEST_SERVER)("asset-step: writeOrReuse", () => {
   beforeEach(async () => {
     await useApplyEnvironment();
   });

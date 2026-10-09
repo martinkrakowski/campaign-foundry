@@ -26,6 +26,15 @@ import { makeRoot, writeAt } from "./tree.js";
  * was written on the second import, and can throw on the Nth `put` to simulate a
  * store failure mid-write (D222's "after the Nth write" injection, N3).
  */
+/**
+ * These suites run ONLY against the in-process PGlite fixture the harness
+ * installs; they must never be pointed at a real test server (N9). `skipIf` keeps
+ * them reported as SKIPPED on `TEST_PG_URL` rather than failing the CI Postgres
+ * job by throwing on a real database.
+ */
+export const ON_A_REAL_TEST_SERVER =
+  process.env["TEST_PG_URL"] !== undefined && process.env["TEST_PG_URL"] !== "";
+
 export class CountingObjects implements ObjectStorePort {
   putCount = 0;
   deleteCount = 0;

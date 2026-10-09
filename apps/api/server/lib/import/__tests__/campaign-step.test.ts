@@ -25,6 +25,7 @@ import type { ScannedCampaign } from "../scan.js";
 import type { StepContext } from "../steps.js";
 import {
   failOnNth,
+  ON_A_REAL_TEST_SERVER,
   restoreApplyEnvironment,
   useApplyEnvironment,
 } from "./fixtures/apply-harness.js";
@@ -224,7 +225,7 @@ describe("campaign-step: preflight", () => {
   });
 });
 
-describe("campaign-step: probe", () => {
+describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: probe", () => {
   beforeEach(async () => {
     await useApplyEnvironment();
   });
@@ -404,7 +405,7 @@ async function seedCampaign(root: string, slug: string, assetBytes: Buffer): Pro
   return id;
 }
 
-describe("campaign-step: importCampaign", () => {
+describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: importCampaign", () => {
   let env: Awaited<ReturnType<typeof useApplyEnvironment>>;
   beforeEach(async () => {
     env = await useApplyEnvironment();
@@ -471,7 +472,7 @@ describe("campaign-step: importCampaign", () => {
   });
 });
 
-describe("campaign-step: interruption and resumability (N2)", () => {
+describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: interruption and resumability (N2)", () => {
   let env: Awaited<ReturnType<typeof useApplyEnvironment>>;
   beforeEach(async () => {
     env = await useApplyEnvironment();
@@ -635,195 +636,200 @@ describe("campaign-step: interruption and resumability (N2)", () => {
   });
 });
 
-describe("campaign-step: refusals before the first write (N3)", () => {
-  let env: Awaited<ReturnType<typeof useApplyEnvironment>>;
-  beforeEach(async () => {
-    env = await useApplyEnvironment();
-  });
-  afterEach(async () => {
-    await restoreApplyEnvironment();
-  });
+describe.skipIf(ON_A_REAL_TEST_SERVER)(
+  "campaign-step: refusals before the first write (N3)",
+  () => {
+    let env: Awaited<ReturnType<typeof useApplyEnvironment>>;
+    beforeEach(async () => {
+      env = await useApplyEnvironment();
+    });
+    afterEach(async () => {
+      await restoreApplyEnvironment();
+    });
 
-  test("a ref that is missing when the step runs refuses the campaign with no row left", async () => {
-    const root = makeRoot();
-    try {
-      const { ctx, scanned, expected } = buildScanned(root, "camp", {
-        id: "camp",
-        products: [
-          {
-            id: "p1",
-            name: "P1",
-            primaryColor: "#111111",
-            logoPath: "assets/inputs/camp/logo.png",
-          },
-        ],
-      });
-      rmSync(join(ctx.projectRoot, "assets/inputs/camp/logo.png"));
-      const rescanned: ScannedCampaign = { ...scanned, refs: classifyRefs(ctx, scanned) };
-      const deps = makeDeps();
-      const result = (await importCampaign(deps, ctx, rescanned, expected)) as CampaignResult;
-      expect(result.outcome).toBe("refused");
-      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
-      expect(env.objects.putCount).toBe(0);
-    } finally {
-      dropRoot(root);
-    }
-  });
-
-  test("a reserved slug is refused by the step and nothing is written", async () => {
-    const root = makeRoot();
-    try {
-      const { ctx, scanned, expected } = buildScanned(root, "briefs", {
-        id: "briefs",
-        products: [
-          {
-            id: "p1",
-            name: "P1",
-            primaryColor: "#111111",
-            logoPath: "assets/inputs/briefs/logo.png",
-          },
-        ],
-      });
-      const deps = makeDeps();
-      const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
-      expect(result.outcome).toBe("refused");
-      expect(result.reason).toMatch(/reserved/);
-      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
-    } finally {
-      dropRoot(root);
-    }
-  });
-
-  test("a uuid-shaped slug is refused and nothing is written", async () => {
-    const root = makeRoot();
-    try {
-      const { ctx, scanned, expected } = buildScanned(
-        root,
-        "11111111-1111-1111-1111-111111111111",
-        {
-          id: "11111111-1111-1111-1111-111111111111",
+    test("a ref that is missing when the step runs refuses the campaign with no row left", async () => {
+      const root = makeRoot();
+      try {
+        const { ctx, scanned, expected } = buildScanned(root, "camp", {
+          id: "camp",
           products: [
             {
               id: "p1",
               name: "P1",
               primaryColor: "#111111",
-              logoPath: "assets/inputs/11111111-1111-1111-1111-111111111111/logo.png",
+              logoPath: "assets/inputs/camp/logo.png",
             },
           ],
-        },
-      );
-      const deps = makeDeps();
-      const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
-      expect(result.outcome).toBe("refused");
-      expect(result.reason).toMatch(/uuid/);
-      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
-    } finally {
-      dropRoot(root);
-    }
-  });
+        });
+        rmSync(join(ctx.projectRoot, "assets/inputs/camp/logo.png"));
+        const rescanned: ScannedCampaign = { ...scanned, refs: classifyRefs(ctx, scanned) };
+        const deps = makeDeps();
+        const result = (await importCampaign(deps, ctx, rescanned, expected)) as CampaignResult;
+        expect(result.outcome).toBe("refused");
+        expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+        expect(env.objects.putCount).toBe(0);
+      } finally {
+        dropRoot(root);
+      }
+    });
 
-  test("a ref refused by the upload rules when the step runs refuses the campaign with no row left", async () => {
-    const root = makeRoot();
-    try {
-      const { ctx, scanned, expected } = buildScanned(root, "camp", {
-        id: "camp",
-        products: [
+    test("a reserved slug is refused by the step and nothing is written", async () => {
+      const root = makeRoot();
+      try {
+        const { ctx, scanned, expected } = buildScanned(root, "briefs", {
+          id: "briefs",
+          products: [
+            {
+              id: "p1",
+              name: "P1",
+              primaryColor: "#111111",
+              logoPath: "assets/inputs/briefs/logo.png",
+            },
+          ],
+        });
+        const deps = makeDeps();
+        const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+        expect(result.outcome).toBe("refused");
+        expect(result.reason).toMatch(/reserved/);
+        expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+      } finally {
+        dropRoot(root);
+      }
+    });
+
+    test("a uuid-shaped slug is refused and nothing is written", async () => {
+      const root = makeRoot();
+      try {
+        const { ctx, scanned, expected } = buildScanned(
+          root,
+          "11111111-1111-1111-1111-111111111111",
           {
-            id: "p1",
-            name: "P1",
-            primaryColor: "#111111",
-            logoPath: "assets/inputs/camp/logo.png",
+            id: "11111111-1111-1111-1111-111111111111",
+            products: [
+              {
+                id: "p1",
+                name: "P1",
+                primaryColor: "#111111",
+                logoPath: "assets/inputs/11111111-1111-1111-1111-111111111111/logo.png",
+              },
+            ],
           },
-        ],
-      });
-      writeAt(root, join("assets/inputs/camp/logo.png"), NOT_A_PNG);
-      const rescanned: ScannedCampaign = { ...scanned, refs: classifyRefs(ctx, scanned) };
-      const deps = makeDeps();
-      const result = (await importCampaign(deps, ctx, rescanned, expected)) as CampaignResult;
-      expect(result.outcome).toBe("refused");
-      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
-      expect(env.objects.putCount).toBe(0);
-    } finally {
-      dropRoot(root);
-    }
-  });
+        );
+        const deps = makeDeps();
+        const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+        expect(result.outcome).toBe("refused");
+        expect(result.reason).toMatch(/uuid/);
+        expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+      } finally {
+        dropRoot(root);
+      }
+    });
 
-  test("an EEXIST at createCampaign is listed as refused: slug reserved and nothing else is written", async () => {
-    const root = makeRoot();
-    try {
-      const { ctx, scanned, expected } = buildScanned(root, "camp", {
-        id: "camp",
-        products: [
-          {
-            id: "p1",
-            name: "P1",
-            primaryColor: "#111111",
-            logoPath: "assets/inputs/camp/logo.png",
+    test("a ref refused by the upload rules when the step runs refuses the campaign with no row left", async () => {
+      const root = makeRoot();
+      try {
+        const { ctx, scanned, expected } = buildScanned(root, "camp", {
+          id: "camp",
+          products: [
+            {
+              id: "p1",
+              name: "P1",
+              primaryColor: "#111111",
+              logoPath: "assets/inputs/camp/logo.png",
+            },
+          ],
+        });
+        writeAt(root, join("assets/inputs/camp/logo.png"), NOT_A_PNG);
+        const rescanned: ScannedCampaign = { ...scanned, refs: classifyRefs(ctx, scanned) };
+        const deps = makeDeps();
+        const result = (await importCampaign(deps, ctx, rescanned, expected)) as CampaignResult;
+        expect(result.outcome).toBe("refused");
+        expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+        expect(env.objects.putCount).toBe(0);
+      } finally {
+        dropRoot(root);
+      }
+    });
+
+    test("an EEXIST at createCampaign is listed as refused: slug reserved and nothing else is written", async () => {
+      const root = makeRoot();
+      try {
+        const { ctx, scanned, expected } = buildScanned(root, "camp", {
+          id: "camp",
+          products: [
+            {
+              id: "p1",
+              name: "P1",
+              primaryColor: "#111111",
+              logoPath: "assets/inputs/camp/logo.png",
+            },
+          ],
+        });
+        const briefs = getBriefStore(importTenant("local"));
+        const assets = getAssetStore(importTenant("local"));
+        await briefs.createCampaign("camp");
+        const blind: BriefStorePort = new Proxy(briefs, {
+          get(target, prop, receiver) {
+            if (prop === "campaignMeta") return () => Promise.resolve(undefined);
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
           },
-        ],
-      });
-      const briefs = getBriefStore(importTenant("local"));
-      const assets = getAssetStore(importTenant("local"));
-      await briefs.createCampaign("camp");
-      const blind: BriefStorePort = new Proxy(briefs, {
-        get(target, prop, receiver) {
-          if (prop === "campaignMeta") return () => Promise.resolve(undefined);
-          const value = Reflect.get(target, prop, receiver);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      });
-      const deps: ImportDeps = { briefs: blind, assets };
-      const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
-      expect(result.outcome).toBe("refused");
-      expect(result.reason).toBe("refused: slug reserved");
-      expect((await campaignCounts(env.db, env.objects.putCount)).assets).toBe(0);
-      expect(env.objects.putCount).toBe(0);
-    } finally {
-      dropRoot(root);
-    }
-  });
+        });
+        const deps: ImportDeps = { briefs: blind, assets };
+        const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+        expect(result.outcome).toBe("refused");
+        expect(result.reason).toBe("refused: slug reserved");
+        expect((await campaignCounts(env.db, env.objects.putCount)).assets).toBe(0);
+        expect(env.objects.putCount).toBe(0);
+      } finally {
+        dropRoot(root);
+      }
+    });
 
-  test("a slug used by a campaign with a different body is refused and not renamed", async () => {
-    const root = makeRoot();
-    try {
-      const over = (message: string) => ({
-        id: "camp",
-        campaignMessage: message,
-        products: [
-          {
-            id: "p1",
-            name: "P1",
-            primaryColor: "#111111",
-            logoPath: "assets/inputs/camp/logo.png",
-          },
-        ],
-      });
-      const { ctx: c1, scanned: s1, expected: e1 } = buildScanned(root, "camp", over("Hello"));
-      const deps = makeDeps();
-      expect((await importCampaign(deps, c1, s1, e1)).outcome).toBe("created");
+    test("a slug used by a campaign with a different body is refused and not renamed", async () => {
+      const root = makeRoot();
+      try {
+        const over = (message: string) => ({
+          id: "camp",
+          campaignMessage: message,
+          products: [
+            {
+              id: "p1",
+              name: "P1",
+              primaryColor: "#111111",
+              logoPath: "assets/inputs/camp/logo.png",
+            },
+          ],
+        });
+        const { ctx: c1, scanned: s1, expected: e1 } = buildScanned(root, "camp", over("Hello"));
+        const deps = makeDeps();
+        expect((await importCampaign(deps, c1, s1, e1)).outcome).toBe("created");
 
-      const {
-        ctx: c2,
-        scanned: s2,
-        expected: e2,
-      } = buildScanned(root, "camp", over("A different message"));
-      const again = (await importCampaign(deps, c2, s2, e2)) as CampaignResult;
-      expect(again.outcome).toBe("refused");
-      expect(
-        (await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`)).rows[0]!
-          .n,
-      ).toBe(1);
-      const slugs = (
-        await env.db.query<{ slug: string }>(`select slug from campaign where org_id=$1`, ["local"])
-      ).rows;
-      expect(slugs.map((r) => r.slug)).toEqual(["camp"]);
-    } finally {
-      dropRoot(root);
-    }
-  });
-});
+        const {
+          ctx: c2,
+          scanned: s2,
+          expected: e2,
+        } = buildScanned(root, "camp", over("A different message"));
+        const again = (await importCampaign(deps, c2, s2, e2)) as CampaignResult;
+        expect(again.outcome).toBe("refused");
+        expect(
+          (await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`))
+            .rows[0]!.n,
+        ).toBe(1);
+        const slugs = (
+          await env.db.query<{ slug: string }>(`select slug from campaign where org_id=$1`, [
+            "local",
+          ])
+        ).rows;
+        expect(slugs.map((r) => r.slug)).toEqual(["camp"]);
+      } finally {
+        dropRoot(root);
+      }
+    });
+  },
+);
 
-describe("campaign-step: brief integrity (N4, N5, D220)", () => {
+describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: brief integrity (N4, N5, D220)", () => {
   beforeEach(async () => {
     await useApplyEnvironment();
   });
@@ -877,7 +883,7 @@ describe("campaign-step: brief integrity (N4, N5, D220)", () => {
   });
 });
 
-describe("campaign-step: importCampaignStep", () => {
+describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: importCampaignStep", () => {
   let env: Awaited<ReturnType<typeof useApplyEnvironment>>;
   beforeEach(async () => {
     env = await useApplyEnvironment();
@@ -1018,7 +1024,7 @@ describe("campaign-step: importCampaignStep", () => {
   });
 });
 
-describe("campaign-step: asset names (D219/D221)", () => {
+describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: asset names (D219/D221)", () => {
   beforeEach(async () => {
     await useApplyEnvironment();
   });
@@ -1172,7 +1178,7 @@ describe("campaign-step: asset names (D219/D221)", () => {
   });
 });
 
-describe("campaign-step: integrity (N9, N10)", () => {
+describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: integrity (N9, N10)", () => {
   let env: Awaited<ReturnType<typeof useApplyEnvironment>>;
   beforeEach(async () => {
     env = await useApplyEnvironment();
@@ -1322,7 +1328,7 @@ describe("campaign-step: integrity (N9, N10)", () => {
   });
 });
 
-describe("campaign-step: edge cases", () => {
+describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: edge cases", () => {
   let env: Awaited<ReturnType<typeof useApplyEnvironment>>;
   beforeEach(async () => {
     env = await useApplyEnvironment();
