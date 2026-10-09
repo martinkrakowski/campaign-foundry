@@ -356,8 +356,7 @@ describe("secret scan withholds the output (N5)", () => {
       ["cat-file --batch"]: catFileResponse([
         {
           sha: BLOB_REPO,
-          content:
-            `function ownsSecret() { const key = "${PRIVATE_KEY_HEADER}"; return true; }`,
+          content: `function ownsSecret() { const key = "${PRIVATE_KEY_HEADER}"; return true; }`,
         },
       ]),
       ["diff --unified=0 --no-color --no-ext-diff --no-renames " + BASE + " " + HEAD]:
