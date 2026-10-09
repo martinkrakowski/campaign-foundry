@@ -493,3 +493,20 @@ describe("collect blocks", () => {
     expect(blocks[3]?.startLine).toBe(2);
   });
 });
+
+describe("a declaration with no body is skipped and the rest is still collected", () => {
+  test("a declare function with no body does not break collection", () => {
+    const sources = new Map([
+      ["packages/repo/src/decl.ts", "declare function resolveOwner(id: string): string;"],
+      ["packages/repo/src/impl.ts", "function resolveOwner(id: string) { return id; }"],
+    ]);
+    const diff: DiffInfo = {
+      files: [fileEntry("packages/app/api.ts", ["resolveOwner"])],
+      calledNames: new Set(["resolveOwner"]),
+      tableNames: new Set(),
+    };
+    const blocks = collectBlocks(sources, diff);
+    // resolveOwner in impl.ts is collected (tier 2); the declare is skipped
+    expect(blocks.some((b) => b.symbol === "resolveOwner")).toBe(true);
+  });
+});

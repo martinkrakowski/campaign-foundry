@@ -105,6 +105,7 @@ function collectDecls(project: Project): Decl[] {
         /* istanbul ignore next -- ts-morph always returns a name for class methods */
         if (!name) continue;
         const body = method.getBody();
+        if (!body) continue;
         decls.push({
           filePath,
           name,
@@ -122,13 +123,15 @@ function collectDecls(project: Project): Decl[] {
     for (const fn of file.getFunctions()) {
       const name = fn.getName();
       if (!name) continue;
+      const fnBody = fn.getBody();
+      if (!fnBody) continue;
       decls.push({
         filePath,
         name,
         startLine: fn.getStartLineNumber(),
         endLine: fn.getEndLineNumber(),
         text: cutTo120Lines(fn.getText()),
-        bodyText: fn.getBody()!.getText(),
+        bodyText: fnBody.getText(),
         className: null,
         implementsNames: [],
         kind: "function",
@@ -143,13 +146,15 @@ function collectDecls(project: Project): Decl[] {
         const name = decl.getName();
         /* istanbul ignore next -- VariableDeclarations for arrow constants always have names when the initializer is an ArrowFunction */
         if (!name) continue;
+        const arrowBody = init.getBody();
+        if (!arrowBody) continue;
         decls.push({
           filePath,
           name,
           startLine: init.getStartLineNumber(),
           endLine: init.getEndLineNumber(),
           text: cutTo120Lines(init.getText()),
-          bodyText: init.getBody()!.getText(),
+          bodyText: arrowBody.getText(),
           className: null,
           implementsNames: [],
           kind: "arrow",
