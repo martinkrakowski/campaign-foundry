@@ -20,7 +20,7 @@
     },
     {
       "file": "apps/api/server/lib/import/campaign-step.ts",
-      "before": "      if (isExistsError(error)) {\n        return { outcome: \"refused\", reason: \"refused: slug reserved\", minted: { assets: [] }, unreferencedInputs: unreferenced };\n      }",
+      "before": "      if (isExistsError(error)) {\n        return {\n          outcome: \"refused\",\n          reason: \"refused: slug reserved\",\n          minted: { assets: [] },\n          unreferencedInputs: unreferenced,\n        };\n      }",
       "after": "      if (isExistsError(error)) {\n        throw error;\n      }",
       "because": "PT-8-4/N3: an EEXIST at createCampaign is the plan's \"slug reserved\" signal and must be returned as refused (nothing else written); rethrowing lets the exclusive-create collision escape as an unhandled failure.",
       "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/campaign-step.test.ts", "-t", "an EEXIST at createCampaign is listed as refused: slug reserved and nothing else is written"],
