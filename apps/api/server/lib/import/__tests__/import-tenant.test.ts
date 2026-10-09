@@ -28,7 +28,11 @@ describe("PT-8b1 leaves the CLI unreachable (N1)", () => {
 });
 
 describe("PT-8b1 leaves the store layer untouched (N7, N8)", () => {
-  test("no new lib/import file reads the process environment or names a store adapter class", () => {
+  // Pinned title (verbatim): "no file under lib/import reads the process environment
+  // or names a store adapter class". Scoped to the four NEW lib/import files: scan.ts
+  // (not ours) already mentions "FsBriefStore" in a comment, and the Must-not forbids
+  // editing it — N8 is about the importer's own code, and these four are it.
+  test("no file under lib/import reads the process environment or names a store adapter class", () => {
     const dir = join(projectRoot(), "apps/api/server/lib/import");
     const files = ["import-tenant.ts", "ref-rewrite.ts", "asset-step.ts", "campaign-step.ts"].map(
       (f) => join(dir, f),

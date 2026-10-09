@@ -916,7 +916,7 @@ describe("campaign-step: importCampaignStep", () => {
     }
   });
 
-  test("the step with reviewed hashes imports and stamps import:pt-8", async () => {
+  test("the stored version is stamped import:pt-8", async () => {
     const root = makeRoot();
     try {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
