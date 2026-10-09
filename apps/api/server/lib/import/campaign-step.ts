@@ -5,7 +5,14 @@ import { dumpBrief, errorMessage } from "@campaignfoundry/shared";
 import { blocksImport, classifyRefs } from "./classify.js";
 import { hashBytes, isErrno, isExistsError } from "../brief-files.js";
 import { UUID_PATTERN } from "../object-store/object-keys.js";
-import { candidateAt, countUnreferencedInputs, resolveRefTargets, type RefTarget, type UnreferencedInputs, writeOrReuse } from "./asset-step.js";
+import {
+  candidateAt,
+  countUnreferencedInputs,
+  resolveRefTargets,
+  type RefTarget,
+  type UnreferencedInputs,
+  writeOrReuse,
+} from "./asset-step.js";
 import { getAssetStore, getBriefStore } from "../ports/index.js";
 import type { AssetStorePort } from "../ports/asset-store.port.js";
 import type { BriefStorePort } from "../ports/brief-store.port.js";
@@ -165,7 +172,10 @@ export async function probeCampaign(
   const rewritten = rewriteBriefRefs(files.brief, scanned.slug, refToId);
   const stored = await briefs.findBriefById(scanned.slug);
   if (dumpBrief(rewritten) === dumpBrief(stored!.brief)) return { kind: "unchanged" };
-  return { kind: "refused", reason: `campaign ${scanned.slug} body differs from the rewritten source` };
+  return {
+    kind: "refused",
+    reason: `campaign ${scanned.slug} body differs from the rewritten source`,
+  };
 }
 
 /**
@@ -182,13 +192,30 @@ export async function importCampaign(
 ): Promise<CampaignResult> {
   const empty: UnreferencedInputs = { count: 0, names: [] };
   const pf = await preflight(ctx, scanned, expected);
-  if (!pf.ok) return { outcome: "refused", reason: pf.reason, minted: { assets: [] }, unreferencedInputs: empty };
+  if (!pf.ok)
+    return {
+      outcome: "refused",
+      reason: pf.reason,
+      minted: { assets: [] },
+      unreferencedInputs: empty,
+    };
 
   const { brief, targets, targetBytes } = pf.preflight;
   const unreferenced = countUnreferencedInputs(ctx, scanned.slug, targets);
-  const probe = await probeCampaign(deps.briefs, deps.assets, ctx, scanned, { brief, targets, targetBytes });
-  if (probe.kind === "unchanged") return { outcome: "unchanged", minted: { assets: [] }, unreferencedInputs: unreferenced };
-  if (probe.kind === "refused") return { outcome: "refused", reason: probe.reason, minted: { assets: [] }, unreferencedInputs: unreferenced };
+  const probe = await probeCampaign(deps.briefs, deps.assets, ctx, scanned, {
+    brief,
+    targets,
+    targetBytes,
+  });
+  if (probe.kind === "unchanged")
+    return { outcome: "unchanged", minted: { assets: [] }, unreferencedInputs: unreferenced };
+  if (probe.kind === "refused")
+    return {
+      outcome: "refused",
+      reason: probe.reason,
+      minted: { assets: [] },
+      unreferencedInputs: unreferenced,
+    };
 
   let campaignId: string | undefined;
   if (probe.kind === "absent") {
@@ -200,7 +227,12 @@ export async function importCampaign(
       campaignId = resolved.campaignId;
     } catch (error) {
       if (isExistsError(error)) {
-        return { outcome: "refused", reason: "refused: slug reserved", minted: { assets: [] }, unreferencedInputs: unreferenced };
+        return {
+          outcome: "refused",
+          reason: "refused: slug reserved",
+          minted: { assets: [] },
+          unreferencedInputs: unreferenced,
+        };
       }
       throw error;
     }
@@ -210,9 +242,16 @@ export async function importCampaign(
   const mintedAssets: MintedAsset[] = [];
   try {
     for (const target of targets) {
-      const written = await writeOrReuse(deps.assets, scanned.slug, target.name, targetBytes.get(target.ref)!, target.from);
+      const written = await writeOrReuse(
+        deps.assets,
+        scanned.slug,
+        target.name,
+        targetBytes.get(target.ref)!,
+        target.from,
+      );
       refToId.set(target.ref, written.id);
-      if (!written.reused) mintedAssets.push({ id: written.id, name: written.name, key: written.key });
+      if (!written.reused)
+        mintedAssets.push({ id: written.id, name: written.name, key: written.key });
     }
     const rewritten = rewriteBriefRefs(brief, scanned.slug, refToId);
     await deps.briefs.createBrief(rewritten);
@@ -226,7 +265,11 @@ export async function importCampaign(
     };
   }
 
-  return { outcome: probe.kind === "absent" ? "created" : "completed", minted: { campaignId, assets: mintedAssets }, unreferencedInputs: unreferenced };
+  return {
+    outcome: probe.kind === "absent" ? "created" : "completed",
+    minted: { campaignId, assets: mintedAssets },
+    unreferencedInputs: unreferenced,
+  };
 }
 
 /** `importCampaignStep`'s context: the reviewed hashes ride the context (D221). */
@@ -237,7 +280,10 @@ export function hasExpectedHashes(ctx: StepContext): ctx is HashedContext {
   return "expectedHashes" in ctx;
 }
 
-function campaignMetaFromFile(ctx: StepContext, slug: string): { name: string | null; type: string | null } {
+function campaignMetaFromFile(
+  ctx: StepContext,
+  slug: string,
+): { name: string | null; type: string | null } {
   try {
     const raw = readFileSync(join(ctx.projectRoot, "briefs", slug, "campaign.json"), "utf8");
     const parsed = JSON.parse(raw) as { name?: unknown; type?: unknown };
@@ -258,10 +304,7 @@ function campaignMetaFromFile(ctx: StepContext, slug: string): { name: string | 
  * for name/type, and reading the reviewed hashes out of a widened context behind
  * {@link hasExpectedHashes} so `StepContext` itself is not widened (D221).
  */
-export const importCampaignStep: ImportStep = async (
-  ctx,
-  campaign,
-): Promise<CampaignResult> => {
+export const importCampaignStep: ImportStep = async (ctx, campaign): Promise<CampaignResult> => {
   if (!hasExpectedHashes(ctx)) {
     return {
       outcome: "refused",
@@ -284,7 +327,10 @@ export const importCampaignStep: ImportStep = async (
   };
   const scanned: ScannedCampaign = { ...draft, refs: classifyRefs(ctx, draft) };
   return importCampaign(
-    { briefs: getBriefStore(importTenant(ctx.orgId)), assets: getAssetStore(importTenant(ctx.orgId)) },
+    {
+      briefs: getBriefStore(importTenant(ctx.orgId)),
+      assets: getAssetStore(importTenant(ctx.orgId)),
+    },
     ctx,
     scanned,
     ctx.expectedHashes,

@@ -30,12 +30,9 @@ describe("PT-8b1 leaves the CLI unreachable (N1)", () => {
 describe("PT-8b1 leaves the store layer untouched (N7, N8)", () => {
   test("no new lib/import file reads the process environment or names a store adapter class", () => {
     const dir = join(projectRoot(), "apps/api/server/lib/import");
-    const files = [
-      "import-tenant.ts",
-      "ref-rewrite.ts",
-      "asset-step.ts",
-      "campaign-step.ts",
-    ].map((f) => join(dir, f));
+    const files = ["import-tenant.ts", "ref-rewrite.ts", "asset-step.ts", "campaign-step.ts"].map(
+      (f) => join(dir, f),
+    );
     const adapters = ["PgBriefStore", "ObjectAssetStore", "FsAssetStore", "FsBriefStore"];
     for (const file of files) {
       const source = readFileSync(file, "utf8");

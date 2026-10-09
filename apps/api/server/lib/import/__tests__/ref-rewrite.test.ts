@@ -20,7 +20,10 @@ describe("rewriteBriefRefs", () => {
           inputAsset: "assets/inputs/acme/input.mp3",
         },
       ],
-      audio: { path: "assets/inputs/acme/music.mp3", rights: { licenceId: "l", source: "library" } },
+      audio: {
+        path: "assets/inputs/acme/music.mp3",
+        rights: { licenceId: "l", source: "library" },
+      },
       copy: {
         timeline: {
           beats: [{ text: "Go", weight: 1, background: "assets/inputs/acme/bg.png" }],
@@ -53,7 +56,11 @@ describe("rewriteBriefRefs", () => {
     });
     expect(brief.audio).toBeUndefined();
 
-    const rewritten = rewriteBriefRefs(brief, "acme", new Map([["assets/inputs/logo.png", LOGO_ID]]));
+    const rewritten = rewriteBriefRefs(
+      brief,
+      "acme",
+      new Map([["assets/inputs/logo.png", LOGO_ID]]),
+    );
     expect(rewritten.audio).toBeUndefined();
     expect(rewritten.products[0].logoPath).toBe(LOGO_ID);
   });

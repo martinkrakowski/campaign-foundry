@@ -12,11 +12,16 @@ import { importTenant } from "../import-tenant.js";
 import type { ScannedCampaign } from "../scan.js";
 import type { StepContext } from "../steps.js";
 import { getAssetStore, getBriefStore } from "../../ports/index.js";
+import { restoreApplyEnvironment, useApplyEnvironment } from "./fixtures/apply-harness.js";
 import {
-  restoreApplyEnvironment,
-  useApplyEnvironment,
-} from "./fixtures/apply-harness.js";
-import { PNG, briefBody, dropRoot, linkAt, makeRoot, writeAt, writeBrief } from "./fixtures/tree.js";
+  PNG,
+  briefBody,
+  dropRoot,
+  linkAt,
+  makeRoot,
+  writeAt,
+  writeBrief,
+} from "./fixtures/tree.js";
 
 function ctxWith(root: string): StepContext {
   return {
@@ -71,7 +76,14 @@ describe("asset-step: unreferenced inputs", () => {
       writeAt(root, join("assets/inputs/camp/logo.png"), PNG);
       writeAt(root, join("assets/inputs/camp/extra.png"), PNG);
       const ctx = ctxWith(root);
-      const targets: RefTarget[] = [{ ref: "assets/inputs/camp/logo.png", name: "logo.png", path: join(root, "assets/inputs/camp/logo.png"), from: "camp" }];
+      const targets: RefTarget[] = [
+        {
+          ref: "assets/inputs/camp/logo.png",
+          name: "logo.png",
+          path: join(root, "assets/inputs/camp/logo.png"),
+          from: "camp",
+        },
+      ];
       const result = countUnreferencedInputs(ctx, "camp", targets);
       expect(result.names).toEqual(["extra.png"]);
       expect(result.count).toBe(1);
@@ -111,19 +123,47 @@ describe("asset-step: resolveRefTargets", () => {
       const sourcePath = writeBrief(root, "camp.yaml", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/missing.png" },
-          { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/missing.png",
+          },
+          {
+            id: "p2",
+            name: "P2",
+            primaryColor: "#222222",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       writeAt(root, join("assets/inputs/camp/logo.png"), PNG);
       const brief = briefBody({
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/missing.png" },
-          { id: "p2", name: "P2", primaryColor: "#222222", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/missing.png",
+          },
+          {
+            id: "p2",
+            name: "P2",
+            primaryColor: "#222222",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
-      const draft: ScannedCampaign = { slug: "camp", sourcePath, name: null, type: null, brief, refs: [], sample: false };
+      const draft: ScannedCampaign = {
+        slug: "camp",
+        sourcePath,
+        name: null,
+        type: null,
+        brief,
+        refs: [],
+        sample: false,
+      };
       const scanned: ScannedCampaign = { ...draft, refs: classifyRefs(ctx, draft) };
       const targets = resolveRefTargets(ctx, scanned);
       expect(targets).toHaveLength(1);
@@ -140,17 +180,21 @@ describe("asset-step: resolveRefTargets", () => {
       writeAt(root, "assets/promo.png", PNG);
       const sourcePath = writeBrief(root, "camp.yaml", {
         id: "camp",
-        products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/promo.png" },
-        ],
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/promo.png" }],
       });
       const brief = briefBody({
         id: "camp",
-        products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/promo.png" },
-        ],
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/promo.png" }],
       });
-      const draft: ScannedCampaign = { slug: "camp", sourcePath, name: null, type: null, brief, refs: [], sample: false };
+      const draft: ScannedCampaign = {
+        slug: "camp",
+        sourcePath,
+        name: null,
+        type: null,
+        brief,
+        refs: [],
+        sample: false,
+      };
       const scanned: ScannedCampaign = { ...draft, refs: classifyRefs(ctx, draft) };
       const targets = resolveRefTargets(ctx, scanned);
       expect(targets).toHaveLength(1);

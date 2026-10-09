@@ -27,7 +27,17 @@ import {
   restoreApplyEnvironment,
   useApplyEnvironment,
 } from "./fixtures/apply-harness.js";
-import { MP3, NOT_A_PNG, PNG, type BriefOverrides, briefBody, dropRoot, makeRoot, writeAt, writeBrief } from "./fixtures/tree.js";
+import {
+  MP3,
+  NOT_A_PNG,
+  PNG,
+  type BriefOverrides,
+  briefBody,
+  dropRoot,
+  makeRoot,
+  writeAt,
+  writeBrief,
+} from "./fixtures/tree.js";
 
 function ctxWith(root: string): StepContext {
   return {
@@ -40,7 +50,11 @@ function ctxWith(root: string): StepContext {
   };
 }
 
-function scannedWith(root: string, slug: string, refs: ScannedCampaign["refs"] = []): {
+function scannedWith(
+  root: string,
+  slug: string,
+  refs: ScannedCampaign["refs"] = [],
+): {
   ctx: StepContext;
   scanned: ScannedCampaign;
 } {
@@ -163,7 +177,12 @@ describe("campaign-step: preflight", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       expected.delete(relative(ctx.projectRoot, scanned.sourcePath));
@@ -181,7 +200,12 @@ describe("campaign-step: preflight", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       for (const key of expected.keys()) if (key.startsWith("assets/")) expected.delete(key);
@@ -208,7 +232,12 @@ describe("campaign-step: probe", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const pf = await preflight(ctx, scanned, expected);
@@ -228,7 +257,12 @@ describe("campaign-step: probe", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const pf = await preflight(ctx, scanned, expected);
@@ -248,9 +282,16 @@ async function campaignCounts(
   db: SqlClient,
   putCount: number,
 ): Promise<{ campaigns: number; assets: number; versions: number; objects: number }> {
-  const campaigns = (await db.query<{ n: number }>(`select count(*)::int as n from campaign where org_id=$1`, ["local"])).rows[0]!.n;
-  const assets = (await db.query<{ n: number }>(`select count(*)::int as n from asset where org_id=$1`, ["local"])).rows[0]!.n;
-  const versions = (await db.query<{ n: number }>(`select count(*)::int as n from brief_version`)).rows[0]!.n;
+  const campaigns = (
+    await db.query<{ n: number }>(`select count(*)::int as n from campaign where org_id=$1`, [
+      "local",
+    ])
+  ).rows[0]!.n;
+  const assets = (
+    await db.query<{ n: number }>(`select count(*)::int as n from asset where org_id=$1`, ["local"])
+  ).rows[0]!.n;
+  const versions = (await db.query<{ n: number }>(`select count(*)::int as n from brief_version`))
+    .rows[0]!.n;
   return { campaigns, assets, versions, objects: putCount };
 }
 
@@ -265,7 +306,12 @@ function makeDeps(): ImportDeps {
 async function importIt(
   root: string,
   overrides: BriefOverrides,
-): Promise<{ ctx: StepContext; scanned: ScannedCampaign; expected: Map<string, string>; deps: ImportDeps }> {
+): Promise<{
+  ctx: StepContext;
+  scanned: ScannedCampaign;
+  expected: Map<string, string>;
+  deps: ImportDeps;
+}> {
   const { ctx, scanned, expected } = buildScanned(root, overrides.id, overrides);
   return { ctx, scanned, expected, deps: makeDeps() };
 }
@@ -283,7 +329,13 @@ async function importTwoLogos(
   secondRef: string,
   firstBytes: Buffer,
   secondBytes: Buffer,
-): Promise<{ ctx: StepContext; scanned: ScannedCampaign; expected: Map<string, string>; deps: ImportDeps; result: CampaignResult }> {
+): Promise<{
+  ctx: StepContext;
+  scanned: ScannedCampaign;
+  expected: Map<string, string>;
+  deps: ImportDeps;
+  result: CampaignResult;
+}> {
   const ctx = ctxWith(root);
   writeAt(root, firstRef, firstBytes);
   writeAt(root, secondRef, secondBytes);
@@ -296,7 +348,15 @@ async function importTwoLogos(
   };
   const sourcePath = writeBrief(root, "camp.yaml", overrides);
   const brief = briefBody(overrides);
-  const draft: ScannedCampaign = { slug: "camp", sourcePath, name: null, type: null, brief, refs: [], sample: false };
+  const draft: ScannedCampaign = {
+    slug: "camp",
+    sourcePath,
+    name: null,
+    type: null,
+    brief,
+    refs: [],
+    sample: false,
+  };
   const scanned: ScannedCampaign = { ...draft, refs: classifyRefs(ctx, draft) };
   const expected = new Map<string, string>();
   expected.set(relative(ctx.projectRoot, sourcePath), hashBytes(readFileSync(sourcePath)));
@@ -312,7 +372,13 @@ async function importTwoLogos(
 async function run(
   root: string,
   overrides: BriefOverrides,
-): Promise<{ ctx: StepContext; scanned: ScannedCampaign; expected: Map<string, string>; deps: ImportDeps; result: CampaignResult }> {
+): Promise<{
+  ctx: StepContext;
+  scanned: ScannedCampaign;
+  expected: Map<string, string>;
+  deps: ImportDeps;
+  result: CampaignResult;
+}> {
   const { ctx, scanned, expected, deps } = await importIt(root, overrides);
   const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
   return { ctx, scanned, expected, deps, result };
@@ -321,7 +387,7 @@ async function run(
 /** Seed a versionful campaign row + asset row + brief_version, returning the asset id. */
 async function seedCampaign(root: string, slug: string, assetBytes: Buffer): Promise<string> {
   const { assets, briefs } = makeDeps();
-  await briefs.createCampaign(slug, { name: null, type: null });
+  await briefs.createCampaign(slug);
   const written = await assets.writeAsset(slug, "logo.png", assetBytes);
   const id = written.id!;
   const brief = briefBody({
@@ -347,7 +413,12 @@ describe("campaign-step: importCampaign", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const deps = {
@@ -371,7 +442,12 @@ describe("campaign-step: importCampaign", () => {
       const { ctx, scanned, expected, deps } = await importIt(root, {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       expect((await importCampaign(deps, ctx, scanned, expected)).outcome).toBe("created");
@@ -404,7 +480,12 @@ describe("campaign-step: interruption and resumability (N2)", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const briefs = getBriefStore(importTenant("local"));
@@ -416,12 +497,16 @@ describe("campaign-step: interruption and resumability (N2)", () => {
 
       const again = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
       expect(again.outcome).toBe("completed");
-      const rows = (await env.db.query<{ n: number }>(
-        `select count(*)::int as n from campaign where org_id=$1`,
-        ["local"],
-      )).rows[0]!.n;
+      const rows = (
+        await env.db.query<{ n: number }>(
+          `select count(*)::int as n from campaign where org_id=$1`,
+          ["local"],
+        )
+      ).rows[0]!.n;
       expect(rows).toBe(1);
-      const versions = (await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`)).rows[0]!.n;
+      const versions = (
+        await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`)
+      ).rows[0]!.n;
       expect(versions).toBe(1);
       const meta = await briefs.campaignMeta("camp");
       expect(meta).toBeDefined();
@@ -436,7 +521,12 @@ describe("campaign-step: interruption and resumability (N2)", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const briefs = getBriefStore(importTenant("local"));
@@ -449,7 +539,9 @@ describe("campaign-step: interruption and resumability (N2)", () => {
       const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
       expect(result.outcome).toBe("completed");
       expect(result.minted.campaignId).toBeUndefined();
-      const versions = (await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`)).rows[0]!.n;
+      const versions = (
+        await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`)
+      ).rows[0]!.n;
       expect(versions).toBe(1);
     } finally {
       dropRoot(root);
@@ -496,7 +588,12 @@ describe("campaign-step: interruption and resumability (N2)", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const deps: ImportDeps = {
@@ -505,14 +602,26 @@ describe("campaign-step: interruption and resumability (N2)", () => {
       };
       // First call to createBrief fails (injected); rerun succeeds (counter moves past 1).
       const wrapped = failOnNth(deps.briefs, "createBrief", 1);
-      const first = (await importCampaign({ briefs: wrapped, assets: deps.assets }, ctx, scanned, expected)) as CampaignResult;
+      const first = (await importCampaign(
+        { briefs: wrapped, assets: deps.assets },
+        ctx,
+        scanned,
+        expected,
+      )) as CampaignResult;
       expect(first.outcome).toBe("refused");
       expect(first.partial).toBe(true);
       expect(first.minted.assets.length).toBe(1);
 
-      const again = (await importCampaign({ briefs: wrapped, assets: deps.assets }, ctx, scanned, expected)) as CampaignResult;
+      const again = (await importCampaign(
+        { briefs: wrapped, assets: deps.assets },
+        ctx,
+        scanned,
+        expected,
+      )) as CampaignResult;
       expect(again.outcome).toBe("completed");
-      const versions = (await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`)).rows[0]!.n;
+      const versions = (
+        await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`)
+      ).rows[0]!.n;
       expect(versions).toBe(1);
     } finally {
       dropRoot(root);
@@ -535,7 +644,12 @@ describe("campaign-step: refusals before the first write (N3)", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       rmSync(join(ctx.projectRoot, "assets/inputs/camp/logo.png"));
@@ -556,7 +670,12 @@ describe("campaign-step: refusals before the first write (N3)", () => {
       const { ctx, scanned, expected } = buildScanned(root, "briefs", {
         id: "briefs",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/briefs/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/briefs/logo.png",
+          },
         ],
       });
       const deps = makeDeps();
@@ -572,12 +691,21 @@ describe("campaign-step: refusals before the first write (N3)", () => {
   test("a uuid-shaped slug is refused and nothing is written", async () => {
     const root = makeRoot();
     try {
-      const { ctx, scanned, expected } = buildScanned(root, "11111111-1111-1111-1111-111111111111", {
-        id: "11111111-1111-1111-1111-111111111111",
-        products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/11111111-1111-1111-1111-111111111111/logo.png" },
-        ],
-      });
+      const { ctx, scanned, expected } = buildScanned(
+        root,
+        "11111111-1111-1111-1111-111111111111",
+        {
+          id: "11111111-1111-1111-1111-111111111111",
+          products: [
+            {
+              id: "p1",
+              name: "P1",
+              primaryColor: "#111111",
+              logoPath: "assets/inputs/11111111-1111-1111-1111-111111111111/logo.png",
+            },
+          ],
+        },
+      );
       const deps = makeDeps();
       const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
       expect(result.outcome).toBe("refused");
@@ -594,7 +722,12 @@ describe("campaign-step: refusals before the first write (N3)", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       writeAt(root, join("assets/inputs/camp/logo.png"), NOT_A_PNG);
@@ -615,12 +748,17 @@ describe("campaign-step: refusals before the first write (N3)", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const briefs = getBriefStore(importTenant("local"));
       const assets = getAssetStore(importTenant("local"));
-      await briefs.createCampaign("camp", { name: null, type: null });
+      await briefs.createCampaign("camp");
       const blind: BriefStorePort = new Proxy(briefs, {
         get(target, prop, receiver) {
           if (prop === "campaignMeta") return () => Promise.resolve(undefined);
@@ -646,20 +784,32 @@ describe("campaign-step: refusals before the first write (N3)", () => {
         id: "camp",
         campaignMessage: message,
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const { ctx: c1, scanned: s1, expected: e1 } = buildScanned(root, "camp", over("Hello"));
       const deps = makeDeps();
       expect((await importCampaign(deps, c1, s1, e1)).outcome).toBe("created");
 
-      const { ctx: c2, scanned: s2, expected: e2 } = buildScanned(root, "camp", over("A different message"));
+      const {
+        ctx: c2,
+        scanned: s2,
+        expected: e2,
+      } = buildScanned(root, "camp", over("A different message"));
       const again = (await importCampaign(deps, c2, s2, e2)) as CampaignResult;
       expect(again.outcome).toBe("refused");
       expect(
-        (await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`)).rows[0]!.n,
+        (await env.db.query<{ n: number }>(`select count(*)::int as n from brief_version`)).rows[0]!
+          .n,
       ).toBe(1);
-      const slugs = (await env.db.query<{ slug: string }>(`select slug from campaign where org_id=$1`, ["local"])).rows;
+      const slugs = (
+        await env.db.query<{ slug: string }>(`select slug from campaign where org_id=$1`, ["local"])
+      ).rows;
       expect(slugs.map((r) => r.slug)).toEqual(["camp"]);
     } finally {
       dropRoot(root);
@@ -705,7 +855,12 @@ describe("campaign-step: brief integrity (N4, N5, D220)", () => {
       const { deps } = await run(root, {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const meta = await deps.briefs.campaignMeta("camp");
@@ -732,7 +887,12 @@ describe("campaign-step: importCampaignStep", () => {
       const { ctx, scanned } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const deps: ImportDeps = {
@@ -757,7 +917,12 @@ describe("campaign-step: importCampaignStep", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const hashedCtx: HashedContext = { ...ctx, expectedHashes: expected };
@@ -793,7 +958,12 @@ describe("campaign-step: importCampaignStep", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const hashedCtx: HashedContext = { ...ctx, expectedHashes: expected };
@@ -827,7 +997,12 @@ describe("campaign-step: importCampaignStep", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const hashedCtx: HashedContext = { ...ctx, expectedHashes: expected };
@@ -942,7 +1117,12 @@ describe("campaign-step: asset names (D219/D221)", () => {
       const { deps, result } = await run(root, {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/other/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/other/logo.png",
+          },
         ],
       });
       expect(result.outcome).toBe("created");
@@ -977,7 +1157,12 @@ describe("campaign-step: asset names (D219/D221)", () => {
       const { deps, result } = await run(root, {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       expect(result.outcome).toBe("created");
@@ -1006,7 +1191,12 @@ describe("campaign-step: integrity (N9, N10)", () => {
       const { ctx, scanned, expected, deps } = await importIt(root, {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       writeAt(root, "assets/inputs/camp/logo.png", PNG2);
@@ -1020,10 +1210,30 @@ describe("campaign-step: integrity (N9, N10)", () => {
         id: "camp",
         campaignMessage: "tweaked",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
-      const rescanned: ScannedCampaign = { ...scanned, brief: briefBody({ id: "camp", campaignMessage: "tweaked", products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" }] }), sourcePath: fresh };
+      const rescanned: ScannedCampaign = {
+        ...scanned,
+        brief: briefBody({
+          id: "camp",
+          campaignMessage: "tweaked",
+          products: [
+            {
+              id: "p1",
+              name: "P1",
+              primaryColor: "#111111",
+              logoPath: "assets/inputs/camp/logo.png",
+            },
+          ],
+        }),
+        sourcePath: fresh,
+      };
       const changedBrief = (await importCampaign(deps, ctx, rescanned, expected)) as CampaignResult;
       expect(changedBrief.outcome).toBe("refused");
       expect(changedBrief.reason).toMatch(/changed since the digest/);
@@ -1039,7 +1249,12 @@ describe("campaign-step: integrity (N9, N10)", () => {
       const { result } = await run(root, {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       expect(result.outcome).toBe("created");
@@ -1067,7 +1282,12 @@ describe("campaign-step: edge cases", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const real = getBriefStore(importTenant("local"));
@@ -1093,7 +1313,12 @@ describe("campaign-step: edge cases", () => {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const hashedCtx: HashedContext = { ...ctx, expectedHashes: expected };
@@ -1113,7 +1338,12 @@ describe("campaign-step: edge cases", () => {
       const { ctx, scanned, expected, deps } = await importIt(root, {
         id: "camp",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
