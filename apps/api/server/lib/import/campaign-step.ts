@@ -20,12 +20,7 @@ import { parseBriefText } from "../load-brief.js";
 import { importTenant } from "./import-tenant.js";
 import { rewriteBriefRefs } from "./ref-rewrite.js";
 import type { ScannedCampaign } from "./scan.js";
-import {
-  type CampaignOutcome,
-  type ImportStep,
-  type PlannedCampaign,
-  type StepContext,
-} from "./steps.js";
+import { type CampaignOutcome, type ImportStep, type StepContext } from "./steps.js";
 
 export interface ImportDeps {
   readonly briefs: BriefStorePort;

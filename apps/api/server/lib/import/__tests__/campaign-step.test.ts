@@ -818,9 +818,8 @@ describe("campaign-step: refusals before the first write (N3)", () => {
 });
 
 describe("campaign-step: brief integrity (N4, N5, D220)", () => {
-  let env: Awaited<ReturnType<typeof useApplyEnvironment>>;
   beforeEach(async () => {
-    env = await useApplyEnvironment();
+    await useApplyEnvironment();
   });
   afterEach(async () => {
     await restoreApplyEnvironment();
@@ -926,10 +925,6 @@ describe("campaign-step: importCampaignStep", () => {
         ],
       });
       const hashedCtx: HashedContext = { ...ctx, expectedHashes: expected };
-      const deps: ImportDeps = {
-        briefs: getBriefStore(importTenant("local")),
-        assets: getAssetStore(importTenant("local")),
-      };
       const result = (await importCampaignStep(hashedCtx, {
         slug: scanned.slug,
         sourcePath: scanned.sourcePath,
@@ -967,10 +962,6 @@ describe("campaign-step: importCampaignStep", () => {
         ],
       });
       const hashedCtx: HashedContext = { ...ctx, expectedHashes: expected };
-      const deps: ImportDeps = {
-        briefs: getBriefStore(importTenant("local")),
-        assets: getAssetStore(importTenant("local")),
-      };
       const result = (await importCampaignStep(hashedCtx, {
         slug: scanned.slug,
         sourcePath: scanned.sourcePath,
@@ -1022,9 +1013,8 @@ describe("campaign-step: importCampaignStep", () => {
 });
 
 describe("campaign-step: asset names (D219/D221)", () => {
-  let env: Awaited<ReturnType<typeof useApplyEnvironment>>;
   beforeEach(async () => {
-    env = await useApplyEnvironment();
+    await useApplyEnvironment();
   });
   afterEach(async () => {
     await restoreApplyEnvironment();

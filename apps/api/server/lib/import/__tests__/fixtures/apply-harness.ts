@@ -1,4 +1,4 @@
-import { copyFileSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { projectRoot } from "@campaignfoundry/shared";
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
