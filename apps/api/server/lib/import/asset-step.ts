@@ -34,12 +34,10 @@ export function resolveRefTargets(ctx: StepContext, campaign: ScannedCampaign): 
   const targets: RefTarget[] = [];
   for (const ref of campaign.refs) {
     if (blocksImport(ref)) continue;
-    const path = resolveAssetPath(ref.ref, ctx.projectRoot);
-    if (path === undefined) continue;
+    const path = resolveAssetPath(ref.ref, ctx.projectRoot)!;
     const rel = relative(resolve(ctx.projectRoot, "assets"), path);
     const parts = rel.split("/");
-    const from =
-      parts[0] !== "inputs" ? "root" : parts.length < 3 ? "root" : parts[1];
+    const from = parts[0] !== "inputs" ? "root" : parts.length < 3 ? "root" : parts[1];
     targets.push({ ref: ref.ref, name: basename(path), path, from });
   }
   return targets;
@@ -72,9 +70,9 @@ export function countUnreferencedInputs(
     throw error;
   }
   for (const entry of entries) {
-    // `lstat`-based: a symlink answers `isSymbolicLink()` and is skipped, not
-    // followed — the importer never reads through one (D222).
-    if (entry.isSymbolicLink() || !entry.isFile()) continue;
+    // `lstat`-based (`withFileTypes`): a symlink answers `isFile() === false`
+    // and is skipped, never followed — the importer never reads through one (D222).
+    if (!entry.isFile()) continue;
     if (referenced.has(join(dir, entry.name))) continue;
     names.push(entry.name);
   }
@@ -88,13 +86,18 @@ export function countUnreferencedInputs(
  * so a fresh name is minted on the first that is free.
  */
 export function* candidateNames(name: string, from: string): Generator<string> {
+  for (let index = 0; ; index++) {
+    yield candidateAt(name, from, index);
+  }
+}
+
+/** The candidate at `index`: plain for 0, `<stem>-<from><ext>` for 1, then `-N`. */
+export function candidateAt(name: string, from: string, index: number): string {
+  if (index === 0) return name;
   const ext = extname(name);
   const stem = basename(name, ext);
-  yield name;
-  for (let counter = 1; ; counter++) {
-    const base = counter === 1 ? `${stem}-${from}` : `${stem}-${from}-${counter}`;
-    yield `${base}${ext}`;
-  }
+  const base = index === 1 ? `${stem}-${from}` : `${stem}-${from}-${index}`;
+  return `${base}${ext}`;
 }
 
 export interface WrittenAsset {
@@ -104,21 +107,18 @@ export interface WrittenAsset {
   readonly reused: boolean;
 }
 
-/** The id `listAssets` reports for `name`, or a throw when the row is nameless. */
+/** The id `listAssets` reports for `name` (s3 always has one). */
 async function reusedId(assets: AssetStorePort, slug: string, name: string): Promise<string> {
   const entries = await assets.listAssets(slug);
-  for (const entry of entries) {
-    if (entry.name === name && entry.id !== undefined) return entry.id;
-  }
-  throw new Error(`asset exists under ${name} but has no id`);
+  const entry = entries.find((e) => e.name === name);
+  return entry!.id!;
 }
 
 /**
  * Write one ref target as an asset of `slug`, named by its basename, reusing an
- * existing same-name/same-bytes row when one exists (D219, D221). The candidate
- * list is `{@link candidateNames}`'(; on EEXIST the existing bytes are compared
- * by sha256: equal bytes reuse that row (its id taken from `listAssets`, never a
- * guessed one), different bytes advance to the next candidate.
+ * existing same-name/same-bytes row when one exists (D219, D221). On EEXIST the
+ * existing bytes are compared by sha256: equal bytes reuse that row (its id taken
+ * from `listAssets`, never a guessed one), different bytes advance to the next candidate.
  */
 export async function writeOrReuse(
   assets: AssetStorePort,
@@ -128,30 +128,27 @@ export async function writeOrReuse(
   from: string,
 ): Promise<WrittenAsset> {
   const sourceSha = hashBytes(bytes);
-  for (const candidate of candidateNames(name, from)) {
+  for (let index = 0; ; index++) {
+    const candidate = candidateAt(name, from, index);
     try {
       const written = await assets.writeAsset(slug, candidate, bytes);
-      if (written.id === undefined) {
-        throw new Error(`writeAsset returned no id for ${candidate}`);
-      }
       return {
-        id: written.id,
+        id: written.id!,
         name: candidate,
-        key: (await assets.assetObjectKey(slug, candidate)) ?? "",
+        key: (await assets.assetObjectKey(slug, candidate))!,
         reused: false,
       };
     } catch (error) {
       if (!isExistsError(error)) throw error;
       const existing = await assets.readAsset(slug, candidate);
-      if (existing !== undefined && hashBytes(existing) === sourceSha) {
+      if (hashBytes(existing!) === sourceSha) {
         return {
           id: await reusedId(assets, slug, candidate),
           name: candidate,
-          key: (await assets.assetObjectKey(slug, candidate)) ?? "",
+          key: (await assets.assetObjectKey(slug, candidate))!,
           reused: true,
         };
       }
     }
   }
-  throw new Error("unreachable: candidateNames never stops");
 }

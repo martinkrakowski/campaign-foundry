@@ -5,7 +5,7 @@ import { dumpBrief, errorMessage } from "@campaignfoundry/shared";
 import { blocksImport, classifyRefs } from "./classify.js";
 import { hashBytes, isErrno, isExistsError } from "../brief-files.js";
 import { UUID_PATTERN } from "../object-store/object-keys.js";
-import { candidateNames, countUnreferencedInputs, resolveRefTargets, type RefTarget, type UnreferencedInputs, writeOrReuse } from "./asset-step.js";
+import { candidateAt, countUnreferencedInputs, resolveRefTargets, type RefTarget, type UnreferencedInputs, writeOrReuse } from "./asset-step.js";
 import { getAssetStore, getBriefStore } from "../ports/index.js";
 import type { AssetStorePort } from "../ports/asset-store.port.js";
 import type { BriefStorePort } from "../ports/brief-store.port.js";
@@ -123,17 +123,15 @@ async function reuseIdAt(
   bytes: Buffer,
 ): Promise<string | { missing: string }> {
   const entries = await assets.listAssets(slug);
-  const byName = new Map(
-    entries.filter((e) => e.id !== undefined).map((e) => [e.name, e.id as string]),
-  );
+  const byName = new Map(entries.map((e) => [e.name, e.id as string]));
   const sourceSha = hashBytes(bytes);
-  for (const candidate of candidateNames(target.name, target.from)) {
+  for (let index = 0; ; index++) {
+    const candidate = candidateAt(target.name, target.from, index);
     const existing = byName.get(candidate);
     if (existing === undefined) return { missing: candidate };
     const stored = await assets.readAsset(slug, candidate);
-    if (stored !== undefined && hashBytes(stored) === sourceSha) return existing;
+    if (hashBytes(stored!) === sourceSha) return existing;
   }
-  return { missing: target.name };
 }
 
 /**
@@ -166,10 +164,7 @@ export async function probeCampaign(
   }
   const rewritten = rewriteBriefRefs(files.brief, scanned.slug, refToId);
   const stored = await briefs.findBriefById(scanned.slug);
-  if (stored === undefined) {
-    return { kind: "refused", reason: `campaign ${scanned.slug} vanished during probe` };
-  }
-  if (dumpBrief(rewritten) === dumpBrief(stored.brief)) return { kind: "unchanged" };
+  if (dumpBrief(rewritten) === dumpBrief(stored!.brief)) return { kind: "unchanged" };
   return { kind: "refused", reason: `campaign ${scanned.slug} body differs from the rewritten source` };
 }
 
