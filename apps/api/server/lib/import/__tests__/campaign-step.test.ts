@@ -1,4 +1,4 @@
-import { readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { classifyRefs } from "../classify.js";
@@ -37,6 +37,7 @@ import {
   makeRoot,
   writeAt,
   writeBrief,
+  writeHtmlLayerBrief,
 } from "./fixtures/tree.js";
 
 function ctxWith(root: string): StepContext {
@@ -102,6 +103,10 @@ function buildScanned(
   expected.set(relative(ctx.projectRoot, sourcePath), hashBytes(readFileSync(sourcePath)));
   for (const target of resolveRefTargets(ctx, scanned)) {
     expected.set(relative(ctx.projectRoot, target.path), hashBytes(readFileSync(target.path)));
+  }
+  const metaPath = join(ctx.projectRoot, "briefs", slug, "campaign.json");
+  if (existsSync(metaPath)) {
+    expected.set(`briefs/${slug}/campaign.json`, hashBytes(readFileSync(metaPath)));
   }
   return { ctx, scanned, expected };
 }
@@ -1233,6 +1238,65 @@ describe("campaign-step: integrity (N9, N10)", () => {
     }
   });
 
+  test("a campaign meta file changed after the hashes were taken refuses the campaign before any write", async () => {
+    const root = makeRoot();
+    try {
+      const { ctx, scanned, expected } = await importIt(root, {
+        id: "camp",
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
+        ],
+      });
+      writeAt(
+        root,
+        join("briefs/camp/campaign.json"),
+        JSON.stringify({ name: "Changed", type: "social-post" }),
+      );
+      const deps = makeDeps();
+      const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+      expect(result.outcome).toBe("refused");
+      expect(result.reason).toMatch(/changed since the digest/);
+      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a campaign meta file removed after the hashes were taken refuses the campaign before any write", async () => {
+    const root = makeRoot();
+    try {
+      writeAt(
+        root,
+        join("briefs/camp/campaign.json"),
+        JSON.stringify({ name: "Camp", type: "social-post" }),
+      );
+      const { ctx, scanned, expected } = await importIt(root, {
+        id: "camp",
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
+        ],
+      });
+      rmSync(join(ctx.projectRoot, "briefs/camp/campaign.json"));
+      const deps = makeDeps();
+      const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+      expect(result.outcome).toBe("refused");
+      expect(result.reason).toMatch(/changed since the digest/);
+      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
   test("the import tests query only the wrapped PGlite and reach only the in-memory object store", async () => {
     const root = makeRoot();
     try {
@@ -1312,9 +1376,12 @@ describe("campaign-step: edge cases", () => {
         ],
       });
       const hashedCtx: HashedContext = { ...ctx, expectedHashes: expected };
-      await expect(
-        importCampaignStep(hashedCtx, { slug: scanned.slug, sourcePath: scanned.sourcePath }),
-      ).rejects.toThrow();
+      const result = (await importCampaignStep(hashedCtx, {
+        slug: scanned.slug,
+        sourcePath: scanned.sourcePath,
+      })) as CampaignResult;
+      expect(result.outcome).toBe("refused");
+      expect(result.reason).toMatch(/campaign\.json/);
       expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
     } finally {
       dropRoot(root);
@@ -1351,7 +1418,12 @@ describe("campaign-step: edge cases", () => {
         id: "camp",
         campaignMessage: "from-file",
         products: [
-          { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
         ],
       });
       // `scanned.brief` carries a DIFFERENT campaignMessage but the SAME refs:
@@ -1362,7 +1434,12 @@ describe("campaign-step: edge cases", () => {
           id: "camp",
           campaignMessage: "from-scanned",
           products: [
-            { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/camp/logo.png" },
+            {
+              id: "p1",
+              name: "P1",
+              primaryColor: "#111111",
+              logoPath: "assets/inputs/camp/logo.png",
+            },
           ],
         }),
       };
@@ -1371,6 +1448,79 @@ describe("campaign-step: edge cases", () => {
       const stored = await deps.briefs.findBriefById("camp");
       expect(stored).toBeDefined();
       expect(stored!.brief.campaignMessage).toBe("from-file");
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a brief that cannot be parsed refuses the campaign before any write", async () => {
+    const root = makeRoot();
+    try {
+      const ctx = ctxWith(root);
+      const sourcePath = writeHtmlLayerBrief(root, "camp.yaml", "camp");
+      const expected = new Map<string, string>();
+      expected.set(relative(ctx.projectRoot, sourcePath), hashBytes(readFileSync(sourcePath)));
+      const scanned: ScannedCampaign = {
+        slug: "camp",
+        sourcePath,
+        name: null,
+        type: null,
+        brief: briefBody({
+          id: "camp",
+          products: [
+            {
+              id: "p1",
+              name: "P1",
+              primaryColor: "#111111",
+              logoPath: "assets/inputs/camp/logo.png",
+            },
+          ],
+        }),
+        refs: [],
+        sample: false,
+      };
+      const deps = makeDeps();
+      const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
+      expect(result.outcome).toBe("refused");
+      expect((await campaignCounts(env.db, env.objects.putCount)).campaigns).toBe(0);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("a brief whose refs differ from the hashed bytes is refused", async () => {
+    const root = makeRoot();
+    try {
+      const { ctx, scanned, expected, deps } = await importIt(root, {
+        id: "camp",
+        campaignMessage: "from-file",
+        products: [
+          {
+            id: "p1",
+            name: "P1",
+            primaryColor: "#111111",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
+        ],
+      });
+      const forged: ScannedCampaign = {
+        ...scanned,
+        brief: briefBody({
+          id: "camp",
+          campaignMessage: "from-file",
+          products: [
+            {
+              id: "p1",
+              name: "P1",
+              primaryColor: "#111111",
+              logoPath: "assets/inputs/camp/other.png",
+            },
+          ],
+        }),
+      };
+      const result = (await importCampaign(deps, ctx, forged, expected)) as CampaignResult;
+      expect(result.outcome).toBe("refused");
+      expect(result.reason).toMatch(/changed since the digest/);
     } finally {
       dropRoot(root);
     }

@@ -4,7 +4,7 @@ import { isReservedCampaignId, type CampaignBrief } from "@campaignfoundry/Campa
 import { dumpBrief, errorMessage } from "@campaignfoundry/shared";
 import { blocksImport, classifyRefs } from "./classify.js";
 import { collectRefs } from "../asset-files.js";
-import { hashBytes, isErrno, isExistsError } from "../brief-files.js";
+import { hashBytes, isExistsError, pathExists } from "../brief-files.js";
 import { UUID_PATTERN } from "../object-store/object-keys.js";
 import {
   candidateAt,
@@ -46,11 +46,13 @@ export interface CampaignResult {
   readonly unreferencedInputs: UnreferencedInputs;
 }
 
-/** The files preflight read and hashed, ready to write. */
+/** The files preflight read and hashed, plus the campaign.json meta, ready to write. */
 export interface Preflight {
   readonly brief: CampaignBrief;
   readonly targets: readonly RefTarget[];
   readonly targetBytes: ReadonlyMap<string, Buffer>;
+  readonly name: string | null;
+  readonly type: string | null;
 }
 
 export type PreflightResult =
@@ -123,7 +125,30 @@ export async function preflight(
     }
     targetBytes.set(target.ref, bytes);
   }
-  return { ok: true, preflight: { brief, targets, targetBytes } };
+  // D220: digestSourceFiles records `briefs/<slug>/campaign.json` when it exists,
+  // so a name/type changed (or removed) after review is a digest mismatch that
+  // refuses before any write. Name and type come from the bytes that were hashed.
+  const metaKey = `briefs/${scanned.slug}/campaign.json`;
+  const metaPath = join(ctx.projectRoot, "briefs", scanned.slug, "campaign.json");
+  let name: string | null = null;
+  let type: string | null = null;
+  if (await pathExists(metaPath)) {
+    const metaBytes = readFileSync(metaPath);
+    if (expected.get(metaKey) !== hashBytes(metaBytes)) {
+      return { ok: false, reason: `${metaKey} changed since the digest` };
+    }
+    let parsed: { name?: unknown; type?: unknown };
+    try {
+      parsed = JSON.parse(metaBytes.toString("utf8")) as { name?: unknown; type?: unknown };
+    } catch (error) {
+      return { ok: false, reason: `${metaKey}: ${errorMessage(error)}` };
+    }
+    name = typeof parsed.name === "string" ? parsed.name : null;
+    type = typeof parsed.type === "string" ? parsed.type : null;
+  } else if (expected.get(metaKey) !== undefined) {
+    return { ok: false, reason: `${metaKey} changed since the digest` };
+  }
+  return { ok: true, preflight: { brief, targets, targetBytes, name, type } };
 }
 
 export type ProbeDecision =
@@ -215,12 +240,14 @@ export async function importCampaign(
       unreferencedInputs: empty,
     };
 
-  const { brief, targets, targetBytes } = pf.preflight;
+  const { brief, targets, targetBytes, name, type } = pf.preflight;
   const unreferenced = countUnreferencedInputs(ctx, scanned.slug, targets);
   const probe = await probeCampaign(deps.briefs, deps.assets, ctx, scanned, {
     brief,
     targets,
     targetBytes,
+    name,
+    type,
   });
   if (probe.kind === "unchanged")
     return { outcome: "unchanged", minted: { assets: [] }, unreferencedInputs: unreferenced };
@@ -236,8 +263,8 @@ export async function importCampaign(
   if (probe.kind === "absent") {
     try {
       const resolved = await deps.briefs.createCampaign(scanned.slug, {
-        name: scanned.name ?? undefined,
-        type: scanned.type ?? undefined,
+        name: name ?? undefined,
+        type: type ?? undefined,
       });
       campaignId = resolved.campaignId;
     } catch (error) {
@@ -295,29 +322,13 @@ export function hasExpectedHashes(ctx: StepContext): ctx is HashedContext {
   return "expectedHashes" in ctx;
 }
 
-function campaignMetaFromFile(
-  ctx: StepContext,
-  slug: string,
-): { name: string | null; type: string | null } {
-  try {
-    const raw = readFileSync(join(ctx.projectRoot, "briefs", slug, "campaign.json"), "utf8");
-    const parsed = JSON.parse(raw) as { name?: unknown; type?: unknown };
-    return {
-      name: typeof parsed.name === "string" ? parsed.name : null,
-      type: typeof parsed.type === "string" ? parsed.type : null,
-    };
-  } catch (error) {
-    if (isErrno(error, "ENOENT")) return { name: null, type: null };
-    throw error;
-  }
-}
-
 /**
  * The `ImportStep` for PT-8b (D220, D222): adapts the `{ slug, sourcePath }`
  * shape the plan hands a step into the per-campaign import, re-reading and
- * re-classifying the brief from `sourcePath`, reading `briefs/<slug>/campaign.json`
- * for name/type, and reading the reviewed hashes out of a widened context behind
- * {@link hasExpectedHashes} so `StepContext` itself is not widened (D221).
+ * re-classifying the brief from `sourcePath`, and reading the reviewed hashes
+ * out of a widened context behind {@link hasExpectedHashes} so `StepContext`
+ * itself is not widened (D221). Campaign name/type come from the hashed
+ * `briefs/<slug>/campaign.json`, checked by `preflight`.
  */
 export const importCampaignStep: ImportStep = async (ctx, campaign): Promise<CampaignResult> => {
   if (!hasExpectedHashes(ctx)) {
@@ -330,12 +341,11 @@ export const importCampaignStep: ImportStep = async (ctx, campaign): Promise<Cam
   }
   const raw = readFileSync(campaign.sourcePath, "utf8");
   const brief = parseBriefText(campaign.sourcePath, raw);
-  const { name, type } = campaignMetaFromFile(ctx, campaign.slug);
   const draft: ScannedCampaign = {
     slug: campaign.slug,
     sourcePath: campaign.sourcePath,
-    name,
-    type,
+    name: null,
+    type: null,
     brief,
     refs: [],
     sample: false,
