@@ -573,11 +573,11 @@ describe("tier 7 collects the unchanged functions of a changed file, nearest the
     const sources = new Map([
       [
         "packages/app/src/api.ts",
-        "function first() {\n  return 1;\n}\nfunction second() {\n  return 2;\n}\nfunction third() {\n  return 3;\n}\n// end",
+        "const helper = () => 1;\nfunction first() {\n  return 1;\n}\nfunction second() {\n  return 2;\n}\nfunction third() {\n  return 3;\n}\n// end",
       ],
     ]);
     const diff: DiffInfo = {
-      files: [fileEntry("packages/app/src/api.ts", [], [], [{ baseStart: 4, baseCount: 1 }])],
+      files: [fileEntry("packages/app/src/api.ts", [], [], [{ baseStart: 5, baseCount: 1 }])],
       calledNames: new Set(),
       tableNames: new Set(),
     };
@@ -585,15 +585,15 @@ describe("tier 7 collects the unchanged functions of a changed file, nearest the
     const tier7 = blocks.filter((b) => b.tier === 7);
     expect(tier7).toHaveLength(2);
     expect(tier7[0]?.symbol).toBe("first");
-    expect(tier7[0]?.startLine).toBe(1);
-    expect(tier7[0]?.endLine).toBe(3);
+    expect(tier7[0]?.startLine).toBe(2);
+    expect(tier7[0]?.endLine).toBe(4);
     expect(tier7[0]?.why).toBe(
       "unchanged in packages/app/src/api.ts, 1 line(s) from a changed hunk",
     );
     expect(tier7[0]?.text).toContain("first");
     expect(tier7[1]?.symbol).toBe("third");
-    expect(tier7[1]?.startLine).toBe(7);
-    expect(tier7[1]?.endLine).toBe(9);
+    expect(tier7[1]?.startLine).toBe(8);
+    expect(tier7[1]?.endLine).toBe(10);
     expect(tier7[1]?.why).toBe(
       "unchanged in packages/app/src/api.ts, 3 line(s) from a changed hunk",
     );
@@ -643,7 +643,8 @@ describe("tier 8 collects the exported functions of same-directory siblings of a
         "apps/api/server/routes/users.post.ts",
         "export function create() { return 1; }\n" +
           "export const update = () => 2;\n" +
-          "function privateFn() { return 3; }",
+          "function privateFn() { return 3; }\n" +
+          "class Service { run() {} }",
       ],
       ["apps/api/server/routes/users.delete.ts", "export function remove() { return 4; }"],
     ]);
@@ -656,6 +657,7 @@ describe("tier 8 collects the exported functions of same-directory siblings of a
           [],
           [{ baseStart: 1, baseCount: 1 }],
         ),
+        fileEntry("apps/api/server/routes/config", [], [], [{ baseStart: 1, baseCount: 1 }]),
       ],
       calledNames: new Set(),
       tableNames: new Set(),
@@ -691,14 +693,14 @@ describe("tier 8 collects the exported functions of same-directory siblings of a
   test("siblings with the same stem come before the others and no more than six are taken", () => {
     const longDecl = Array.from({ length: 50 }, (_, i) => `  const v${i} = ${i};`).join("\n");
     const sources = new Map([
-      ["apps/api/server/routes/assets.delete.ts", "export function del() { return 2; }"],
-      ["apps/api/server/routes/assets.long.ts", `export function longFn() {\n${longDecl}\n}`],
-      ["apps/api/server/routes/assets.post.ts", "export function post() { return 1; }"],
-      ["apps/api/server/routes/alpha.ts", "export function alpha() { return 3; }"],
-      ["apps/api/server/routes/beta.ts", "export function beta() { return 4; }"],
-      ["apps/api/server/routes/charlie.ts", "export function charlie() { return 5; }"],
-      ["apps/api/server/routes/delta.ts", "export function delta() { return 6; }"],
       ["apps/api/server/routes/echo.ts", "export function echo() { return 7; }"],
+      ["apps/api/server/routes/assets.delete.ts", "export function del() { return 2; }"],
+      ["apps/api/server/routes/delta.ts", "export function delta() { return 6; }"],
+      ["apps/api/server/routes/alpha.ts", "export function alpha() { return 3; }"],
+      ["apps/api/server/routes/charlie.ts", "export function charlie() { return 5; }"],
+      ["apps/api/server/routes/assets.long.ts", `export function longFn() {\n${longDecl}\n}`],
+      ["apps/api/server/routes/beta.ts", "export function beta() { return 4; }"],
+      ["apps/api/server/routes/assets.post.ts", "export function post() { return 1; }"],
     ]);
     const diff: DiffInfo = {
       files: [

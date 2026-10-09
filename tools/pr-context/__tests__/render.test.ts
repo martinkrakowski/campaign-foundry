@@ -81,7 +81,7 @@ describe("tier share and trimming", () => {
     const headerTokens = render(base, [], 999999).totalTokens;
     const oneBlock = render(base, [makeBlock({ tier: 1, text: "x".repeat(100) })], 999999);
     const blockTokens = oneBlock.totalTokens - headerTokens;
-    const maxTokens = headerTokens + 3 * blockTokens;
+    const maxTokens = headerTokens + 4 * blockTokens;
     const result = render(
       base,
       [
@@ -94,7 +94,7 @@ describe("tier share and trimming", () => {
       maxTokens,
     );
     expect(result.text).toContain("t2a");
-    expect(result.text).not.toContain("t1c");
+    expect(result.text).not.toContain("t1d");
   });
 
   test("a block that does not fit is written cut to 40 lines before it is dropped", () => {

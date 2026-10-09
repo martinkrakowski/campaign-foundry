@@ -492,9 +492,7 @@ function distanceToHunk(
   range: { baseStart: number; baseCount: number },
 ): number {
   const hEnd = range.baseStart + range.baseCount - 1;
-  if (end < range.baseStart) return range.baseStart - end;
-  if (start > hEnd) return start - hEnd;
-  return 0;
+  return Math.max(range.baseStart - end, start - hEnd, 0);
 }
 
 // Tier 7 ranks second: after tier 1 (port implementations) and before the
@@ -565,9 +563,8 @@ function tier8(decls: Decl[], sources: Map<string, string>, diff: DiffInfo): Blo
     siblings.sort((a, b) => {
       const aSame = getStem(a.split("/").pop()!) === changedStem;
       const bSame = getStem(b.split("/").pop()!) === changedStem;
-      if (aSame && !bSame) return -1;
-      if (!aSame && bSame) return 1;
-      return a < b ? -1 : a > b ? 1 : 0;
+      if (aSame !== bSame) return aSame ? -1 : 1;
+      return a.localeCompare(b);
     });
     for (let i = 0; i < Math.min(siblings.length, 6); i++) {
       const siblingPath = siblings[i]!;
