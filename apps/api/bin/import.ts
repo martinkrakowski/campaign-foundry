@@ -317,12 +317,22 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
         }
       },
     );
-    await writer.summary(counts);
+    // Refusals happen before any write: either at the scan (the campaign never
+    // reaches `applyCampaigns`) or inside it (a step returned `refused` or threw,
+    // which is recorded as refused+partial and counted under `partial`). Nothing
+    // of a refused campaign's is written, so they share one census figure.
+    const refused = replanned.result.refusals.length + counts.refused;
+    await writer.summary({ ...counts, refused });
     io.stdout(
       `${counts.created} created, ${counts.completed} completed, ` +
-        `${counts.unchanged} unchanged, ${counts.refused} refused`,
+        `${counts.unchanged} unchanged, ${refused} refused`,
     );
-    return counts.partial ? 1 : 0;
+    if (counts.partial) return 1;
+    if (refused > 0) {
+      io.stdout(`${refused} campaign(s) refused; nothing of theirs was written`);
+      return 3;
+    }
+    return 0;
   } catch (error) {
     io.stderr(errorMessage(error));
     return 1;
@@ -333,7 +343,9 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
 }
 
 /**
- * `yarn import <subcommand> …` — `0` on success, `1` for every run-level refusal.
+ * `yarn import <subcommand> …` — `0` on success (no refusal, nothing partial),
+ * `1` when at least one campaign is partial or the run itself failed, `3` when
+ * nothing is partial but at least one campaign was refused before any write.
  *
  * **Never calls `process.exit`**: the entry guard sets `process.exitCode` from this
  * number instead, so a caller (and the tests) own the exit and `main` stays a plain

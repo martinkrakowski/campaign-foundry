@@ -1153,7 +1153,8 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
     }
 
     // A campaign whose input is missing after the digest was taken is refused
-    // before any write: the run exits 0 (a per-campaign refusal is not a failure).
+    // before any write: nothing was half-done, so the run exits 3 (not 0) and
+    // names the refusal, rather than reading as success.
     {
       const { root, output } = sampleTree();
       rmSync(join(root, "assets/inputs/camp/logo.png"));
@@ -1164,13 +1165,44 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         const { out, err, deps } = io();
         expect(
           await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
-        ).toBe(0);
+        ).toBe(3);
         expect(err).toEqual([]);
-        expect(out).toEqual(["0 created, 0 completed, 0 unchanged, 0 refused"]);
+        expect(out).toEqual([
+          "0 created, 0 completed, 0 unchanged, 1 refused",
+          "1 campaign(s) refused; nothing of theirs was written",
+        ]);
       } finally {
         dropRoot(root);
         rmSync(result, { force: true });
       }
+    }
+  });
+
+  test("a run whose only refusals happened before any write exits 3", async () => {
+    const { root, output } = threeCampaignTree();
+    try {
+      // Removing the shared input refuses every campaign at scan, before any
+      // write: a clean refusal, so the run exits 3 with the census and reason.
+      rmSync(join(root, "assets/inputs/logo.png"));
+      const result = freshResult("3");
+      try {
+        const real = await replannedDigest(root, output);
+        env.reinstall();
+        const { out, err, deps } = io();
+        expect(
+          await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+        ).toBe(3);
+        expect(err).toEqual([]);
+        expect(out).toEqual([
+          "0 created, 0 completed, 0 unchanged, 3 refused",
+          "3 campaign(s) refused; nothing of theirs was written",
+        ]);
+        expect(await counts(env)).toEqual({ campaigns: 0, assets: 0, versions: 0, puts: 0 });
+      } finally {
+        rmSync(result, { force: true });
+      }
+    } finally {
+      dropRoot(root);
     }
   });
 
