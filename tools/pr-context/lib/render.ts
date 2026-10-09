@@ -46,8 +46,15 @@ export function render(
 ): RenderResult {
   let written = 0;
   let dropped = 0;
-  let runningTokens = 0;
   const parts: string[] = [];
+
+  // The header (3 fixed lines + a counts line) is always written, so its
+  // token cost is charged first. The counts line length varies, so use a
+  // safe upper bound for the budget check.
+  const countsEstimate = "# 999 block(s), 999 dropped for budget";
+  const headerChars =
+    `${HEADER[0]}${base}\n${HEADER[1]}\n${HEADER[2]}\n${countsEstimate}`.length;
+  let runningTokens = Math.ceil(headerChars / 4);
 
   for (const block of blocks) {
     const blockText = renderBlock(block);

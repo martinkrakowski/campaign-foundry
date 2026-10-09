@@ -95,6 +95,7 @@ describe("collected code is read from the base tree and never from the head", ()
       argv: ["--base", BASE, "--head", HEAD, "--out", "/tmp/out.md"],
       git,
       writeFile: log.writeFile,
+      isSymlink: async () => false,
       log: () => undefined,
       logError: (text) => { void text; },
     });
@@ -128,6 +129,7 @@ describe("commit id validation (N3)", () => {
       argv: ["--base", "zzz", "--head", HEAD, "--out", "/tmp/out.md"],
       git,
       writeFile: log.writeFile,
+      isSymlink: async () => false,
       log: () => undefined,
       logError: (text) => {
         errs.push(text);
@@ -146,6 +148,7 @@ describe("commit id validation (N3)", () => {
       argv: ["--head", HEAD, "--out", "/tmp/out.md"],
       git,
       writeFile: log.writeFile,
+      isSymlink: async () => false,
       log: () => undefined,
       logError: () => undefined,
     });
@@ -161,6 +164,7 @@ describe("commit id validation (N3)", () => {
       argv: ["--base", BASE, "--head", HEAD],
       git,
       writeFile: log.writeFile,
+      isSymlink: async () => false,
       log: () => undefined,
       logError: () => undefined,
     });
@@ -176,6 +180,7 @@ describe("commit id validation (N3)", () => {
       argv: ["--base", BASE, "--head", HEAD, "--out", "/tmp/out.md", "--bogus"],
       git,
       writeFile: log.writeFile,
+      isSymlink: async () => false,
       log: () => undefined,
       logError: () => undefined,
     });
@@ -200,6 +205,7 @@ describe("collector failure handling (N6)", () => {
       argv: ["--base", BASE, "--head", HEAD, "--out", "/tmp/out.md"],
       git: failGit,
       writeFile: log.writeFile,
+      isSymlink: async () => false,
       log: () => undefined,
       logError: () => undefined,
     });
@@ -221,6 +227,7 @@ describe("collector failure handling (N6)", () => {
         },
       },
       writeFile: log.writeFile,
+      isSymlink: async () => false,
       log: () => undefined,
       logError: () => undefined,
     });
@@ -263,6 +270,7 @@ describe("argument parsing edge cases", () => {
       ],
       git,
       writeFile: log.writeFile,
+      isSymlink: async () => false,
       log: () => undefined,
       logError: () => undefined,
     });
@@ -277,6 +285,7 @@ describe("argument parsing edge cases", () => {
       argv: ["--base", BASE, "--out", "/tmp/out.md"],
       git,
       writeFile: log.writeFile,
+      isSymlink: async () => false,
       log: () => undefined,
       logError: () => undefined,
     });
@@ -292,6 +301,7 @@ describe("argument parsing edge cases", () => {
       argv: ["--base", BASE, "--head", "badhex!", "--out", "/tmp/out.md"],
       git,
       writeFile: log.writeFile,
+      isSymlink: async () => false,
       log: () => undefined,
       logError: () => undefined,
     });
@@ -320,6 +330,7 @@ describe("argument parsing edge cases", () => {
       argv: ["--base", BASE, "--head", HEAD, "--out", "/tmp/out.md"],
       git,
       writeFile: log.writeFile,
+      isSymlink: async () => false,
       log: () => undefined,
       logError: () => undefined,
     });
@@ -343,6 +354,7 @@ describe("argument parsing edge cases", () => {
       argv: ["--base", BASE, "--head", HEAD, "--out", "/tmp/out.md"],
       git,
       writeFile: log.writeFile,
+      isSymlink: async () => false,
       log: () => undefined,
       logError: () => undefined,
     });
@@ -366,6 +378,7 @@ describe("argument parsing edge cases", () => {
       argv: ["--base", BASE, "--head", HEAD, "--out", "/tmp/out.md"],
       git,
       writeFile: log.writeFile,
+      isSymlink: async () => false,
       log: () => undefined,
       logError: () => undefined,
     });
@@ -423,6 +436,7 @@ describe("secret scan withholds the output (N5)", () => {
       argv: ["--base", BASE, "--head", HEAD, "--out", "/tmp/out.md"],
       git,
       writeFile: log.writeFile,
+      isSymlink: async () => false,
       log: () => undefined,
       logError: () => undefined,
     });
@@ -457,11 +471,78 @@ describe("a changed file whose name holds prose is not written into the output",
       argv: ["--base", BASE, "--head", HEAD, "--out", "/tmp/out.md"],
       git,
       writeFile: log.writeFile,
+      isSymlink: async () => false,
       log: () => undefined,
       logError: () => undefined,
     });
     expect(code).toBe(0);
     expect(log.written[0]?.content).toContain("a changed file (name withheld: unusual characters)");
     expect(log.written[0]?.content).not.toContain("IGNORE");
+  });
+});
+
+describe("argument and output path handling", () => {
+  test("--max-tokens with a missing value exits 2 and writes nothing", async () => {
+    const log = makeWritten();
+    const code = await runCli({
+      argv: ["--base", BASE, "--head", HEAD, "--out", "/tmp/out.md", "--max-tokens"],
+      git: makeGit({}),
+      writeFile: log.writeFile,
+      isSymlink: async () => false,
+      log: () => undefined,
+      logError: () => undefined,
+    });
+    expect(code).toBe(2);
+    expect(log.written).toHaveLength(0);
+  });
+
+  test("--max-tokens with a non-numeric value exits 2", async () => {
+    const log = makeWritten();
+    const code = await runCli({
+      argv: ["--base", BASE, "--head", HEAD, "--out", "/tmp/out.md", "--max-tokens", "abc"],
+      git: makeGit({}),
+      writeFile: log.writeFile,
+      isSymlink: async () => false,
+      log: () => undefined,
+      logError: () => undefined,
+    });
+    expect(code).toBe(2);
+    expect(log.written).toHaveLength(0);
+  });
+
+   test("an output path that is a symbolic link is not written through", async () => {
+    const git = makeGit({
+      ["ls-tree -r -z " + BASE]: "",
+      ["diff --unified=0 --no-color --no-ext-diff --no-renames " + BASE + " " + HEAD]: "",
+    });
+    let written = false;
+    const code = await runCli({
+      argv: ["--base", BASE, "--head", HEAD, "--out", "/tmp/out.md"],
+      git,
+      writeFile: async () => { written = true; },
+      isSymlink: async () => true,
+      log: () => undefined,
+      logError: () => undefined,
+    });
+    expect(code).toBe(0);
+    expect(written).toBe(false);
+  });
+
+  test("an output path that cannot be written is reported on stderr and exits 0", async () => {
+    const git = makeGit({
+      ["ls-tree -r -z " + BASE]: "",
+      ["diff --unified=0 --no-color --no-ext-diff --no-renames " + BASE + " " + HEAD]: "",
+    });
+    const errs: string[] = [];
+    const code = await runCli({
+      argv: ["--base", BASE, "--head", HEAD, "--out", "/no/such/dir/out.md"],
+      git,
+      writeFile: async () => { throw new Error("ENOENT: no such file or directory"); },
+      isSymlink: async () => false,
+      log: () => undefined,
+      logError: (text) => { errs.push(text); },
+    });
+    expect(code).toBe(0);
+    expect(errs.some((e) => e.includes("could not write"))).toBe(true);
   });
 });

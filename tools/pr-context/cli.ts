@@ -16,6 +16,7 @@ export interface PrContextCliIo {
   readonly argv: readonly string[];
   readonly git: GitIo;
   readonly writeFile: (path: string, content: string) => Promise<void>;
+  readonly isSymlink: (path: string) => Promise<boolean>;
   readonly log: (text: string) => void;
   readonly logError: (text: string) => void;
 }
@@ -28,7 +29,11 @@ interface ParsedArgs {
 }
 
 const USAGE =
-  "usage: pr:context --base <commit> --head <commit> --out <file> [--max-tokens <n>] [--repo <dir>]";
+  "usage: pr:context --base <commit> --head <commit> --out <file> [--max-tokens <n>]\n" +
+  "[--repo <dir>]\n" +
+  "The output file is never written through a symlink; if the write fails, " +
+  "the error is printed on stderr and the process exits 0 — the collector " +
+  "never fails a review.";
 
 function parseArgs(argv: readonly string[]): ParsedArgs {
   let base: string | undefined;
@@ -40,7 +45,12 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
     if (arg === "--base") base = argv[++i];
     else if (arg === "--head") head = argv[++i];
     else if (arg === "--out") out = argv[++i];
-    else if (arg === "--max-tokens") maxTokens = Number.parseInt(argv[++i]!, 10);
+    else if (arg === "--max-tokens") {
+      const val = argv[++i];
+      if (val === undefined) throw new Error("--max-tokens requires a value");
+      maxTokens = Number.parseInt(val, 10);
+      if (Number.isNaN(maxTokens)) throw new Error(`--max-tokens ${val} is not a number`);
+    }
     else if (arg === "--repo") i++;
     else throw new Error(`unknown argument '${arg}'`);
   }
@@ -107,7 +117,18 @@ export async function runCli(io: PrContextCliIo): Promise<number> {
       ? render(args.base, [], 0).text +
         "\nwithheld: a secret-shaped string was found in the collected code"
       : result.text;
-    await io.writeFile(args.out, outputText);
+    // The output file is never written through a symlink; a write failure is
+    // printed on stderr and exits 0 — the collector never fails a review.
+    try {
+      if (await io.isSymlink(args.out)) {
+        throw new Error("is a symbolic link");
+      }
+      await io.writeFile(args.out, outputText);
+    } catch (error) {
+      const msg = errorMessage(error).replace(/\s+/g, " ").slice(0, 200);
+      io.logError(`pr:context: could not write ${args.out}: ${msg}`);
+      return 0;
+    }
     const ms = Date.now() - start;
     const written = secretFound ? 0 : result.blocksWritten;
     const tokens = secretFound ? 0 : result.totalTokens;
@@ -141,6 +162,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     git,
     writeFile: (path, content) =>
       import("node:fs/promises").then((fs) => fs.writeFile(path, content, "utf8")),
+    isSymlink: (path) =>
+      import("node:fs/promises").then((fs) =>
+        fs
+          .lstat(path)
+          .then((stat) => stat.isSymbolicLink())
+          .catch(() => false),
+      ),
     log: (text) => console.log(text),
     logError: (text: string) => console.error(text),
   })
