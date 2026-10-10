@@ -128,6 +128,11 @@ function draftRoutes(opts: {
    * answer inline and settle before the assertion could mean anything.
    */
   deferPutFor?: string | string[];
+  /**
+   * Hold the Save's own brief PUT (the generic PUT branch) open until
+   * `releaseBriefPut()` is called, so an edit can land while a Save is out.
+   */
+  deferBriefPut?: boolean;
 }) {
   const store = new Map<string, { state: unknown; baseRevision: string | null }>();
   const calls: { url: string; method: string; body?: Record<string, unknown> }[] = [];
@@ -153,6 +158,7 @@ function draftRoutes(opts: {
     release: (r: Response) => void;
   }[] = [];
   const heldDeletes: { id: string; release: (r: Response) => void }[] = [];
+  const heldBriefPuts: (() => void)[] = [];
   vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
     const u = String(url);
     const method = (init?.method ?? "GET").toUpperCase();
@@ -218,9 +224,15 @@ function draftRoutes(opts: {
       return Promise.resolve(opts.meta(u.slice(u.lastIndexOf("/") + 1)));
     }
     if (method === "PUT") {
-      return Promise.resolve(
-        opts.put?.(u, parsed) ?? json({ file: "x.yaml", brief: brief("x"), revision: "rev-new" }),
-      );
+      const answer = () =>
+        opts.put?.(u, parsed) ?? json({ file: "x.yaml", brief: brief("x"), revision: "rev-new" });
+      const isBriefPut = u.includes("/campaigns/briefs/");
+      if (opts.deferBriefPut && isBriefPut) {
+        return new Promise<Response>((resolve) => {
+          heldBriefPuts.push(() => resolve(answer()));
+        });
+      }
+      return Promise.resolve(answer());
     }
     return Promise.resolve(json({}, 404));
   });
@@ -255,6 +267,14 @@ function draftRoutes(opts: {
       if (!next) throw new Error("releaseDelete: nothing is held");
       store.delete(next.id);
       next.release(json({ deleted: true }));
+    },
+    /** How many Saves' brief PUTs are currently held. */
+    pendingBriefPutCount: () => heldBriefPuts.length,
+    /** Answer the OLDEST held brief PUT now. */
+    releaseBriefPut: () => {
+      const next = heldBriefPuts.shift();
+      if (!next) throw new Error("releaseBriefPut: nothing is held");
+      next();
     },
   };
 }
@@ -1022,6 +1042,56 @@ describe("the write flags the shell's leave guard reads (D185)", () => {
             (c) => c.method === "PUT" && c.url.startsWith(`${API}/campaigns/briefs/camp`),
           ),
         ).toBe(true),
+      );
+    });
+
+    test("a Save that lands while a newer edit is on screen lowers the failed flag by itself", async () => {
+      // The editor stays dirty after the Save — an edit typed while the
+      // request was out — so the autosave effect's pristine branch never runs;
+      // the next draft PUT is held open too, so it cannot lower the flag
+      // either. Only the Save's own supersede (`discardPendingDraft`) is left
+      // as the one thing that can lower the flag, which is what this test
+      // pins.
+      const routed = draftRoutes({
+        list: () => json({ briefs: [entry("camp", "r1")] }),
+        failPutFor: "camp",
+        deferPutFor: "camp",
+        deferBriefPut: true,
+        put: (_url, body) =>
+          json({ file: "camp.yaml", brief: { ...brief("camp"), ...body }, revision: "r2" }, 200),
+      });
+      renderWithRun(
+        <>
+          <Editor id="camp" />
+          <EditorUnloadGuard />
+          <WriteFlags />
+        </>,
+      );
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("camp"),
+      );
+      await flushDebounce(screen.getByLabelText("Headline"), "Never stored");
+      await waitFor(() => expect(flag("failed-write")).toBe("true"));
+
+      fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
+      await waitFor(() => expect(routed.pendingBriefPutCount()).toBe(1));
+      act(() => {
+        fireEvent.change(screen.getByLabelText("Headline"), {
+          target: { value: "Typed while the Save was out" },
+        });
+      });
+      expect(flag("failed-write")).toBe("true");
+
+      act(() => {
+        routed.releaseBriefPut();
+      });
+      await waitFor(() => expect(flag("failed-write")).toBe("false"));
+      // The editor is still dirty (the newer edit was never saved), so the
+      // guard stays armed.
+      expect(unload().defaultPrevented).toBe(true);
+      // And the newer edit is still on screen.
+      expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe(
+        "Typed while the Save was out",
       );
     });
 
