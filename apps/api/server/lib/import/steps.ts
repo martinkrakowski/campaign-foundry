@@ -1,3 +1,5 @@
+import { importCampaignStep } from "./campaign-step.js";
+
 export type StepContext = {
   orgId: string;
   switchedAt: Date; // the parsed Date, never the raw --switched-at string (PT-8a1 req 4)
@@ -20,4 +22,4 @@ export type ImportStep = (
   campaign: PlannedCampaign,
 ) => Promise<{ outcome: CampaignOutcome }>;
 
-export const IMPORT_STEPS: readonly ImportStep[] = [];
+export const IMPORT_STEPS: readonly ImportStep[] = [importCampaignStep];

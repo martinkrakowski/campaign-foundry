@@ -787,6 +787,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)(
         const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
         expect(result.outcome).toBe("refused");
         expect(result.reason).toBe("refused: slug reserved");
+        expect(result.partial).toBeUndefined();
         expect((await campaignCounts(env.db, env.objects)).assets).toBe(0);
         expect(env.objects.putCount).toBe(0);
       } finally {
@@ -1394,7 +1395,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: edge cases", () => {
     await restoreApplyEnvironment();
   });
 
-  test("a createCampaign failure that is not EEXIST refuses the campaign without partial", async () => {
+  test("a createCampaign failure that is not EEXIST is reported as partial", async () => {
     const root = makeRoot();
     try {
       const { ctx, scanned, expected } = buildScanned(root, "camp", {
@@ -1411,7 +1412,8 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: edge cases", () => {
       const real = getBriefStore(importTenant("local"));
       const briefs: BriefStorePort = new Proxy(real, {
         get(target, prop, receiver) {
-          if (prop === "createCampaign") return () => Promise.reject(new Error("db on fire"));
+          if (prop === "createCampaign")
+            return () => Promise.reject(new Error("connection terminated"));
           const value = Reflect.get(target, prop, receiver);
           return typeof value === "function" ? value.bind(target) : value;
         },
@@ -1419,8 +1421,8 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("campaign-step: edge cases", () => {
       const deps: ImportDeps = { briefs, assets: getAssetStore(importTenant("local")) };
       const result = (await importCampaign(deps, ctx, scanned, expected)) as CampaignResult;
       expect(result.outcome).toBe("refused");
-      expect(result.reason).toBe("db on fire");
-      expect(result.partial).toBeUndefined();
+      expect(result.reason).toBe("connection terminated");
+      expect(result.partial).toBe(true);
       expect((await campaignCounts(env.db, env.objects)).campaigns).toBe(0);
       expect(env.objects.putCount).toBe(0);
     } finally {
