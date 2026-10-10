@@ -26,6 +26,17 @@ export async function importReportRow(
 ): Promise<RowResult> {
   const revision = hashBytes(bytes);
   const payload = bytes.toString("utf8");
-  await reports.writeReport(slug, payload, null);
+  try {
+    await reports.writeReport(slug, payload, null);
+  } catch (error) {
+    if (!(error instanceof ReportConflictError)) throw error;
+    if (error.revision === revision) return { kind: "report", status: "skipped", revision };
+    return {
+      kind: "report",
+      status: "refused",
+      revision,
+      reason: `a different report is already stored for ${slug} (revision ${error.revision})`,
+    };
+  }
   return { kind: "report", status: "written", revision };
 }

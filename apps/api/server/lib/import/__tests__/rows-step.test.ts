@@ -41,4 +41,25 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importReportRow", () => {
     expect(stored?.revision).toBe(hashBytes(LOOSE));
     expect(stored?.body).toBe(LOOSE.toString("utf8"));
   });
+
+  test("a second import of the same bytes is skipped and the row is not touched", async () => {
+    await importReportRow(reports, "camp", LOOSE);
+    const before = await row(env);
+    const result = await importReportRow(reports, "camp", LOOSE);
+    expect(result).toEqual({ kind: "report", status: "skipped", revision: hashBytes(LOOSE) });
+    expect(await row(env)).toEqual(before);
+  });
+
+  test("a different stored report is refused and left as it was", async () => {
+    const theirs = '{"assets":["a user ran this campaign"]}';
+    await reports.writeReport("camp", theirs);
+    const before = await row(env);
+    const result = await importReportRow(reports, "camp", LOOSE);
+    expect(result.status).toBe("refused");
+    expect(result.revision).toBe(hashBytes(LOOSE));
+    expect(result.reason).toBe(
+      `a different report is already stored for camp (revision ${before?.revision})`,
+    );
+    expect(await row(env)).toEqual(before);
+  });
 });
