@@ -103,7 +103,11 @@ export interface AssetStorePort {
    * that have one; `path` is NOT that key. Fails with EEXIST if an asset already
    * exists at that path.
    */
-  writeAsset(briefId: string, name: string, bytes: Buffer): Promise<{ path: string; id?: string; objectKey?: ObjectKey }>;
+  writeAsset(
+    briefId: string,
+    name: string,
+    bytes: Buffer,
+  ): Promise<{ path: string; id?: string; objectKey?: ObjectKey }>;
 
   /**
    * Read raw bytes of an asset stored under a campaign brief.

@@ -16,7 +16,9 @@ function stub(
 
 describe("writeOrReuse: object key source", () => {
   test("a newly written asset's key comes from the write, not from a second lookup", async () => {
-    const assetObjectKey = vi.fn().mockRejectedValue(new Error("assetObjectKey must not run on a fresh write"));
+    const assetObjectKey = vi
+      .fn()
+      .mockRejectedValue(new Error("assetObjectKey must not run on a fresh write"));
     const assets = stub(
       vi.fn().mockResolvedValue({ path: "assets/inputs/camp/a.png", id: "id-1", objectKey: KEY }),
       vi.fn(),
@@ -34,9 +36,11 @@ describe("writeOrReuse: object key source", () => {
     const assets = stub(
       vi.fn().mockRejectedValue(eexist),
       vi.fn().mockResolvedValue(PNG),
-      vi.fn().mockResolvedValue([
-        { name: "a.png", type: "png", size: PNG.length, thumbnailUrl: "", id: "id-1" },
-      ]),
+      vi
+        .fn()
+        .mockResolvedValue([
+          { name: "a.png", type: "png", size: PNG.length, thumbnailUrl: "", id: "id-1" },
+        ]),
       assetObjectKey,
     );
     const out = await writeOrReuse(assets, "camp", "a.png", PNG, "camp");
