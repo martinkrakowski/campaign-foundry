@@ -297,7 +297,7 @@ jobs:
       # on the PR.
       - name: Test (shard ${{ matrix.shard }}/${{ strategy.job-total }}, coverage collected)
         run: >-
-          yarn test:cov
+          sh scripts/run-test-step.sh yarn test:cov
           --shard=${{ matrix.shard }}/${{ strategy.job-total }}
           --reporter=default
           --reporter=blob
@@ -589,7 +589,7 @@ jobs:
       # evidence that the server path works, and has no --coverage because the
       # 100% thresholds are the full run's.
       - name: Test (real Postgres backend)
-        run: "yarn vitest run --project api"
+        run: "sh scripts/run-test-step.sh yarn vitest run --project api"
         env:
           NODE_ENV: test
           TEST_PG_URL: postgres://postgres:postgres@localhost:5432/postgres

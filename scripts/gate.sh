@@ -40,10 +40,21 @@
 # gates in two worktrees would each be handed a slot and each would write
 # manifests the other is reading.
 #
-# A coverage threshold failure fails the gate even when vitest exits 0: the
-# test:cov step's output is captured, replayed for the human, and scanned for
-# `ERROR: Coverage` — a piped read (M3) reported exit 0 while coverage failed,
-# and the scan is what stops the same failure arriving through a pipe.
+# A test runner that loses its exit code down a pipe reports failures on stdout
+# rather than in its status: the gate scans the test:cov step's captured output
+# for that case on every run, because a piped read can mask a real result. Two
+# scans live side by side in run_test_cov. The coverage scan still looks for
+# `ERROR: Coverage` (M3) — a threshold failure must fail the gate even when
+# vitest exits 0 — and a failed-tests scan now catches the same hazard for
+# vitest's own output: a step that exits 0 while its output holds `Test Files
+# <n> failed`, `Tests <n> failed` (n > 0), or vitest's sentence that it caught
+# unhandled errors. That scan lives in `scripts/test-output-scan.sh`. Neither
+# scan can turn a real failure into a pass: a step
+# that exits non-zero fails the gate on its own code, unchanged (N1); only a 0
+# exit is promoted. When both fire on one step the stronger fact wins — the
+# failed-tests rule is named first and coverage is still mentioned — and the
+# gate exits 96. The test:cov step keeps its NAME under a profile, so both scans
+# wrap its command there too.
 #
 # `--profile <name>` is for a host whose tests cannot all be green (D187). It
 # replaces ONE cell — the test:cov step's command — with a `yarn vitest run`
@@ -364,6 +375,14 @@ COVLOG=""
 cov_failed=0
 release_failed=0
 release_attempted=0
+# Set by run_test_cov only for the test:cov step: the captured output reports
+# failed tests (`summary_kind=failed tests`) or vitest caught unhandled errors
+# (`summary_kind=unhandled errors`) while the step itself exited 0. The scan
+# can only turn a 0 exit into a failure (N1); it never moves a failed step's
+# code. summary_reason holds the first matched log line.
+summary_failed=0
+summary_kind=""
+summary_reason=""
 
 release_lock() {
   # A release child has already been started, by the end-of-run release or by an
@@ -587,6 +606,24 @@ run_test_cov() {
   if grep -q "ERROR: Coverage" "$COVLOG"; then
     cov_failed=1
   fi
+  # Scan the captured output for a test runner that reported failures or
+  # unhandled errors: a pipe can hide the failure code the same way coverage
+  # can (M3). The scan only applies to test:cov; whether it promotes the step
+  # is decided where the gate picks its result, gated on an exit 0 THERE so a
+  # step that already failed keeps today's path and code (N1). The scan itself
+  # lives in scripts/test-output-scan.sh; this block only reads its verdict —
+  # exit 96 sets the summary, any other non-zero exit fails the gate loudly
+  # (the lock is released by the EXIT trap, as for every other failure).
+  scan_out=$(sh "$HERE/test-output-scan.sh" "$COVLOG")
+  scan_code=$?
+  if [ "$scan_code" -eq 96 ]; then
+    summary_failed=1
+    summary_kind=${scan_out%%: *}
+    summary_reason=${scan_out#*: }
+  elif [ "$scan_code" -ne 0 ]; then
+    printf '%s\n' "gate: FAILED — the test output scan could not run (exit $scan_code)" >&2
+    exit 2
+  fi
   rm -f "$COVLOG"
   COVLOG=""
   return "$code"
@@ -677,6 +714,9 @@ while IFS="$TAB" read -r name cmd; do
     fi
   fi
   cov_failed=0
+  summary_failed=0
+  summary_kind=""
+  summary_reason=""
   case "$name" in
     test:cov)
       # The profile's two lines print HERE, immediately before the tests, and
@@ -699,6 +739,19 @@ while IFS="$TAB" read -r name cmd; do
       ;;
   esac
   printf '<== %s: exit %s\n' "$name" "$code"
+  # A step that exited 0 but whose output reports failed tests or unhandled
+  # errors (a runner that lost its exit code down a pipe) fails the gate with
+  # its own code 96. The scan can only turn a 0 into a failure (N1): a step
+  # that already failed keeps today's path and exit code. When both the
+  # failed-tests and coverage rules fire on the same exit-0 step, the stronger
+  # fact is named first and coverage is still mentioned as today.
+  if [ "$code" -eq 0 ] && [ "${summary_failed:-0}" -eq 1 ]; then
+    printf '%s\n' "gate: FAILED — step 'test:cov' exited 0 but its output reports $summary_kind ($summary_reason)" >&2
+    if [ "$cov_failed" -eq 1 ]; then
+      printf '%s\n' "gate: FAILED — step 'test:cov' — a coverage threshold failure was reported (vitest exited $code)" >&2
+    fi
+    exit 96
+  fi
   if [ "$cov_failed" -eq 1 ]; then
     printf '%s\n' "gate: FAILED at step 'test:cov' — a coverage threshold failure was reported (vitest exited $code)" >&2
     exit 1

@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { scaled } from "../../gate/__tests__/wait-scale.js";
 
 /**
  * D184's merge gate (`scripts/merge-prs.sh` — the spec, the refusal, the
@@ -736,7 +737,7 @@ function parkedRun(harness: Harness): {
  * test that waited for the file alone read an empty pgid, computed a group of 0,
  * killed nothing, and then sat waiting for a body that was never going to die.
  */
-async function waitForContent(path: string, timeoutMs = 5_000): Promise<boolean> {
+async function waitForContent(path: string, timeoutMs = scaled(5_000)): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     if (existsSync(path) && readFileSync(path, "utf8").trim() !== "") return true;
@@ -1083,14 +1084,18 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
     const { child } = startMergePrs(harness, [specOf(PR_ONE)], parked.env, true);
     try {
       expect(
-        await waitFor(() => existsSync(parked.calledOut), 5_000, "the PR to be in flight"),
+        await waitFor(() => existsSync(parked.calledOut), scaled(5_000), "the PR to be in flight"),
       ).toBe(true);
       expect(existsSync(harness.lockDir)).toBe(true);
 
       process.kill(-(child.pid as number), "SIGINT");
 
       expect(
-        await waitFor(() => !existsSync(harness.lockDir), 3_000, "the lock to be released on INT"),
+        await waitFor(
+          () => !existsSync(harness.lockDir),
+          scaled(3_000),
+          "the lock to be released on INT",
+        ),
       ).toBe(true);
     } finally {
       // The run and its body both go, through the same path every other test uses.
@@ -1116,7 +1121,11 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
     });
     try {
       expect(
-        await waitFor(() => existsSync(pausePoint), 5_000, "the run to judge the holder dead"),
+        await waitFor(
+          () => existsSync(pausePoint),
+          scaled(5_000),
+          "the run to judge the holder dead",
+        ),
       ).toBe(true);
 
       // The contender wins the name while the first run is still deciding.
@@ -1233,7 +1242,11 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
     });
     try {
       expect(
-        await waitFor(() => existsSync(mergePidFile), 10_000, "the merge call to be in flight"),
+        await waitFor(
+          () => existsSync(mergePidFile),
+          scaled(10_000),
+          "the merge call to be in flight",
+        ),
       ).toBe(true);
       const stubPid = Number(readFileSync(mergePidFile, "utf8").trim());
       expect(isAlive(stubPid)).toBe(true);
@@ -1246,7 +1259,7 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       // other, because the two facts are only interesting as a pair: a run that
       // released the lock first and signalled afterwards shows a LIVE stub here.
       let stubAliveWhenLockGone: boolean | null = null;
-      const deadline = Date.now() + 5_000;
+      const deadline = Date.now() + scaled(5_000);
       while (Date.now() < deadline && stubAliveWhenLockGone === null) {
         if (!existsSync(harness.lockDir)) stubAliveWhenLockGone = isAlive(stubPid);
         else await new Promise((resolve) => setTimeout(resolve, 5));
@@ -1322,7 +1335,11 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
     });
     try {
       expect(
-        await waitFor(() => existsSync(pausePoint), 5_000, "the run to judge the holder dead"),
+        await waitFor(
+          () => existsSync(pausePoint),
+          scaled(5_000),
+          "the run to judge the holder dead",
+        ),
       ).toBe(true);
 
       // Same pid as the lock it judged dead, different nonce: a replacement no
@@ -1346,57 +1363,65 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
     }
   });
 
-  test("TERM to the run alone kills the PR in flight instead of letting it merge", async () => {
-    // Signalling the GROUP is the easy case and proves nothing about the
-    // script: the whole tree dies and so would a script with no trap at all.
-    // This signals the parent pid only, which is what a CI timeout does, and
-    // what used to be swallowed — zsh defers its own trap while a foreground
-    // child runs, so the in-flight PR went on to `gh pr merge` and was reaped
-    // by no epilogue.
-    const harness = makeHarness();
-    const parked = parkedRun(harness);
-    const { child, done } = startMergePrs(harness, [specOf(PR_ONE)], parked.env);
-    try {
-      expect(
-        await waitFor(() => existsSync(parked.calledOut), 5_000, "the PR to be in flight"),
-      ).toBe(true);
+  test(
+    "TERM to the run alone kills the PR in flight instead of letting it merge",
+    async () => {
+      // Signalling the GROUP is the easy case and proves nothing about the
+      // script: the whole tree dies and so would a script with no trap at all.
+      // This signals the parent pid only, which is what a CI timeout does, and
+      // what used to be swallowed — zsh defers its own trap while a foreground
+      // child runs, so the in-flight PR went on to `gh pr merge` and was reaped
+      // by no epilogue.
+      const harness = makeHarness();
+      const parked = parkedRun(harness);
+      const { child, done } = startMergePrs(harness, [specOf(PR_ONE)], parked.env);
+      try {
+        expect(
+          await waitFor(
+            () => existsSync(parked.calledOut),
+            scaled(5_000),
+            "the PR to be in flight",
+          ),
+        ).toBe(true);
 
-      const signalledAt = Date.now();
-      process.kill(child.pid as number, "SIGTERM");
-      // Raced against a deadline rather than awaited outright, so a run that
-      // never answers fails on THIS assertion. Awaiting it would hand the
-      // failure to the test framework's timeout, which names the harness
-      // instead of the defect — and the defect is the whole point: a body in
-      // the foreground swallows the signal, runs the merge to completion
-      // (measured at 149s here, five 30s stubbed gh calls) and only then
-      // leaves through the trap.
-      const finished = await Promise.race([
-        done.then((result) => ({ kind: "exited" as const, result })),
-        new Promise<{ kind: "deadline" }>((resolve) =>
-          setTimeout(() => resolve({ kind: "deadline" }), 5_000),
-        ),
-      ]);
-      expect(
-        finished.kind,
-        `the run did not answer SIGTERM promptly (waited ${
-          Date.now() - signalledAt
-        }ms); a body in the foreground defers this shell's own trap until it finishes`,
-      ).toBe("exited");
-      const result = finished.kind === "exited" ? finished.result : undefined;
-      // 130 for INT, 143 for TERM: the signal reached the run and named itself.
-      expect(result?.status).toBe(143);
-      // The PR in flight did not reach the merge, and the lock was handed back
-      // on the way out rather than left for the next run to reclaim.
-      expect(mergedByStub(harness)).toBe("");
-      expect(existsSync(harness.lockDir)).toBe(false);
-    } finally {
-      // Nothing is left to clean up but the run itself: the body is its own
-      // process group, so the signal this test sent reached the stub inside it and
-      // there is no orphan to wait for.
-      await stopRun(child);
-      harness.cleanup();
-    }
-  }, 20_000);
+        const signalledAt = Date.now();
+        process.kill(child.pid as number, "SIGTERM");
+        // Raced against a deadline rather than awaited outright, so a run that
+        // never answers fails on THIS assertion. Awaiting it would hand the
+        // failure to the test framework's timeout, which names the harness
+        // instead of the defect — and the defect is the whole point: a body in
+        // the foreground swallows the signal, runs the merge to completion
+        // (measured at 149s here, five 30s stubbed gh calls) and only then
+        // leaves through the trap.
+        const finished = await Promise.race([
+          done.then((result) => ({ kind: "exited" as const, result })),
+          new Promise<{ kind: "deadline" }>((resolve) =>
+            setTimeout(() => resolve({ kind: "deadline" }), 5_000),
+          ),
+        ]);
+        expect(
+          finished.kind,
+          `the run did not answer SIGTERM promptly (waited ${
+            Date.now() - signalledAt
+          }ms); a body in the foreground defers this shell's own trap until it finishes`,
+        ).toBe("exited");
+        const result = finished.kind === "exited" ? finished.result : undefined;
+        // 130 for INT, 143 for TERM: the signal reached the run and named itself.
+        expect(result?.status).toBe(143);
+        // The PR in flight did not reach the merge, and the lock was handed back
+        // on the way out rather than left for the next run to reclaim.
+        expect(mergedByStub(harness)).toBe("");
+        expect(existsSync(harness.lockDir)).toBe(false);
+      } finally {
+        // Nothing is left to clean up but the run itself: the body is its own
+        // process group, so the signal this test sent reached the stub inside it and
+        // there is no orphan to wait for.
+        await stopRun(child);
+        harness.cleanup();
+      }
+    },
+    scaled(20_000),
+  );
 
   test("a lock this script wrote itself, left by a crashed run, is reclaimed by the next run", async () => {
     // Every other reclaim test in this file PLANTS a lock file. That is how the
@@ -1418,9 +1443,10 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       // Waiting for the pgid file, not just the called-out file: the stub writes
       // the pgid as it parks, so this is the handshake that says "parked, and here
       // is the group to clean up". Waiting for the other file alone races it.
-      expect(await waitForContent(pgidOut, 5_000), "the PR body to park and report its group").toBe(
-        true,
-      );
+      expect(
+        await waitForContent(pgidOut, scaled(5_000)),
+        "the PR body to park and report its group",
+      ).toBe(true);
       expect(existsSync(harness.lockDir)).toBe(true);
 
       // What the script itself wrote, read back the way every other run reads it.
@@ -1460,63 +1486,72 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
     }
   }, 60_000);
 
-  test("a PR body that left a process behind in its group takes that process with it", async () => {
-    // The shape a process-TREE walk cannot see. The stub double-forks a sleeper
-    // and lets the middle process exit, so the sleeper keeps the body's process
-    // GROUP while its parent becomes init: `ps -o ppid=` no longer names anybody
-    // the run could walk to, but the group is still the body's. Round 2 signalled
-    // the tree, so this process survived every signal the run sent and outlived
-    // the lock it was started under.
-    const harness = makeHarness();
-    const calledOut = join(harness.stateDir, "gh-called");
-    const survivorOut = join(harness.stateDir, "survivor-pid");
-    const { child, done } = startMergePrs(harness, [specOf(PR_ONE)], {
-      STUB_GH_CALLED_OUT: calledOut,
-      STUB_SURVIVOR_OUT: survivorOut,
-      STUB_SURVIVOR_SECONDS: "300",
-    });
-    try {
-      expect(await waitForContent(survivorOut, 5_000), "the orphan to report its own pid").toBe(
-        true,
-      );
-      const survivor = Number(readFileSync(survivorOut, "utf8").trim());
-      expect(survivor).toBeGreaterThan(0);
-      // Precondition, and the reason a walk misses it: nobody in this run is its
-      // parent any more. If this ever fails the test has stopped testing the shape
-      // it exists for.
-      expect(
-        parentPidOf(survivor),
-        "the orphan was not re-parented, so the walk would find it",
-      ).not.toBe(child.pid as number);
-      expect(isAlive(survivor)).toBe(true);
-
-      process.kill(child.pid as number, "SIGTERM");
-      const finished = await Promise.race([
-        done.then((result) => ({ kind: "exited" as const, result })),
-        new Promise<{ kind: "deadline" }>((resolve) =>
-          setTimeout(() => resolve({ kind: "deadline" }), 5_000),
-        ),
-      ]);
-      expect(finished.kind, "the run did not answer SIGTERM").toBe("exited");
-
-      // The whole point: the process that is in the group and in nobody's tree
-      // went with the group. A walk leaves it running for its full 300s.
-      expect(
-        await waitFor(() => !isAlive(survivor), 5_000, "the re-parented process to be gone"),
-      ).toBe(true);
-      // And the lock is still handed back on the way out.
-      expect(existsSync(harness.lockDir)).toBe(false);
-    } finally {
-      await stopRun(child);
-      // The sleeper is 300s long on purpose; nothing else here would ever reap it.
+  test(
+    "a PR body that left a process behind in its group takes that process with it",
+    async () => {
+      // The shape a process-TREE walk cannot see. The stub double-forks a sleeper
+      // and lets the middle process exit, so the sleeper keeps the body's process
+      // GROUP while its parent becomes init: `ps -o ppid=` no longer names anybody
+      // the run could walk to, but the group is still the body's. Round 2 signalled
+      // the tree, so this process survived every signal the run sent and outlived
+      // the lock it was started under.
+      const harness = makeHarness();
+      const calledOut = join(harness.stateDir, "gh-called");
+      const survivorOut = join(harness.stateDir, "survivor-pid");
+      const { child, done } = startMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_GH_CALLED_OUT: calledOut,
+        STUB_SURVIVOR_OUT: survivorOut,
+        STUB_SURVIVOR_SECONDS: "300",
+      });
       try {
-        process.kill(Number(readFileSync(survivorOut, "utf8").trim()), "SIGKILL");
-      } catch {
-        // Already gone, which is the case this wants.
+        expect(
+          await waitForContent(survivorOut, scaled(5_000)),
+          "the orphan to report its own pid",
+        ).toBe(true);
+        const survivor = Number(readFileSync(survivorOut, "utf8").trim());
+        expect(survivor).toBeGreaterThan(0);
+        // Precondition, and the reason a walk misses it: nobody in this run is its
+        // parent any more. If this ever fails the test has stopped testing the shape
+        // it exists for.
+        expect(
+          parentPidOf(survivor),
+          "the orphan was not re-parented, so the walk would find it",
+        ).not.toBe(child.pid as number);
+        expect(isAlive(survivor)).toBe(true);
+
+        process.kill(child.pid as number, "SIGTERM");
+        const finished = await Promise.race([
+          done.then((result) => ({ kind: "exited" as const, result })),
+          new Promise<{ kind: "deadline" }>((resolve) =>
+            setTimeout(() => resolve({ kind: "deadline" }), 5_000),
+          ),
+        ]);
+        expect(finished.kind, "the run did not answer SIGTERM").toBe("exited");
+
+        // The whole point: the process that is in the group and in nobody's tree
+        // went with the group. A walk leaves it running for its full 300s.
+        expect(
+          await waitFor(
+            () => !isAlive(survivor),
+            scaled(5_000),
+            "the re-parented process to be gone",
+          ),
+        ).toBe(true);
+        // And the lock is still handed back on the way out.
+        expect(existsSync(harness.lockDir)).toBe(false);
+      } finally {
+        await stopRun(child);
+        // The sleeper is 300s long on purpose; nothing else here would ever reap it.
+        try {
+          process.kill(Number(readFileSync(survivorOut, "utf8").trim()), "SIGKILL");
+        } catch {
+          // Already gone, which is the case this wants.
+        }
+        harness.cleanup();
       }
-      harness.cleanup();
-    }
-  }, 30_000);
+    },
+    scaled(30_000),
+  );
 
   test("a process the signal cannot kill is swept before the lock is released", async () => {
     // What the sweep is for: something still in the PR's process group when the
@@ -1546,9 +1581,12 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
       // The merge call itself, not the first gh call: this is about a process
       // left under a merge that is in flight.
       expect(
-        await waitFor(() => existsSync(entered), 15_000, "the merge call to be in flight"),
+        await waitFor(() => existsSync(entered), scaled(15_000), "the merge call to be in flight"),
       ).toBe(true);
-      expect(await waitForContent(termproofOut, 5_000), "the stub published no sleeper").toBe(true);
+      expect(
+        await waitForContent(termproofOut, scaled(5_000)),
+        "the stub published no sleeper",
+      ).toBe(true);
       sleeper = Number(readFileSync(termproofOut, "utf8").trim());
       expect(sleeper).toBeGreaterThan(0);
       expect(isAlive(sleeper)).toBe(true);
@@ -1596,148 +1634,165 @@ describe.skipIf(!hasZsh())("merge-prs.sh — --continue and the run lock", () =>
     }
   }, 60_000);
 
-  test("a TERM inside the window before the body has a process group still stops the PR", async () => {
-    // The window between `&` returning and perl's setpgid. The body's pid is
-    // already known — it is what `$!` gave us — but it is not yet a PROCESS GROUP,
-    // so `kill -TERM -- -$pgid` names a group that does not exist, fails silently,
-    // and `wait` then blocks for the whole PR: the signal is answered only after
-    // the merge it was meant to stop, and the lock is released after that. The
-    // hook widens the window to three seconds so a signal can be aimed at it.
-    const harness = makeHarness();
-    const pgidOut = join(harness.stateDir, "gh-pgid");
-    const { child, done } = startMergePrs(harness, [specOf(PR_ONE)], {
-      MERGE_PRS_TEST_PRE_SETPGID_SLEEP: "3",
-      STUB_GH_PGID_OUT: pgidOut,
-    });
-    try {
-      // The lock is taken before the body is launched, so it is proof the run is
-      // up; the pgid file appearing is proof the window has closed, which is the
-      // one moment this must NOT be signalled in.
-      expect(await waitFor(() => existsSync(harness.lockDir), 5_000, "the lock to be taken")).toBe(
+  test(
+    "a TERM inside the window before the body has a process group still stops the PR",
+    async () => {
+      // The window between `&` returning and perl's setpgid. The body's pid is
+      // already known — it is what `$!` gave us — but it is not yet a PROCESS GROUP,
+      // so `kill -TERM -- -$pgid` names a group that does not exist, fails silently,
+      // and `wait` then blocks for the whole PR: the signal is answered only after
+      // the merge it was meant to stop, and the lock is released after that. The
+      // hook widens the window to three seconds so a signal can be aimed at it.
+      const harness = makeHarness();
+      const pgidOut = join(harness.stateDir, "gh-pgid");
+      const { child, done } = startMergePrs(harness, [specOf(PR_ONE)], {
+        MERGE_PRS_TEST_PRE_SETPGID_SLEEP: "3",
+        STUB_GH_PGID_OUT: pgidOut,
+      });
+      try {
+        // The lock is taken before the body is launched, so it is proof the run is
+        // up; the pgid file appearing is proof the window has closed, which is the
+        // one moment this must NOT be signalled in.
+        expect(
+          await waitFor(() => existsSync(harness.lockDir), scaled(5_000), "the lock to be taken"),
+        ).toBe(true);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
+        process.kill(child.pid as number, "SIGTERM");
+        const result = await Promise.race([
+          done.then((r) => ({ kind: "exited" as const, result: r })),
+          new Promise<{ kind: "deadline" }>((resolve) =>
+            setTimeout(() => resolve({ kind: "deadline" }), 2_500),
+          ),
+        ]);
+        // Inside the window, the answer has to be prompt. Without the pid kill the
+        // run is still blocked in `wait` when this deadline lands, having swallowed
+        // the signal — and it goes on to merge.
+        expect(
+          result.kind,
+          "the run did not answer SIGTERM inside the fork-to-setpgid window",
+        ).toBe("exited");
+        expect(result.kind === "exited" ? result.result.status : -1).toBe(143);
+        // The PR never got as far as the merge, and the lock was handed back.
+        expect(mergedByStub(harness)).toBe("");
+        expect(existsSync(harness.lockDir)).toBe(false);
+      } finally {
+        await stopRun(child);
+        harness.cleanup();
+      }
+    },
+    scaled(30_000),
+  );
+
+  test(
+    "a HUP to the run stops the PR in flight and releases the lock",
+    async () => {
+      // SIGHUP is what a closing terminal sends, and a run that ignored it would go
+      // on merging with nobody watching: the terminal is gone, so the PRs it merges
+      // are merged with no one to answer a prompt.
+      const harness = makeHarness();
+      const parked = parkedRun(harness);
+      const { child, done } = startMergePrs(harness, [specOf(PR_ONE)], parked.env);
+      try {
+        expect(
+          await waitFor(
+            () => existsSync(parked.calledOut),
+            scaled(5_000),
+            "the PR to be in flight",
+          ),
+        ).toBe(true);
+        // `?? 0` so this is a plain number: readPidFile answers `number | undefined`
+        // and an assertion that "it is defined" does not narrow the type, so the
+        // call below would not typecheck. 0 is not a pid, so a stub that never
+        // published one fails the next line with a message that says so.
+        const pgid = readPidFile(join(harness.stateDir, "gh-pgid")) ?? 0;
+        expect(pgid, "the body published no process group").toBeGreaterThan(0);
+
+        process.kill(child.pid as number, "SIGHUP");
+        const finished = await Promise.race([
+          done.then((result) => ({ kind: "exited" as const, result })),
+          new Promise<{ kind: "deadline" }>((resolve) =>
+            setTimeout(() => resolve({ kind: "deadline" }), 5_000),
+          ),
+        ]);
+        expect(finished.kind, "the run did not answer SIGHUP").toBe("exited");
+        // 129 is SIGHUP's number: the signal reached the run and named itself.
+        expect(finished.kind === "exited" ? finished.result.status : -1).toBe(129);
+        // The body's whole PROCESS GROUP is empty, not merely the body itself. The
+        // body is the group's leader, so a leader that has been killed can still
+        // have members: the `gh` it exec'd, a child of that, anything re-parented
+        // out of it. Signalling the pid is what this test used to assert, and it
+        // passes for a group with a live `gh` under it — which is the one thing the
+        // group kill and the sweep exist to prevent. `groupAlive` asks the group.
+        expect(
+          await waitFor(() => !groupAlive(pgid), scaled(5_000), "the body's group to be empty"),
+        ).toBe(true);
+        expect(mergedByStub(harness)).toBe("");
+        // And the lock is gone, which is the ordering forward_signal works in: the
+        // group is swept before the lock is handed back.
+        expect(existsSync(harness.lockDir)).toBe(false);
+      } finally {
+        await stopRun(child);
+        harness.cleanup();
+      }
+    },
+    scaled(30_000),
+  );
+
+  test(
+    "a PR body never waits on a terminal for input",
+    async () => {
+      // The body inherits this run's stdin. On a terminal that is a tty, and the
+      // first thing to read it — a git credential prompt, a gh auth question, a
+      // pager — blocks on a human who is not there, holding the lock, with the run
+      // looking exactly like a slow test. The stub reads stdin and records what it
+      // got, and a body with `</dev/null` gets EOF at once.
+      //
+      // The stdin here is a real pipe, HELD OPEN and never written to, and that is
+      // the whole test. The previous version of this test used runMergePrs, which
+      // cannot express a held-open pipe: spawnSync hands a child a pipe it has
+      // already closed, so the child sees EOF whether or not the script redirects
+      // anything — it passed with the `</dev/null` deleted, and proved nothing. With
+      // the pipe open, a body missing the redirect blocks on a read that will never
+      // be answered, and the run does not finish inside the race below.
+      const harness = makeHarness();
+      const stdinOut = join(harness.stateDir, "stdin-read");
+      const { child, done } = startMergePrs(
+        harness,
+        [specOf(PR_ONE)],
+        { STUB_READ_STDIN_OUT: stdinOut },
+        false,
         true,
       );
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      process.kill(child.pid as number, "SIGTERM");
-      const result = await Promise.race([
-        done.then((r) => ({ kind: "exited" as const, result: r })),
-        new Promise<{ kind: "deadline" }>((resolve) =>
-          setTimeout(() => resolve({ kind: "deadline" }), 2_500),
-        ),
-      ]);
-      // Inside the window, the answer has to be prompt. Without the pid kill the
-      // run is still blocked in `wait` when this deadline lands, having swallowed
-      // the signal — and it goes on to merge.
-      expect(result.kind, "the run did not answer SIGTERM inside the fork-to-setpgid window").toBe(
-        "exited",
-      );
-      expect(result.kind === "exited" ? result.result.status : -1).toBe(143);
-      // The PR never got as far as the merge, and the lock was handed back.
-      expect(mergedByStub(harness)).toBe("");
-      expect(existsSync(harness.lockDir)).toBe(false);
-    } finally {
-      await stopRun(child);
-      harness.cleanup();
-    }
-  }, 30_000);
-
-  test("a HUP to the run stops the PR in flight and releases the lock", async () => {
-    // SIGHUP is what a closing terminal sends, and a run that ignored it would go
-    // on merging with nobody watching: the terminal is gone, so the PRs it merges
-    // are merged with no one to answer a prompt.
-    const harness = makeHarness();
-    const parked = parkedRun(harness);
-    const { child, done } = startMergePrs(harness, [specOf(PR_ONE)], parked.env);
-    try {
-      expect(
-        await waitFor(() => existsSync(parked.calledOut), 5_000, "the PR to be in flight"),
-      ).toBe(true);
-      // `?? 0` so this is a plain number: readPidFile answers `number | undefined`
-      // and an assertion that "it is defined" does not narrow the type, so the
-      // call below would not typecheck. 0 is not a pid, so a stub that never
-      // published one fails the next line with a message that says so.
-      const pgid = readPidFile(join(harness.stateDir, "gh-pgid")) ?? 0;
-      expect(pgid, "the body published no process group").toBeGreaterThan(0);
-
-      process.kill(child.pid as number, "SIGHUP");
-      const finished = await Promise.race([
-        done.then((result) => ({ kind: "exited" as const, result })),
-        new Promise<{ kind: "deadline" }>((resolve) =>
-          setTimeout(() => resolve({ kind: "deadline" }), 5_000),
-        ),
-      ]);
-      expect(finished.kind, "the run did not answer SIGHUP").toBe("exited");
-      // 129 is SIGHUP's number: the signal reached the run and named itself.
-      expect(finished.kind === "exited" ? finished.result.status : -1).toBe(129);
-      // The body's whole PROCESS GROUP is empty, not merely the body itself. The
-      // body is the group's leader, so a leader that has been killed can still
-      // have members: the `gh` it exec'd, a child of that, anything re-parented
-      // out of it. Signalling the pid is what this test used to assert, and it
-      // passes for a group with a live `gh` under it — which is the one thing the
-      // group kill and the sweep exist to prevent. `groupAlive` asks the group.
-      expect(await waitFor(() => !groupAlive(pgid), 5_000, "the body's group to be empty")).toBe(
-        true,
-      );
-      expect(mergedByStub(harness)).toBe("");
-      // And the lock is gone, which is the ordering forward_signal works in: the
-      // group is swept before the lock is handed back.
-      expect(existsSync(harness.lockDir)).toBe(false);
-    } finally {
-      await stopRun(child);
-      harness.cleanup();
-    }
-  }, 30_000);
-
-  test("a PR body never waits on a terminal for input", async () => {
-    // The body inherits this run's stdin. On a terminal that is a tty, and the
-    // first thing to read it — a git credential prompt, a gh auth question, a
-    // pager — blocks on a human who is not there, holding the lock, with the run
-    // looking exactly like a slow test. The stub reads stdin and records what it
-    // got, and a body with `</dev/null` gets EOF at once.
-    //
-    // The stdin here is a real pipe, HELD OPEN and never written to, and that is
-    // the whole test. The previous version of this test used runMergePrs, which
-    // cannot express a held-open pipe: spawnSync hands a child a pipe it has
-    // already closed, so the child sees EOF whether or not the script redirects
-    // anything — it passed with the `</dev/null` deleted, and proved nothing. With
-    // the pipe open, a body missing the redirect blocks on a read that will never
-    // be answered, and the run does not finish inside the race below.
-    const harness = makeHarness();
-    const stdinOut = join(harness.stateDir, "stdin-read");
-    const { child, done } = startMergePrs(
-      harness,
-      [specOf(PR_ONE)],
-      { STUB_READ_STDIN_OUT: stdinOut },
-      false,
-      true,
-    );
-    try {
-      const finished = await Promise.race([
-        done.then((result) => ({ kind: "exited" as const, result })),
-        new Promise<{ kind: "blocked" }>((resolve) =>
-          setTimeout(() => resolve({ kind: "blocked" }), 10_000),
-        ),
-      ]);
-      // Not "did it eventually finish" — a run waiting on a person never does,
-      // and the lock it is holding is exactly the thing being tested.
-      expect(
-        finished.kind,
-        "the run did not finish: its body is waiting on a stdin that will never be answered",
-      ).toBe("exited");
-      const result = finished.kind === "exited" ? finished.result : undefined;
-      expect(result?.status).toBe(0);
-      // EOF, from the read the stub actually made.
-      expect(existsSync(stdinOut), "the stub never got to read stdin").toBe(true);
-      expect(readFileSync(stdinOut, "utf8").trim()).toBe("EOF");
-      expect(result?.stdout).toContain("merged #101");
-    } finally {
-      // Close the pipe before tearing down: leaving it open is what the test is
-      // about, and stopRun must not have to know that to be safe.
-      child.stdin?.end();
-      await stopRun(child);
-      harness.cleanup();
-    }
-  }, 30_000);
+      try {
+        const finished = await Promise.race([
+          done.then((result) => ({ kind: "exited" as const, result })),
+          new Promise<{ kind: "blocked" }>((resolve) =>
+            setTimeout(() => resolve({ kind: "blocked" }), 10_000),
+          ),
+        ]);
+        // Not "did it eventually finish" — a run waiting on a person never does,
+        // and the lock it is holding is exactly the thing being tested.
+        expect(
+          finished.kind,
+          "the run did not finish: its body is waiting on a stdin that will never be answered",
+        ).toBe("exited");
+        const result = finished.kind === "exited" ? finished.result : undefined;
+        expect(result?.status).toBe(0);
+        // EOF, from the read the stub actually made.
+        expect(existsSync(stdinOut), "the stub never got to read stdin").toBe(true);
+        expect(readFileSync(stdinOut, "utf8").trim()).toBe("EOF");
+        expect(result?.stdout).toContain("merged #101");
+      } finally {
+        // Close the pipe before tearing down: leaving it open is what the test is
+        // about, and stopRun must not have to know that to be safe.
+        child.stdin?.end();
+        await stopRun(child);
+        harness.cleanup();
+      }
+    },
+    scaled(30_000),
+  );
 
   test("__pr_body is refused unless a run launched it", () => {
     // The entry point runs one PR's body with no lock and no epilogue. Anyone who

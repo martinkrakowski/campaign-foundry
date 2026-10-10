@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -14,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import vitestConfig from "../../../vitest.config";
 import { gateEnv } from "./gate-env.js";
+import { scaled } from "./wait-scale.js";
 
 // D183 (lane HX3-gate-in-repo) — `yarn gate`. Every test drives the real
 // script with CF_GATE_STEPS (one name<TAB>command line per step) and a fresh
@@ -24,6 +26,7 @@ import { gateEnv } from "./gate-env.js";
 // exits 0; busy propagates as 75.
 
 const gateSh = fileURLToPath(new URL("../../../scripts/gate.sh", import.meta.url));
+const gateLockSh = fileURLToPath(new URL("../../../scripts/gate-lock.sh", import.meta.url));
 const packageJson = fileURLToPath(new URL("../../../package.json", import.meta.url));
 
 /**
@@ -136,7 +139,7 @@ function runGateAsyncIn(
 }
 
 /** Poll until the path exists — the handshake for the script's test pauses. */
-async function waitForFile(path: string, timeoutMs = 10_000): Promise<void> {
+async function waitForFile(path: string, timeoutMs = scaled(10_000)): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!existsSync(path)) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${path}`);
@@ -252,6 +255,157 @@ describe("yarn gate", () => {
     expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
   });
 
+  test("a test step that exits 0 while its output reports failed tests fails the gate with code 96", () => {
+    const r = runGate(
+      ["--lane", "lane-b"],
+      stepsEnv([
+        [
+          "test:cov",
+          'printf " Test Files  1 failed | 3 passed (4)\\n      Tests  1 failed | 10 passed (11)\\n"',
+        ],
+      ]),
+    );
+    expect(r.status).toBe(96);
+    expect(r.stdout).toContain("<== test:cov: exit 0");
+    expect(r.stderr).toContain(
+      "gate: FAILED — step 'test:cov' exited 0 but its output reports failed tests",
+    );
+    expect(r.stderr).toContain("1 failed | 3 passed (4)");
+    expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
+  });
+
+  test("a failed summary and a coverage failure on one exit-0 step are both reported, with code 96", () => {
+    const r = runGate(
+      ["--lane", "lane-b"],
+      stepsEnv([
+        [
+          "test:cov",
+          'printf " Test Files  1 failed | 3 passed (4)\\nERROR: Coverage for statements does not meet global threshold\\n"',
+        ],
+      ]),
+    );
+    expect(r.status).toBe(96);
+    expect(r.stderr).toContain(
+      "gate: FAILED — step 'test:cov' exited 0 but its output reports failed tests",
+    );
+    expect(r.stderr).toContain("a coverage threshold failure was reported");
+    expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
+  });
+
+  test("a test step that exits 0 while vitest reports unhandled errors fails the gate with code 96", () => {
+    const r = runGate(
+      ["--lane", "lane-b"],
+      stepsEnv([
+        [
+          "test:cov",
+          'printf "Vitest caught 1 unhandled error during the test run.\\nThis might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.\\n"',
+        ],
+      ]),
+    );
+    expect(r.status).toBe(96);
+    expect(r.stdout).toContain("<== test:cov: exit 0");
+    expect(r.stderr).toContain(
+      "gate: FAILED — step 'test:cov' exited 0 but its output reports unhandled errors",
+    );
+    expect(r.stderr).toContain("Vitest caught 1 unhandled error during the test run.");
+    expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
+  });
+
+  test("a clean summary and a title that holds the word failed do not fail the gate", () => {
+    const r = runGate(
+      ["--lane", "lane-b"],
+      stepsEnv([
+        [
+          "test:cov",
+          'printf " Test Files  3 passed (3)\\n      Tests  0 failed | 12 passed (12)\\n \\xe2\\x9c\\x93 a refund that failed is retried  12ms\\nstdout | x > Tests 3 failed earlier in this log line\\n[h3] [unhandled] H3Error: boom\\nUnhandled Rejection is handled by the app\\n"',
+        ],
+      ]),
+    );
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("<== test:cov: exit 0");
+    expect(r.stderr).not.toContain("exited 0 but its output reports");
+    expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
+  });
+
+  test("a failing test step fails the gate with its own code whatever the scan finds", () => {
+    // The scan runs on test:cov (so the summary is present and matched), but a
+    // non-zero exit keeps today's path and the step's own code — the scan can
+    // never override a step that already failed (N1).
+    const withSummary = runGate(
+      ["--lane", "lane-b"],
+      stepsEnv([
+        [
+          "test:cov",
+          "sh -c 'printf \" Test Files  1 failed | 3 passed (4)\\n      Tests  1 failed | 10 passed (11)\\n\"; exit 3'",
+        ],
+      ]),
+    );
+    expect(withSummary.status).toBe(3);
+    expect(withSummary.stderr).toContain("FAILED at step 'test:cov' (exit 3)");
+    expect(withSummary.stderr).not.toContain("exited 0 but its output reports");
+
+    // No summary, same exit code: identical result.
+    const withoutSummary = runGate(
+      ["--lane", "lane-b"],
+      stepsEnv([["test:cov", 'sh -c "exit 3"']]),
+    );
+    expect(withoutSummary.status).toBe(3);
+    expect(withoutSummary.stderr).toContain("FAILED at step 'test:cov' (exit 3)");
+    expect(withoutSummary.stderr).not.toContain("exited 0 but its output reports");
+  });
+
+  test("the failed summary is found through ANSI colour codes", () => {
+    // Vitest colour-wraps its summary; the ESC bytes are real, the newlines are
+    // printf escapes, so the gate must strip colour before anchoring (N2/N3).
+    const C = "\u001b";
+    const cmd = `printf '${C}[31m Test Files  1 failed | 3 passed (4)${C}[0m\\n${C}[32m      Tests  1 failed | 10 passed (11)${C}[0m\\n'`;
+    const r = runGate(["--lane", "lane-b"], stepsEnv([["test:cov", cmd]]));
+    expect(r.status).toBe(96);
+    expect(r.stdout).toContain("<== test:cov: exit 0");
+    expect(r.stderr).toContain("exited 0 but its output reports failed tests");
+    expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
+  });
+
+  test("the output scan applies under a profile as well", () => {
+    // The profile keeps the step's NAME, so run_test_cov still wraps whatever
+    // command the profile resolved to — the scan must fire there too.
+    const r = runGate(["--lane", "lane-b", "--profile", "midnight"], {
+      ...stepsEnv([
+        [
+          "test:cov",
+          'printf " Test Files  1 failed | 3 passed (4)\\n      Tests  1 failed | 10 passed (11)\\n"',
+        ],
+      ]),
+      CF_GATE_TEST_PRINT_LISTING: "1",
+    });
+    expect(r.status).toBe(96);
+    expect(r.stderr).toContain("exited 0 but its output reports failed tests");
+  });
+
+  test("a scan that cannot run fails the gate and is not read as clean", () => {
+    // Copy gate.sh and gate-lock.sh into a temp dir WITHOUT test-output-scan.sh,
+    // so run_test_cov's scan call cannot find the script. The gate must exit 2
+    // (never 0, never 96) and the lock must be released.
+    const scriptDir = mkdtempSync(join(tmpdir(), "cf-gate-temp-"));
+    dirs.push(scriptDir);
+    const tempGate = join(scriptDir, "gate.sh");
+    const tempLock = join(scriptDir, "gate-lock.sh");
+    copyFileSync(gateSh, tempGate);
+    copyFileSync(gateLockSh, tempLock);
+    chmodSync(tempGate, 0o755);
+    chmodSync(tempLock, 0o755);
+
+    const dir = scratch();
+    const r = spawnSync("sh", [tempGate, "--lane", "lane-b"], {
+      encoding: "utf8",
+      env: gateEnv(dir, stepsEnv([["test:cov", "true"]])),
+      timeout: scaled(15_000),
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("the test output scan could not run");
+    expect(existsSync(join(dir, "cf-gate.lock"))).toBe(false);
+  });
+
   test("a failing nitro prepare fails the guard, even with a stale manifest present", () => {
     const dir = scratch();
     const manifest = join(dir, "nitro-routes.d.ts");
@@ -354,99 +508,115 @@ describe("yarn gate", () => {
     expect(r.status).toBe(0);
   });
 
-  test("a lock lost during a locked step fails the gate as lock lost", () => {
-    // The step removes the lock out from under the gate; the heartbeat's next
-    // tick fails, the loop dies leaving its marker, and the boundary check
-    // after the step must fail the gate — not release a phantom and go green.
-    const r = runGate(
-      ["--lane", "lane-b"],
-      {
-        CF_GATE_HEARTBEAT_SECONDS: "1",
-        ...stepsEnv([["test:cov", 'rm -rf "$TMPDIR/cf-gate.lock"; sleep 2']]),
-      },
-      15_000,
-    );
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("lock lost after step 'test:cov'");
-    expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
-  }, 15_000);
+  test(
+    "a lock lost during a locked step fails the gate as lock lost",
+    () => {
+      // The step removes the lock out from under the gate; the heartbeat's next
+      // tick fails, the loop dies leaving its marker, and the boundary check
+      // after the step must fail the gate — not release a phantom and go green.
+      const r = runGate(
+        ["--lane", "lane-b"],
+        {
+          CF_GATE_HEARTBEAT_SECONDS: "1",
+          ...stepsEnv([["test:cov", 'rm -rf "$TMPDIR/cf-gate.lock"; sleep 2']]),
+        },
+        15_000,
+      );
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("lock lost after step 'test:cov'");
+      expect(existsSync(join(r.dir, "cf-gate.lock"))).toBe(false);
+    },
+    scaled(15_000),
+  );
 
-  test("a lock replaced by another holder fails the gate as lock lost, and the replacement survives cleanup", () => {
-    // The reclaim scenario end to end: the lock is replaced by a fresh holder
-    // while the gate is mid-step. The gate must fail as lock lost, and its
-    // cleanup must leave the replacement's lock exactly as it found it.
-    const dir = scratch();
-    const lock = join(dir, "cf-gate.lock");
-    const replace = [
-      'rm -rf "$TMPDIR/cf-gate.lock"',
-      'mkdir "$TMPDIR/cf-gate.lock"',
-      'printf "lane-c\\n" > "$TMPDIR/cf-gate.lock/owner"',
-      `printf "${process.pid}\\n" > "$TMPDIR/cf-gate.lock/pid"`,
-      'printf "$(date +%s)\\n" > "$TMPDIR/cf-gate.lock/started"',
-      'printf "$(date +%s)\\n" > "$TMPDIR/cf-gate.lock/beat"',
-      "sleep 2",
-    ].join("; ");
-    const r = runGate(
-      ["--lane", "lane-b"],
-      {
-        TMPDIR: dir,
-        CF_GATE_HEARTBEAT_SECONDS: "1",
-        ...stepsEnv([["test:cov", replace]]),
-      },
-      15_000,
-    );
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("lock lost after step 'test:cov'");
-    expect(readFileSync(join(lock, "owner"), "utf8").trim()).toBe("lane-c");
-    expect(existsSync(lock)).toBe(true);
-  }, 15_000);
+  test(
+    "a lock replaced by another holder fails the gate as lock lost, and the replacement survives cleanup",
+    () => {
+      // The reclaim scenario end to end: the lock is replaced by a fresh holder
+      // while the gate is mid-step. The gate must fail as lock lost, and its
+      // cleanup must leave the replacement's lock exactly as it found it.
+      const dir = scratch();
+      const lock = join(dir, "cf-gate.lock");
+      const replace = [
+        'rm -rf "$TMPDIR/cf-gate.lock"',
+        'mkdir "$TMPDIR/cf-gate.lock"',
+        'printf "lane-c\\n" > "$TMPDIR/cf-gate.lock/owner"',
+        `printf "${process.pid}\\n" > "$TMPDIR/cf-gate.lock/pid"`,
+        'printf "$(date +%s)\\n" > "$TMPDIR/cf-gate.lock/started"',
+        'printf "$(date +%s)\\n" > "$TMPDIR/cf-gate.lock/beat"',
+        "sleep 2",
+      ].join("; ");
+      const r = runGate(
+        ["--lane", "lane-b"],
+        {
+          TMPDIR: dir,
+          CF_GATE_HEARTBEAT_SECONDS: "1",
+          ...stepsEnv([["test:cov", replace]]),
+        },
+        15_000,
+      );
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("lock lost after step 'test:cov'");
+      expect(readFileSync(join(lock, "owner"), "utf8").trim()).toBe("lane-c");
+      expect(existsSync(lock)).toBe(true);
+    },
+    scaled(15_000),
+  );
 
-  test("a lock lost between locked steps fails the gate at the next step's boundary", async () => {
-    // The pause hook holds the gate before each locked step; the handshake
-    // removes the lock in exactly the between-steps window the check covers.
-    const dir = scratch();
-    const marker = join(dir, "paused-before-step");
-    const pending = runGateAsyncIn(dir, ["--lane", "lane-b"], {
-      ...stepsEnv([
-        ["test:cov", "true"],
-        ["verify-manifests", "true"],
-      ]),
-      CF_GATE_TEST_PAUSE_BEFORE_STEP: marker,
-    });
-    await waitForFile(marker);
-    rmSync(marker);
-    await waitForFile(marker);
-    rmSync(join(dir, "cf-gate.lock"), { recursive: true, force: true });
-    rmSync(marker);
-    const r = await pending;
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("lock lost before step 'verify-manifests'");
-    expect(existsSync(join(dir, "cf-gate.lock"))).toBe(false);
-  }, 15_000);
-
-  test("a failed release is reported by the gate, which does not report green", () => {
-    // The last locked step makes the lock directory read-only, so the gate's
-    // release cannot remove it: the gate must report the failed release and
-    // exit non-zero, never print the tally over a lingering lock.
-    const dir = scratch();
-    const lock = join(dir, "cf-gate.lock");
-    const r = runGate(
-      ["--lane", "lane-b"],
-      {
-        TMPDIR: dir,
+  test(
+    "a lock lost between locked steps fails the gate at the next step's boundary",
+    async () => {
+      // The pause hook holds the gate before each locked step; the handshake
+      // removes the lock in exactly the between-steps window the check covers.
+      const dir = scratch();
+      const marker = join(dir, "paused-before-step");
+      const pending = runGateAsyncIn(dir, ["--lane", "lane-b"], {
         ...stepsEnv([
           ["test:cov", "true"],
-          ["verify-manifests", 'chmod 555 "$TMPDIR/cf-gate.lock"'],
+          ["verify-manifests", "true"],
         ]),
-      },
-      15_000,
-    );
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("FAILED to release the lock");
-    expect(existsSync(lock)).toBe(true);
-    // Let the cleanup remove the scratch dir again.
-    chmodSync(lock, 0o755);
-  }, 15_000);
+        CF_GATE_TEST_PAUSE_BEFORE_STEP: marker,
+      });
+      await waitForFile(marker);
+      rmSync(marker);
+      await waitForFile(marker);
+      rmSync(join(dir, "cf-gate.lock"), { recursive: true, force: true });
+      rmSync(marker);
+      const r = await pending;
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("lock lost before step 'verify-manifests'");
+      expect(existsSync(join(dir, "cf-gate.lock"))).toBe(false);
+    },
+    scaled(15_000),
+  );
+
+  test(
+    "a failed release is reported by the gate, which does not report green",
+    () => {
+      // The last locked step makes the lock directory read-only, so the gate's
+      // release cannot remove it: the gate must report the failed release and
+      // exit non-zero, never print the tally over a lingering lock.
+      const dir = scratch();
+      const lock = join(dir, "cf-gate.lock");
+      const r = runGate(
+        ["--lane", "lane-b"],
+        {
+          TMPDIR: dir,
+          ...stepsEnv([
+            ["test:cov", "true"],
+            ["verify-manifests", 'chmod 555 "$TMPDIR/cf-gate.lock"'],
+          ]),
+        },
+        15_000,
+      );
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("FAILED to release the lock");
+      expect(existsSync(lock)).toBe(true);
+      // Let the cleanup remove the scratch dir again.
+      chmodSync(lock, 0o755);
+    },
+    scaled(15_000),
+  );
 
   test("a run where every step passes prints the full tally", () => {
     const r = runGate(
