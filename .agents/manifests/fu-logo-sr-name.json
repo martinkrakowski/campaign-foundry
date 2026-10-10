@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "FU-logo-sr-name",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/LogoField.tsx",
+      "before": "    displayName !== undefined && displayName.trim() !== \"\" && displayName !== value",
+      "after": "    displayName !== undefined && displayName.trim() !== \"\" && displayName !== displayName",
+      "because": "The description is only ever an addition, so the gate that decides to add it is the pair of half-negations: a name was resolved, and the ref does not already say it. Compare the name with itself and the second half can never hold, so `assetName` is always undefined and the mirror keeps announcing a bare 36-character uuid — the exact gap this description was written for. The test that renders an id ref WITH a display name and reads the ids off `aria-describedby`, resolving one to `Asset: hydra-logo.png`, finds none and fails on `texts`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/LogoField.test.tsx",
+        "-t",
+        "the hidden field is described by the asset's name when the value is an id"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/LogoField.tsx",
+      "before": "    [ariaDescribedBy, assetName === undefined ? undefined : assetNameId]",
+      "after": "    [assetName === undefined ? undefined : assetNameId]",
+      "because": "The attribute is a list, not a claim: the caller wired their own `aria-describedby` (an error id, a hint) and this field appends to it. Dropping the caller's value silently deletes whatever they described — the field stops reading as invalid — while the join still returns a non-empty string, so nothing about the result says it was overwritten. The test that passes `aria-describedby=\"hint-1\"` beside a real `<span id=\"hint-1\">` and asserts the attribute carries exactly `hint-1 <new id>` sees one id and fails on the length.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/LogoField.test.tsx",
+        "-t",
+        "a caller's own description is kept beside the name"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

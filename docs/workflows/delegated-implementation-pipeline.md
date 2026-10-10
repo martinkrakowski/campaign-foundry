@@ -235,7 +235,11 @@ under pressure.
   numbers reach the wave record. See *Watching a lane*, above.
 - **`ocm-run -s <session id>`** resumes a lane's session instead of starting a new one, and takes
   **`--fork`** when the branch moved, because the old session's view of the branch is stale. It
-  retries once by itself when the first attempt dies on an early `database is locked`.
+  retries once by itself when the first attempt dies on an early `database is locked`. Resuming is
+  the exception (owner, 2026-10-09): every step re-reads the whole session, so cost grows with the
+  square of its length. A lane is sized for about 45 minutes (roughly 100 steps), a fix round is a
+  fresh session with a short handover brief, and a session is resumed once at most, only while it
+  is under 45 minutes and $0.50.
 
 #### The orchestrator pushes and opens the PR, and opens it early
 

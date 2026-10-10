@@ -138,12 +138,22 @@ every brief and fix brief; the fourth goes in the dispatch prompt itself.
   write `<file>` with your write tool; then one numbered item at a time: a few sentences of thought,
   edit, run its test." Three of the first six dispatches of that wave ended on finish reason
   `length` (one 32,000-token reasoning pass, exit 0, nothing written); none of the next seven did
-  once the prompt named the first action. A lane that stops that way is resumed in its own session
-  with one concrete first edit named, never re-dispatched.
+  once the prompt named the first action. A lane that stops that way, or on the step cap, gets a
+  fresh session with a smaller unit and one concrete first edit named, not a resume.
+- *Lane sessions are short-lived (owner, 2026-10-09).* Every step re-reads the whole session so
+  far, so a session's cost grows with the square of its length: in one night seven of 46 lanes were
+  62% of the spend. Size a lane to finish in about 45 minutes of lane time (roughly 100 steps) and
+  split anything larger into sequential lanes BEFORE dispatch, each with its own brief and commit.
+  A fix round starts a FRESH session on the same branch with a short handover brief: what is on the
+  branch, the numbered fixes, the files and line ranges to read, the proof each fix needs. Resume a
+  lane's own session only for ONE small round, and only when its usage shows it under 45 minutes and
+  under $0.50; never past 60 minutes or $0.50, and never a second time. Measure every lane when it
+  ends and put its cost in the pull request.
 
 **Two things a sandboxed lane cannot do, so never brief them:** `git fetch` and `git merge`. After
 `scripts/merge-prs.sh` refreshes a branch, fast-forward the lane's worktree from the host yourself,
-then resume the lane with `--fork`.
+then start the next round in a fresh session (or, for the one small resume the rule above allows,
+with `--fork`).
 
 **Know which gates are enforced by CI and which are enforced by you.** `plan:verify`, a lane
 retiring its own premise, and `mutate:verify` on a changed manifest are **CI**; a manifest existing
@@ -282,7 +292,9 @@ keeps the wave reading fresh on the service after the work has ended. With `WAVE
    drafts the lane brief for a sandboxed lane (Template F); `yarn fix-brief` drafts the fix-round
    brief (Template E) from a PR's **unresolved** threads; `yarn lane:watch follow|usage` is liveness
    and cost, with `--emit <logdir> <wave> <lane> implement`; and **`ocm-run -s <id>` resumes** a
-   lane's session instead of starting a new one — add `--fork` when the branch moved, since
+   lane's session instead of starting a new one — the exception, not the default: a fix round is a
+   fresh session unless the session is under 45 minutes and $0.50, and then once only. Add `--fork`
+   when the branch moved;
    `ocm-run` retries once by itself when the first attempt dies on an early `database is locked`.
 
    **The lane commits; you push and open the PR.** A lane's explicit final instruction is "commit

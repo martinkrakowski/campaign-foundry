@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test } from "vitest";
 import { gateEnv } from "./gate-env.js";
+import { scaled } from "./wait-scale.js";
 
 // D188 (lane MH2-gate-lock-slots) — a SECOND signal arriving while scripts/gate.sh
 // is releasing the gate lock. `cleanup` used to reset INT/TERM to their DEFAULT
@@ -114,7 +115,7 @@ function startGate(dir: string, env: Record<string, string>, shell: string): Gat
 }
 
 /** Poll until the path exists — the handshake for the script's test pauses. */
-async function waitForFile(path: string, timeoutMs = 10_000): Promise<void> {
+async function waitForFile(path: string, timeoutMs = scaled(10_000)): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!existsSync(path)) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${path}`);
@@ -213,7 +214,7 @@ function seedBusyLock(dir: string, owner = "lane-a"): void {
 async function waitForOutput(
   stdout: () => string,
   needle: string,
-  timeoutMs = 10_000,
+  timeoutMs = scaled(10_000),
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!stdout().includes(needle)) {
@@ -363,7 +364,7 @@ describe("gate.sh signals", () => {
         // written by the loop's TERM handler, which only runs once the loop is
         // being stopped — so this exists while the gate is INSIDE release_lock's
         // `wait` for it, not merely on its way there.
-        await waitForFile(inHandler, 30_000);
+        await waitForFile(inHandler, scaled(30_000));
         // That `wait` is interruptible by a trapped signal in dash and in bash
         // alike, so this lands in the one window where the gate has decided to
         // release the lock and has not yet run the release.

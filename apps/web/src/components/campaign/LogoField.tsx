@@ -109,6 +109,21 @@ export function LogoField({
   const extMatch = shownName.match(/\.([a-zA-Z0-9]+)$/);
   const fileExt = extMatch ? extMatch[1].toUpperCase() : "IMG";
 
+  // What the mirror input DESCRIBES. Its `value` is the asset id, so a screen reader
+  // announces 36 characters of nothing where the sighted user reads a file name off
+  // the tile. When the caller resolved a name the value does not already carry, the
+  // input is described by it; when there is nothing to add, by nothing at all.
+  // A blank name describes nothing, so it is treated as no name at all.
+  const assetName =
+    displayName !== undefined && displayName.trim() !== "" && displayName !== value
+      ? displayName
+      : undefined;
+  const assetNameId = `logo-upload-description-${instanceId}`;
+  const describedBy =
+    [ariaDescribedBy, assetName === undefined ? undefined : assetNameId]
+      .filter((id): id is string => id !== undefined && id !== "")
+      .join(" ") || undefined;
+
   return (
     <div className="space-y-1.5">
       <input
@@ -123,7 +138,7 @@ export function LogoField({
       <input
         type="text"
         aria-label={messages.logoPathAria}
-        aria-describedby={ariaDescribedBy}
+        aria-describedby={describedBy}
         className="sr-only"
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -135,6 +150,11 @@ export function LogoField({
         readOnly={readOnly}
         tabIndex={-1}
       />
+      {assetName === undefined ? null : (
+        <span id={assetNameId} className="sr-only">
+          {messages.logoPathNamed(assetName)}
+        </span>
+      )}
 
       {hasLogo ? (
         <div

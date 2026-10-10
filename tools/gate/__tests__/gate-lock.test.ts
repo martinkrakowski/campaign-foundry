@@ -15,8 +15,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { gateEnv } from "./gate-env.js";
+import { scaled } from "./wait-scale.js";
 
 // D183 (lane HX3-gate-in-repo) — the in-repo gate lock. Drives the real script
 // the way page.test.ts drives wave-event.sh: a fresh TMPDIR per test, so no
@@ -232,7 +233,7 @@ function runLockAsyncIn(
 }
 
 /** Poll until the path exists — the handshake for the script's test pauses. */
-async function waitForFile(path: string, timeoutMs = 10_000): Promise<void> {
+async function waitForFile(path: string, timeoutMs = scaled(10_000)): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!existsSync(path)) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${path}`);
@@ -247,7 +248,7 @@ async function waitForFile(path: string, timeoutMs = 10_000): Promise<void> {
  * waiting for the file, and waiting for the pid means waiting for the value.
  * Reading the pid out of a file that exists but is not yet written gives 0.
  */
-async function waitForContent(path: string, timeoutMs = 10_000): Promise<void> {
+async function waitForContent(path: string, timeoutMs = scaled(10_000)): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     if (existsSync(path) && readFileSync(path, "utf8").trim() !== "") return;
@@ -288,7 +289,7 @@ async function waitFor(
  * `sleep 30` outlives any timeout a test may set, so a command that was not
  * signalled reads as alive, not as slow.
  */
-async function waitForDead(pid: number, timeoutMs = 5_000): Promise<void> {
+async function waitForDead(pid: number, timeoutMs = scaled(5_000)): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (isAlive(pid)) {
     if (Date.now() > deadline) throw new Error(`pid ${pid} is still alive after ${timeoutMs}ms`);
@@ -306,6 +307,30 @@ function heartbeatPidOf(stdout: string): number {
 function leftoverCands(dir: string): string[] {
   return readdirSync(dir).filter((entry) => entry.startsWith("cf-gate.lock.cand."));
 }
+
+/**
+ * Proof, on the host, that a wait helper lets its deadline be stretched by the
+ * scale before it gives up — without needing a slow runner. The path never
+ * appears, the deadline is 40 ms, and the scale is stubbed to 3, so the helper
+ * must not give up until at least 120 ms (40 * 3); under 1 s rules out a poll
+ * loop that forgot to scale and gave up near-instantly.
+ */
+test("a wait helper allows its deadline times the scale before it gives up", async () => {
+  const missing = join(scratch(), "never-appears");
+  vi.stubEnv("CF_GATE_TEST_WAIT_SCALE", "3");
+  vi.resetModules();
+  const { scaled: deadlineFor } = await import("./wait-scale.js");
+  try {
+    const start = Date.now();
+    await expect(waitForFile(missing, deadlineFor(40))).rejects.toThrow(/timed out/);
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeGreaterThanOrEqual(120);
+    expect(elapsed).toBeLessThan(1_000);
+  } finally {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  }
+});
 
 describe("gate-lock.sh", () => {
   test("parses as POSIX sh", () => {
@@ -447,69 +472,77 @@ describe("gate-lock.sh", () => {
     expect(tightened.stdout).toContain("reclaiming");
   });
 
-  test("a reclaimer that renamed its replacement restores it, never deletes it", async () => {
-    // The reclaim race: the reclaimer judges a stale lock, pauses (test hook),
-    // and in that window the stale holder is replaced by a fresh acquirer.
-    // The rename then moves the REPLACEMENT, which was never judged — it must
-    // be restored (the name is free) and never deleted.
-    const dir = scratch();
-    const marker = join(dir, "paused-after-inspect");
-    seedLock(dir, {
-      owner: "lane-old",
-      pid: reapedPid(),
-      beat: Math.floor(Date.now() / 1000) - 700,
-    });
-    const pending = runLockAsyncIn(dir, ["acquire", "lane-new"], {
-      CF_GATE_CALLER_PID: "424242",
-      CF_GATE_TEST_PAUSE_AFTER_INSPECT: marker,
-    });
-    await waitForFile(marker);
-    const replacement = seedLock(dir, { owner: "lane-replacement", pid: process.pid });
-    rmSync(marker);
-    const result = await pending;
-    expect(result.status).toBe(75);
-    expect(result.stderr).toContain("busy");
-    expect(result.stderr).toContain("reclaim aborted");
-    // The replacement is back at the name, byte for byte as its holder wrote it.
-    expect(lockFile(dir, "owner").trim()).toBe("lane-replacement");
-    expect(lockFile(dir, "pid").trim()).toBe(String(process.pid));
-    expect(existsSync(replacement)).toBe(true);
-    expect(readdirSync(dir).some((e) => e.startsWith("cf-gate.lock.reclaim."))).toBe(false);
-  }, 15_000);
+  test(
+    "a reclaimer that renamed its replacement restores it, never deletes it",
+    async () => {
+      // The reclaim race: the reclaimer judges a stale lock, pauses (test hook),
+      // and in that window the stale holder is replaced by a fresh acquirer.
+      // The rename then moves the REPLACEMENT, which was never judged — it must
+      // be restored (the name is free) and never deleted.
+      const dir = scratch();
+      const marker = join(dir, "paused-after-inspect");
+      seedLock(dir, {
+        owner: "lane-old",
+        pid: reapedPid(),
+        beat: Math.floor(Date.now() / 1000) - 700,
+      });
+      const pending = runLockAsyncIn(dir, ["acquire", "lane-new"], {
+        CF_GATE_CALLER_PID: "424242",
+        CF_GATE_TEST_PAUSE_AFTER_INSPECT: marker,
+      });
+      await waitForFile(marker);
+      const replacement = seedLock(dir, { owner: "lane-replacement", pid: process.pid });
+      rmSync(marker);
+      const result = await pending;
+      expect(result.status).toBe(75);
+      expect(result.stderr).toContain("busy");
+      expect(result.stderr).toContain("reclaim aborted");
+      // The replacement is back at the name, byte for byte as its holder wrote it.
+      expect(lockFile(dir, "owner").trim()).toBe("lane-replacement");
+      expect(lockFile(dir, "pid").trim()).toBe(String(process.pid));
+      expect(existsSync(replacement)).toBe(true);
+      expect(readdirSync(dir).some((e) => e.startsWith("cf-gate.lock.reclaim."))).toBe(false);
+    },
+    scaled(15_000),
+  );
 
-  test("a reclaimer whose replacement was moved while the name is taken leaves it aside, never deletes it", async () => {
-    const dir = scratch();
-    const markerInspect = join(dir, "paused-after-inspect");
-    const markerRestore = join(dir, "paused-before-restore");
-    seedLock(dir, {
-      owner: "lane-old",
-      pid: reapedPid(),
-      beat: Math.floor(Date.now() / 1000) - 700,
-    });
-    const pending = runLockAsyncIn(dir, ["acquire", "lane-new"], {
-      CF_GATE_CALLER_PID: "424242",
-      CF_GATE_TEST_PAUSE_AFTER_INSPECT: markerInspect,
-      CF_GATE_TEST_PAUSE_BEFORE_RESTORE: markerRestore,
-    });
-    await waitForFile(markerInspect);
-    seedLock(dir, { owner: "lane-replacement", pid: process.pid });
-    rmSync(markerInspect);
-    // The reclaimer has now moved the replacement aside and is paused again,
-    // before restoring it; the name is free. A third acquirer takes it.
-    await waitForFile(markerRestore);
-    seedLock(dir, { owner: "lane-late", pid: process.pid });
-    rmSync(markerRestore);
-    const result = await pending;
-    expect(result.status).toBe(75);
-    expect(result.stderr).toContain("never deleted");
-    // The name holds the third acquirer's lock, intact…
-    expect(lockFile(dir, "owner").trim()).toBe("lane-late");
-    // …and the moved replacement is still aside, untouched by the reclaimer.
-    expect(readdirSync(dir).filter((e) => e.startsWith("cf-gate.lock.reclaim."))).toHaveLength(1);
-    const aside = readdirSync(dir).find((entry) => entry.startsWith("cf-gate.lock.reclaim."));
-    if (!aside) throw new Error("the moved replacement was deleted rather than left aside");
-    expect(readFileSync(join(dir, aside, "owner"), "utf8").trim()).toBe("lane-replacement");
-  }, 15_000);
+  test(
+    "a reclaimer whose replacement was moved while the name is taken leaves it aside, never deletes it",
+    async () => {
+      const dir = scratch();
+      const markerInspect = join(dir, "paused-after-inspect");
+      const markerRestore = join(dir, "paused-before-restore");
+      seedLock(dir, {
+        owner: "lane-old",
+        pid: reapedPid(),
+        beat: Math.floor(Date.now() / 1000) - 700,
+      });
+      const pending = runLockAsyncIn(dir, ["acquire", "lane-new"], {
+        CF_GATE_CALLER_PID: "424242",
+        CF_GATE_TEST_PAUSE_AFTER_INSPECT: markerInspect,
+        CF_GATE_TEST_PAUSE_BEFORE_RESTORE: markerRestore,
+      });
+      await waitForFile(markerInspect);
+      seedLock(dir, { owner: "lane-replacement", pid: process.pid });
+      rmSync(markerInspect);
+      // The reclaimer has now moved the replacement aside and is paused again,
+      // before restoring it; the name is free. A third acquirer takes it.
+      await waitForFile(markerRestore);
+      seedLock(dir, { owner: "lane-late", pid: process.pid });
+      rmSync(markerRestore);
+      const result = await pending;
+      expect(result.status).toBe(75);
+      expect(result.stderr).toContain("never deleted");
+      // The name holds the third acquirer's lock, intact…
+      expect(lockFile(dir, "owner").trim()).toBe("lane-late");
+      // …and the moved replacement is still aside, untouched by the reclaimer.
+      expect(readdirSync(dir).filter((e) => e.startsWith("cf-gate.lock.reclaim."))).toHaveLength(1);
+      const aside = readdirSync(dir).find((entry) => entry.startsWith("cf-gate.lock.reclaim."));
+      if (!aside) throw new Error("the moved replacement was deleted rather than left aside");
+      expect(readFileSync(join(dir, aside, "owner"), "utf8").trim()).toBe("lane-replacement");
+    },
+    scaled(15_000),
+  );
 
   test("a non-numeric stale threshold is refused", () => {
     const dir = scratch();
@@ -537,53 +570,61 @@ describe("gate-lock.sh", () => {
     expect(lockFile(dir, "owner").trim()).toBe("lane-b");
   });
 
-  test("a creator paused before the rename leaves no lock at the name, then completes atomically", async () => {
-    // Creation writes the candidate aside and renames it onto the name, so a
-    // contender can never observe a half-written lock — only an abandoned one.
-    const dir = scratch();
-    const marker = join(dir, "paused-before-mv");
-    const pending = runLockAsyncIn(dir, ["acquire", "lane-a"], {
-      CF_GATE_CALLER_PID: "424242",
-      CF_GATE_TEST_PAUSE_BEFORE_MV: marker,
-    });
-    await waitForFile(marker);
-    expect(existsSync(lockDir(dir))).toBe(false);
-    const candDir = leftoverCands(dir).at(0);
-    if (!candDir) throw new Error("no candidate directory while the creator is paused");
-    expect(readFileSync(join(dir, candDir, "owner"), "utf8").trim()).toBe("lane-a");
-    expect(readFileSync(join(dir, candDir, "pid"), "utf8").trim()).toBe("424242");
-    expect(Number(readFileSync(join(dir, candDir, "beat"), "utf8"))).toBeGreaterThan(0);
-    rmSync(marker);
-    const result = await pending;
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("acquired by lane-a");
-    expect(lockFile(dir, "owner").trim()).toBe("lane-a");
-    expect(lockFile(dir, "pid").trim()).toBe("424242");
-    expect(leftoverCands(dir)).toEqual([]);
-  }, 15_000);
+  test(
+    "a creator paused before the rename leaves no lock at the name, then completes atomically",
+    async () => {
+      // Creation writes the candidate aside and renames it onto the name, so a
+      // contender can never observe a half-written lock — only an abandoned one.
+      const dir = scratch();
+      const marker = join(dir, "paused-before-mv");
+      const pending = runLockAsyncIn(dir, ["acquire", "lane-a"], {
+        CF_GATE_CALLER_PID: "424242",
+        CF_GATE_TEST_PAUSE_BEFORE_MV: marker,
+      });
+      await waitForFile(marker);
+      expect(existsSync(lockDir(dir))).toBe(false);
+      const candDir = leftoverCands(dir).at(0);
+      if (!candDir) throw new Error("no candidate directory while the creator is paused");
+      expect(readFileSync(join(dir, candDir, "owner"), "utf8").trim()).toBe("lane-a");
+      expect(readFileSync(join(dir, candDir, "pid"), "utf8").trim()).toBe("424242");
+      expect(Number(readFileSync(join(dir, candDir, "beat"), "utf8"))).toBeGreaterThan(0);
+      rmSync(marker);
+      const result = await pending;
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("acquired by lane-a");
+      expect(lockFile(dir, "owner").trim()).toBe("lane-a");
+      expect(lockFile(dir, "pid").trim()).toBe("424242");
+      expect(leftoverCands(dir)).toEqual([]);
+    },
+    scaled(15_000),
+  );
 
-  test("a creator paused before the rename loses the name to a contender and reports busy", async () => {
-    const dir = scratch();
-    const marker = join(dir, "paused-before-mv");
-    const pending = runLockAsyncIn(dir, ["acquire", "lane-a"], {
-      CF_GATE_CALLER_PID: "424242",
-      CF_GATE_TEST_PAUSE_BEFORE_MV: marker,
-    });
-    await waitForFile(marker);
-    // The contender takes the name while the first is paused before its rename.
-    const contender = runLockIn(dir, ["acquire", "lane-b"], {
-      CF_GATE_CALLER_PID: String(process.pid),
-    });
-    expect(contender.status).toBe(0);
-    rmSync(marker);
-    const result = await pending;
-    expect(result.status).toBe(75);
-    expect(result.stderr).toContain("busy");
-    expect(result.stderr).toContain("lane-b");
-    // The winner's lock is intact, and no candidate directories leak.
-    expect(lockFile(dir, "owner").trim()).toBe("lane-b");
-    expect(leftoverCands(dir)).toEqual([]);
-  }, 15_000);
+  test(
+    "a creator paused before the rename loses the name to a contender and reports busy",
+    async () => {
+      const dir = scratch();
+      const marker = join(dir, "paused-before-mv");
+      const pending = runLockAsyncIn(dir, ["acquire", "lane-a"], {
+        CF_GATE_CALLER_PID: "424242",
+        CF_GATE_TEST_PAUSE_BEFORE_MV: marker,
+      });
+      await waitForFile(marker);
+      // The contender takes the name while the first is paused before its rename.
+      const contender = runLockIn(dir, ["acquire", "lane-b"], {
+        CF_GATE_CALLER_PID: String(process.pid),
+      });
+      expect(contender.status).toBe(0);
+      rmSync(marker);
+      const result = await pending;
+      expect(result.status).toBe(75);
+      expect(result.stderr).toContain("busy");
+      expect(result.stderr).toContain("lane-b");
+      // The winner's lock is intact, and no candidate directories leak.
+      expect(lockFile(dir, "owner").trim()).toBe("lane-b");
+      expect(leftoverCands(dir)).toEqual([]);
+    },
+    scaled(15_000),
+  );
 
   test("heartbeat refreshes the beat, and fails loudly without a lock", () => {
     const dir = scratch();
@@ -699,38 +740,42 @@ describe("gate-lock.sh", () => {
 // the lock cannot be taken from under it and the command cannot outlive the
 // signal that was meant to stop it.
 describe("gate-lock.sh run <lane> -- <command>", () => {
-  test("holds the lock under its own pid while the command runs, and is busy to everyone else", async () => {
-    const dir = scratch();
-    // The command waits for the test to let it finish, so the lock is
-    // provably held for the whole window in which the contender looks at it —
-    // not merely held at some point during a run that may already be over.
-    const { child, done } = startLockIn(
-      dir,
-      ["run", "lane-a", "--", "sh", "-c", 'while [ ! -f "$TMPDIR/go" ]; do sleep 1; done'],
-      // An inherited caller pid is exactly what `run` must ignore: it belongs
-      // to whatever launched this script, and that is free to exit mid-command.
-      { CF_GATE_CALLER_PID: "424242" },
-    );
-    await waitForLock(dir);
-    expect(lockFile(dir, "owner").trim()).toBe("lane-a");
-    expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
+  test(
+    "holds the lock under its own pid while the command runs, and is busy to everyone else",
+    async () => {
+      const dir = scratch();
+      // The command waits for the test to let it finish, so the lock is
+      // provably held for the whole window in which the contender looks at it —
+      // not merely held at some point during a run that may already be over.
+      const { child, done } = startLockIn(
+        dir,
+        ["run", "lane-a", "--", "sh", "-c", 'while [ ! -f "$TMPDIR/go" ]; do sleep 1; done'],
+        // An inherited caller pid is exactly what `run` must ignore: it belongs
+        // to whatever launched this script, and that is free to exit mid-command.
+        { CF_GATE_CALLER_PID: "424242" },
+      );
+      await waitForLock(dir);
+      expect(lockFile(dir, "owner").trim()).toBe("lane-a");
+      expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
 
-    const contender = runLockIn(dir, ["acquire", "lane-b"], {
-      CF_GATE_CALLER_PID: String(process.pid),
-    });
-    expect(contender.status).toBe(75);
-    expect(contender.stderr).toContain("busy");
-    // The refusal leaves the holder's lock — and its pid — exactly as it was.
-    expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
-    expect(lockFile(dir, "owner").trim()).toBe("lane-a");
+      const contender = runLockIn(dir, ["acquire", "lane-b"], {
+        CF_GATE_CALLER_PID: String(process.pid),
+      });
+      expect(contender.status).toBe(75);
+      expect(contender.stderr).toContain("busy");
+      // The refusal leaves the holder's lock — and its pid — exactly as it was.
+      expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
+      expect(lockFile(dir, "owner").trim()).toBe("lane-a");
 
-    writeFileSync(join(dir, "go"), "");
-    const result = await done;
-    expect(result.status).toBe(0);
-    // Released the moment the command is done: a lock outliving its run is a
-    // lock the next lane trips over for no reason.
-    expect(existsSync(lockDir(dir))).toBe(false);
-  }, 15_000);
+      writeFileSync(join(dir, "go"), "");
+      const result = await done;
+      expect(result.status).toBe(0);
+      // Released the moment the command is done: a lock outliving its run is a
+      // lock the next lane trips over for no reason.
+      expect(existsSync(lockDir(dir))).toBe(false);
+    },
+    scaled(15_000),
+  );
 
   test("its heartbeat keeps the beat fresh for as long as the command runs", () => {
     const dir = scratch();
@@ -764,67 +809,71 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     expect(result.stdout).toContain("heartbeat pid");
   }, 20_000);
 
-  test("a reader never catches the beat empty while the heartbeat refreshes it", async () => {
-    // Under both shells, like the signal tests: the beat is written by a
-    // subshell that sleeps and forks, and the two shells differ in what they
-    // defer and when, so a property of the beat that holds under one of them is
-    // a property of that shell until it has been run under the other.
-    for (const shell of SIGNAL_SHELLS) {
-      const dir = scratch();
-      // `acquire` and `status` read the beat, and an empty one reads as STALE:
-      // a reader that caught a heartbeat mid-write would judge a live,
-      // heartbeating holder's lock reclaimable, and take it. The beat is
-      // replaced by a rename, so a reader sees the previous beat or the next one
-      // and never nothing. Hammering the file for the life of a run that
-      // heartbeats every second is the only way to look at that window; the
-      // sample count is asserted too, so a reader that stalled cannot pass this
-      // by having read nothing.
-      const { child, done } = startLockIn(
-        dir,
-        ["run", "lane-a", "--", "sleep", "7"],
-        {
-          CF_GATE_HEARTBEAT_SECONDS: "1",
-        },
-        shell,
-      );
-      await waitForLock(dir);
-      const beat = join(lockDir(dir), "beat");
-      let reads = 0;
-      let empty = 0;
-      let missing = 0;
-      const deadline = Date.now() + 5_000;
-      while (Date.now() < deadline) {
-        let value: string;
-        try {
-          value = readFileSync(beat, "utf8");
-        } catch {
-          // Counted, not skipped: the beat is replaced by a rename, so it is
-          // never absent, and a read that fails is a defect this test would
-          // otherwise step over — on the way to passing on the reads that worked.
-          missing += 1;
-          continue;
+  test(
+    "a reader never catches the beat empty while the heartbeat refreshes it",
+    async () => {
+      // Under both shells, like the signal tests: the beat is written by a
+      // subshell that sleeps and forks, and the two shells differ in what they
+      // defer and when, so a property of the beat that holds under one of them is
+      // a property of that shell until it has been run under the other.
+      for (const shell of SIGNAL_SHELLS) {
+        const dir = scratch();
+        // `acquire` and `status` read the beat, and an empty one reads as STALE:
+        // a reader that caught a heartbeat mid-write would judge a live,
+        // heartbeating holder's lock reclaimable, and take it. The beat is
+        // replaced by a rename, so a reader sees the previous beat or the next one
+        // and never nothing. Hammering the file for the life of a run that
+        // heartbeats every second is the only way to look at that window; the
+        // sample count is asserted too, so a reader that stalled cannot pass this
+        // by having read nothing.
+        const { child, done } = startLockIn(
+          dir,
+          ["run", "lane-a", "--", "sleep", "7"],
+          {
+            CF_GATE_HEARTBEAT_SECONDS: "1",
+          },
+          shell,
+        );
+        await waitForLock(dir);
+        const beat = join(lockDir(dir), "beat");
+        let reads = 0;
+        let empty = 0;
+        let missing = 0;
+        const deadline = Date.now() + 5_000;
+        while (Date.now() < deadline) {
+          let value: string;
+          try {
+            value = readFileSync(beat, "utf8");
+          } catch {
+            // Counted, not skipped: the beat is replaced by a rename, so it is
+            // never absent, and a read that fails is a defect this test would
+            // otherwise step over — on the way to passing on the reads that worked.
+            missing += 1;
+            continue;
+          }
+          reads += 1;
+          if (value === "") empty += 1;
+          // Yield periodically, so the child's stdout and stderr keep being drained
+          // while this loop runs. Nothing here fills a pipe today — `run` prints two
+          // lines and the heartbeat's stdio is detached — but a reader that starves
+          // the writer it is measuring is a measurement that can stop measuring.
+          if (reads % 500 === 0) await new Promise((resolve) => setImmediate(resolve));
         }
-        reads += 1;
-        if (value === "") empty += 1;
-        // Yield periodically, so the child's stdout and stderr keep being drained
-        // while this loop runs. Nothing here fills a pipe today — `run` prints two
-        // lines and the heartbeat's stdio is detached — but a reader that starves
-        // the writer it is measuring is a measurement that can stop measuring.
-        if (reads % 500 === 0) await new Promise((resolve) => setImmediate(resolve));
+        // All three, and the sample count with them: a reader that stalled, or one
+        // whose reads were all failures, must not be able to pass.
+        expect({ shell, reads: reads > 1000, empty, missing }).toEqual({
+          shell,
+          reads: true,
+          empty: 0,
+          missing: 0,
+        });
+        process.kill(child.pid as number, "SIGTERM");
+        const result = await done;
+        expect({ shell, status: result.status }).toEqual({ shell, status: 143 });
       }
-      // All three, and the sample count with them: a reader that stalled, or one
-      // whose reads were all failures, must not be able to pass.
-      expect({ shell, reads: reads > 1000, empty, missing }).toEqual({
-        shell,
-        reads: true,
-        empty: 0,
-        missing: 0,
-      });
-      process.kill(child.pid as number, "SIGTERM");
-      const result = await done;
-      expect({ shell, status: result.status }).toEqual({ shell, status: 143 });
-    }
-  }, 30_000);
+    },
+    scaled(30_000),
+  );
 
   /**
    * One signal, from outside, at a `run` that is holding the lock around a
@@ -896,12 +945,12 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     // here, on a claim about elapsed time, and not on the clock running out.
     const settled = await waitFor(
       () => child.exitCode !== null || child.signalCode !== null,
-      5_000,
+      scaled(5_000),
       `run did not exit within 5000ms of ${signal}`,
     );
     expect({ shell, times, settled }).toEqual({ shell, times, settled: true });
     const elapsed = Date.now() - signalledAt;
-    expect({ shell, withinBudget: elapsed < 5_000 }).toEqual({ shell, withinBudget: true });
+    expect({ shell, withinBudget: elapsed < scaled(5_000) }).toEqual({ shell, withinBudget: true });
 
     const result = await done;
     // 130/143 are INT/TERM's own conventions, so a caller can tell a signalled
@@ -922,29 +971,45 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     await waitForDead(commandPid);
   }
 
-  test("TERM on run exits 143, releases the lock, and takes the command and the heartbeat with it", async () => {
-    for (const shell of SIGNAL_SHELLS) {
-      await signalRun(shell, "SIGTERM", 143);
-    }
-  }, 30_000);
+  test(
+    "TERM on run exits 143, releases the lock, and takes the command and the heartbeat with it",
+    async () => {
+      for (const shell of SIGNAL_SHELLS) {
+        await signalRun(shell, "SIGTERM", 143);
+      }
+    },
+    scaled(30_000),
+  );
 
-  test("INT on run exits 130, releases the lock, and stops the command too", async () => {
-    for (const shell of SIGNAL_SHELLS) {
-      await signalRun(shell, "SIGINT", 130);
-    }
-  }, 30_000);
+  test(
+    "INT on run exits 130, releases the lock, and stops the command too",
+    async () => {
+      for (const shell of SIGNAL_SHELLS) {
+        await signalRun(shell, "SIGINT", 130);
+      }
+    },
+    scaled(30_000),
+  );
 
-  test("TERM twice on run still releases the lock and reaps the heartbeat", async () => {
-    for (const shell of SIGNAL_SHELLS) {
-      await signalRun(shell, "SIGTERM", 143, 2);
-    }
-  }, 30_000);
+  test(
+    "TERM twice on run still releases the lock and reaps the heartbeat",
+    async () => {
+      for (const shell of SIGNAL_SHELLS) {
+        await signalRun(shell, "SIGTERM", 143, 2);
+      }
+    },
+    scaled(30_000),
+  );
 
-  test("INT twice on run still releases the lock and reaps the heartbeat", async () => {
-    for (const shell of SIGNAL_SHELLS) {
-      await signalRun(shell, "SIGINT", 130, 2);
-    }
-  }, 30_000);
+  test(
+    "INT twice on run still releases the lock and reaps the heartbeat",
+    async () => {
+      for (const shell of SIGNAL_SHELLS) {
+        await signalRun(shell, "SIGINT", 130, 2);
+      }
+    },
+    scaled(30_000),
+  );
 
   /**
    * The same two signals again against a command that is still ALIVE when the
@@ -1250,66 +1315,74 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     expect(result.stderr).toContain("FAILED to release the lock");
   });
 
-  test("a nested run is refused 75, never starts its command, and leaves no lock", () => {
-    const dir = scratch();
-    const marker = join(dir, "inner-ran");
-    // Same host lock, so a nested run is not a second holder: it must lose
-    // rather than deadlock or, worse, take the name from the run above it.
-    const result = runLockIn(dir, [
-      "run",
-      "lane-a",
-      "--",
-      "sh",
-      gateLockSh,
-      "run",
-      "lane-b",
-      "--",
-      "touch",
-      marker,
-    ]);
-    expect(result.status).toBe(75);
-    // The busy line is what tells a nested refusal from a command that merely
-    // exited 75 — and it is on stderr, where a busy answer belongs.
-    expect(result.stderr).toContain("busy");
-    expect(result.stderr).toContain("lane-a");
-    expect(existsSync(marker)).toBe(false);
-    // The outer run still cleans up after itself.
-    expect(existsSync(lockDir(dir))).toBe(false);
-  }, 15_000);
-
-  test("passes the command through quoted, and a -- inside it is just an argument", () => {
-    // Under both shells, because `"$@"` is the shell's own and the two differ:
-    // two arguments that contain spaces must arrive as two arguments, and the
-    // -- that separates them must be the FIRST one only: read as a separator
-    // again, the command would lose both.
-    for (const shell of SIGNAL_SHELLS) {
+  test(
+    "a nested run is refused 75, never starts its command, and leaves no lock",
+    () => {
       const dir = scratch();
-      const out = join(dir, "args");
-      const result = runLockIn(
-        dir,
-        [
-          "run",
-          "lane-a",
-          "--",
-          "sh",
-          "-c",
-          'printf "%s\\n" "$@" > "$TMPDIR/args"',
-          "args",
-          "--",
-          "a b",
-          "c d",
-        ],
-        {},
-        15_000,
-        shell,
-      );
-      expect({ shell, status: result.status }).toEqual({ shell, status: 0 });
-      expect({ shell, args: readFileSync(out, "utf8").trim().split("\n") }).toEqual({
-        shell,
-        args: ["--", "a b", "c d"],
-      });
-    }
-  }, 15_000);
+      const marker = join(dir, "inner-ran");
+      // Same host lock, so a nested run is not a second holder: it must lose
+      // rather than deadlock or, worse, take the name from the run above it.
+      const result = runLockIn(dir, [
+        "run",
+        "lane-a",
+        "--",
+        "sh",
+        gateLockSh,
+        "run",
+        "lane-b",
+        "--",
+        "touch",
+        marker,
+      ]);
+      expect(result.status).toBe(75);
+      // The busy line is what tells a nested refusal from a command that merely
+      // exited 75 — and it is on stderr, where a busy answer belongs.
+      expect(result.stderr).toContain("busy");
+      expect(result.stderr).toContain("lane-a");
+      expect(existsSync(marker)).toBe(false);
+      // The outer run still cleans up after itself.
+      expect(existsSync(lockDir(dir))).toBe(false);
+    },
+    scaled(15_000),
+  );
+
+  test(
+    "passes the command through quoted, and a -- inside it is just an argument",
+    () => {
+      // Under both shells, because `"$@"` is the shell's own and the two differ:
+      // two arguments that contain spaces must arrive as two arguments, and the
+      // -- that separates them must be the FIRST one only: read as a separator
+      // again, the command would lose both.
+      for (const shell of SIGNAL_SHELLS) {
+        const dir = scratch();
+        const out = join(dir, "args");
+        const result = runLockIn(
+          dir,
+          [
+            "run",
+            "lane-a",
+            "--",
+            "sh",
+            "-c",
+            'printf "%s\\n" "$@" > "$TMPDIR/args"',
+            "args",
+            "--",
+            "a b",
+            "c d",
+          ],
+          {},
+          15_000,
+          shell,
+        );
+        expect({ shell, status: result.status }).toEqual({ shell, status: 0 });
+        expect({ shell, args: readFileSync(out, "utf8").trim().split("\n") }).toEqual({
+          shell,
+          args: ["--", "a b", "c d"],
+        });
+      }
+    },
+    scaled(15_000),
+  );
 
   test("a missing -- or an empty command is a usage error, and takes no lock", () => {
     const dir = scratch();
@@ -1337,29 +1410,33 @@ describe("gate-lock.sh run <lane> -- <command>", () => {
     expect(existsSync(lockDir(dir))).toBe(false);
   });
 
-  test("a run signalled between taking the lock and recording it still gives it back", async () => {
-    const dir = scratch();
-    // The window the test hook exists for: the lock is on disk and names this
-    // run, but `run` has not yet recorded that it holds it. A signal here used
-    // to leave the lock behind with a pid that was about to die — reclaimable
-    // by the next lane, in the meantime, and never released by the only process
-    // that could.
-    const marker = join(dir, "paused-after-acquire");
-    const { child, done } = startLockIn(dir, ["run", "lane-a", "--", "sleep", "30"], {
-      CF_GATE_TEST_PAUSE_AFTER_ACQUIRE: marker,
-    });
-    await waitForFile(marker);
-    expect(lockFile(dir, "owner").trim()).toBe("lane-a");
-    expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
-    process.kill(child.pid as number, "SIGTERM");
-    rmSync(marker);
+  test(
+    "a run signalled between taking the lock and recording it still gives it back",
+    async () => {
+      const dir = scratch();
+      // The window the test hook exists for: the lock is on disk and names this
+      // run, but `run` has not yet recorded that it holds it. A signal here used
+      // to leave the lock behind with a pid that was about to die — reclaimable
+      // by the next lane, in the meantime, and never released by the only process
+      // that could.
+      const marker = join(dir, "paused-after-acquire");
+      const { child, done } = startLockIn(dir, ["run", "lane-a", "--", "sleep", "30"], {
+        CF_GATE_TEST_PAUSE_AFTER_ACQUIRE: marker,
+      });
+      await waitForFile(marker);
+      expect(lockFile(dir, "owner").trim()).toBe("lane-a");
+      expect(lockFile(dir, "pid").trim()).toBe(String(child.pid));
+      process.kill(child.pid as number, "SIGTERM");
+      rmSync(marker);
 
-    const result = await done;
-    expect(result.status).toBe(143);
-    // No command was running under it — the command is started after this
-    // window — so nothing else is holding the lock, and `run` is gone.
-    expect(existsSync(lockDir(dir))).toBe(false);
-  }, 15_000);
+      const result = await done;
+      expect(result.status).toBe(143);
+      // No command was running under it — the command is started after this
+      // window — so nothing else is holding the lock, and `run` is gone.
+      expect(existsSync(lockDir(dir))).toBe(false);
+    },
+    scaled(15_000),
+  );
 
   test("a zero heartbeat interval is refused: a spin is not a heartbeat", () => {
     const dir = scratch();
@@ -1551,97 +1628,101 @@ describe("gate-lock.sh CF_GATE_SLOTS", () => {
     }
   });
 
-  test("three runs hold three slots at once, and a fourth is busy", async () => {
-    const dir = scratch();
-    // Each command waits for a file of its own, so all three are provably parked
-    // at once — three locks on the host at the same moment, not three runs that
-    // happened to overlap.
-    //
-    // A cwd each, under the one TMPDIR. Three lanes in ONE checkout is three
-    // gates against one tree, which is exactly what the lock exists to prevent:
-    // `verify-manifests` mutates the tree it verifies, so two of them at once
-    // write manifests the other is reading. Before that rule existed this test
-    // ran all three from the vitest process's own cwd and was three gates in one
-    // worktree; the host lock did not notice and the row review caught it. Three
-    // plain scratch cwds are three worktrees that differ under `pwd -P`, which is
-    // the branch a directory outside any repository takes.
-    const lanes = ["lane-a", "lane-b", "lane-c"];
-    const cwds = lanes.map(() => scratch());
-    const started = lanes.map((lane, n) =>
-      startLockIn(
-        dir,
-        ["run", lane, "--", "sh", "-c", `while [ ! -f "$TMPDIR/go-${lane}" ]; do sleep 1; done`],
-        { CF_GATE_SLOTS: "3" },
-        "sh",
-        cwds[n],
-      ),
-    );
-    try {
-      for (let n = 0; n < lanes.length; n++) {
-        await waitForFile(join(slotDir(dir, n), "pid"));
-      }
-      // WHICH run wins which slot is a race — three acquirers are three
-      // concurrent mkdirs, and spawn order decides nothing — so the claim is
-      // about the set of holders and about each slot naming the pid of the run
-      // that owns it, not about which lane landed where.
-      const owners = lanes.map((_, n) => slotFile(slotDir(dir, n), "owner").trim());
-      expect([...owners].sort()).toEqual([...lanes].sort());
-      for (let n = 0; n < lanes.length; n++) {
-        const holder = started[lanes.indexOf(owners[n])];
-        // The holder is the run itself, exactly as at SLOTS=1.
-        expect(slotFile(slotDir(dir, n), "pid").trim()).toBe(String(holder.child.pid));
-        // …and it recorded the worktree it is standing in, which is the one
-        // thing that lets the next acquirer see it. The set is the set of cwds,
-        // matched as a set because the slot-to-run mapping above is a race: if
-        // these were not three different worktrees the whole host would be
-        // answering about one tree and this test would be passing for the wrong
-        // reason.
-        expect(slotFile(slotDir(dir, n), "worktree").trim()).toBe(
-          plainWorktree(cwds[lanes.indexOf(owners[n])]),
+  test(
+    "three runs hold three slots at once, and a fourth is busy",
+    async () => {
+      const dir = scratch();
+      // Each command waits for a file of its own, so all three are provably parked
+      // at once — three locks on the host at the same moment, not three runs that
+      // happened to overlap.
+      //
+      // A cwd each, under the one TMPDIR. Three lanes in ONE checkout is three
+      // gates against one tree, which is exactly what the lock exists to prevent:
+      // `verify-manifests` mutates the tree it verifies, so two of them at once
+      // write manifests the other is reading. Before that rule existed this test
+      // ran all three from the vitest process's own cwd and was three gates in one
+      // worktree; the host lock did not notice and the row review caught it. Three
+      // plain scratch cwds are three worktrees that differ under `pwd -P`, which is
+      // the branch a directory outside any repository takes.
+      const lanes = ["lane-a", "lane-b", "lane-c"];
+      const cwds = lanes.map(() => scratch());
+      const started = lanes.map((lane, n) =>
+        startLockIn(
+          dir,
+          ["run", lane, "--", "sh", "-c", `while [ ! -f "$TMPDIR/go-${lane}" ]; do sleep 1; done`],
+          { CF_GATE_SLOTS: "3" },
+          "sh",
+          cwds[n],
+        ),
+      );
+      try {
+        for (let n = 0; n < lanes.length; n++) {
+          await waitForFile(join(slotDir(dir, n), "pid"));
+        }
+        // WHICH run wins which slot is a race — three acquirers are three
+        // concurrent mkdirs, and spawn order decides nothing — so the claim is
+        // about the set of holders and about each slot naming the pid of the run
+        // that owns it, not about which lane landed where.
+        const owners = lanes.map((_, n) => slotFile(slotDir(dir, n), "owner").trim());
+        expect([...owners].sort()).toEqual([...lanes].sort());
+        for (let n = 0; n < lanes.length; n++) {
+          const holder = started[lanes.indexOf(owners[n])];
+          // The holder is the run itself, exactly as at SLOTS=1.
+          expect(slotFile(slotDir(dir, n), "pid").trim()).toBe(String(holder.child.pid));
+          // …and it recorded the worktree it is standing in, which is the one
+          // thing that lets the next acquirer see it. The set is the set of cwds,
+          // matched as a set because the slot-to-run mapping above is a race: if
+          // these were not three different worktrees the whole host would be
+          // answering about one tree and this test would be passing for the wrong
+          // reason.
+          expect(slotFile(slotDir(dir, n), "worktree").trim()).toBe(
+            plainWorktree(cwds[lanes.indexOf(owners[n])]),
+          );
+        }
+        expect(lanes.map((_, n) => slotFile(slotDir(dir, n), "worktree").trim()).sort()).toEqual(
+          cwds.map(plainWorktree).sort(),
         );
-      }
-      expect(lanes.map((_, n) => slotFile(slotDir(dir, n), "worktree").trim()).sort()).toEqual(
-        cwds.map(plainWorktree).sort(),
-      );
 
-      // A fourth caller, with the host's full three slots busy.
-      const fourth = runLockIn(
-        dir,
-        ["run", "lane-d", "--", "true"],
-        { CF_GATE_SLOTS: "3" },
-        15_000,
-        "sh",
-        scratch(),
-      );
-      expect(fourth.status).toBe(75);
-      expect(fourth.stderr).toContain("busy");
-      // It names the first holder, which is the one a retrying caller waits for
-      // — and the first slot is whichever run happened to win it.
-      expect(fourth.stderr).toContain(slotFile(slotDir(dir, 0), "owner").trim());
-      // Refused, not damaging: all three locks are intact and no fourth appeared.
-      expect(existsSync(join(dir, "cf-gate.lock.3"))).toBe(false);
-      for (let n = 0; n < lanes.length; n++) {
-        expect(slotFile(slotDir(dir, n), "owner").trim()).toBe(owners[n]);
-      }
+        // A fourth caller, with the host's full three slots busy.
+        const fourth = runLockIn(
+          dir,
+          ["run", "lane-d", "--", "true"],
+          { CF_GATE_SLOTS: "3" },
+          15_000,
+          "sh",
+          scratch(),
+        );
+        expect(fourth.status).toBe(75);
+        expect(fourth.stderr).toContain("busy");
+        // It names the first holder, which is the one a retrying caller waits for
+        // — and the first slot is whichever run happened to win it.
+        expect(fourth.stderr).toContain(slotFile(slotDir(dir, 0), "owner").trim());
+        // Refused, not damaging: all three locks are intact and no fourth appeared.
+        expect(existsSync(join(dir, "cf-gate.lock.3"))).toBe(false);
+        for (let n = 0; n < lanes.length; n++) {
+          expect(slotFile(slotDir(dir, n), "owner").trim()).toBe(owners[n]);
+        }
 
-      for (const lane of lanes) writeFileSync(join(dir, `go-${lane}`), "");
-      for (const run of started) {
-        const result = await run.done;
-        expect(result.status).toBe(0);
+        for (const lane of lanes) writeFileSync(join(dir, `go-${lane}`), "");
+        for (const run of started) {
+          const result = await run.done;
+          expect(result.status).toBe(0);
+        }
+        // Each holder gave back its own slot and nobody else's.
+        for (let n = 0; n < lanes.length; n++) {
+          expect(existsSync(slotDir(dir, n))).toBe(false);
+        }
+      } finally {
+        // A failed assertion must not leave three runs parked on files in a TMPDIR
+        // the afterEach has already removed — they would loop forever with nobody
+        // left to release their slots. Releasing again is harmless: the go files
+        // are writes, and `done` is one promise however many callers await it.
+        for (const lane of lanes) writeFileSync(join(dir, `go-${lane}`), "");
+        await Promise.all(started.map((run) => run.done));
       }
-      // Each holder gave back its own slot and nobody else's.
-      for (let n = 0; n < lanes.length; n++) {
-        expect(existsSync(slotDir(dir, n))).toBe(false);
-      }
-    } finally {
-      // A failed assertion must not leave three runs parked on files in a TMPDIR
-      // the afterEach has already removed — they would loop forever with nobody
-      // left to release their slots. Releasing again is harmless: the go files
-      // are writes, and `done` is one promise however many callers await it.
-      for (const lane of lanes) writeFileSync(join(dir, `go-${lane}`), "");
-      await Promise.all(started.map((run) => run.done));
-    }
-  }, 30_000);
+    },
+    scaled(30_000),
+  );
 
   test("a dead holder's slot is reclaimed, and the live slot beside it is left alone", () => {
     const dir = scratch();
@@ -1967,77 +2048,81 @@ describe("gate-lock.sh CF_GATE_SLOTS", () => {
     }
   });
 
-  test("a same-worktree refusal that has lost its own slot leaves the replacement alone", async () => {
-    // `rm -rf "$LOCK"` is a statement about the NAME, and by the time a refused
-    // acquire gives its slot back the name may not be the one it created. The
-    // window is real, not theoretical: MH5's acquire window is gate.sh being
-    // TERMed while the acquire child carries on, so the recorded caller pid is
-    // gone mid-acquire and the next contender judges the slot reclaimable on
-    // its first pass. The refused acquire then deletes the replacement — a lock
-    // it never held and never named, belonging to a gate that is running now.
-    //
-    // So the give-back re-reads owner and pid and removes only while both are
-    // still this invocation's, the contract release already uses. Driving it
-    // needs the scan and the removal parked apart from each other, which
-    // CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM is for: the two are
-    // microseconds apart in production, and a test that raced them would be
-    // racing luck.
-    const dir = scratch();
-    const worktree = scratch();
-    // A live same-worktree holder in slot 0, so this acquirer cannot take slot
-    // 0, wins slot 1, and is then refused — the only path that reaches a
-    // give-back at all.
-    const holder = seedSlot(dir, 0, {
-      owner: "lane-holder",
-      pid: process.pid,
-      worktree: plainWorktree(worktree),
-    });
-    const hook = join(dir, "paused-before-same-worktree-rm");
-    const { done } = startLockIn(
-      dir,
-      ["acquire", "lane-late"],
-      {
-        CF_GATE_CALLER_PID: "424242",
-        CF_GATE_SLOTS: "2",
-        CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM: hook,
-      },
-      "sh",
-      worktree,
-    );
-    try {
-      // Parked between the scan and the give-back, holding slot 1.
-      await waitForFile(hook);
-      expect(existsSync(slotDir(dir, 1))).toBe(true);
-      // The name is taken over while it waits: the slot is removed and a
-      // contender's lock, with another owner and another pid, is seeded there.
-      rmSync(slotDir(dir, 1), { recursive: true, force: true });
-      const replacement = seedSlot(dir, 1, {
-        owner: "lane-replacement",
+  test(
+    "a same-worktree refusal that has lost its own slot leaves the replacement alone",
+    async () => {
+      // `rm -rf "$LOCK"` is a statement about the NAME, and by the time a refused
+      // acquire gives its slot back the name may not be the one it created. The
+      // window is real, not theoretical: MH5's acquire window is gate.sh being
+      // TERMed while the acquire child carries on, so the recorded caller pid is
+      // gone mid-acquire and the next contender judges the slot reclaimable on
+      // its first pass. The refused acquire then deletes the replacement — a lock
+      // it never held and never named, belonging to a gate that is running now.
+      //
+      // So the give-back re-reads owner and pid and removes only while both are
+      // still this invocation's, the contract release already uses. Driving it
+      // needs the scan and the removal parked apart from each other, which
+      // CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM is for: the two are
+      // microseconds apart in production, and a test that raced them would be
+      // racing luck.
+      const dir = scratch();
+      const worktree = scratch();
+      // A live same-worktree holder in slot 0, so this acquirer cannot take slot
+      // 0, wins slot 1, and is then refused — the only path that reaches a
+      // give-back at all.
+      const holder = seedSlot(dir, 0, {
+        owner: "lane-holder",
         pid: process.pid,
         worktree: plainWorktree(worktree),
       });
-      rmSync(hook, { force: true });
+      const hook = join(dir, "paused-before-same-worktree-rm");
+      const { done } = startLockIn(
+        dir,
+        ["acquire", "lane-late"],
+        {
+          CF_GATE_CALLER_PID: "424242",
+          CF_GATE_SLOTS: "2",
+          CF_GATE_TEST_PAUSE_BEFORE_SAME_WORKTREE_RM: hook,
+        },
+        "sh",
+        worktree,
+      );
+      try {
+        // Parked between the scan and the give-back, holding slot 1.
+        await waitForFile(hook);
+        expect(existsSync(slotDir(dir, 1))).toBe(true);
+        // The name is taken over while it waits: the slot is removed and a
+        // contender's lock, with another owner and another pid, is seeded there.
+        rmSync(slotDir(dir, 1), { recursive: true, force: true });
+        const replacement = seedSlot(dir, 1, {
+          owner: "lane-replacement",
+          pid: process.pid,
+          worktree: plainWorktree(worktree),
+        });
+        rmSync(hook, { force: true });
 
-      const result = await done;
-      // Still the same refusal: the guard changes what is removed, not the
-      // answer the caller gets.
-      expect(result.status).toBe(75);
-      expect(result.stderr).toContain("same worktree");
-      // The replacement is intact — both halves of the identity disagree with
-      // this invocation's, and the give-back removed nothing.
-      expect(slotFile(replacement, "owner").trim()).toBe("lane-replacement");
-      expect(slotFile(replacement, "pid").trim()).toBe(String(process.pid));
-      // And the holder it yielded to in the first place never moved.
-      expect(slotFile(holder, "owner").trim()).toBe("lane-holder");
-    } finally {
-      // A failed assertion must not leave the child parked on a hook file in a
-      // TMPDIR the afterEach has already removed: it would sleep forever with
-      // nobody left to release its slot. Removing the file releases it, and
-      // awaiting `done` is safe however many callers await it.
-      rmSync(hook, { force: true });
-      await done;
-    }
-  }, 30_000);
+        const result = await done;
+        // Still the same refusal: the guard changes what is removed, not the
+        // answer the caller gets.
+        expect(result.status).toBe(75);
+        expect(result.stderr).toContain("same worktree");
+        // The replacement is intact — both halves of the identity disagree with
+        // this invocation's, and the give-back removed nothing.
+        expect(slotFile(replacement, "owner").trim()).toBe("lane-replacement");
+        expect(slotFile(replacement, "pid").trim()).toBe(String(process.pid));
+        // And the holder it yielded to in the first place never moved.
+        expect(slotFile(holder, "owner").trim()).toBe("lane-holder");
+      } finally {
+        // A failed assertion must not leave the child parked on a hook file in a
+        // TMPDIR the afterEach has already removed: it would sleep forever with
+        // nobody left to release its slot. Removing the file releases it, and
+        // awaiting `done` is safe however many callers await it.
+        rmSync(hook, { force: true });
+        await done;
+      }
+    },
+    scaled(30_000),
+  );
 
   test("a holder with no worktree file never blocks: it never claimed one", () => {
     // Compatibility, and not optional: locks outlive the script that wrote
@@ -3387,53 +3472,59 @@ describe("gate-lock.sh: GATE_LOCK_DIR, the host-wide pool", () => {
     expect(result.stdout).toContain(`${older} held by lane-a project unknown`);
   });
 
-  test("at the beat pause the staged beat is inside the pool, and never on TMPDIR", async () => {
-    // The reason the beat is staged where it is. This used to write
-    // ${TMPDIR}/cf-gate.beatnew.$$ and rename it onto $LOCK/beat, which was one
-    // directory for as long as the lock's parent WAS TMPDIR — and stops being one
-    // the moment the pool moves: on midnight the pool is tmpfs and TMPDIR is
-    // mergerfs, so the rename becomes copy-then-unlink, the beat is briefly
-    // absent at the name, and beat_is_stale reads an absent beat as stale. The
-    // next acquirer then reclaims a lock whose holder is alive and heartbeating.
-    //
-    // Two scratch directories, deliberately DIFFERENT ones: with TMPDIR and the
-    // pool in the same directory the assertion could not tell a beat staged
-    // beside the lock from one that happened to land in the right place.
-    const tmp = scratch();
-    const pool = poolAt(scratch());
-    const hooks = scratch();
-    const marker = join(hooks, "paused-before-beat-mv");
-    const { child, done } = startLockIn(
-      tmp,
-      ["run", "lane-a", "--", "sleep", "30"],
-      {
-        GATE_LOCK_DIR: pool,
-        CF_GATE_HEARTBEAT_SECONDS: "1",
-        CF_GATE_TEST_PAUSE_BEFORE_BEAT_MV: marker,
-      },
-      "sh",
-      scratch(),
-    );
-    try {
-      await waitForFile(poolSlot(pool, 0));
-      await waitForFile(marker);
-      // A refresh is parked with its beat staged, and the staged file is a
-      // SIBLING of the slot: in the pool, named after the heartbeat's own pid.
-      const staged = readdirSync(pool).filter((entry) => /^gate\.lock\.beatnew\.\d+$/.test(entry));
-      expect(staged).toEqual([expect.stringMatching(/^gate\.lock\.beatnew\.\d+$/)]);
-      // And nothing at all on TMPDIR: no beat staged for a rename that would cross
-      // a filesystem, and no lock of this project's own.
-      expect(readdirSync(tmp).filter((entry) => entry.startsWith("cf-gate.beatnew"))).toEqual([]);
-      expect(readdirSync(tmp).filter((entry) => entry.startsWith("cf-gate.lock"))).toEqual([]);
-    } finally {
-      rmSync(marker, { force: true });
-      await stopLock(child, done);
-    }
-    // The staged file goes with the lock it belonged to: the run released that
-    // lock, the heartbeat's rename delivered the beat, and what is left in the
-    // pool is the marker and nothing else.
-    expect(readdirSync(pool).sort()).toEqual([".format"]);
-  }, 30_000);
+  test(
+    "at the beat pause the staged beat is inside the pool, and never on TMPDIR",
+    async () => {
+      // The reason the beat is staged where it is. This used to write
+      // ${TMPDIR}/cf-gate.beatnew.$$ and rename it onto $LOCK/beat, which was one
+      // directory for as long as the lock's parent WAS TMPDIR — and stops being one
+      // the moment the pool moves: on midnight the pool is tmpfs and TMPDIR is
+      // mergerfs, so the rename becomes copy-then-unlink, the beat is briefly
+      // absent at the name, and beat_is_stale reads an absent beat as stale. The
+      // next acquirer then reclaims a lock whose holder is alive and heartbeating.
+      //
+      // Two scratch directories, deliberately DIFFERENT ones: with TMPDIR and the
+      // pool in the same directory the assertion could not tell a beat staged
+      // beside the lock from one that happened to land in the right place.
+      const tmp = scratch();
+      const pool = poolAt(scratch());
+      const hooks = scratch();
+      const marker = join(hooks, "paused-before-beat-mv");
+      const { child, done } = startLockIn(
+        tmp,
+        ["run", "lane-a", "--", "sleep", "30"],
+        {
+          GATE_LOCK_DIR: pool,
+          CF_GATE_HEARTBEAT_SECONDS: "1",
+          CF_GATE_TEST_PAUSE_BEFORE_BEAT_MV: marker,
+        },
+        "sh",
+        scratch(),
+      );
+      try {
+        await waitForFile(poolSlot(pool, 0));
+        await waitForFile(marker);
+        // A refresh is parked with its beat staged, and the staged file is a
+        // SIBLING of the slot: in the pool, named after the heartbeat's own pid.
+        const staged = readdirSync(pool).filter((entry) =>
+          /^gate\.lock\.beatnew\.\d+$/.test(entry),
+        );
+        expect(staged).toEqual([expect.stringMatching(/^gate\.lock\.beatnew\.\d+$/)]);
+        // And nothing at all on TMPDIR: no beat staged for a rename that would cross
+        // a filesystem, and no lock of this project's own.
+        expect(readdirSync(tmp).filter((entry) => entry.startsWith("cf-gate.beatnew"))).toEqual([]);
+        expect(readdirSync(tmp).filter((entry) => entry.startsWith("cf-gate.lock"))).toEqual([]);
+      } finally {
+        rmSync(marker, { force: true });
+        await stopLock(child, done);
+      }
+      // The staged file goes with the lock it belonged to: the run released that
+      // lock, the heartbeat's rename delivered the beat, and what is left in the
+      // pool is the marker and nothing else.
+      expect(readdirSync(pool).sort()).toEqual([".format"]);
+    },
+    scaled(30_000),
+  );
 
   test("two acquirers racing into an absent pool both take a slot, and one .format is published", async () => {
     // The `ln` is what makes this safe, and two SEQUENTIAL runs would prove

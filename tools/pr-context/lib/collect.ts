@@ -1,6 +1,6 @@
 import { Project, Node, SyntaxKind } from "ts-morph";
 import type { DiffInfo } from "./diff.js";
-import { safePath } from "./paths.js";
+import { safePath, isCollectable } from "./paths.js";
 
 export interface CollectedBlock {
   readonly tier: number;
@@ -46,6 +46,12 @@ function cutTo120Lines(text: string): string {
   const l = text.split("\n");
   if (l.length <= 120) return text;
   return l.slice(0, 120).join("\n") + "\n// … cut at 120 lines";
+}
+
+function cutTo40Lines(text: string): string {
+  const lines = text.split("\n");
+  if (lines.length <= 40) return text;
+  return lines.slice(0, 40).join("\n") + "\n// … cut at 40 lines for budget";
 }
 
 function escapeRegex(s: string): string {
@@ -480,6 +486,111 @@ function buildMigrationTables(sources: Map<string, string>): Set<string> {
   return tables;
 }
 
+function distanceToHunk(
+  start: number,
+  end: number,
+  range: { baseStart: number; baseCount: number },
+): number {
+  const hEnd = range.baseStart + range.baseCount - 1;
+  return Math.max(range.baseStart - end, start - hEnd, 0);
+}
+
+// Tier 7 ranks second: after tier 1 (port implementations) and before the
+// helpers tier (tier 2). Numbered 7 so existing tier numbers and tests
+// do not move.
+function tier7(decls: Decl[], diff: DiffInfo): BlockCandidate[] {
+  const blocks: BlockCandidate[] = [];
+  for (const file of diff.files) {
+    // A file the diff lists with no hunk (a mode-only change) has no changed
+    // lines to be near, so it contributes nothing here.
+    if (file.ranges.length === 0) continue;
+    for (const decl of decls) {
+      if (decl.filePath !== file.path) continue;
+      let overlaps = false;
+      for (const range of file.ranges) {
+        if (rangesOverlap(decl.startLine, decl.endLine, range.baseStart, range.baseCount)) {
+          overlaps = true;
+          break;
+        }
+      }
+      if (overlaps) continue;
+      if (decl.kind === "arrow" && !decl.isExported) continue;
+      let minDist = Infinity;
+      for (const range of file.ranges) {
+        minDist = Math.min(minDist, distanceToHunk(decl.startLine, decl.endLine, range));
+      }
+      blocks.push({
+        tier: 7,
+        path: decl.filePath,
+        startLine: decl.startLine,
+        endLine: decl.endLine,
+        symbol: symbolFor(decl),
+        why: `unchanged in ${safePath(file.path)}, ${minDist} line(s) from a changed hunk`,
+        text: decl.text,
+        reach: minDist,
+      });
+    }
+  }
+  return blocks.sort((a, b) => {
+    if (a.reach !== b.reach) return a.reach - b.reach;
+    return a.startLine - b.startLine;
+  });
+}
+
+function isRouteOrWebPath(path: string): boolean {
+  return path.startsWith("apps/api/server/routes/") || path.startsWith("apps/web/src/");
+}
+
+function getStem(baseName: string): string {
+  const dotIndex = baseName.indexOf(".");
+  return dotIndex === -1 ? baseName : baseName.slice(0, dotIndex);
+}
+
+// Tier 8 ranks last: same-directory siblings of a changed route or component.
+function tier8(decls: Decl[], sources: Map<string, string>, diff: DiffInfo): BlockCandidate[] {
+  const changedPaths = new Set(diff.files.map((f) => f.path));
+  const blocks: BlockCandidate[] = [];
+  for (const file of diff.files) {
+    if (!isRouteOrWebPath(file.path)) continue;
+    const dir = file.path.substring(0, file.path.lastIndexOf("/"));
+    const changedStem = getStem(file.path.split("/").pop()!);
+    const siblings: string[] = [];
+    for (const sibling of sources.keys()) {
+      if (!isCollectable(sibling)) continue;
+      if (sibling === file.path) continue;
+      if (changedPaths.has(sibling)) continue;
+      const siblingDir = sibling.substring(0, sibling.lastIndexOf("/"));
+      if (siblingDir !== dir) continue;
+      siblings.push(sibling);
+    }
+    siblings.sort((a, b) => {
+      const aSame = getStem(a.split("/").pop()!) === changedStem;
+      const bSame = getStem(b.split("/").pop()!) === changedStem;
+      if (aSame !== bSame) return aSame ? -1 : 1;
+      return a.localeCompare(b);
+    });
+    for (let i = 0; i < Math.min(siblings.length, 6); i++) {
+      const siblingPath = siblings[i]!;
+      for (const decl of decls) {
+        if (decl.filePath !== siblingPath) continue;
+        if (decl.kind === "method") continue;
+        if (!decl.isExported) continue;
+        blocks.push({
+          tier: 8,
+          path: decl.filePath,
+          startLine: decl.startLine,
+          endLine: decl.endLine,
+          symbol: symbolFor(decl),
+          why: `sibling of ${safePath(file.path)} in the same directory`,
+          text: cutTo40Lines(decl.text),
+          reach: 0,
+        });
+      }
+    }
+  }
+  return blocks;
+}
+
 export function collectBlocks(sources: Map<string, string>, diff: DiffInfo): CollectedBlock[] {
   const project = buildProject(sources);
   const decls = collectDecls(project);
@@ -499,6 +610,7 @@ export function collectBlocks(sources: Map<string, string>, diff: DiffInfo): Col
 
   const changedSymbols = findChangedSymbols(decls, diff);
   acceptBlocks(accepted, seen, sortCandidates(tier1(decls, interfaces, nameReach)), diff);
+  acceptBlocks(accepted, seen, tier7(decls, diff), diff);
   acceptBlocks(accepted, seen, sortCandidates(tier2(decls, nameReach)), diff);
   acceptBlocks(accepted, seen, sortCandidates(tier3(decls, changedSymbols, nameReach)), diff);
   acceptBlocks(accepted, seen, sortCandidates(tier4(decls, filteredDiff, nameReach)), diff);
@@ -509,6 +621,7 @@ export function collectBlocks(sources: Map<string, string>, diff: DiffInfo): Col
     diff,
   );
   acceptBlocks(accepted, seen, sortCandidates(tier6(sources, filteredDiff, tableReach)), diff);
+  acceptBlocks(accepted, seen, tier8(decls, sources, diff), diff);
 
   return accepted;
 }
