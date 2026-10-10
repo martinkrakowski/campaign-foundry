@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "FU-slug-uuid-409",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "      await this.assertSlugIsNoCampaignId(tx, brief.id);\n      const { rows: inserted } = await tx.query<{ id: string }>(",
+      "after": "      const { rows: inserted } = await tx.query<{ id: string }>(",
+      "because": "Removing the helper call from createBriefInternal lets a uuid-shaped slug equal to a same-org campaign's id create a colliding row, so 'createBrief refuses a slug equal to a same-org campaign's uuid' fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-brief-store.slug-uuid.test.ts",
+        "-t",
+        "createBrief refuses a slug equal to a same-org campaign's uuid"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "      await this.assertSlugIsNoCampaignId(tx, slug);\n      const { rows } = await tx.query<{ id: string }>(",
+      "after": "      const { rows } = await tx.query<{ id: string }>(",
+      "because": "Removing the helper call from createCampaign lets a uuid-shaped slug equal to a same-org campaign's id mint a colliding row, so 'createCampaign refuses a slug equal to a same-org campaign's uuid' fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-brief-store.slug-uuid.test.ts",
+        "-t",
+        "createCampaign refuses a slug equal to a same-org campaign's uuid"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "where c.org_id = $1 and c.id = $2::uuid",
+      "after": "where c.id = $2::uuid",
+      "because": "Dropping the org_id predicate from the collision select lets a campaign of one org collide with a create in another org, so 'another organisation's campaign uuid is not a collision' fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-brief-store.slug-uuid.test.ts",
+        "-t",
+        "another organisation's campaign uuid is not a collision"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/pg-brief-store.ts",
+      "before": "and not exists (select 1 from campaign where org_id = $1 and slug = $2::text)",
+      "after": "and not exists (select 1 from campaign where slug = $2::text)",
+      "because": "Dropping the org_id predicate from the grandfather sub-clause lets a row of ANOTHER org under that slug exempt this org's create, so the colliding pair is created and 'another organisation's row under that slug does not grandfather the create' fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-brief-store.slug-uuid.test.ts",
+        "-t",
+        "another organisation's row under that slug does not grandfather the create"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
