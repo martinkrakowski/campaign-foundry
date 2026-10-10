@@ -129,6 +129,43 @@ describe("LogoField", () => {
     expect(input.getAttribute("aria-describedby")).toBe("logo-error-id");
   });
 
+  // The two handlers below are what make the control editable at all, and neither
+  // had a test: the file input's, which forwards the picked file and then clears
+  // itself so re-picking the same file fires again, and the mirror's, which is the
+  // only route by which a keyboard or a paste can change the ref.
+  test("a picked file is uploaded once and the file input is left empty", () => {
+    const onUploadFile = vi.fn();
+    render(<LogoField value="" onChange={vi.fn()} onUploadFile={onUploadFile} />);
+    const input = screen.getByLabelText(messages.logoUploadAria) as HTMLInputElement;
+    const file = new File(["png"], "hydra-logo.png", { type: "image/png" });
+
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(onUploadFile).toHaveBeenCalledTimes(1);
+    expect(onUploadFile).toHaveBeenCalledWith(file);
+    expect(input.value).toBe("");
+
+    // A dialog the operator cancels fires a change with nothing in it: no upload,
+    // and no error either — nothing happened, and it must not read as something did.
+    fireEvent.change(input, { target: { files: [] } });
+    expect(onUploadFile).toHaveBeenCalledTimes(1);
+  });
+
+  test("the mirror input reports its edits to onChange", () => {
+    const onChange = vi.fn();
+    render(<LogoField value="logo.png" onChange={onChange} onUploadFile={vi.fn()} />);
+
+    const mirror = screen.getByLabelText(messages.logoPathAria);
+    fireEvent.change(mirror, { target: { value: "assets/inputs/camp/other.png" } });
+    expect(onChange).toHaveBeenCalledWith("assets/inputs/camp/other.png");
+  });
+
+  test("an unset logo that is invalid draws its drop zone in the error colour", () => {
+    const { container } = render(
+      <LogoField value="" onChange={vi.fn()} onUploadFile={vi.fn()} invalid />,
+    );
+    expect(container.querySelector(".border-error")).not.toBeNull();
+  });
+
   // D203/#666 — under the object backend `value` is a uuid. Everything below is
   // about the one rule that follows from it: nothing a person can read may be that
   // uuid, and everything that reads `value` as a NAME (the label, the title, the
@@ -234,6 +271,100 @@ describe("LogoField", () => {
       expect(screen.getByText("hydra-bottle-logo.png")).toBeTruthy();
       expect(screen.getAllByText("PNG")).toHaveLength(2);
       expect(container.textContent).not.toContain("assets/inputs/camp/");
+    });
+
+    // The mirror input is the one part of the control a screen reader actually
+    // READS, and its value is the uuid: "Logo Path, 3f2504e0-4f89-…" is 36
+    // characters of nothing. The name the tile shows is the answer, so the field
+    // is described by it — and described by nothing at all when there is no name
+    // to add, because a description is only ever an addition.
+    test("the hidden field is described by the asset's name when the value is an id", () => {
+      render(
+        <LogoField
+          value={ID}
+          displayName="hydra-logo.png"
+          onChange={vi.fn()}
+          onUploadFile={vi.fn()}
+        />,
+      );
+
+      const mirror = screen.getByLabelText(messages.logoPathAria);
+      const describedBy = (mirror.getAttribute("aria-describedby") ?? "").split(" ");
+      const texts = describedBy.map((id) => document.getElementById(id)?.textContent ?? "");
+      expect(texts).toContain("Asset: hydra-logo.png");
+    });
+
+    test("a caller's own description is kept beside the name", () => {
+      render(
+        <>
+          <span id="hint-1">Required</span>
+          <LogoField
+            value={ID}
+            displayName="hydra-logo.png"
+            onChange={vi.fn()}
+            onUploadFile={vi.fn()}
+            aria-describedby="hint-1"
+          />
+        </>,
+      );
+
+      const mirror = screen.getByLabelText(messages.logoPathAria);
+      const ids = (mirror.getAttribute("aria-describedby") ?? "").split(" ");
+      expect(ids).toHaveLength(2);
+      expect(ids[0]).toBe("hint-1");
+      expect(document.getElementById(ids[1])?.textContent).toBe("Asset: hydra-logo.png");
+    });
+
+    test("with no display name the hidden field has no added description", () => {
+      const { container } = render(
+        <LogoField value="assets/inputs/camp/logo.png" onChange={vi.fn()} onUploadFile={vi.fn()} />,
+      );
+
+      const mirror = screen.getByLabelText(messages.logoPathAria);
+      expect(mirror.hasAttribute("aria-describedby")).toBe(false);
+      expect(container.textContent).not.toContain("Asset:");
+    });
+
+    test("a display name equal to the value adds nothing", () => {
+      render(
+        <LogoField
+          value="hydra-logo.png"
+          displayName="hydra-logo.png"
+          onChange={vi.fn()}
+          onUploadFile={vi.fn()}
+        />,
+      );
+
+      const mirror = screen.getByLabelText(messages.logoPathAria);
+      expect(mirror.hasAttribute("aria-describedby")).toBe(false);
+    });
+
+    test("a blank display name adds nothing", () => {
+      const { container } = render(
+        <LogoField value={ID} displayName="   " onChange={vi.fn()} onUploadFile={vi.fn()} />,
+      );
+
+      const mirror = screen.getByLabelText(messages.logoPathAria);
+      expect(mirror.hasAttribute("aria-describedby")).toBe(false);
+      expect(container.textContent).not.toContain("Asset:");
+    });
+
+    test("an empty caller description leaves only the name's id, with no stray space", () => {
+      render(
+        <LogoField
+          value={ID}
+          displayName="hydra-logo.png"
+          onChange={vi.fn()}
+          onUploadFile={vi.fn()}
+          aria-describedby=""
+        />,
+      );
+
+      const mirror = screen.getByLabelText(messages.logoPathAria);
+      const described = mirror.getAttribute("aria-describedby") ?? "";
+      expect(described).toBe(described.trim());
+      expect(described.split(" ")).toHaveLength(1);
+      expect(document.getElementById(described)?.textContent).toBe("Asset: hydra-logo.png");
     });
   });
 });
