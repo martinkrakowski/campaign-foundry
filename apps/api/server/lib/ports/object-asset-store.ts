@@ -138,7 +138,7 @@ export class ObjectAssetStore implements AssetStorePort {
     briefId: string,
     name: string,
     bytes: Buffer,
-  ): Promise<{ path: string; id: string }> {
+  ): Promise<{ path: string; id: string; objectKey: ObjectKey }> {
     const campaignId = await this.resolveCampaignId(briefId);
     // Before the put, not after: an unresolved reference is the one failure with
     // nothing to undo, and a `23503` from the foreign key would be a genuine
@@ -194,7 +194,7 @@ export class ObjectAssetStore implements AssetStorePort {
       }
       throw error;
     }
-    return { path: this.assetRelPath(briefId, name), id: assetId };
+    return { path: this.assetRelPath(briefId, name), id: assetId, objectKey: key };
   }
 
   /**
