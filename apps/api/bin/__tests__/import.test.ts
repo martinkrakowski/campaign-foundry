@@ -282,9 +282,11 @@ describe("import CLI (PT-8a)", () => {
     expect(err).toEqual([]);
     const text = out.join("\n");
     expect(text).toContain("0  nothing was refused and nothing is partial");
-    expect(text).toContain("1  at least one campaign is partial, or the run itself failed");
     expect(text).toContain(
-      "3  nothing is partial and at least one campaign was refused before any write",
+      "1  at least one campaign is partial, or the run itself failed, or the run wrote at least one campaign and refused at least one",
+    );
+    expect(text).toContain(
+      "3  the run wrote nothing: at least one campaign was refused before any write, none was created or completed, nothing is partial",
     );
   });
 

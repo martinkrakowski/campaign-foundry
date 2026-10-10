@@ -56,8 +56,8 @@ export const APPLY_USAGE =
   " --org <id> --expect <digest> --result <path> [--include-samples]" +
   "\nexit codes:\n" +
   "  0  nothing was refused and nothing is partial\n" +
-  "  1  at least one campaign is partial, or the run itself failed\n" +
-  "  3  nothing is partial and at least one campaign was refused before any write";
+  "  1  at least one campaign is partial, or the run itself failed, or the run wrote at least one campaign and refused at least one\n" +
+  "  3  the run wrote nothing: at least one campaign was refused before any write, none was created or completed, nothing is partial";
 
 /** argv's flags, as {@link resolveSource} takes them — plus the flag each subcommand owns. */
 type ParsedFlags = SourceFlags & {
@@ -307,6 +307,26 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
     const hashedCtx: HashedContext = { ...ctx, expectedHashes: replanned.expectedHashes };
     const resultPath = flags.result;
     await writer.header();
+    for (const refusal of replanned.result.refusals) {
+      const slug = refusal.slug ?? refusal.sourcePath;
+      io.stdout(`${slug}: refused: ${refusal.reason}`);
+      try {
+        await writer.add({
+          slug,
+          outcome: "refused",
+          reason: refusal.reason,
+          minted: { assets: [] },
+          unreferencedInputs: { count: 0, names: [] },
+        });
+      } catch (error) {
+        const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+        throw new Error(
+          `could not write the result file ${JSON.stringify(resultPath)}` +
+            (code ? ` (${code})` : "") +
+            `: ${errorMessage(error)}`,
+        );
+      }
+    }
     const counts = await applyCampaigns(
       hashedCtx,
       replanned.result.campaigns,
@@ -346,7 +366,7 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
     if (counts.partial) return 1;
     if (refused > 0) {
       io.stdout(`${refused} campaign(s) refused; nothing of theirs was written`);
-      return 3;
+      return counts.created + counts.completed === 0 ? 3 : 1;
     }
     return 0;
   } catch (error) {

@@ -1159,7 +1159,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
     }
   });
 
-  test("a partial campaign makes apply exit 1 and a refusal before any write exits 0", async () => {
+  test("a partial campaign makes apply exit 1 and a refusal before any write exits 3", async () => {
     // A campaign that writes a row and then fails on its only asset write is
     // partial: exit 1 (the campaign row is left, to be completed by a rerun).
     {
@@ -1197,6 +1197,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         ).toBe(3);
         expect(err).toEqual([]);
         expect(out).toEqual([
+          'camp: refused: ref "assets/inputs/camp/logo.png": no file at "assets/inputs/camp/logo.png"',
           "0 created, 0 completed, 0 unchanged, 1 refused",
           "1 campaign(s) refused; nothing of theirs was written",
         ]);
@@ -1223,6 +1224,9 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         ).toBe(3);
         expect(err).toEqual([]);
         expect(out).toEqual([
+          'alpha: refused: ref "assets/inputs/logo.png": no file at "assets/inputs/logo.png"',
+          'beta: refused: ref "assets/inputs/logo.png": no file at "assets/inputs/logo.png"',
+          'gamma: refused: ref "assets/inputs/logo.png": no file at "assets/inputs/logo.png"',
           "0 created, 0 completed, 0 unchanged, 3 refused",
           "3 campaign(s) refused; nothing of theirs was written",
         ]);
@@ -1232,6 +1236,56 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       }
     } finally {
       dropRoot(root);
+    }
+  });
+
+  test("a run that writes one campaign and refuses another exits 1 and names the refused one", async () => {
+    const root = makeRoot();
+    const output = join(root, "output");
+    mkdirSync(output, { recursive: true });
+    writeAt(root, "assets/inputs/logo.png", PNG);
+    writeBrief(root, "alpha.yaml", {
+      id: "alpha",
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/logo.png" },
+      ],
+    });
+    writeBrief(root, "package.yaml", {
+      id: "package",
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/logo.png" },
+      ],
+    });
+    const result = freshResult("1");
+    try {
+      const real = await replannedDigest(root, output);
+      env.reinstall();
+      const { out, err, deps } = io();
+      expect(
+        await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+      ).toBe(1);
+      expect((await counts(env)).campaigns).toBe(1);
+      expect(err).toEqual([]);
+      const lines = readFileSync(result, "utf8")
+        .split("\n")
+        .filter((l) => l.length > 0);
+      expect(JSON.parse(lines[0])).toMatchObject({ kind: "header" });
+      expect(JSON.parse(lines[1])).toMatchObject({
+        kind: "campaign",
+        slug: "package",
+        outcome: "refused",
+      });
+      expect(JSON.parse(lines[2])).toMatchObject({
+        kind: "campaign",
+        slug: "alpha",
+        outcome: "created",
+      });
+      expect(JSON.parse(lines[3]).kind).toBe("summary");
+      expect(out).toContain('package: refused: "package" is a reserved campaign id.');
+      expect(out).toContain("1 created, 0 completed, 0 unchanged, 1 refused");
+      expect(out).toContain("1 campaign(s) refused; nothing of theirs was written");
+    } finally {
+      rmSync(result, { force: true });
     }
   });
 
