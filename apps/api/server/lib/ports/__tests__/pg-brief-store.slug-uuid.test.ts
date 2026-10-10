@@ -147,9 +147,12 @@ describe("PgBriefStore slug-equals-campaign-uuid guard (FU-slug-uuid-409)", () =
   test("after a refused create the purge guard has nothing to refuse", async () => {
     const created = await store.createCampaign(A_SLUG);
 
-    // The refused creates in tests 1-4 are what keep a sibling from landing
-    // with `slug == this campaign's uuid`; absent that sibling, the purge guard
-    // (sharesCampaignKey) finds no key-sharing row for A.
+    // The colliding create is attempted HERE, so this is about its aftermath:
+    // without the refusal the sibling would land with `slug == A's uuid`, and
+    // the purge guard would then find a key-sharing row for A for ever.
+    await expect(store.createBrief(brief(created.campaignId))).rejects.toMatchObject({
+      code: "EEXIST",
+    });
     expect(await sharesCampaignKey(db, "local", created.campaignId, created.slug)).toBe(false);
   });
 });
