@@ -871,7 +871,9 @@ describe("the write flags the shell's leave guard reads (D185)", () => {
       // represent — the registry takes the entry out, and the guard releases.
       routed.releasePut();
       await waitFor(() => expect(flag("pending-write")).toBe("false"));
-      expect(unload().defaultPrevented).toBe(false);
+      // The flag's text commits before the guard's effect cleanup runs: wait
+      // for the listener to actually drop, not just for the flag to read false.
+      await waitFor(() => expect(unload().defaultPrevented).toBe(false));
     });
 
     test("one editor's write settling cannot clear another editor's pending write (Qodo 2)", async () => {
@@ -1055,7 +1057,7 @@ describe("the write flags the shell's leave guard reads (D185)", () => {
 
       await waitFor(() => expect(flag("failed-write")).toBe("false"));
       expect(flag("pending-write")).toBe("false");
-      expect(unload().defaultPrevented).toBe(false);
+      await waitFor(() => expect(unload().defaultPrevented).toBe(false));
       await waitFor(() =>
         expect(
           routed.calls.some(
