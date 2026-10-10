@@ -1007,11 +1007,13 @@ describe("the write flags the shell's leave guard reads (D185)", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
       await waitFor(() => expect(flag("failed-write")).toBe("false"));
-      // The guard STAYS armed here, and rightly: a Save does not make the
-      // editor clean (`save`, not `load` — edits made while the request was in
-      // flight survive and stay dirty), so `isDirty` is arming it now. What
-      // the test is about is that the failure is no longer contributing.
-      expect(unload().defaultPrevented).toBe(true);
+      // And the guard RELEASES: nothing was typed while the Save was in flight,
+      // so the saved snapshot now equals the brief on screen, `isDirty` goes
+      // false in the editor's own effect, and with the failure cleared nothing
+      // arms the guard. That effect runs after the flag's text commits, so the
+      // release is waited for, not read in the same tick (this line once read
+      // `true` here and passed only while the stale `isDirty` lingered).
+      await waitFor(() => expect(unload().defaultPrevented).toBe(false));
       // And the Save really did land — the clear is the supersede doing its
       // job, not a flag quietly forgotten.
       await waitFor(() =>
