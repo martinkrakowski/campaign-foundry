@@ -3813,6 +3813,67 @@ describe("BriefPage — the editor is one scrolling column (SG1 / SG-D2)", () =>
       });
       expect(await screen.findByText("beta.png")).toBeTruthy();
     });
+
+    test("a failed listing refetch keeps the names an earlier listing resolved", async () => {
+      const landed = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+      const fresh = "9c5b94b1-35ad-49bb-b118-8e8fc24af80e";
+      const entry = (id: string, name: string) => ({
+        id,
+        name,
+        type: "image/png",
+        size: 1,
+        thumbnailUrl: "",
+      });
+      let refetches = 0;
+      // The first listing resolves and names A; the refetch that the new id B opens
+      // FAILS — the catch must keep what the first listing resolved for this
+      // campaign, not replace it with an empty one.
+      const stored = {
+        ...brief("ok"),
+        products: [{ ...brief("ok").products[0], logoPath: landed }, brief("ok").products[1]],
+      };
+      vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+        const u = String(url);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (u.includes("/campaigns/assets?briefId=")) {
+          refetches += 1;
+          if (refetches === 1) {
+            return Promise.resolve(json({ assets: [entry(landed, "alpha.png")] }));
+          }
+          return Promise.resolve(json({ error: "listing unavailable" }, 500));
+        }
+        if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+          return Promise.resolve(json({ motion: true }));
+        }
+        if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+          return Promise.resolve(
+            json({ briefs: [{ file: "ok.yaml", brief: stored, revision: "r1" }] }),
+          );
+        }
+        return Promise.resolve(json({}, 404));
+      });
+      renderWithRun(<Editor id="ok" />);
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
+      );
+      expect(await screen.findByText("alpha.png")).toBeTruthy();
+
+      // Product 1's logo becomes an id the landed listing has never seen, so the
+      // editor refetches — and that request is the one that fails.
+      const mirrors = screen
+        .getAllByLabelText("Logo Path")
+        .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
+      fireEvent.change(mirrors[1] as HTMLInputElement, { target: { value: fresh } });
+      await waitFor(() => expect(refetches).toBe(2));
+
+      // A's tile keeps its name through the failed refetch; B reads unavailable,
+      // and nothing anywhere reads as still loading. The request being counted
+      // is not the same moment as its failure being handled, so the settled
+      // state is waited for rather than read in the same tick.
+      await waitFor(() => expect(screen.getByText(messages.assetUnavailable)).toBeTruthy());
+      expect(screen.getByText("alpha.png")).toBeTruthy();
+      expect(screen.queryByText(messages.assetPending)).toBeNull();
+    });
   });
 
   /**
