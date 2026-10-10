@@ -81,8 +81,6 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importReportRow", () => {
         throw new Error("the database went away");
       },
     } as unknown as ReportStorePort;
-    await expect(importReportRow(failing, "camp", LOOSE)).rejects.toThrow(
-      "the database went away",
-    );
+    await expect(importReportRow(failing, "camp", LOOSE)).rejects.toThrow("the database went away");
   });
 });
