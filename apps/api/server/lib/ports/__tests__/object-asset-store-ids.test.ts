@@ -102,6 +102,10 @@ describe("ObjectAssetStore by id (PT-4k1, D208c)", () => {
       // which is what "the id IS the key" means, and what a lookup that rebuilt
       // the key from a slug would get wrong the moment a campaign is renamed.
       expect(await store.get(inputKey(ORG, campaignId, written.id!))).toBeDefined();
+      // The write hands back that same key, and it is the one a later lookup
+      // answers: the import's result file records it without a second read.
+      expect(written.objectKey).toBe(inputKey(ORG, campaignId, written.id!));
+      expect(await assets.assetObjectKey(SLUG, NAME)).toBe(written.objectKey);
     });
 
     test("another org's id answers undefined and NEVER its bytes (HIGH)", async () => {
