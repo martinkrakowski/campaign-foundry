@@ -139,7 +139,7 @@ export async function writeOrReuse(
       return {
         id: written.id as string,
         name: candidate,
-        key: (await assets.assetObjectKey(slug, candidate)) as string,
+        key: written.objectKey as string,
         reused: false,
       };
     } catch (error) {

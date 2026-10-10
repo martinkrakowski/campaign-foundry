@@ -194,7 +194,7 @@ export class ObjectAssetStore implements AssetStorePort {
       }
       throw error;
     }
-    return { path: this.assetRelPath(briefId, name), id: assetId };
+    return { path: this.assetRelPath(briefId, name), id: assetId, objectKey: key };
   }
 
   /**
