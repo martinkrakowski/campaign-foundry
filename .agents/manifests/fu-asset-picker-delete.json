@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "FU-asset-picker-delete",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "if (!gone) setRefocusTick((tick) => tick + 1);",
+      "after": "if (!gone) setRefocusTick((tick) => tick);",
+      "because": "The counter bump is the whole refusal signal: writing the same value back means it never changes, so the effect never runs and focus stays on the drawer's Close button after a refused delete. The test fails on the waitFor that expects document.activeElement to be the row's Delete button.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "a refused delete returns focus to the Delete button of its row"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "triggerRef.current = event.currentTarget;",
+      "after": "triggerRef.current = null;",
+      "because": "Nulling the ref instead of remembering the pressed button leaves the effect with nothing to focus, so focus stays on the drawer's Close button after a refused delete. The test fails on the same waitFor that expects document.activeElement to be the row's Delete button.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "a refused delete returns focus to the Delete button of its row"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
