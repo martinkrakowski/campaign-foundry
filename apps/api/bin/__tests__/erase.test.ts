@@ -10,6 +10,7 @@ import {
   reportFailure,
 } from "../erase.js";
 import { eraseUser, ErasePassTwoError } from "../../server/lib/deletion/erase-user.js";
+import { safeId } from "../../server/lib/auth/id.js";
 import {
   seedWorld,
   dumpDatabase,
@@ -19,6 +20,10 @@ import {
   LOCAL_OWNER,
 } from "../../server/lib/deletion/__tests__/erase-user-fixtures.js";
 import type { World } from "../../server/lib/deletion/__tests__/erase-user-fixtures.js";
+
+/** Two well-formed ids (the shape `safeId()` mints) that name no user. */
+const ID_A = "a".repeat(32);
+const ID_B = "b".repeat(32);
 
 /** Insert one surviving row per actor column, all carrying `TARGET.id`. */
 async function insertSurvivors(db: SqlClient, world: World): Promise<void> {
@@ -109,15 +114,72 @@ describe("erase CLI (bin/erase.ts)", () => {
       runErase(["--email", "a@x.com", "--email", "b@x.com"], open, (l) => log.push(l)),
     ).rejects.toThrow(USAGE_ERASE);
     await expect(
-      runErase(["--user", "u1", "--user", "u2"], open, (l) => log.push(l)),
+      runErase(["--user", ID_A, "--user", ID_B], open, (l) => log.push(l)),
     ).rejects.toThrow(USAGE_ERASE);
     await expect(
-      runErase(["--email", "a@x.com", "--user", "u1"], open, (l) => log.push(l)),
+      runErase(["--email", "a@x.com", "--user", ID_A], open, (l) => log.push(l)),
     ).rejects.toThrow(USAGE_ERASE);
     await expect(runErase(["--apply"], open, (l) => log.push(l))).rejects.toThrow(USAGE_ERASE);
 
     expect(open).not.toHaveBeenCalled();
     expect(log).toEqual([]);
+  });
+
+  test("erase CLI refuses a user id that is not shaped like a minted id before opening anything", async () => {
+    const open = vi.fn();
+    const log: string[] = [];
+    const token = "erased:00000000-0000-4000-8000-000000000000";
+    const bad: readonly string[] = [
+      TARGET.email, // an address typed where the id belongs
+      "u-target", // not hex
+      "operator", // the three non-user actor values
+      "local",
+      "cli:erase-user",
+      token, // a token where the id belongs
+      ` ${TARGET.id}`, // whitespace around a real id
+      `${TARGET.id} `,
+      `${TARGET.id}\n`,
+      TARGET.id.slice(1), // 31 characters
+      `${TARGET.id}0`, // 33 characters
+      TARGET.id.toUpperCase(),
+      `${TARGET.id};id`, // would print into the "To finish, run:" line
+    ];
+    for (const value of bad) {
+      const shapes: readonly (readonly string[])[] = [
+        ["--user", value],
+        ["--user", value, "--apply"],
+        ["--finish", token, "--user", value, "--apply"],
+      ];
+      for (const args of shapes) {
+        let message = "";
+        try {
+          await runErase(args, open, (l) => log.push(l));
+        } catch (e) {
+          message = e instanceof Error ? e.message : String(e);
+        }
+        expect(message).toBe(USAGE_ERASE);
+      }
+    }
+    expect(open).not.toHaveBeenCalled();
+    expect(log).toEqual([]);
+  });
+
+  test("erase CLI accepts every id that safeId mints", () => {
+    const token = "erased:00000000-0000-4000-8000-000000000000";
+    for (let i = 0; i < 200; i++) {
+      const id = safeId();
+      expect(parseEraseArgs(["--user", id, "--apply"])).toEqual({
+        mode: "erase",
+        ref: { userId: id },
+        apply: true,
+      });
+      expect(parseEraseArgs(["--finish", token, "--user", id, "--apply"])).toEqual({
+        mode: "finish",
+        token,
+        userId: id,
+        apply: true,
+      });
+    }
   });
 
   test("erase CLI refuses apply together with dry-run", async () => {
@@ -138,14 +200,14 @@ describe("erase CLI (bin/erase.ts)", () => {
       ref: { email: "a@x.com" },
       apply: false,
     });
-    expect(parseEraseArgs(["--user", "u1", "--apply"])).toEqual({
+    expect(parseEraseArgs(["--user", ID_A, "--apply"])).toEqual({
       mode: "erase",
-      ref: { userId: "u1" },
+      ref: { userId: ID_A },
       apply: true,
     });
-    expect(parseEraseArgs(["--user", "u1", "--dry-run"])).toEqual({
+    expect(parseEraseArgs(["--user", ID_A, "--dry-run"])).toEqual({
       mode: "erase",
-      ref: { userId: "u1" },
+      ref: { userId: ID_A },
       apply: false,
     });
   });
@@ -156,13 +218,13 @@ describe("erase CLI (bin/erase.ts)", () => {
         "--finish",
         "erased:00000000-0000-4000-8000-000000000000",
         "--user",
-        "u1",
+        ID_A,
         "--apply",
       ]),
     ).toEqual({
       mode: "finish",
       token: "erased:00000000-0000-4000-8000-000000000000",
-      userId: "u1",
+      userId: ID_A,
       apply: true,
     });
   });
@@ -584,20 +646,18 @@ describe("erase CLI (bin/erase.ts)", () => {
     expect(await dumpDatabase(db)).toEqual(before);
   });
 
-  test("finish CLI refuses --user cli:erase-user and closes the database", async () => {
+  test("finish CLI refuses the non-user value cli:erase-user as a usage error and opens nothing", async () => {
     const outcome = await eraseUser(db, { userId: TARGET.id }, { apply: true });
     if (outcome.outcome !== "erased") throw new Error("expected erased");
     const before = await dumpDatabase(db);
 
+    const open = vi.fn(() => db);
     await expect(
-      runErase(
-        ["--finish", outcome.token, "--user", "cli:erase-user", "--apply"],
-        () => db,
-        () => {},
-      ),
-    ).rejects.toThrow("erase: that id is not a user id.");
+      runErase(["--finish", outcome.token, "--user", "cli:erase-user", "--apply"], open, () => {}),
+    ).rejects.toThrow(USAGE_ERASE);
+    expect(open).not.toHaveBeenCalled();
     expect(await dumpDatabase(db)).toEqual(before);
-    expect(endSpy).toHaveBeenCalledTimes(1);
+    expect(endSpy).not.toHaveBeenCalled();
   });
 
   test("12. usage errors: finish without --user", async () => {
@@ -634,7 +694,7 @@ describe("erase CLI (bin/erase.ts)", () => {
     const open = vi.fn();
     await expect(
       runErase(
-        ["--finish", "erased:00000000-0000-4000-8000-000000000000", "--user", "u1"],
+        ["--finish", "erased:00000000-0000-4000-8000-000000000000", "--user", ID_A],
         open,
         () => {},
       ),
@@ -652,7 +712,7 @@ describe("erase CLI (bin/erase.ts)", () => {
           "--finish",
           "erased:00000000-0000-4000-8000-000000000001",
           "--user",
-          "u1",
+          ID_A,
           "--apply",
         ],
         open,
@@ -802,7 +862,7 @@ describe("erase CLI (bin/erase.ts)", () => {
           "cli:erase-user",
           "--apply",
         ],
-        match: "not an erasure token",
+        match: USAGE_ERASE,
       },
     ];
     for (const { args, match } of cases) {

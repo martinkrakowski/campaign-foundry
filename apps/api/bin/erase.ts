@@ -1,5 +1,6 @@
 import { pathToFileURL } from "node:url";
 import type { SqlClient } from "../server/lib/db/sql-client.js";
+import { MINTED_ID_PATTERN } from "../server/lib/auth/id.js";
 import {
   eraseUser,
   finishErasure,
@@ -81,7 +82,7 @@ function logActorCounts(log: (line: string) => void, prefix: string, counts: Act
 /**
  * `--apply` acts; the default is a dry run that prints counts. `--finish <token>`
  * with `--user <id> --apply` finishes an incomplete erasure. Exactly one mode,
- * each flag once. A refusal never echoes an argument.
+ * each flag once. A `--user` value must have the shape `safeId()` mints (32 lowercase hex), or it is a usage error like any other. A refusal never echoes an argument.
  */
 export function parseEraseArgs(args: readonly string[]): EraseArgs {
   let apply = false;
@@ -104,6 +105,7 @@ export function parseEraseArgs(args: readonly string[]): EraseArgs {
     } else if (arg === "--user" && user === undefined) {
       const val = args[++i];
       if (val === undefined || val === "" || val.startsWith("-")) throw new Error(USAGE_ERASE);
+      if (!MINTED_ID_PATTERN.test(val)) throw new Error(USAGE_ERASE);
       user = val;
     } else throw new Error(USAGE_ERASE);
   }
