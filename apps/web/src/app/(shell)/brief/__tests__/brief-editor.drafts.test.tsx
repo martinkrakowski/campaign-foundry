@@ -972,7 +972,10 @@ describe("the write flags the shell's leave guard reads (D185)", () => {
       // the chain is not idle.
       expect(flag("pending-write")).toBe("false");
       expect(flag("failed-write")).toBe("false");
-      expect(unload().defaultPrevented).toBe(false);
+      // The release is two effects away from the click (the dirty flag falls,
+      // then the guard's own effect removes its listener), and the held
+      // DELETE proves neither ran: waited for, not read in the same tick.
+      await waitFor(() => expect(unload().defaultPrevented).toBe(false));
 
       routed.releaseDelete();
       await waitFor(() => expect(routed.has("camp")).toBe(false));
