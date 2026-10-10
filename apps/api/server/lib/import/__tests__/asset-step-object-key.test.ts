@@ -47,4 +47,16 @@ describe("writeOrReuse: object key source", () => {
     expect(out).toEqual({ id: "id-1", name: "a.png", key: KEY, reused: true });
     expect(assetObjectKey).toHaveBeenCalledTimes(1);
   });
+
+  test("a write that returns no object key is an error naming the asset id", async () => {
+    const assets = stub(
+      vi.fn().mockResolvedValue({ path: "assets/inputs/camp/a.png", id: "id-1" }),
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+    );
+    await expect(writeOrReuse(assets, "camp", "a.png", PNG, "camp")).rejects.toThrow(
+      "asset a.png of camp was written (id id-1) but the store returned no object key",
+    );
+  });
 });

@@ -136,10 +136,13 @@ export async function writeOrReuse(
     const candidate = candidateAt(name, from, index);
     try {
       const written = await assets.writeAsset(slug, candidate, bytes);
+      if (written.objectKey === undefined) {
+        throw new Error(`asset ${candidate} of ${slug} was written (id ${written.id}) but the store returned no object key`);
+      }
       return {
         id: written.id as string,
         name: candidate,
-        key: written.objectKey as string,
+        key: written.objectKey,
         reused: false,
       };
     } catch (error) {
