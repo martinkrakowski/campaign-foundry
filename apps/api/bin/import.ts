@@ -1,9 +1,24 @@
 import { pathToFileURL } from "node:url";
-import { writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { writeFile, type FileHandle } from "node:fs/promises";
 import { errorMessage } from "@campaignfoundry/shared";
 import { database, resetDatabase } from "../server/lib/db/database.js";
-import { databaseSettings, storeBackend } from "../server/lib/config.js";
+import { databaseSettings, storeBackend, objectStore } from "../server/lib/config.js";
 import { resolveSource, type SourceFlags } from "../server/lib/import/source.js";
+import {
+  applyCampaigns,
+  applyGuards,
+  checkResultPath,
+  describeResultRefusal,
+  openResult,
+  planProbes,
+  replan,
+  ResultWriter,
+  type CampaignEntry,
+  type PlanProbe,
+} from "../server/lib/import/apply.js";
+import { IMPORT_STEPS } from "../server/lib/import/steps.js";
+import type { HashedContext } from "../server/lib/import/campaign-step.js";
 import { scanBriefs } from "../server/lib/import/scan.js";
 import { assemblePlan } from "../server/lib/import/plan.js";
 import { assembleCensus } from "../server/lib/import/census.js";
@@ -32,8 +47,38 @@ export const USAGE =
   "usage: yarn import plan --switched-at <iso> [--project-root <dir>] [--output-root <dir>]" +
   " [--org <id>] [--include-samples] [--out <path>]";
 
-/** argv's flags, as {@link resolveSource} takes them — plus `--out`, which `plan` alone reads. */
-type PlanFlags = SourceFlags & { readonly out?: string };
+/**
+ * The `apply` usage and its exit-code contract, printed by `apply --help`
+ * (D229/D221). A job definition reads the codes, so they are stated here verbatim.
+ */
+export const APPLY_USAGE =
+  "usage: yarn import apply --switched-at <iso> --project-root <dir> --output-root <dir>" +
+  " --org <id> --expect <digest> --result <path> [--include-samples]" +
+  "\nexit codes:\n" +
+  "  0  nothing was refused and nothing is partial\n" +
+  "  1  at least one campaign is partial, or the run itself failed, or the run wrote at least one campaign and refused at least one\n" +
+  "  3  the run wrote nothing: at least one campaign was refused before any write, none was created or completed, nothing is partial";
+
+/**
+ * The error `apply` stops with when a line of the result file cannot be written:
+ * it names the file and the system's code, for a campaign's line and for a
+ * scan refusal's line alike.
+ */
+function resultWriteError(resultPath: string | undefined, error: unknown): Error {
+  const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+  return new Error(
+    `could not write the result file ${JSON.stringify(resultPath)}` +
+      (code ? ` (${code})` : "") +
+      `: ${errorMessage(error)}`,
+  );
+}
+
+/** argv's flags, as {@link resolveSource} takes them — plus the flag each subcommand owns. */
+type ParsedFlags = SourceFlags & {
+  readonly out?: string;
+  readonly expect?: string;
+  readonly result?: string;
+};
 
 /** A refused subcommand's exact stderr, so a caller can key on it (req 4's habit). */
 const NOT_YET_IMPLEMENTED = "not yet implemented";
@@ -44,13 +89,15 @@ export interface ImportIO {
 }
 
 /** argv's flags, as {@link resolveSource} takes them. An unknown flag refuses the run. */
-function parseFlags(argv: readonly string[]): PlanFlags | string {
+function parseFlags(subcommand: string, argv: readonly string[]): ParsedFlags | string {
   let flags: {
     projectRoot?: string;
     outputRoot?: string;
     org?: string;
     switchedAt?: string;
     out?: string;
+    expect?: string;
+    result?: string;
     includeSamples: boolean;
   } = { includeSamples: false };
   for (let i = 0; i < argv.length; i++) {
@@ -68,8 +115,16 @@ function parseFlags(argv: readonly string[]): PlanFlags | string {
     else if (flag === "--output-root") flags = { ...flags, outputRoot: value };
     else if (flag === "--org") flags = { ...flags, org: value };
     else if (flag === "--switched-at") flags = { ...flags, switchedAt: value };
-    else if (flag === "--out") flags = { ...flags, out: value };
-    else return `${flag} is not a flag this command takes.`;
+    else if (flag === "--out") {
+      if (subcommand !== "plan") return `${flag} is not a flag this command takes.`;
+      flags = { ...flags, out: value };
+    } else if (flag === "--expect") {
+      if (subcommand !== "apply") return `${flag} is not a flag this command takes.`;
+      flags = { ...flags, expect: value };
+    } else if (flag === "--result") {
+      if (subcommand !== "apply") return `${flag} is not a flag this command takes.`;
+      flags = { ...flags, result: value };
+    } else return `${flag} is not a flag this command takes.`;
   }
   return flags;
 }
@@ -93,7 +148,7 @@ function parseFlags(argv: readonly string[]): PlanFlags | string {
  */
 async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
   try {
-    const flags = parseFlags(argv);
+    const flags = parseFlags("plan", argv);
     if (typeof flags === "string") {
       io.stderr(flags);
       return 1;
@@ -120,12 +175,27 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
       ),
     );
     const census = await assembleCensus(ctx, result, named);
+    const files = await digestSourceFiles(ctx, result, planned);
     const digest = planDigest({
-      files: await digestSourceFiles(ctx, result, planned),
+      files,
       orgId: ctx.orgId,
       switchedAt: ctx.switchedAt.toISOString(),
       includeSamples: ctx.includeSamples,
     });
+    // D225 read-only probes are only meaningful against the live target: a plan
+    // whose target is the file stores has no campaign rows to probe, so it
+    // reports why the probes were skipped rather than null-ing them silently.
+    const expectedHashes = new Map<string, string>();
+    for (const file of files) {
+      if (file.sha256 !== undefined) expectedHashes.set(file.rel, file.sha256);
+    }
+    let probes: readonly PlanProbe[] | null = null;
+    let probesSkipped: string | null = null;
+    if (backend === "postgres" && objectStore() === "s3") {
+      probes = await planProbes(ctx, result.campaigns, expectedHashes);
+    } else {
+      probesSkipped = "needs STORE_BACKEND=postgres and OBJECT_STORE=s3";
+    }
     const json = JSON.stringify({
       switchedAt: switchedAtIso,
       orgId: ctx.orgId,
@@ -139,6 +209,8 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
       decisions: assembled.decisions,
       census,
       digest,
+      probes,
+      probesSkipped,
     });
     // The `--out` write happens BEFORE anything is printed: a failed write
     // throws into the catch below — exit 1, nothing printed, no partial file —
@@ -185,8 +257,141 @@ async function closeDatabase(io: ImportIO): Promise<void> {
   }
 }
 
+/** `apply` requires both a reviewed digest to match and a result path to write. */
+const EXPECT_REQUIRED = "apply needs --expect <digest>";
+const RESULT_REQUIRED = "apply needs --result <path>";
+
 /**
- * `yarn import <subcommand> …` — `0` on success, `1` for every run-level refusal.
+ * `apply`: re-plan the source, refuse unless the re-planned digest equals
+ * `--expect` (N1/D225), refuse unless the target is the postgres/s3 backend with
+ * an org row (N2/D225), refuse a result path that already exists or sits under a
+ * source root (N4/D229), then run each campaign through {@link IMPORT_STEPS} and
+ * write the result file as it goes (D229/D221). Every refusal below runs before
+ * the first write; the database is closed once in `finally`, as `plan` does.
+ */
+async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
+  if (argv.includes("--help")) {
+    io.stdout(APPLY_USAGE);
+    return 0;
+  }
+  let handle: FileHandle | undefined;
+  try {
+    const flags = parseFlags("apply", argv);
+    if (typeof flags === "string") {
+      io.stderr(flags);
+      return 1;
+    }
+    if (flags.expect === undefined) {
+      io.stderr(EXPECT_REQUIRED);
+      return 1;
+    }
+    if (flags.result === undefined) {
+      io.stderr(RESULT_REQUIRED);
+      return 1;
+    }
+    const guard = applyGuards();
+    if (guard !== undefined) {
+      io.stderr(guard);
+      return 1;
+    }
+    const outcome = await resolveSource(flags);
+    if (!outcome.ok) {
+      io.stderr(outcome.reason);
+      return 1;
+    }
+    const { ctx, switchedAtIso } = outcome.source;
+    const pathProblem = await checkResultPath(flags.result, ctx);
+    if (pathProblem !== undefined) {
+      io.stderr(pathProblem);
+      return 1;
+    }
+    const replanned = await replan(ctx);
+    if (replanned.digest !== flags.expect) {
+      io.stderr(
+        `--expect ${flags.expect} does not match the re-planned digest ${replanned.digest}`,
+      );
+      return 1;
+    }
+    if (existsSync(flags.result!)) {
+      io.stderr(await describeResultRefusal(flags.result!));
+      return 1;
+    }
+    handle = await openResult(flags.result!);
+    const writer = new ResultWriter(handle, switchedAtIso, ctx.orgId, replanned.digest);
+    const hashedCtx: HashedContext = { ...ctx, expectedHashes: replanned.expectedHashes };
+    const resultPath = flags.result;
+    await writer.header();
+    for (const refusal of replanned.result.refusals) {
+      const slug = refusal.slug ?? refusal.sourcePath;
+      io.stdout(`${slug}: refused: ${refusal.reason}`);
+      try {
+        await writer.add({
+          slug,
+          outcome: "refused",
+          reason: refusal.reason,
+          minted: { assets: [] },
+          unreferencedInputs: { count: 0, names: [] },
+        });
+      } catch (error) {
+        throw resultWriteError(resultPath, error);
+      }
+    }
+    const counts = await applyCampaigns(
+      hashedCtx,
+      replanned.result.campaigns,
+      IMPORT_STEPS,
+      async (entry: CampaignEntry) => {
+        io.stdout(`${entry.slug}: ${entry.outcome}${entry.reason ? `: ${entry.reason}` : ""}`);
+        if (entry.minted.assets.length > 0) {
+          io.stdout(
+            `  minted: campaign ${entry.minted.campaignId}, ${entry.minted.assets.length} asset(s)`,
+          );
+          for (const asset of entry.minted.assets) {
+            io.stdout(`    asset ${asset.id} ${asset.name} ${asset.key}`);
+          }
+        }
+        try {
+          await writer.add(entry);
+        } catch (error) {
+          throw resultWriteError(resultPath, error);
+        }
+      },
+    );
+    // Refusals happen before any write: either at the scan (the campaign never
+    // reaches `applyCampaigns`) or inside it (a step returned `refused` or threw,
+    // which is recorded as refused+partial and counted under `partial`). Nothing
+    // of a refused campaign's is written, so they share one census figure.
+    const refused = replanned.result.refusals.length + counts.refused;
+    await writer.summary({ ...counts, refused });
+    io.stdout(
+      `${counts.created} created, ${counts.completed} completed, ` +
+        `${counts.unchanged} unchanged, ${refused} refused`,
+    );
+    if (counts.partial) return 1;
+    if (refused > 0) {
+      io.stdout(`${refused} campaign(s) refused; nothing of theirs was written`);
+      return counts.created + counts.completed === 0 ? 3 : 1;
+    }
+    return 0;
+  } catch (error) {
+    io.stderr(errorMessage(error));
+    return 1;
+  } finally {
+    if (handle !== undefined) {
+      try {
+        await handle.close();
+      } catch (error) {
+        io.stderr(`could not close the result file: ${errorMessage(error)}`);
+      }
+    }
+    await closeDatabase(io);
+  }
+}
+
+/**
+ * `yarn import <subcommand> …` — `0` on success (no refusal, nothing partial),
+ * `1` when at least one campaign is partial or the run itself failed, `3` when
+ * nothing is partial but at least one campaign was refused before any write.
  *
  * **Never calls `process.exit`**: the entry guard sets `process.exitCode` from this
  * number instead, so a caller (and the tests) own the exit and `main` stays a plain
@@ -197,15 +402,14 @@ export async function main(
   deps: ImportIO = { stdout: console.log, stderr: console.error },
 ): Promise<number> {
   const [subcommand, ...rest] = argv;
-  if (subcommand === undefined || subcommand !== "plan") {
-    if (subcommand === "apply" || subcommand === "verify") {
-      deps.stderr(`${subcommand}: ${NOT_YET_IMPLEMENTED}`);
-      return 1;
-    }
-    deps.stderr(USAGE);
+  if (subcommand === "plan") return plan(rest, deps);
+  if (subcommand === "apply") return apply(rest, deps);
+  if (subcommand === "verify") {
+    deps.stderr(`${subcommand}: ${NOT_YET_IMPLEMENTED}`);
     return 1;
   }
-  return plan(rest, deps);
+  deps.stderr(USAGE);
+  return 1;
 }
 
 /* istanbul ignore next -- CLI entry guard; main() is covered directly in tests */
