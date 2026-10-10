@@ -309,6 +309,25 @@ function makeHarness(): Harness {
     '    printf "%s\\n" "${3:-}" >>"$STUB_STATE/merged"',
     "    ;;",
     '  "api "*)',
+    "    # The workflow-runs read (`actions/runs`) is a different question from the",
+    "    # check-runs one below, and is answered first. STUB_AGENT_RUNS is the",
+    "    # projected run list (n, s, id); unset, the branch has no runs at all.",
+    "    # STUB_AGENT_RUNS_LATER replaces it from the SECOND read on, which is how",
+    "    # a review finishes during the wait. Every read is counted in a file.",
+    '    case "$*" in',
+    "      *actions/runs*)",
+    '        echo read >>"$STUB_STATE/agent-run-reads"',
+    '        reads=$(wc -l <"$STUB_STATE/agent-run-reads" | tr -d " ")',
+    '        if [ "$reads" -gt 1 ] && [ -n "${STUB_AGENT_RUNS_LATER:-}" ]; then',
+    "          printf '%s\\n' \"$STUB_AGENT_RUNS_LATER\"",
+    '        elif [ -n "${STUB_AGENT_RUNS:-}" ]; then',
+    "          printf '%s\\n' \"$STUB_AGENT_RUNS\"",
+    "        else",
+    "          printf '[]\\n'",
+    "        fi",
+    '        exit "${STUB_GH_AGENT_RUNS_EXIT:-0}"',
+    "        ;;",
+    "    esac",
     "    # `gh --jq` projects the API's own field names, and the script then",
     "    # reads .n/.s/.c rather than .name/.status/.conclusion — so this answers",
     "    # each of the two questions the script asks with what that projection",
@@ -2264,6 +2283,110 @@ describe.skipIf(!hasZsh())("merge-prs.sh — check-run verdicts per name", () =>
       expect(read.status, `jq could not read ${JSON.stringify(input)}`).toBe(0);
       expect(read.stderr).toBe("");
       expect(read.stdout.trim()).toBe("0");
+    }
+  });
+});
+
+describe.skipIf(!hasZsh())("merge-prs.sh — a PR-Agent review still running", () => {
+  /** One workflow run, in the shape the script's own `--jq` projection keeps. */
+  function wf(name: string, status: string, id: number) {
+    return { n: name, s: status, id };
+  }
+  const CORRECTNESS = "PR-Agent Correctness Review";
+  /** How many times the script read the branch's workflow runs. */
+  function agentRunReads(harness: Harness): number {
+    const file = join(harness.stateDir, "agent-run-reads");
+    return existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").length : 0;
+  }
+
+  test("a PR-Agent run still queued when the wait runs out refuses the PR and names the run", () => {
+    // One read allowed, no sleep: the answer being tested is what the script
+    // does when the queued review has not finished by the time the bound runs
+    // out — it must refuse, and name the run that outlasted the wait.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, ["--continue", specOf(PR_ONE)], {
+        STUB_AGENT_RUNS: JSON.stringify([wf(CORRECTNESS, "queued", 9001)]),
+        AGENT_RUN_POLL_ATTEMPTS: "1",
+        AGENT_RUN_POLL_SECONDS: "0",
+      });
+
+      expect(mergedByStub(harness)).toBe("");
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("PR-Agent review still running for #101");
+      expect(result.stderr).toContain("PR-Agent Correctness Review (run 9001, queued)");
+      // The reason reaches the `--continue` summary as REFUSED, with the run.
+      expect(result.stdout).toContain("#101 (feat/one): REFUSED");
+      expect(result.stdout).toContain("run 9001");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("a PR-Agent run that finishes during the wait lets the merge go on", () => {
+    // The first read still sees the review running; the second sees it done —
+    // which is exactly the window the wait exists for. The merge goes on, and
+    // exactly two reads prove the loop polled rather than judging once.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_AGENT_RUNS: JSON.stringify([wf(CORRECTNESS, "in_progress", 9001)]),
+        STUB_AGENT_RUNS_LATER: JSON.stringify([{ ...wf(CORRECTNESS, "completed", 9001) }]),
+        AGENT_RUN_POLL_ATTEMPTS: "3",
+        AGENT_RUN_POLL_SECONDS: "0",
+      });
+
+      expect(result.status).toBe(0);
+      expect(mergedByStub(harness)).toContain("101");
+      expect(agentRunReads(harness)).toBe(2);
+      expect(result.stdout).toContain("waiting for PR-Agent");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("completed, skipped and other workflows' runs are not waited for", () => {
+    // The on-request workflow ends `skipped`-as-`completed`, and CI is not a
+    // PR-Agent workflow at all: neither may hold the merge. One read, no
+    // "waiting" line — the loop never entered its polling body.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_AGENT_RUNS: JSON.stringify([
+          wf("PR-Agent (on request)", "completed", 7001),
+          wf("PR-Agent Architecture Review", "completed", 7002),
+          wf("CI", "in_progress", 7003),
+        ]),
+        AGENT_RUN_POLL_ATTEMPTS: "1",
+        AGENT_RUN_POLL_SECONDS: "0",
+      });
+
+      expect(result.status).toBe(0);
+      expect(mergedByStub(harness)).toContain("101");
+      expect(agentRunReads(harness)).toBe(1);
+      expect(result.stdout).not.toContain("waiting for PR-Agent");
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  test("a workflow-run list that cannot be read refuses instead of merging unseen", () => {
+    // An unreadable answer is not "no runs": merging past it is merging blind.
+    // One read allowed, no sleep — the answer being tested is the refusal on
+    // the very first failed read, before any retry could mask it.
+    const harness = makeHarness();
+    try {
+      const result = runMergePrs(harness, [specOf(PR_ONE)], {
+        STUB_GH_AGENT_RUNS_EXIT: "1",
+        AGENT_RUN_POLL_ATTEMPTS: "1",
+        AGENT_RUN_POLL_SECONDS: "0",
+      });
+
+      expect(result.status).toBe(1);
+      expect(mergedByStub(harness)).toBe("");
+      expect(result.stderr).toContain("PR-Agent runs could not be read for #101");
+    } finally {
+      harness.cleanup();
     }
   });
 });
