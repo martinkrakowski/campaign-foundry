@@ -123,6 +123,15 @@ export const productLogo = "No logo yet — upload one with the Logo button.";
 
 export const logoUploadAria = "Upload product logo";
 export const logoPathAria = "Logo Path";
+/**
+ * The asset the hidden mirror input holds, by the name a person can read. Under the
+ * object backend the mirror's own value is a uuid, so without this the announcement is
+ * "Logo Path, 3f2504e0-4f89-41d3-9a0c-0305e82c3301" — the one thing the sighted user,
+ * who reads the name on the tile, is not shown.
+ */
+export function logoPathNamed(name: string): string {
+  return `Asset: ${name}`;
+}
 export const logoPreviewAlt = "Product logo preview";
 export const logoReplace = "Replace";
 export const logoUploading = "Uploading...";
