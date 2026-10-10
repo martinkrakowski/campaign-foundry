@@ -1202,6 +1202,9 @@ describe("campaignId and resolveCampaign (PT-5a, D168, D178)", () => {
     );
     const adminStore = new PgBriefStore(db, "local", "admin", ["admin"]);
     const hidden = await adminStore.createBrief(brief("hidden-camp"), { teamId: "t-secret" });
+    // A legacy pair: a slug equal to another campaign's uuid can no longer be created
+    // through the store (FU-slug-uuid-409), so the row is planted and then Saved into.
+    await db.query(`insert into campaign (org_id, slug) values ($1, $2)`, ["local", hidden.campaignId]);
     // A visible, org-wide campaign whose slug is the hidden campaign's uuid.
     const visible = await adminStore.createBrief(brief(hidden.campaignId));
 
@@ -1223,6 +1226,10 @@ describe("campaignId and resolveCampaign (PT-5a, D168, D178)", () => {
     // Campaign A has id = uuidA, slug = "slug-a"
     const campA = await store.createBrief(brief("slug-a"));
     const uuidA = campA.campaignId;
+
+    // A legacy pair: a slug equal to another campaign's uuid can no longer be created
+    // through the store (FU-slug-uuid-409), so the row is planted and then Saved into.
+    await db.query(`insert into campaign (org_id, slug) values ($1, $2)`, ["local", uuidA]);
 
     // Campaign B has id = uuidB, slug = uuidA (slug of B is uuid of A)
     const campB = await store.createBrief(brief(uuidA));
@@ -1380,12 +1387,18 @@ describe("the campaign tombstone (PT-9a1, D231, D233)", () => {
     // lookup, as `resolveCampaign` does, or the visible campaign that `resolveCampaign`
     // DID resolve would 404 on every route that re-checks its slug.
     const uuid = await tombstone("gone");
+    // A legacy pair: a slug equal to another campaign's uuid can no longer be created
+    // through the store (FU-slug-uuid-409), so the row is planted and then Saved into.
+    await db.query(`insert into campaign (org_id, slug) values ($1, $2)`, ["local", uuid]);
     await owner.createBrief(brief(uuid));
     expect(await owner.campaignVisibility(uuid)).toBe("visible");
   });
 
   test("a visible campaign whose slug is a team-hidden campaign's uuid answers visible to the outsider", async () => {
     const hidden = await owner.createBrief(brief("t2-only"), { teamId: "t2" });
+    // A legacy pair: a slug equal to another campaign's uuid can no longer be created
+    // through the store (FU-slug-uuid-409), so the row is planted and then Saved into.
+    await db.query(`insert into campaign (org_id, slug) values ($1, $2)`, ["local", hidden.campaignId]);
     await owner.createBrief(brief(hidden.campaignId!));
     const outsider = new PgBriefStore(db, "local", "u1", [], ["t1"]);
     expect(await outsider.campaignVisibility(hidden.campaignId!)).toBe("visible");
