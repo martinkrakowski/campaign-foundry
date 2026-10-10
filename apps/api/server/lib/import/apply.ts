@@ -117,9 +117,23 @@ export async function checkResultPath(path: string, ctx: StepContext): Promise<s
  * Open the result file exclusively (N4). The `wx` open fails with EEXIST when a
  * file already sits at the path — the run refuses rather than truncating a prior
  * result; later rewrites in this same run use the returned handle, not another open.
+ * The parent directory entry is fsynced before returning so the new file path
+ * survives a crash.
  */
 export async function openResult(path: string): Promise<FileHandle> {
-  return open(path, "wx");
+  const handle = await open(path, "wx");
+  try {
+    const dir = await open(dirname(resolve(path)), "r");
+    try {
+      await dir.sync();
+    } finally {
+      await dir.close();
+    }
+    return handle;
+  } catch (error) {
+    await handle.close().catch(() => {});
+    throw error;
+  }
 }
 
 /**
