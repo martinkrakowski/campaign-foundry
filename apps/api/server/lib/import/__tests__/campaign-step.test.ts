@@ -21,7 +21,7 @@ import { objectStoreClient } from "../../object-store/index.js";
 import type { AssetStorePort } from "../../ports/asset-store.port.js";
 import type { BriefStorePort } from "../../ports/brief-store.port.js";
 import type { SqlClient } from "../../db/sql-client.js";
-import type { ScannedCampaign } from "../scan.js";
+import { scanBriefs, type ScannedCampaign } from "../scan.js";
 import type { StepContext } from "../steps.js";
 import {
   failOnNth,
@@ -133,6 +133,25 @@ describe("campaign-step: preflight", () => {
       const result = await preflight(ctx, scanned, new Map());
       expect(result.ok).toBe(false);
       expect(result.ok === false ? result.reason : "").toMatch(/uuid/);
+    } finally {
+      dropRoot(root);
+    }
+  });
+
+  test("the plan refuses a uuid-shaped slug with the reason preflight gives", async () => {
+    const root = makeRoot();
+    try {
+      const slug = "11111111-1111-1111-1111-111111111111";
+      const { ctx, scanned } = scannedWith(root, slug);
+      const applied = await preflight(ctx, scanned, new Map());
+      const planned = await scanBriefs(ctx);
+      // One rule, read twice: what `plan` lists as refused is what `apply` would refuse,
+      // in the same words, so the reviewed plan and the apply cannot disagree.
+      expect(applied.ok).toBe(false);
+      expect(planned.campaigns).toEqual([]);
+      expect(planned.refusals.map((refusal) => refusal.reason)).toEqual([
+        applied.ok === false ? applied.reason : "",
+      ]);
     } finally {
       dropRoot(root);
     }
