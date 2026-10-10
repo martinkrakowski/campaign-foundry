@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "lane": "FU-plan-uuid-slug",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/scan.ts",
+      "before": "  if (UUID_PATTERN.test(slug)) return",
+      "after": "  if (false) return",
+      "because": "The scan is what `plan` prints and what `apply` re-runs. Without the uuid-shape check a brief whose id is a uuid is listed as importable in the reviewed plan, and only `apply`'s preflight refuses it: the plan and the apply disagree. The scan test plants such a brief beside a clean one and expects one planned campaign and one refusal.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/scan.test.ts", "-t", "req 10: a UUID-SHAPED slug is refused, with the reason apply gives"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/scan.ts",
+      "before": "return `a uuid-shaped slug is refused: ${slug}`;",
+      "after": "return `${JSON.stringify(slug)} is a uuid-shaped slug.`;",
+      "because": "The plan's reason must be the reason apply would give, word for word, or the reviewer reads one sentence and the result file records another. The test runs `preflight` and the scan over the same brief and compares the two reasons; a reworded scan reason no longer equals preflight's.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/campaign-step.test.ts", "-t", "the plan refuses a uuid-shaped slug with the reason preflight gives"],
+      "verdict": "caught"
+    }
+  ]
+}

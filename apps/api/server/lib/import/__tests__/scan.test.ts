@@ -385,6 +385,26 @@ meta: &a
     ]);
   });
 
+  test("req 10: a UUID-SHAPED slug is refused, with the reason apply gives", async () => {
+    root = makeRoot();
+    inputs(root);
+    const uuid = "11111111-1111-1111-1111-111111111111";
+    campaign(root, uuid);
+    campaign(root, "camp-ok");
+
+    const result = await scanBriefs(context(root));
+
+    // The neighbour is still planned: the refusal is a fact about ONE brief.
+    expect(result.campaigns.map((each) => each.slug)).toEqual(["camp-ok"]);
+    expect(result.refusals).toEqual([
+      {
+        slug: uuid,
+        sourcePath: join(root, "briefs", `${uuid}.yaml`),
+        reason: `a uuid-shaped slug is refused: ${uuid}`,
+      },
+    ]);
+  });
+
   test("req 10: TWO files claiming one slug refuse both, and name both files", async () => {
     root = makeRoot();
     inputs(root);

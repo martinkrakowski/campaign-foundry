@@ -377,7 +377,13 @@ describe.skipIf(!server)("orphan cleanup (D186)", () => {
       expect(await names()).toContain(stale);
 
       await building.query("select pg_advisory_unlock($1)", [TEMPLATE_LOCK]);
-      expect(await sweeping).toContain(stale);
+      // WHICH sweep drops the fixture is not this test's claim. It is stale to
+      // every sweep on the server, and a foreign worker's sweep queued on the
+      // same lock may be granted it first and drop the fixture, leaving this
+      // one nothing to report (seen twice on CI's real-Postgres job as
+      // `expected [] to include`). What holds in either order: this sweep
+      // waited for the lock, and once it has settled the fixture is gone.
+      await sweeping;
     } finally {
       await building.query("select pg_advisory_unlock($1)", [TEMPLATE_LOCK]).catch(() => undefined);
       await building.end();

@@ -711,10 +711,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         }
       })
       .catch(() => {
-        // An unreadable listing is an empty one, not an absent one: the display
-        // has to leave "Loading…" and the `[]` is what makes it do so.
+        // An unreadable FIRST listing is an empty one, not an absent one: the
+        // display has to leave "Loading…" and the `[]` is what makes it do so.
+        // An unreadable REFETCH keeps what this campaign's earlier listing
+        // already resolved, so tiles that already had names do not lose them.
         if (!cancelled) {
-          setStoredAssets({ briefId: state.briefId, assets: [] });
+          setStoredAssets((held) =>
+            held?.briefId === state.briefId ? held : { briefId: state.briefId, assets: [] },
+          );
           setAssetsRefetching(false);
         }
       });
