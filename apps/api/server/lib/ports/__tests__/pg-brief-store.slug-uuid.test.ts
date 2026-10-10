@@ -118,6 +118,36 @@ describe("PgBriefStore slug-equals-campaign-uuid guard (FU-slug-uuid-409)", () =
     expect(result.campaignId).toEqual(expect.any(String));
   });
 
+  test("another organisation's row under that slug does not grandfather the create", async () => {
+    // The exemption for a slug that already names a row is this org's alone: a
+    // campaign of ANOTHER org whose slug happens to be A's uuid must not let
+    // this org create the colliding pair.
+    const created = await store.createCampaign(A_SLUG);
+    await db.query(`insert into org (id, name) values ($1, $2)`, ["other", "Other"]);
+    await db.query(`insert into campaign (org_id, slug) values ($1, $2)`, [
+      "other",
+      created.campaignId,
+    ]);
+
+    await expect(store.createBrief(brief(created.campaignId))).rejects.toMatchObject({
+      code: "EEXIST",
+    });
+    expect(await campaignCount(db, "local")).toBe(1);
+  });
+
+  test("an upper-case spelling of the uuid cannot be created either", async () => {
+    // It never reaches the collision check: a slug with upper-case letters is
+    // refused as an unsafe brief id first, so no differently-cased twin of a
+    // campaign's uuid can be minted through the store.
+    const created = await store.createBrief(brief(A_SLUG));
+    const upper = created.campaignId.toUpperCase();
+    expect(upper).not.toBe(created.campaignId);
+
+    await expect(store.createBrief(brief(upper))).rejects.toThrow(/Brief id/);
+    await expect(store.createCampaign(upper)).rejects.toThrow(/Brief id/);
+    expect(await campaignCount(db, "local")).toBe(1);
+  });
+
   test("a uuid-shaped slug that matches no campaign is still accepted", async () => {
     const created = await store.createCampaign(UUID_U);
 
