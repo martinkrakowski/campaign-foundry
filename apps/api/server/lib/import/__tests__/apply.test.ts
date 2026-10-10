@@ -19,7 +19,15 @@ import {
   ON_A_REAL_TEST_SERVER,
   failOnNth,
 } from "./fixtures/apply-harness.js";
-import { dropRoot, makeRoot, writeAt, writeBrief, briefBody, PNG } from "./fixtures/tree.js";
+import {
+  dropRoot,
+  makeRoot,
+  writeAt,
+  writeBrief,
+  writeRawBrief,
+  briefBody,
+  PNG,
+} from "./fixtures/tree.js";
 import type { StepContext, CampaignOutcome, PlannedCampaign } from "../steps.js";
 import {
   replan,
@@ -1325,6 +1333,38 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       expect(out).toContain("1 campaign(s) refused; nothing of theirs was written");
     } finally {
       rmSync(result, { force: true });
+    }
+  });
+
+  test("a brief that does not parse is named by its path, on stdout and in the result file", async () => {
+    // A file the scan cannot parse has no slug to be named by: its refusal
+    // carries the source path, and that is what both records show.
+    const root = makeRoot();
+    const output = join(root, "output");
+    mkdirSync(output, { recursive: true });
+    writeRawBrief(root, "broken.yaml", "id: [unclosed\n");
+    const result = freshResult("np");
+    try {
+      const real = await replannedDigest(root, output);
+      env.reinstall();
+      const { out, err, deps } = io();
+      expect(
+        await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+      ).toBe(3);
+      expect(err).toEqual([]);
+      expect(out[0]).toMatch(/broken\.yaml: refused: /);
+      const lines = readFileSync(result, "utf8")
+        .split("\n")
+        .filter((l) => l.length > 0);
+      expect(lines).toHaveLength(3);
+      const refused = JSON.parse(lines[1]);
+      expect(refused).toMatchObject({ kind: "campaign", outcome: "refused" });
+      expect(refused.slug).toMatch(/broken\.yaml$/);
+      expect(JSON.parse(lines[2]).kind).toBe("summary");
+      expect(await counts(env)).toEqual({ campaigns: 0, assets: 0, versions: 0, puts: 0 });
+    } finally {
+      rmSync(result, { force: true });
+      dropRoot(root);
     }
   });
 
