@@ -6,7 +6,11 @@ import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { openResult, ResultWriter, replan } from "../apply.js";
 import { main } from "../../../../bin/import.js";
-import { useApplyEnvironment, restoreApplyEnvironment } from "./fixtures/apply-harness.js";
+import {
+  useApplyEnvironment,
+  restoreApplyEnvironment,
+  ON_A_REAL_TEST_SERVER,
+} from "./fixtures/apply-harness.js";
 import { makeRoot, writeBrief, writeAt, PNG, dropRoot } from "./fixtures/tree.js";
 import { database, resetDatabase, setDatabase } from "../../db/database.js";
 import type { SqlClient } from "../../db/sql-client.js";
@@ -142,7 +146,9 @@ describe("ResultWriter short writes", () => {
   });
 });
 
-describe("failed result-file close (req 20 mirror)", () => {
+// The apply harness runs only on PGlite and refuses a real test server by design,
+// as the `apply` suite in apply.test.ts does.
+describe.skipIf(ON_A_REAL_TEST_SERVER)("failed result-file close (req 20 mirror)", () => {
   let env: Awaited<ReturnType<typeof useApplyEnvironment>>;
   let root: string | undefined;
 

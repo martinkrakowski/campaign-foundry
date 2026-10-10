@@ -1208,6 +1208,45 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
     }
   });
 
+  test("a failed write of a scan refusal's line stops the run with exit 1 and names the result file", async () => {
+    const { root, output } = threeCampaignTree();
+    // Every campaign is refused at scan, so the first result line after the
+    // header is a scan refusal's: a full disk there must stop the run as it
+    // does on a campaign's line.
+    rmSync(join(root, "assets/inputs/logo.png"));
+    const result = freshResult("W7r");
+    try {
+      const real = await replannedDigest(root, output);
+      env.reinstall();
+      const spy = vi.spyOn(ResultWriter.prototype, "add").mockImplementation(async () => {
+        const error: NodeJS.ErrnoException = new Error("no space left on device");
+        error.code = "ENOSPC";
+        throw error;
+      });
+      const { err, deps } = io();
+      try {
+        expect(
+          await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+        ).toBe(1);
+        expect(err).toHaveLength(1);
+        expect(err[0]).toContain("could not write the result file");
+        expect(err[0]).toContain(result);
+        expect(err[0]).toContain("ENOSPC");
+        const lines = readFileSync(result, "utf8")
+          .split("\n")
+          .filter((l) => l.length > 0);
+        expect(lines).toHaveLength(1);
+        expect(JSON.parse(lines[0]).kind).toBe("header");
+        expect(await counts(env)).toEqual({ campaigns: 0, assets: 0, versions: 0, puts: 0 });
+      } finally {
+        spy.mockRestore();
+      }
+    } finally {
+      rmSync(result, { force: true });
+      dropRoot(root);
+    }
+  });
+
   test("a run whose only refusals happened before any write exits 3", async () => {
     const { root, output } = threeCampaignTree();
     try {

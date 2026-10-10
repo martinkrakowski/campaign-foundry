@@ -59,6 +59,20 @@ export const APPLY_USAGE =
   "  1  at least one campaign is partial, or the run itself failed, or the run wrote at least one campaign and refused at least one\n" +
   "  3  the run wrote nothing: at least one campaign was refused before any write, none was created or completed, nothing is partial";
 
+/**
+ * The error `apply` stops with when a line of the result file cannot be written:
+ * it names the file and the system's code, for a campaign's line and for a
+ * scan refusal's line alike.
+ */
+function resultWriteError(resultPath: string | undefined, error: unknown): Error {
+  const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+  return new Error(
+    `could not write the result file ${JSON.stringify(resultPath)}` +
+      (code ? ` (${code})` : "") +
+      `: ${errorMessage(error)}`,
+  );
+}
+
 /** argv's flags, as {@link resolveSource} takes them — plus the flag each subcommand owns. */
 type ParsedFlags = SourceFlags & {
   readonly out?: string;
@@ -319,12 +333,7 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
           unreferencedInputs: { count: 0, names: [] },
         });
       } catch (error) {
-        const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
-        throw new Error(
-          `could not write the result file ${JSON.stringify(resultPath)}` +
-            (code ? ` (${code})` : "") +
-            `: ${errorMessage(error)}`,
-        );
+        throw resultWriteError(resultPath, error);
       }
     }
     const counts = await applyCampaigns(
@@ -344,12 +353,7 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
         try {
           await writer.add(entry);
         } catch (error) {
-          const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
-          throw new Error(
-            `could not write the result file ${JSON.stringify(resultPath)}` +
-              (code ? ` (${code})` : "") +
-              `: ${errorMessage(error)}`,
-          );
+          throw resultWriteError(resultPath, error);
         }
       },
     );
