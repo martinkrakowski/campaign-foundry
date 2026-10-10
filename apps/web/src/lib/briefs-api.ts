@@ -249,6 +249,7 @@ async function requestJson(url: string, init?: RequestInit): Promise<unknown> {
   }
   const data = await parseJsonBody(res);
   if (!res.ok) {
+    // A conflict body carries the store's fresh revision alongside `error` (API E1.0);
     // every other failure has none. Parse it here, once, so callers can adopt it.
     const revision =
       typeof data === "object" &&
