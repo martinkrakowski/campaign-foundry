@@ -223,7 +223,7 @@ describe("erase CLI (bin/erase.ts)", () => {
     expect(printedToken).toBe(rows[0]!.subject);
 
     const gone = await db.query<{ n: number }>(
-      `select count(*)::int as n from "user" where id = 'u-target'`,
+      `select count(*)::int as n from "user" where id = '${TARGET.id}'`,
     );
     expect(gone.rows[0]!.n).toBe(0);
 
