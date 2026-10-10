@@ -577,6 +577,28 @@ describe("AssetPickerDrawer delete", () => {
     ).toBe(true);
   });
 
+  test("a refused delete returns focus to the Delete button of its row", async () => {
+    const user = userEvent.setup();
+    route({
+      lists: [[logo, banner]],
+      del: () => json({ error: 'Asset "logo.png" is in use.' }, 409),
+    });
+    renderDrawer();
+    await screen.findByText("logo.png");
+
+    const { trigger, dialog } = await openDelete(user);
+    await user.click(confirm(dialog));
+
+    await screen.findByRole("alert");
+    // The row stays, so the button the user pressed is where a retry starts:
+    // focus goes back to it, not to the drawer's Close button.
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(trigger.hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: messages.assetDeleteRowLabel("logo.png") })).toBe(
+      trigger,
+    );
+  });
+
   test("a 404 removes the row and says the asset is already gone", async () => {
     const user = userEvent.setup();
     route({
