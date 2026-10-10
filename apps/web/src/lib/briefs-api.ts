@@ -237,9 +237,18 @@ async function requestJson(url: string, init?: RequestInit): Promise<unknown> {
   } catch {
     throw new BriefsApiError("Network error", 0);
   }
+  // A DELETE that succeeded: neither caller reads its answer (`deleteCampaign`,
+  // `deleteAsset`), so the body is not read at all. Reading it could only turn a
+  // finished delete into a failure, because the body is a stream that can still
+  // reject after the status line arrived. A FAILURE is read as before: its body
+  // carries the message, the code and the revision. A future DELETE caller that
+  // needs its answer must not rely on this function returning it.
+  if (res.ok && init?.method === "DELETE") {
+    void res.body?.cancel().catch(() => undefined);
+    return null;
+  }
   const data = await parseJsonBody(res);
   if (!res.ok) {
-    // A conflict body carries the store's fresh revision alongside `error` (API E1.0);
     // every other failure has none. Parse it here, once, so callers can adopt it.
     const revision =
       typeof data === "object" &&
