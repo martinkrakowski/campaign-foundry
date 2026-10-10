@@ -1064,6 +1064,14 @@ describe("PT-5b1: routes take campaign refs (D178)", () => {
         // matches by slug, so checking it against the raw, unresolved uuid
         // segment (rather than the slug it resolves to) would find H instead
         // of V and wrongly hide V's own output.
+        // A legacy pair: a slug equal to another campaign's uuid can no longer be
+        // created through the store (FU-slug-uuid-409), so H's row is planted and
+        // then Saved into.
+        await harness.db.query(`insert into campaign (org_id, slug, team_id) values ($1, $2, $3)`, [
+          "local",
+          visibleUuid,
+          "t-hidden",
+        ]);
         const hidden = await getBriefStore(LOCAL_TENANT).createBrief(makeBrief(visibleUuid), {
           teamId: "t-hidden",
         });
