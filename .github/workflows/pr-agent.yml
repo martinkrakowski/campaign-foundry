@@ -16,7 +16,7 @@ name: "PR-Agent (on request)"
 # agreement. Do not set repo_context_from_default_branch=false to "read the PR head":
 # false reads the PR *target* (still main), never head.
 #
-# The pin is the multi-arch index digest of pragent/pr-agent:0.42.0-github_action, not
+# The pin is the multi-arch index digest of pragent/pr-agent:0.47.0-github_action, not
 # uses: the-pr-agent/pr-agent@<sha> — that repo's action.yaml FROMs the rolling
 # :github_action tag. Version tags are immutable; rolling tags are not.
 
@@ -129,7 +129,7 @@ jobs:
         run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: "PR Agent"
-        uses: docker://pragent/pr-agent@sha256:b81235c3bddc551939a1feca8926f4b6e8abcec2ae5bf4620424f8f56dd9cb93 # 0.42.0-github_action
+        uses: docker://pragent/pr-agent@sha256:31b9aac6ab067bada9a0c1b001d30ebc500ea4487e00a93c18c59b9ef5fa66db # 0.47.0-github_action
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Dynaconf/PR-Agent OpenRouter secret: openrouter__key. Dotted OPENROUTER.KEY is
@@ -193,6 +193,12 @@ jobs:
           github_action_config.auto_describe: "false"
           github_action_config.auto_improve: "true"
           github_action_config.pr_actions: '["opened", "reopened", "ready_for_review"]'
+          # 0.47.0 fails the Action on a recorded tool error by default. "false" keeps what
+          # 0.42.0 did: a reviewer that could not review stays green and does not block a merge.
+          github_action_config.fail_on_tool_errors: "false"
+          # The run's model, tokens, time and estimated cost, appended to the comment it posts.
+          config.output_run_details: "true"
+          config.output_run_cost: "true"
           # /improve NEVER reads pr_reviewer.extra_instructions, so the mandate is carried
           # here or the bot becomes a generic suggester — which is the overlap with
           # CodeRabbit that a second reviewer exists to avoid.
@@ -259,7 +265,7 @@ jobs:
           # Inline and line-anchored, not a summary table. The default posts one collapsed
           # comment — the format that reads as "nothing happened" even when it found
           # something.
-          pr_code_suggestions.commitable_code_suggestions: "true"
+          pr_code_suggestions.committable_code_suggestions: "true"
           # Do not post when there is nothing to say. The default is what produces an empty
           # guide on every PR; silence is a better signal than three vague rows.
           pr_code_suggestions.publish_output_no_suggestions: "false"
@@ -272,7 +278,7 @@ jobs:
           pr_code_suggestions.max_number_of_calls: "6"
           # PINNED, not inherited. timeout-minutes above is justified by wall-clock being
           # roughly the slowest single call rather than the sum of six — true only while
-          # chunks run in parallel. That is the 0.42.0 default, but a default is not a
+          # chunks run in parallel. That is the 0.47.0 default (as it was in 0.42.0), but a default is not a
           # guarantee: an image bump that flipped it would turn six slow chunks into far
           # more than the cap, and the first symptom would be a killed job with no review.
           pr_code_suggestions.parallel_calls: "true"
