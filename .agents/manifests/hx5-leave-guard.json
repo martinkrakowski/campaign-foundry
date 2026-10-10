@@ -108,7 +108,7 @@
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
       "before": "    draftWriteWriter.setFailed(false);\n    enqueueDraftWrite(() => deleteServerDraft(id), false);",
       "after": "    enqueueDraftWrite(() => deleteServerDraft(id), false);",
-      "because": "A deliberate supersede that forgets to clear what it superseded. The failed flag means the operator's edits are on the screen and nowhere else; Save has just put them in the published brief and Revert has just thrown them away, so there is nothing left to warn about. Left set, it is the most durable version of this bug: nothing in the component's remaining life comes along to lower it, so the guard stays armed for a clean editor until the shell is torn down.",
+      "because": "A deliberate supersede that forgets to clear what it superseded. The failed flag means the operator's edits are on the screen and nowhere else; Save has just put them in the published brief and Revert has just thrown them away, so there is nothing left to warn about. Left set, it outlives its reason whenever the editor is still dirty when the Save lands (an edit typed while the request was out): the autosave effect's pristine branch, which lowers the flag one effect later after a Save that leaves the editor clean, never runs. So the test holds the Save open, types, and holds the next draft PUT as well, which leaves this line as the only thing that can lower the flag.",
       "command": [
         "yarn",
         "vitest",
@@ -117,7 +117,7 @@
         "web",
         "apps/web/src/app/(shell)/brief/__tests__/brief-editor.drafts.test.tsx",
         "-t",
-        "a Save that supersedes a failed draft clears the failed flag"
+        "a Save that lands while a newer edit is on screen lowers the failed flag by itself"
       ],
       "verdict": "caught"
     }
