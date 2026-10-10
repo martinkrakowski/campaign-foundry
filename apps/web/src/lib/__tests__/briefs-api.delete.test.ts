@@ -52,6 +52,17 @@ describe("deleteCampaign", () => {
     expect(text).not.toHaveBeenCalled();
   });
 
+  test("deleteCampaign resolves on a 2xx whose body cannot even be cancelled", async () => {
+    // The unread body is cancelled, best effort: a stream that is locked or
+    // already errored rejects the cancel, and that rejection is nobody's
+    // failure either. It must be swallowed, not left unhandled.
+    const cancel = vi.fn(() => Promise.reject(new Error("locked")));
+    mockFetch(() => ({ ok: true, status: 200, body: { cancel } }) as unknown as Response);
+
+    await expect(deleteCampaign("demo")).resolves.toBeUndefined();
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   test("deleteCampaign maps each failure status to a BriefsApiError carrying that status", async () => {
     for (const status of [400, 403, 404, 409, 501]) {
       const body =
