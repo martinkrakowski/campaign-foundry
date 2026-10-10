@@ -148,7 +148,9 @@ jobs:
           # built for coding agents: with max_model_tokens 70000 below, one review is at most
           # about $0.07. It is a fourth model family, beside the implementer's (Poolside) and the
           # pre-merge reviewer's (Anthropic). A "preview" id can be withdrawn without notice, so
-          # the fallbacks matter: GPT-6.1 Sol ($2/$10) first, then Luna, then Haiku.
+          # the fallbacks matter: GPT-6.1 Sol ($2/$10) first, then Luna. (Haiku was third until
+          # 2026-10-10: the owner ruled out Claude, Gemini and Grok models through OpenRouter in any
+          # pipeline seat.)
           # Swapped 2026-10-06, the same evening (owner: "Let's try ~deepseek/deepseek-flash-latest
           # as the pr-agent"), Hy4 preview → DeepSeek Flash, and back to Hy4 preview hours later:
           # its one run (#714) took 16.5 minutes for a single 45,580-token call and reported no
@@ -160,9 +162,9 @@ jobs:
           # tried here. The reviewer trial now runs in those two workflows (see "Pick the trial
           # arm" there); leave this one alone until it has volume.
           config.model: "openrouter/tencent/hy4-preview"
-          config.fallback_models: '["openrouter/openai/gpt-6.1-sol", "openrouter/openai/gpt-6-luna", "openrouter/anthropic/claude-haiku-4.5"]'
-          # Hy4's window per OpenRouter is 1048576, Sol's and Luna's 1050000. 128000 is declared (Haiku's capacity
-          # bounds the fallback), and max_model_tokens below caps actual spend.
+          config.fallback_models: '["openrouter/openai/gpt-6.1-sol", "openrouter/openai/gpt-6-luna"]'
+          # Hy4's window per OpenRouter is 1048576, Sol's and Luna's 1050000. 128000 is declared (the capacity
+          # of the former Haiku fallback, kept), and max_model_tokens below caps actual spend.
           config.custom_model_max_tokens: "128000"
           # custom_model_max_tokens declares the model's capacity; max_model_tokens caps
           # what PR-Agent actually spends and defaults to 32000 regardless — which is what
