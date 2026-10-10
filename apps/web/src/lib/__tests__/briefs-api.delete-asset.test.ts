@@ -87,6 +87,17 @@ describe("deleteAsset", () => {
     await expect(deleteAsset("camp-1", { name: "logo.png" })).resolves.toBeUndefined();
   });
 
+  test("deleteAsset resolves on a 2xx whose body cannot be read", async () => {
+    // The status line arrived, so the server has answered; the body is a stream
+    // that can still fail afterwards. Nobody reads a delete's body, so a body
+    // that cannot be read must not turn a finished delete into a failure.
+    const text = vi.fn(() => Promise.reject(new Error("stream closed")));
+    mockFetch(() => ({ ok: true, status: 200, text }) as unknown as Response);
+
+    await expect(deleteAsset("camp-1", { name: "logo.png" })).resolves.toBeUndefined();
+    expect(text).not.toHaveBeenCalled();
+  });
+
   test("deleteAsset maps 400 404 and 409 to a BriefsApiError carrying that status", async () => {
     for (const status of [400, 404, 409]) {
       mockFetch(() => json({ error: `msg-${status}` }, status));
