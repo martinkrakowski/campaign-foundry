@@ -5,7 +5,7 @@
     {
       "file": "apps/web/src/components/campaign/BriefEditor.tsx",
       "before": "held?.briefId === state.briefId ? held : { briefId: state.briefId, assets: [] }",
-      "after": "{ briefId: state.briefId, assets: [] }",
+      "after": "({ briefId: state.briefId, assets: [] })",
       "because": "The whole fix is the scope check in the failure branch: without it, a failed refetch discards the listing an earlier successful fetch resolved for this campaign, and every tile that read a resolved file name drops to \"Unavailable asset\" though nothing about it changed. With the ternary reduced to the empty-listing branch the new test's assertion `screen.getByText(\"alpha.png\")` after the failed refetch finds nothing and fails.",
       "command": [
         "yarn",
