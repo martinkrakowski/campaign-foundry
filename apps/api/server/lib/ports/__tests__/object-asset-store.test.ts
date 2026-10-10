@@ -97,13 +97,18 @@ describe("ObjectAssetStore (PT-4b)", () => {
 
   describe("writeAsset", () => {
     test("stores the bytes under a key of ids, and records size, digest and type", async () => {
-      expect(await assets.writeAsset(SLUG, "logo.png", PNG)).toEqual({
+      const written = await assets.writeAsset(SLUG, "logo.png", PNG);
+      const writtenId = (await rowsOf(db, slugId))[0]!.id;
+      expect(written).toEqual({
         path: `assets/inputs/${SLUG}/logo.png`,
         // The id is the SAME one the row holds and the key is built from (PT-4k1),
         // not merely a uuid of the right shape: it is read back through `rowsOf`
         // below and compared, so an id minted for the answer and forgotten by the
         // row would fail here rather than reach a brief.
-        id: (await rowsOf(db, slugId))[0]!.id,
+        id: writtenId,
+        // The key the bytes went under, built from that id (PT-8b2): the import's
+        // result file records it from this answer, with no second lookup.
+        objectKey: inputKey(ORG, slugId, writtenId),
       });
       const rows = await rowsOf(db, slugId);
       expect(rows).toHaveLength(1);
