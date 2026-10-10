@@ -26,6 +26,16 @@ export async function importReportRow(
 ): Promise<RowResult> {
   const revision = hashBytes(bytes);
   const payload = bytes.toString("utf8");
+  // A string is all `writeReport` takes. Bytes that do not survive the UTF-8 round
+  // trip would be stored as OTHER bytes, under another revision: refuse instead.
+  if (!Buffer.from(payload, "utf8").equals(bytes)) {
+    return {
+      kind: "report",
+      status: "refused",
+      revision,
+      reason: `reports/${slug}.json is not valid UTF-8, so its exact bytes cannot be stored`,
+    };
+  }
   try {
     await reports.writeReport(slug, payload, null);
   } catch (error) {

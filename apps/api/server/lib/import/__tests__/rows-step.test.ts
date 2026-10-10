@@ -62,4 +62,27 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importReportRow", () => {
     );
     expect(await row(env)).toEqual(before);
   });
+
+  test("bytes that are not valid UTF-8 are refused before any write", async () => {
+    const broken = Buffer.from([0x7b, 0xff, 0x7d]);
+    const result = await importReportRow(reports, "camp", broken);
+    expect(result).toEqual({
+      kind: "report",
+      status: "refused",
+      revision: hashBytes(broken),
+      reason: "reports/camp.json is not valid UTF-8, so its exact bytes cannot be stored",
+    });
+    expect(await row(env)).toBeUndefined();
+  });
+
+  test("a store failure that is not a conflict is thrown, not turned into a refusal", async () => {
+    const failing = {
+      writeReport: async () => {
+        throw new Error("the database went away");
+      },
+    } as unknown as ReportStorePort;
+    await expect(importReportRow(failing, "camp", LOOSE)).rejects.toThrow(
+      "the database went away",
+    );
+  });
 });
