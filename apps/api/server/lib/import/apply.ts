@@ -159,12 +159,17 @@ export async function describeResultRefusal(path: string): Promise<string> {
   const lines = text.split("\n").filter((line) => line.length > 0);
   let hasHeader = false;
   let hasSummary = false;
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
     } catch {
-      // Not JSON Lines: neither an interrupted run nor ours to interpret.
+      // A parse failure on the LAST line is a torn line left by a crash in
+      // the middle of an append: skip it and fall through to the
+      // header/summary decision below. A parse failure on any earlier line is
+      // foreign content and stays "already exists".
+      if (i === lines.length - 1) continue;
       return `--result ${JSON.stringify(path)} already exists`;
     }
     const kind = (parsed as { kind?: unknown })?.kind;
@@ -272,7 +277,9 @@ export async function applyCampaigns(
  *   - one `{ "kind": "campaign", ... }` per campaign, written as each finishes
  *   - the LAST line, written only when the loop ends: `{ "kind": "summary", ... }`
  * No seek, no truncate, no rewrite: a file with no summary line is, by definition,
- * the record of an interrupted run, and every line it holds is complete and true (D229).
+ * the record of an interrupted run. Every line EXCEPT possibly the last is complete
+ * and true: a crash mid-append can leave a final line cut short, which a reader
+ * must ignore (see {@link describeResultRefusal}).
  */
 export class ResultWriter {
   readonly #handle: FileHandle;
@@ -310,7 +317,14 @@ export class ResultWriter {
   /** Append one JSON object as a line at the end of the file and fsync the handle. */
   async #append(record: Record<string, unknown>): Promise<void> {
     const buf = Buffer.from(JSON.stringify(record) + "\n", "utf8");
-    await this.#handle.write(buf, 0, buf.length);
+    let offset = 0;
+    while (offset < buf.length) {
+      const written = await this.#handle.write(buf, offset, buf.length - offset);
+      const bytesWritten =
+        typeof written === "number" ? written : (written as { bytesWritten: number }).bytesWritten;
+      if (bytesWritten === 0) throw new Error("short write: no progress");
+      offset += bytesWritten;
+    }
     await this.#handle.sync();
   }
 

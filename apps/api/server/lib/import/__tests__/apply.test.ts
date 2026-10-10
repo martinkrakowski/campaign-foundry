@@ -1608,4 +1608,35 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       rmSync(result, { force: true });
     }
   });
+
+  test("a result file whose last line is cut short is named an interrupted run", async () => {
+    const path = freshResult("XT");
+    try {
+      const header: unknown = { kind: "header" };
+      const campaign: unknown = { kind: "campaign", slug: "camp" };
+      const torn = `{"kind":"camp`;
+      writeFileSync(path, JSON.stringify(header) + "\n" + JSON.stringify(campaign) + "\n" + torn);
+      expect(await describeResultRefusal(path)).toBe(
+        `the result file ${JSON.stringify(path)} exists and has no summary ` +
+          "line: it is the record of an interrupted run. Keep it, and give this run a new --result path.",
+      );
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  test("a result file with a broken line before its last line is only 'already exists'", async () => {
+    const path = freshResult("XU");
+    try {
+      const header: unknown = { kind: "header" };
+      const bad = `not-json`;
+      const good: unknown = { kind: "summary", outcome: "ok" };
+      writeFileSync(path, JSON.stringify(header) + "\n" + bad + "\n" + JSON.stringify(good));
+      expect(await describeResultRefusal(path)).toBe(
+        `--result ${JSON.stringify(path)} already exists`,
+      );
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
 });

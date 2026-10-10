@@ -3,7 +3,7 @@ import { open, type FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { openResult } from "../apply.js";
+import { openResult, ResultWriter } from "../apply.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -74,5 +74,38 @@ describe("openResult", () => {
     await expect(openResult(join(base, "r4.jsonl"))).rejects.toMatchObject({ code: "EEXIST" });
     expect(openMock.mock.calls).toHaveLength(1);
     expect(openMock.mock.calls[0][1]).toBe("wx");
+  });
+});
+
+describe("ResultWriter short writes", () => {
+  const writeHandle = (writeImpl: ReturnType<typeof vi.fn>) => {
+    const sync = vi.fn().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    return { handle: { sync, close, write: writeImpl, fd: 17 } as unknown as FileHandle, sync, close, write: writeImpl };
+  };
+
+  test("a short write is continued until the whole line is on the handle", async () => {
+    const line = JSON.stringify({ kind: "campaign", slug: "camp", outcome: "created", minted: { campaignId: "dead", assets: [] }, unreferencedInputs: { count: 0, names: [] } }) + "\n";
+    const len = Buffer.byteLength(line, "utf8");
+    const write = vi.fn()
+      .mockResolvedValueOnce({ bytesWritten: 3 })
+      .mockResolvedValueOnce({ bytesWritten: len - 3 });
+    const { handle, sync, write: writeMock } = writeHandle(write);
+    const writer = new ResultWriter(handle, "2026-10-01T00:00:00Z", "local", "abc");
+    await writer.add({ slug: "camp", outcome: "created", minted: { campaignId: "dead", assets: [] }, unreferencedInputs: { count: 0, names: [] } });
+    expect(writeMock.mock.calls[0]).toEqual([expect.any(Buffer), 0, len]);
+    expect(writeMock.mock.calls[1]).toEqual([expect.any(Buffer), 3, len - 3]);
+    expect(writeMock.mock.calls.length).toBe(2);
+    expect(sync).toHaveBeenCalledTimes(1);
+  });
+
+  test("a write that reports no progress throws and stops looping", async () => {
+    const write = vi.fn().mockResolvedValue({ bytesWritten: 0 });
+    const { handle } = writeHandle(write);
+    const writer = new ResultWriter(handle, "2026-10-01T00:00:00Z", "local", "abc");
+    await expect(
+      writer.add({ slug: "camp", outcome: "created", minted: { campaignId: "dead", assets: [] }, unreferencedInputs: { count: 0, names: [] } }),
+    ).rejects.toThrow("short write: no progress");
+    expect(write.mock.calls.length).toBe(1);
   });
 });
