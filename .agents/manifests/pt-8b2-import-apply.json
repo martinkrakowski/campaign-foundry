@@ -103,6 +103,40 @@
         "a step that throws is recorded as refused and partial and the next campaign still runs"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "    try {\n      await dir.sync();\n    } finally {\n      await dir.close();\n    }\n",
+      "after": "    try {\n    } finally {\n      await dir.close();\n    }\n",
+      "because": "Mutant drops the `dir.sync()` call, so `openResult` can hand back a file handle whose parent-directory entry was never fsynced: a crash can leave the campaigns written but the result path gone (N4/D229). Baseline calls `dir.sync()` once, caught by `openResult syncs the parent directory after creating the file`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply-result-durability.test.ts",
+        "-t",
+        "openResult syncs the parent directory after creating the file"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/asset-step.ts",
+      "before": "        key: written.objectKey as string,\n",
+      "after": "        key: (await assets.assetObjectKey(slug, candidate)) as string,\n",
+      "because": "Mutant re-injects the second `assetObjectKey` lookup after `writeAsset`, so a newly written asset's key can be lost when that lookup throws (D234), leaving a committed object unnamed in the result. Caught by `a newly written asset's key comes from the write, not from a second lookup`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/asset-step-object-key.test.ts",
+        "-t",
+        "a newly written asset's key comes from the write, not from a second lookup"
+      ],
+      "verdict": "caught"
     }
   ]
 }
