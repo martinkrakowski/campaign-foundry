@@ -3867,9 +3867,11 @@ describe("BriefPage — the editor is one scrolling column (SG1 / SG-D2)", () =>
       await waitFor(() => expect(refetches).toBe(2));
 
       // A's tile keeps its name through the failed refetch; B reads unavailable,
-      // and nothing anywhere reads as still loading.
+      // and nothing anywhere reads as still loading. The request being counted
+      // is not the same moment as its failure being handled, so the settled
+      // state is waited for rather than read in the same tick.
+      await waitFor(() => expect(screen.getByText(messages.assetUnavailable)).toBeTruthy());
       expect(screen.getByText("alpha.png")).toBeTruthy();
-      expect(screen.getByText(messages.assetUnavailable)).toBeTruthy();
       expect(screen.queryByText(messages.assetPending)).toBeNull();
     });
   });
