@@ -373,7 +373,13 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
     io.stderr(errorMessage(error));
     return 1;
   } finally {
-    if (handle !== undefined) await handle.close();
+    if (handle !== undefined) {
+      try {
+        await handle.close();
+      } catch (error) {
+        io.stderr(`could not close the result file: ${errorMessage(error)}`);
+      }
+    }
     await closeDatabase(io);
   }
 }
