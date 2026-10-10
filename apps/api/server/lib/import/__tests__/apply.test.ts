@@ -1128,7 +1128,6 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
     try {
       const handle = await openResult(result);
       const writer = new ResultWriter(handle, SWITCHED_AT, "local", "digest");
-      const closeSpy = vi.spyOn(writer, "close");
       await writer.header();
       const step = vi.fn(async (): Promise<CampaignResult> => {
         throw new Error("step blew up");
@@ -1142,8 +1141,9 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         },
       );
       await writer.summary(counts);
+      expect(handle.fd).toBeGreaterThan(-1);
       await writer.close();
-      expect(closeSpy).toHaveBeenCalled();
+      expect(handle.fd).toBe(-1);
       const lines = readFileSync(result, "utf8")
         .split("\n")
         .filter((l) => l.length > 0);
