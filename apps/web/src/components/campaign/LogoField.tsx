@@ -113,11 +113,15 @@ export function LogoField({
   // announces 36 characters of nothing where the sighted user reads a file name off
   // the tile. When the caller resolved a name the value does not already carry, the
   // input is described by it; when there is nothing to add, by nothing at all.
-  const assetName = displayName !== undefined && displayName !== value ? displayName : undefined;
+  // A blank name describes nothing, so it is treated as no name at all.
+  const assetName =
+    displayName !== undefined && displayName.trim() !== "" && displayName !== value
+      ? displayName
+      : undefined;
   const assetNameId = `logo-upload-description-${instanceId}`;
   const describedBy =
     [ariaDescribedBy, assetName === undefined ? undefined : assetNameId]
-      .filter((id): id is string => id !== undefined)
+      .filter((id): id is string => id !== undefined && id !== "")
       .join(" ") || undefined;
 
   return (

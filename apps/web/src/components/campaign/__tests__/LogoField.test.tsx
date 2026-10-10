@@ -338,5 +338,33 @@ describe("LogoField", () => {
       const mirror = screen.getByLabelText(messages.logoPathAria);
       expect(mirror.hasAttribute("aria-describedby")).toBe(false);
     });
+
+    test("a blank display name adds nothing", () => {
+      const { container } = render(
+        <LogoField value={ID} displayName="   " onChange={vi.fn()} onUploadFile={vi.fn()} />,
+      );
+
+      const mirror = screen.getByLabelText(messages.logoPathAria);
+      expect(mirror.hasAttribute("aria-describedby")).toBe(false);
+      expect(container.textContent).not.toContain("Asset:");
+    });
+
+    test("an empty caller description leaves only the name's id, with no stray space", () => {
+      render(
+        <LogoField
+          value={ID}
+          displayName="hydra-logo.png"
+          onChange={vi.fn()}
+          onUploadFile={vi.fn()}
+          aria-describedby=""
+        />,
+      );
+
+      const mirror = screen.getByLabelText(messages.logoPathAria);
+      const described = mirror.getAttribute("aria-describedby") ?? "";
+      expect(described).toBe(described.trim());
+      expect(described.split(" ")).toHaveLength(1);
+      expect(document.getElementById(described)?.textContent).toBe("Asset: hydra-logo.png");
+    });
   });
 });

@@ -4,8 +4,8 @@
   "mutations": [
     {
       "file": "apps/web/src/components/campaign/LogoField.tsx",
-      "before": "  const assetName = displayName !== undefined && displayName !== value ? displayName : undefined;",
-      "after": "  const assetName = displayName !== undefined && displayName !== displayName ? displayName : undefined;",
+      "before": "    displayName !== undefined && displayName.trim() !== \"\" && displayName !== value",
+      "after": "    displayName !== undefined && displayName.trim() !== \"\" && displayName !== displayName",
       "because": "The description is only ever an addition, so the gate that decides to add it is the pair of half-negations: a name was resolved, and the ref does not already say it. Compare the name with itself and the second half can never hold, so `assetName` is always undefined and the mirror keeps announcing a bare 36-character uuid — the exact gap this description was written for. The test that renders an id ref WITH a display name and reads the ids off `aria-describedby`, resolving one to `Asset: hydra-logo.png`, finds none and fails on `texts`.",
       "command": [
         "yarn",
