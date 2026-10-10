@@ -1289,6 +1289,27 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
     }
   });
 
+  test("a createCampaign failure that is not EEXIST makes apply exit 1", async () => {
+    const { root, output } = sampleTree();
+    try {
+      const result = freshResult("2b");
+      try {
+        const real = await replannedDigest(root, output);
+        env.reinstall();
+        setBriefStore(failOnNth(getBriefStore(importTenant("local")), "createCampaign", 1));
+        const { deps } = io();
+        expect(
+          await main(applyArgv(root, output, ["--expect", real, "--result", result]), deps),
+        ).toBe(1);
+        expect((await counts(env)).campaigns).toBe(0);
+      } finally {
+        rmSync(result, { force: true });
+      }
+    } finally {
+      dropRoot(root);
+    }
+  });
+
   test("plan with a configured target writes no row and no object and the plan JSON holds probes", async () => {
     const { root } = trackedSampleTree();
     const output = join(root, "output");

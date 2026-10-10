@@ -292,6 +292,7 @@ export async function importCampaign(
       return {
         outcome: "refused",
         reason: errorMessage(error),
+        partial: true,
         minted: { assets: [] },
         unreferencedInputs: unreferenced,
       };
