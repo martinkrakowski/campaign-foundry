@@ -736,7 +736,11 @@ pr_body() {
   agent_unreadable=1
   agent_said=0
   for _ in $(seq 1 $AGENT_RUN_POLL_ATTEMPTS); do
-    agent_runs=$(gh api --paginate "repos/{owner}/{repo}/actions/runs?branch=$branch&event=pull_request&per_page=100" \
+    # The branch goes in as a FIELD, which gh encodes: interpolated into the
+    # URL, a branch named `feat/a&b` would be read as `branch=feat/a` and an
+    # empty answer would let the merge through.
+    agent_runs=$(gh api --paginate -X GET "repos/{owner}/{repo}/actions/runs" \
+      -f branch="$branch" -f event=pull_request -F per_page=100 \
       --jq '[.workflow_runs[] | {n:.name, s:.status, id:.id}]' 2>/dev/null)
     rc=$?
     if [ "$rc" -ne 0 ]; then
