@@ -28,9 +28,9 @@ const brief = (id: string, message = "Build great things"): CampaignBrief => ({
 
 const A_SLUG = "a-slug";
 const campaignCount = (db: SqlClient, orgId: string) =>
-  db.query<{ n: number }>(`select count(*)::int as n from campaign where org_id = $1`, [orgId]).then(
-    (r) => r.rows[0]!.n,
-  );
+  db
+    .query<{ n: number }>(`select count(*)::int as n from campaign where org_id = $1`, [orgId])
+    .then((r) => r.rows[0]!.n);
 
 const UUID_U = "11111111-1111-4111-8111-111111111111";
 
