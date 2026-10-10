@@ -72,9 +72,9 @@
     },
     {
       "file": "apps/api/server/lib/import/apply.ts",
-      "before": "    await this.#handle.write(buf, 0, buf.length);\n",
-      "after": "    await this.#handle.write(buf, 0, buf.length, 0);\n",
-      "because": "Writing each campaign line from position 0 instead of the current position overwrites earlier lines, violating N4/D229. Title 16's `expect(writes.every((c) => c.length === 3)).toBe(true)` fails on the mutant because the position argument makes each write call pass 4 args (buf, offset, length, position) instead of 3.",
+      "before": "    const written = await this.#handle.write(buf, offset, buf.length - offset);\n",
+      "after": "    const written = await this.#handle.write(buf, 0, buf.length, 0);\n",
+      "because": "Writing each chunk with an explicit position of 0 seeks the file back to the start on every write, so each line overwrites the earlier ones instead of appending, violating N4/D229. Title 16's `expect(writes.every((c) => c.length === 3)).toBe(true)` fails on the mutant because each write call passes 4 args (buf, offset, length, position) instead of 3.",
       "command": [
         "yarn",
         "vitest",
@@ -123,8 +123,8 @@
     },
     {
       "file": "apps/api/server/lib/import/asset-step.ts",
-      "before": "        key: written.objectKey as string,\n",
-      "after": "        key: (await assets.assetObjectKey(slug, candidate)) as string,\n",
+      "before": "        key: written.objectKey,\n",
+      "after": "        key: (await assets.assetObjectKey(slug, candidate)) as ObjectKey,\n",
       "because": "Mutant re-injects the second `assetObjectKey` lookup after `writeAsset`, so a newly written asset's key can be lost when that lookup throws (D234), leaving a committed object unnamed in the result. Caught by `a newly written asset's key comes from the write, not from a second lookup`.",
       "command": [
         "yarn",
@@ -135,6 +135,40 @@
         "apps/api/server/lib/import/__tests__/asset-step-object-key.test.ts",
         "-t",
         "a newly written asset's key comes from the write, not from a second lookup"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/import.ts",
+      "before": "      return counts.created + counts.completed === 0 ? 3 : 1;\n",
+      "after": "      return 3;\n",
+      "because": "Mutant forces exit 3 even when a run wrote a campaign and also refused one after it, so an operator is told to reuse the (already-valid) result for a partial run. Caught by `a run that writes one campaign and refuses another exits 1 and names the refused one`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply.test.ts",
+        "-t",
+        "a run that writes one campaign and refuses another exits 1 and names the refused one"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "      if (i === lines.length - 1) continue;\n      return `--result ${JSON.stringify(path)} already exists`;\n",
+      "after": "      return `--result ${JSON.stringify(path)} already exists`;\n",
+      "because": "Mutant drops the torn-last-line skip, so a crash-cut last line is mis-named as 'already exists' instead of an interrupted run. Caught by `a result file whose last line is cut short is named an interrupted run`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply.test.ts",
+        "-t",
+        "a result file whose last line is cut short is named an interrupted run"
       ],
       "verdict": "caught"
     }

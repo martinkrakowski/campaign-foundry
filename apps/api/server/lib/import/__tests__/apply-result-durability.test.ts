@@ -90,18 +90,36 @@ describe("ResultWriter short writes", () => {
   const writeHandle = (writeImpl: ReturnType<typeof vi.fn>) => {
     const sync = vi.fn().mockResolvedValue(undefined);
     const close = vi.fn().mockResolvedValue(undefined);
-    return { handle: { sync, close, write: writeImpl, fd: 17 } as unknown as FileHandle, sync, close, write: writeImpl };
+    return {
+      handle: { sync, close, write: writeImpl, fd: 17 } as unknown as FileHandle,
+      sync,
+      close,
+      write: writeImpl,
+    };
   };
 
   test("a short write is continued until the whole line is on the handle", async () => {
-    const line = JSON.stringify({ kind: "campaign", slug: "camp", outcome: "created", minted: { campaignId: "dead", assets: [] }, unreferencedInputs: { count: 0, names: [] } }) + "\n";
+    const line =
+      JSON.stringify({
+        kind: "campaign",
+        slug: "camp",
+        outcome: "created",
+        minted: { campaignId: "dead", assets: [] },
+        unreferencedInputs: { count: 0, names: [] },
+      }) + "\n";
     const len = Buffer.byteLength(line, "utf8");
-    const write = vi.fn()
+    const write = vi
+      .fn()
       .mockResolvedValueOnce({ bytesWritten: 3 })
       .mockResolvedValueOnce({ bytesWritten: len - 3 });
     const { handle, sync, write: writeMock } = writeHandle(write);
     const writer = new ResultWriter(handle, "2026-10-01T00:00:00Z", "local", "abc");
-    await writer.add({ slug: "camp", outcome: "created", minted: { campaignId: "dead", assets: [] }, unreferencedInputs: { count: 0, names: [] } });
+    await writer.add({
+      slug: "camp",
+      outcome: "created",
+      minted: { campaignId: "dead", assets: [] },
+      unreferencedInputs: { count: 0, names: [] },
+    });
     expect(writeMock.mock.calls[0]).toEqual([expect.any(Buffer), 0, len]);
     expect(writeMock.mock.calls[1]).toEqual([expect.any(Buffer), 3, len - 3]);
     expect(writeMock.mock.calls.length).toBe(2);
@@ -113,7 +131,12 @@ describe("ResultWriter short writes", () => {
     const { handle } = writeHandle(write);
     const writer = new ResultWriter(handle, "2026-10-01T00:00:00Z", "local", "abc");
     await expect(
-      writer.add({ slug: "camp", outcome: "created", minted: { campaignId: "dead", assets: [] }, unreferencedInputs: { count: 0, names: [] } }),
+      writer.add({
+        slug: "camp",
+        outcome: "created",
+        minted: { campaignId: "dead", assets: [] },
+        unreferencedInputs: { count: 0, names: [] },
+      }),
     ).rejects.toThrow("short write: no progress");
     expect(write.mock.calls.length).toBe(1);
   });
@@ -145,13 +168,15 @@ describe("failed result-file close (req 20 mirror)", () => {
 
   test("a failed close of the result file is named, keeps the run's exit code and still closes the database", async () => {
     const real = await vi.importActual("node:fs/promises");
-    const realOpen = (real as {
-      open: (
-        path: PathLike | FileHandle,
-        flags: string | number | undefined,
-        mode?: number,
-      ) => Promise<FileHandle>;
-    }).open;
+    const realOpen = (
+      real as {
+        open: (
+          path: PathLike | FileHandle,
+          flags: string | number | undefined,
+          mode?: number,
+        ) => Promise<FileHandle>;
+      }
+    ).open;
 
     root = makeRoot();
     const output = join(root, "output");

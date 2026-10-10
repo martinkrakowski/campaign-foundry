@@ -57,6 +57,14 @@
       "because": "D220/N10: briefs/<slug>/campaign.json must be hashed like the brief; skipping the hash check lets a name/type changed after the review be imported.",
       "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/campaign-step.test.ts", "-t", "a campaign meta file changed after the hashes were taken refuses the campaign before any write"],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/campaign-step.ts",
+      "before": "        reason: errorMessage(error),\n        partial: true,\n        minted: { assets: [] },\n",
+      "after": "        reason: errorMessage(error),\n        minted: { assets: [] },\n",
+      "because": "Mutant drops `partial: true` from the non-EEXIST createCampaign branch, so a write failure is reported as a plain refusal with no partial assets carried forward. Caught by `a createCampaign failure that is not EEXIST is reported as partial`.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/campaign-step.test.ts", "-t", "a createCampaign failure that is not EEXIST is reported as partial"],
+      "verdict": "caught"
     }
   ]
 }
