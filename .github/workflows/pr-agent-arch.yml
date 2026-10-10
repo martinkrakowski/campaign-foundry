@@ -122,7 +122,7 @@ jobs:
           echo "PR #$PR -> $model" >> "$GITHUB_STEP_SUMMARY"
 
       - name: "PR Agent"
-        uses: docker://pragent/pr-agent@sha256:b81235c3bddc551939a1feca8926f4b6e8abcec2ae5bf4620424f8f56dd9cb93 # 0.42.0-github_action
+        uses: docker://pragent/pr-agent@sha256:31b9aac6ab067bada9a0c1b001d30ebc500ea4487e00a93c18c59b9ef5fa66db # 0.47.0-github_action
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENROUTER__KEY: ${{ secrets.OPENROUTER_KEY }}
@@ -143,6 +143,12 @@ jobs:
           github_action_config.auto_describe: "false"
           github_action_config.auto_improve: "true"
           github_action_config.pr_actions: '["opened", "reopened", "ready_for_review"]'
+          # 0.47.0 fails the Action on a recorded tool error by default. "false" keeps what
+          # 0.42.0 did: a reviewer that could not review stays green and does not block a merge.
+          github_action_config.fail_on_tool_errors: "false"
+          # The run's model, tokens, time and estimated cost, appended to the comment it posts.
+          config.output_run_details: "true"
+          config.output_run_cost: "true"
           # The instructions OPEN WITH THE PROHIBITION, not the mandate (P2.3). What this
           # reviewer must not say is the part that makes it worth running at all.
           pr_code_suggestions.extra_instructions: |
@@ -272,7 +278,7 @@ jobs:
             Silence is the correct output for most pull requests. This codebase's layering is
             already enforced; you exist for the handful of changes where the import graph is
             clean and the design is not.
-          pr_code_suggestions.commitable_code_suggestions: "true"
+          pr_code_suggestions.committable_code_suggestions: "true"
           pr_code_suggestions.publish_output_no_suggestions: "false"
           pr_code_suggestions.focus_only_on_problems: "true"
           # Lower than the other two reviewers, deliberately. The finding classes above are
