@@ -270,12 +270,24 @@ describe("import CLI (PT-8a)", () => {
     }
   });
 
-  test("apply and verify refuse as not-yet-implemented, and exit 1", async () => {
-    for (const subcommand of ["apply", "verify"]) {
-      const { err, deps } = io();
-      expect(await main([subcommand], deps)).toBe(1);
-      expect(err).toEqual([`${subcommand}: not yet implemented`]);
-    }
+  test("verify refuses as not-yet-implemented, and exits 1", async () => {
+    const { err, deps } = io();
+    expect(await main(["verify"], deps)).toBe(1);
+    expect(err).toEqual(["verify: not yet implemented"]);
+  });
+
+  test("apply --help prints a usage holding the three exit-code lines", async () => {
+    const { out, err, deps } = io();
+    expect(await main(["apply", "--help"], deps)).toBe(0);
+    expect(err).toEqual([]);
+    const text = out.join("\n");
+    expect(text).toContain("0  nothing was refused and nothing is partial");
+    expect(text).toContain(
+      "1  at least one campaign is partial, or the run itself failed, or the run wrote at least one campaign and refused at least one",
+    );
+    expect(text).toContain(
+      "3  the run wrote nothing: at least one campaign was refused before any write, none was created or completed, nothing is partial",
+    );
   });
 
   test("without injected IO the output goes to the process's own streams", async () => {
@@ -284,10 +296,10 @@ describe("import CLI (PT-8a)", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
-      expect(await main(["apply"])).toBe(1);
+      expect(await main(["verify"])).toBe(1);
       expect(await main(["inspect"])).toBe(1);
       expect(await main(planArgv())).toBe(0);
-      expect(error).toHaveBeenNthCalledWith(1, "apply: not yet implemented");
+      expect(error).toHaveBeenNthCalledWith(1, "verify: not yet implemented");
       expect(error).toHaveBeenNthCalledWith(2, USAGE);
       expect(log).toHaveBeenCalledWith(`import plan — switched-at: ${SWITCHED_AT}`);
     } finally {

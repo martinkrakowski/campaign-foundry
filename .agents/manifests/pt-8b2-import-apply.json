@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "lane": "PT-8b2-import-apply",
+  "mutations": [
+    {
+      "file": "apps/api/bin/import.ts",
+      "before": "    if (replanned.digest !== flags.expect) {\n      io.stderr(\n        `--expect ${flags.expect} does not match the re-planned digest ${replanned.digest}`,\n      );\n      return 1;\n    }\n",
+      "after": "    if (replanned.digest !== flags.expect) {\n      io.stderr(\n        `--expect ${flags.expect} does not match the re-planned digest ${replanned.digest}`,\n      );\n    }\n",
+      "because": "Removing the `return 1` from the digest-equality refusal lets `apply` write on a digest that does not match --expect, violating N1/D225. Title 4 exits 1 on the baseline and proceeds on the mutant, caught on `expect(await main(...)).toBe(1)`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply.test.ts",
+        "-t",
+        "apply with a digest that is not the re-planned digest refuses and writes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "  if (objectStore() !== \"s3\") {\n    return `apply needs OBJECT_STORE=s3, and OBJECT_STORE is ${objectStore()}`;\n  }\n",
+      "after": "  if (objectStore() !== \"s3\") {\n  }\n",
+      "because": "Removing the `return` from the OBJECT_STORE guard lets `apply` run on OBJECT_STORE=fs, violating N2/D225. Title 9 exits 1 on the baseline and proceeds on the mutant, caught on `expect(await main(...)).toBe(1)`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply.test.ts",
+        "-t",
+        "apply refuses unless OBJECT_STORE is s3"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "    await this.#append({ kind: \"campaign\", ...entry });\n",
+      "after": "    await this.#append({ kind: \"campaign\", ...entry, minted: { campaignId: entry.minted.campaignId, assets: [] } });\n",
+      "because": "Leaving the minted assets out of the result file violates N4/D229. Title 16's `expect(entry.minted.assets.map((a) => a.id).sort()).toEqual(...)` fails on the mutant because the array is empty.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply.test.ts",
+        "-t",
+        "the result file lists every campaign uuid, asset id and object key the run minted"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/import.ts",
+      "before": "    if (existsSync(flags.result!)) {\n      io.stderr(await describeResultRefusal(flags.result!));\n      return 1;\n    }\n    handle = await openResult(flags.result!);",
+      "after": "    handle = await openResult(flags.result!);",
+      "because": "Removing the `existsSync` guard before `openResult` lets the result reach `open(path, \"wx\")`, which throws EEXIST into the apply catch block — a different error than the `describeResultRefusal` refusal. Title 11 exits 1 on both baseline and mutant, but the error line changes from the 'already exists' refusal to the EEXIST message, caught on `expect(err[0]).toBe(...)` at apply.test.ts:450.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply.test.ts",
+        "-t",
+        "apply refuses a result path that already exists"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "    const written = await this.#handle.write(buf, offset, buf.length - offset);\n",
+      "after": "    const written = await this.#handle.write(buf, 0, buf.length, 0);\n",
+      "because": "Writing each chunk with an explicit position of 0 seeks the file back to the start on every write, so each line overwrites the earlier ones instead of appending, violating N4/D229. Title 16's `expect(writes.every((c) => c.length === 3)).toBe(true)` fails on the mutant because each write call passes 4 args (buf, offset, length, position) instead of 3.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply.test.ts",
+        "-t",
+        "the result file is appended one line per campaign and never rewritten"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "      try {\n        result = (await step(ctx, campaign)) as CampaignResult;\n      } catch (error) {\n        // A thrown step becomes this campaign's entry, not a run abort (N8b2):\n        // refused, the error named, partial (a throw proves nothing kept), empty\n        // minted; the loop then continues with the next campaign.\n        result = {\n          outcome: \"refused\",\n          reason: errorMessage(error),\n          partial: true,\n          minted: { assets: [] },\n          unreferencedInputs: { count: 0, names: [] },\n        };\n      }",
+      "after": "      result = (await step(ctx, campaign)) as CampaignResult;",
+      "because": "Removing the try around the step lets a thrown error abort the run instead of recording it as refused+partial, violating N8b2. The step throws at apply.test.ts:1061, propagating through applyCampaigns at apply.ts:225; the test fails before reaching `expect(step).toHaveBeenCalledTimes(2)`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply.test.ts",
+        "-t",
+        "a step that throws is recorded as refused and partial and the next campaign still runs"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "    try {\n      await dir.sync();\n    } finally {\n      await dir.close();\n    }\n",
+      "after": "    try {\n    } finally {\n      await dir.close();\n    }\n",
+      "because": "Mutant drops the `dir.sync()` call, so `openResult` can hand back a file handle whose parent-directory entry was never fsynced: a crash can leave the campaigns written but the result path gone (N4/D229). Baseline calls `dir.sync()` once, caught by `openResult syncs the parent directory after creating the file`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply-result-durability.test.ts",
+        "-t",
+        "openResult syncs the parent directory after creating the file"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/asset-step.ts",
+      "before": "        key: written.objectKey,\n",
+      "after": "        key: (await assets.assetObjectKey(slug, candidate)) as ObjectKey,\n",
+      "because": "Mutant re-injects the second `assetObjectKey` lookup after `writeAsset`, so a newly written asset's key can be lost when that lookup throws (D234), leaving a committed object unnamed in the result. Caught by `a newly written asset's key comes from the write, not from a second lookup`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/asset-step-object-key.test.ts",
+        "-t",
+        "a newly written asset's key comes from the write, not from a second lookup"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/import.ts",
+      "before": "      return counts.created + counts.completed === 0 ? 3 : 1;\n",
+      "after": "      return 3;\n",
+      "because": "Mutant forces exit 3 even when a run wrote a campaign and also refused one after it, so an operator is told to reuse the (already-valid) result for a partial run. Caught by `a run that writes one campaign and refuses another exits 1 and names the refused one`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply.test.ts",
+        "-t",
+        "a run that writes one campaign and refuses another exits 1 and names the refused one"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "      if (i === lines.length - 1) continue;\n      return `--result ${JSON.stringify(path)} already exists`;\n",
+      "after": "      return `--result ${JSON.stringify(path)} already exists`;\n",
+      "because": "Mutant drops the torn-last-line skip, so a crash-cut last line is mis-named as 'already exists' instead of an interrupted run. Caught by `a result file whose last line is cut short is named an interrupted run`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply.test.ts",
+        "-t",
+        "a result file whose last line is cut short is named an interrupted run"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -97,11 +97,17 @@ export interface CopyAssetsOptions {
 export interface AssetStorePort {
   /**
    * Store a PNG or JPEG asset for a brief exclusively.
-   * Returns the repo-relative path `assets/inputs/<briefId>/<name>`, plus the
-   * asset's own `id` on the backends that mint one (s3, PT-4k1) and no `id` on
-   * fs. Fails with EEXIST if an asset already exists at that path.
+   * Returns the repo-relative path `assets/inputs/<briefId>/<name>`, the asset's
+   * own `id` on the backends that mint one (s3, PT-4k1) and no `id` on fs, plus
+   * `objectKey`: the object key the bytes were stored under, on the backends
+   * that have one; `path` is NOT that key. Fails with EEXIST if an asset already
+   * exists at that path.
    */
-  writeAsset(briefId: string, name: string, bytes: Buffer): Promise<{ path: string; id?: string }>;
+  writeAsset(
+    briefId: string,
+    name: string,
+    bytes: Buffer,
+  ): Promise<{ path: string; id?: string; objectKey?: ObjectKey }>;
 
   /**
    * Read raw bytes of an asset stored under a campaign brief.
