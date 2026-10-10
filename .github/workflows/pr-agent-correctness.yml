@@ -78,10 +78,11 @@ jobs:
           OPENROUTER__KEY: ${{ secrets.OPENROUTER_KEY }}
           config.restricted_mode: "true"
           config.model: ${{ steps.arm.outputs.model }}
-          # Haiku only. A fallback to the OTHER arm's model would quietly turn a failed call into a
-          # review by the wrong model and contaminate the trial; a Haiku review is visibly a third
-          # thing and is dropped from the comparison.
-          config.fallback_models: '["openrouter/anthropic/claude-haiku-4.5"]'
+          # Luna only. A fallback to the OTHER arm's model would quietly turn a failed call into a
+          # review by the wrong model and contaminate the trial; a Luna review is visibly a third
+          # thing and is dropped from the comparison. (Claude Haiku 4.5 until 2026-10-10, when the
+          # owner ruled out Claude, Gemini and Grok models through OpenRouter in any pipeline seat.)
+          config.fallback_models: '["openrouter/openai/gpt-6-luna"]'
           config.custom_model_max_tokens: "128000"
           config.max_model_tokens: "70000"
           # Context for judging behaviour, not design: AGENTS.md (conventions), the testing rules,
