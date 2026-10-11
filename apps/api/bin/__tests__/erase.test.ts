@@ -176,6 +176,24 @@ describe("erase CLI (bin/erase.ts)", () => {
     expect(log).toEqual([]);
   });
 
+  test("the usage text says what an id is and echoes nothing that was passed", async () => {
+    const lines = USAGE_ERASE.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^usage: yarn erase:user --email <email> \[--apply\] \| /);
+    expect(lines[1]).toBe("<id> is the 32-character lowercase hex id from the user table.");
+    const passed = "Not-An-Id-0123";
+    const open = vi.fn();
+    let message = "";
+    try {
+      await runErase(["--user", passed], open, () => {});
+    } catch (e) {
+      message = e instanceof Error ? e.message : String(e);
+    }
+    expect(message).toBe(USAGE_ERASE);
+    expect(message).not.toContain(passed);
+    expect(open).not.toHaveBeenCalled();
+  });
+
   test("erase CLI accepts every id that safeId mints", () => {
     const token = "erased:00000000-0000-4000-8000-000000000000";
     for (let i = 0; i < 200; i++) {

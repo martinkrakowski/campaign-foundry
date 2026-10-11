@@ -14,7 +14,7 @@ import { databaseConfig, type DatabaseSettings } from "../server/lib/db/database
 import { connect } from "./db.js";
 
 export const USAGE_ERASE =
-  "usage: yarn erase:user --email <email> [--apply] | yarn erase:user --user <id> [--apply] | yarn erase:user --finish <token> --user <id> --apply";
+  "usage: yarn erase:user --email <email> [--apply] | yarn erase:user --user <id> [--apply] | yarn erase:user --finish <token> --user <id> --apply\n<id> is the 32-character lowercase hex id from the user table.";
 
 /** The count lines, in the order they print. */
 const COUNT_LINES: readonly (readonly [keyof EraseUserCounts, string])[] = [
