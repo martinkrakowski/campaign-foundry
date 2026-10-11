@@ -165,6 +165,16 @@ export function AssetPickerDrawer({
   /** The confirmation was accepted: close it, then send exactly one request. */
   const runDelete = (asset: AssetEntry) => {
     setConfirmTarget(null);
+    // Protection was decided when the row rendered; the editor's draft may have come to
+    // name this asset while the confirmation was open. The row now shows the in-use hint.
+    if ((protectedRefs ?? []).some((ref) => refMatchesAsset(ref, asset, briefId))) {
+      // Say so where a delete is announced, and move focus to the list heading: the
+      // Delete button that opened the confirmation is no longer there to return to.
+      setDeleteError(undefined);
+      setNotice(messages.assetDeleteProtectedHint);
+      setFocusTick((tick) => tick + 1);
+      return;
+    }
     if (deletingRef.current) return;
     deletingRef.current = true;
     setDeletingName(asset.name);

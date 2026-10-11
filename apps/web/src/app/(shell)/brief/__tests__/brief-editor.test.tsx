@@ -3146,6 +3146,85 @@ describe("BriefPage — the editor is one scrolling column (SG1 / SG-D2)", () =>
     );
   });
 
+  const mockBinFetch = () => {
+    vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+      const u = String(url);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (u.includes("/campaigns/assets")) {
+        return Promise.resolve(
+          json({ assets: [{ name: "brand-logo.png", size: 4096, type: "image/png" }] }),
+        );
+      }
+      if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+        return Promise.resolve(json({ briefs: [entry("ok", "r1")] }));
+      }
+      if (method === "GET" && u.includes("/campaigns/capabilities")) {
+        return Promise.resolve(json({ motion: true }));
+      }
+      return Promise.resolve(json({}, 404));
+    });
+  };
+
+  /** Mounts the editor at "ok" beside the capture and picks the bin's logo, so the draft names a ref. */
+  const publishABinRef = async (user: ReturnType<typeof userEvent.setup>) => {
+    const view = renderWithRun(
+      <>
+        <Editor id="ok" />
+        <PublishedRefs />
+      </>,
+    );
+    await adopt(user, "ok");
+    await user.click(screen.getAllByRole("button", { name: messages.logoChooseFromBin })[0]);
+    await user.click(await screen.findByRole("button", { name: "Choose brand-logo.png" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("published-refs").textContent).toContain(
+        "assets/inputs/ok/brand-logo.png",
+      ),
+    );
+    return view;
+  };
+
+  test("a route the editor cannot load publishes no asset refs, though the same instance held some", async () => {
+    mockBinFetch();
+    const user = userEvent.setup();
+    const view = await publishABinRef(user);
+    // The route changes the way Next changes it: a new `briefId` on the SAME editor
+    // instance. "Bad_Id" fails SAFE_ID_PATTERN, so the editor answers "not found" and
+    // leaves its draft state alone: only the route-error gate can silence the refs.
+    view.rerender(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <>
+            <Editor id="Bad_Id" />
+            <PublishedRefs />
+          </>
+          <CreateCampaignDialog />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+    expect(await screen.findByText(messages.briefNotFound("Bad_Id"))).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("published-refs").textContent).toBe("[]"));
+  });
+
+  test("the editor clears its published asset refs when it unmounts", async () => {
+    mockBinFetch();
+    const user = userEvent.setup();
+    const view = await publishABinRef(user);
+    // Unmount ONLY the editor: the provider (and the capture beside it) stay.
+    view.rerender(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <>
+            <PublishedRefs />
+          </>
+          <CreateCampaignDialog />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+    await waitFor(() => expect(screen.queryByLabelText("Campaign Name")).toBeNull());
+    await waitFor(() => expect(screen.getByTestId("published-refs").textContent).toBe("[]"));
+  });
+
   /**
    * D203/#666, end to end and in both directions at once.
    *
