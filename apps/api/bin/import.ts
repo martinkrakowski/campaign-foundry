@@ -10,6 +10,8 @@ import {
   applyGuards,
   checkResultPath,
   describeResultRefusal,
+  entryNotes,
+  exitCodeFor,
   openResult,
   planProbes,
   replan,
@@ -56,8 +58,8 @@ export const APPLY_USAGE =
   " --org <id> --expect <digest> --result <path> [--include-samples]" +
   "\nexit codes:\n" +
   "  0  nothing was refused and nothing is partial\n" +
-  "  1  at least one campaign is partial, or the run itself failed, or the run wrote at least one campaign and refused at least one\n" +
-  "  3  the run wrote nothing: at least one campaign was refused before any write, none was created or completed, nothing is partial";
+  "  1  at least one campaign is partial (a write of it failed, or one of its report, pool or decision rows was refused), or the run itself failed, or the run wrote something and refused at least one campaign\n" +
+  "  3  the run wrote nothing: at least one campaign was refused before any write, none was created or completed, no row was written, nothing is partial";
 
 /**
  * The error `apply` stops with when a line of the result file cannot be written:
@@ -350,6 +352,7 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
             io.stdout(`    asset ${asset.id} ${asset.name} ${asset.key}`);
           }
         }
+        for (const note of entryNotes(entry)) io.stdout(note);
         try {
           await writer.add(entry);
         } catch (error) {
@@ -357,22 +360,19 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
         }
       },
     );
-    // Refusals happen before any write: either at the scan (the campaign never
-    // reaches `applyCampaigns`) or inside it (a step returned `refused` or threw,
-    // which is recorded as refused+partial and counted under `partial`). Nothing
-    // of a refused campaign's is written, so they share one census figure.
+    // A refused CAMPAIGN is refused before any write: at the scan (it never
+    // reaches `applyCampaigns`) or by the campaign step. A refused ROW of an
+    // imported campaign is not counted here: it makes that line partial.
     const refused = replanned.result.refusals.length + counts.refused;
     await writer.summary({ ...counts, refused });
     io.stdout(
       `${counts.created} created, ${counts.completed} completed, ` +
         `${counts.unchanged} unchanged, ${refused} refused`,
     );
-    if (counts.partial) return 1;
-    if (refused > 0) {
+    if (!counts.partial && refused > 0) {
       io.stdout(`${refused} campaign(s) refused; nothing of theirs was written`);
-      return counts.created + counts.completed === 0 ? 3 : 1;
     }
-    return 0;
+    return exitCodeFor(counts, refused);
   } catch (error) {
     io.stderr(errorMessage(error));
     return 1;
