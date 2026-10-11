@@ -535,6 +535,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         refused: 0,
         partial: false,
         rowsWritten: 0,
+        objectsMinted: 0,
       });
       await writer.close();
       const seed = readFileSync(result, "utf8");
@@ -902,6 +903,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         refused: 0,
         partial: false,
         rowsWritten: 0,
+        objectsMinted: 0,
       });
       await writer.close();
 
@@ -1127,6 +1129,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       refused: 0,
       partial: true,
       rowsWritten: 1,
+      objectsMinted: 0,
     });
   });
 
@@ -1156,6 +1159,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       refused: 0,
       partial: false,
       rowsWritten: 0,
+      objectsMinted: 0,
     });
   });
 
@@ -1202,6 +1206,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       refused: 0,
       partial: true,
       rowsWritten: 0,
+      objectsMinted: 0,
     });
   });
 
@@ -1231,6 +1236,136 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
     }
   });
 
+  const OBJECT_A = { key: "org/local/campaign/c-1/renders/p1/1x1.png", path: "camp/p1/1x1.png" };
+  const OBJECT_B = { key: "org/local/campaign/c-1/renders/p1/9x16.mp4", path: "camp/p1/9x16.mp4" };
+  const OBJECT_C = {
+    key: "org/local/campaign/c-1/renders/proofs/p1.pdf",
+    path: "camp/proofs/p1.pdf",
+  };
+
+  test("the objects later steps minted join the campaign's minted record in step order and are counted", async () => {
+    const hashedCtx = { ...ctxWith("", ""), expectedHashes: new Map() } as HashedContext;
+    const minted = { campaignId: "c-1", assets: [{ id: "a-1", name: "logo.png", key: "k/1" }] };
+    const first = async (): Promise<CampaignResult> => ({
+      outcome: "created",
+      minted,
+      unreferencedInputs: { count: 0, names: [] },
+    });
+    const one = async (): Promise<StepAddition> => ({
+      rows: [],
+      minted: { objects: [OBJECT_A] },
+    });
+    const none = async (): Promise<StepAddition> => ({ rows: [], minted: { objects: [] } });
+    const two = async (): Promise<StepAddition> => ({
+      rows: [],
+      minted: { objects: [OBJECT_B, OBJECT_C] },
+    });
+    const entries: CampaignEntry[] = [];
+    const counts = await applyCampaigns(
+      hashedCtx,
+      [{ slug: "camp", sourcePath: "x" }],
+      [first, one, none, two],
+      async (entry: CampaignEntry) => {
+        entries.push(entry);
+      },
+    );
+    expect(entries).toEqual([
+      {
+        slug: "camp",
+        outcome: "created",
+        minted: { ...minted, objects: [OBJECT_A, OBJECT_B, OBJECT_C] },
+        unreferencedInputs: { count: 0, names: [] },
+        rows: [],
+      },
+    ]);
+    expect(counts).toEqual({
+      created: 1,
+      completed: 0,
+      unchanged: 0,
+      refused: 0,
+      partial: false,
+      rowsWritten: 0,
+      objectsMinted: 3,
+    });
+  });
+
+  test("the objects a later step minted stay on the line when the next step throws", async () => {
+    const hashedCtx = { ...ctxWith("", ""), expectedHashes: new Map() } as HashedContext;
+    const first = async (): Promise<{ outcome: CampaignOutcome }> => ({ outcome: "unchanged" });
+    const one = async (): Promise<StepAddition> => ({
+      rows: [],
+      minted: { objects: [OBJECT_A] },
+    });
+    const boom = async (): Promise<StepAddition> => {
+      throw new Error("the object store went away");
+    };
+    const entries: CampaignEntry[] = [];
+    const counts = await applyCampaigns(
+      hashedCtx,
+      [{ slug: "camp", sourcePath: "x" }],
+      [first, one, boom],
+      async (entry: CampaignEntry) => {
+        entries.push(entry);
+      },
+    );
+    expect(entries[0]).toEqual({
+      slug: "camp",
+      outcome: "unchanged",
+      partial: true,
+      minted: { assets: [], objects: [OBJECT_A] },
+      unreferencedInputs: { count: 0, names: [] },
+      rows: [],
+      stepError: "the object store went away",
+    });
+    expect(counts.objectsMinted).toBe(1);
+    expect(counts.partial).toBe(true);
+  });
+
+  test("a run that minted an object never exits 3, also when a campaign was refused beside it", () => {
+    const counts = {
+      created: 0,
+      completed: 0,
+      unchanged: 1,
+      refused: 0,
+      partial: false,
+      rowsWritten: 0,
+      objectsMinted: 1,
+    };
+    expect(exitCodeFor(counts, 1)).toBe(1);
+    expect(exitCodeFor(counts, 0)).toBe(0);
+    expect(exitCodeFor({ ...counts, objectsMinted: 0 }, 1)).toBe(3);
+  });
+
+  test("the result file lists the objects a later step minted and its summary counts them", async () => {
+    const result = freshResult("minted-objects");
+    try {
+      const handle = await openResult(result);
+      const writer = new ResultWriter(handle, SWITCHED_AT, "local", "digest");
+      await writer.header();
+      const first = async (): Promise<{ outcome: CampaignOutcome }> => ({ outcome: "unchanged" });
+      const renders = async (): Promise<StepAddition> => ({
+        rows: [],
+        minted: { objects: [OBJECT_A, OBJECT_B] },
+      });
+      const counts = await applyCampaigns(
+        { ...ctxWith("", ""), expectedHashes: new Map() },
+        [{ slug: "camp", sourcePath: "x" }],
+        [first, renders],
+        async (entry: CampaignEntry) => {
+          await writer.add(entry);
+        },
+      );
+      await writer.summary(counts);
+      await writer.close();
+      const parsed = parseResult(result);
+      expect(parsed.campaigns).toHaveLength(1);
+      expect(parsed.campaigns[0]!.minted).toEqual({ assets: [], objects: [OBJECT_A, OBJECT_B] });
+      expect(parsed.summary).toMatchObject({ kind: "summary", unchanged: 1, objectsMinted: 2 });
+    } finally {
+      rmSync(result, { force: true });
+    }
+  });
+
   test("exit 3 needs a run that wrote nothing: a row written for an unchanged campaign makes a refusal exit 1", async () => {
     const hashedCtx = { ...ctxWith("", ""), expectedHashes: new Map() } as HashedContext;
     const first = async (): Promise<{ outcome: CampaignOutcome }> => ({ outcome: "unchanged" });
@@ -1253,6 +1388,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       refused: 0,
       partial: false,
       rowsWritten: 1,
+      objectsMinted: 0,
     });
     // One campaign refused at the scan, beside it: the run wrote a row, so 1, not 3.
     expect(exitCodeFor(counts, 1)).toBe(1);
