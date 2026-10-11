@@ -6,7 +6,9 @@ import { errorMessage } from "@campaignfoundry/shared";
 import { isErrno } from "../brief-files.js";
 import { resolveConfined } from "../confined-path.js";
 import { copyPoolProblem } from "../ports/pool-store.port.js";
-import { parentsAreReal, readBounded } from "./census.js";
+import { countUnreferencedInputs, resolveRefTargets } from "./asset-step.js";
+import { blocksImport } from "./classify.js";
+import { parentsAreReal, readBounded, type UnreferencedInputsEntry } from "./census.js";
 import type { ScanRefusal, ScanResult, ScannedCampaign } from "./scan.js";
 import type { StepContext } from "./steps.js";
 
@@ -402,4 +404,41 @@ export async function assemblePlan(ctx: StepContext, scan: ScanResult): Promise<
     decisions.push(await decisionPlan(ctx, refusals, campaign));
   }
   return { reports, pools, decisions, refusals };
+}
+
+/** What {@link unreferencedInputsPlan} answers: the entries to print, and the folders it could not list. */
+export type UnreferencedInputsPlan = {
+  readonly entries: readonly UnreferencedInputsEntry[];
+  readonly refusals: readonly PlanRefusal[];
+};
+
+/**
+ * The own inputs no ref names, per importable campaign (owner's decision,
+ * 2026-10-11): the list `apply` reports on its result line, computed the same way —
+ * `countUnreferencedInputs` over `resolveRefTargets` — so the reviewer sees before
+ * `apply` what will be left behind. They are NOT imported and NOT in the digest.
+ *
+ * A campaign with a ref that blocks the import has no entry: `apply` refuses it
+ * before it counts anything. A folder `countUnreferencedInputs` cannot list
+ * (anything but ENOENT) is that campaign's refusal, never a throw. Nothing is written.
+ */
+export function unreferencedInputsPlan(ctx: StepContext, scan: ScanResult): UnreferencedInputsPlan {
+  const entries: UnreferencedInputsEntry[] = [];
+  const refusals: PlanRefusal[] = [];
+  for (const campaign of scan.campaigns) {
+    if (campaign.refs.some((ref) => blocksImport(ref))) continue;
+    try {
+      const found = countUnreferencedInputs(ctx, campaign.slug, resolveRefTargets(ctx, campaign));
+      if (found.count > 0) {
+        entries.push({ slug: campaign.slug, count: found.count, names: [...found.names].sort() });
+      }
+    } catch (error) {
+      refusals.push({
+        slug: campaign.slug,
+        sourcePath: join(ctx.projectRoot, "assets", "inputs", campaign.slug),
+        reason: errorMessage(error),
+      });
+    }
+  }
+  return { entries, refusals };
 }
