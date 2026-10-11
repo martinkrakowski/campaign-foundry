@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { isErrno } from "../brief-files.js";
@@ -28,11 +28,16 @@ export type OwnInput =
  * Every entry of `assets/inputs/<slug>/`, in name order, checked by `classifyRefs`:
  * the ONE place that decides D222, that refuses a symlink and a non-file, and that
  * never follows a link. Each entry is handed to it as the ref a brief would carry.
- * No folder is no inputs. A folder that cannot be listed throws: the caller refuses
- * the campaign before it writes anything. Read-only.
+ * No folder is no inputs. A folder that is a symlink, or that cannot be listed, throws:
+ * the caller refuses the campaign before it writes anything. Read-only.
  */
 export function ownInputs(ctx: StepContext, slug: string): OwnInput[] {
   const dir = join(ctx.projectRoot, "assets", "inputs", slug);
+  const folder = lstatSync(dir, { throwIfNoEntry: false });
+  if (folder === undefined) return [];
+  if (folder.isSymbolicLink()) {
+    throw new Error(`assets/inputs/${slug} is a symlink; the importer never follows one`);
+  }
   let names: string[];
   try {
     names = readdirSync(dir).sort();
@@ -52,6 +57,14 @@ export function ownInputs(ctx: StepContext, slug: string): OwnInput[] {
     refs: [],
     sample: false,
   });
+  if (
+    classified.length !== refs.length ||
+    classified.some((found, index) => found.ref !== refs[index])
+  ) {
+    throw new Error(
+      `assets/inputs/${slug}: the classifier did not answer one result per entry, in order`,
+    );
+  }
   return names.map((name, index): OwnInput => {
     const found = classified[index]!;
     return blocksImport(found)

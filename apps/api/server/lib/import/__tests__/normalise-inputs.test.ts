@@ -1,6 +1,8 @@
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
+import { classifyRefs } from "../classify.js";
 import { bodyDrift, ownInputs } from "../normalise-inputs.js";
 import type { StepContext } from "../steps.js";
 import {
@@ -13,6 +15,16 @@ import {
   makeRoot,
   writeAt,
 } from "./fixtures/tree.js";
+
+vi.mock("../classify.js", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../classify.js")>();
+  return { ...real, classifyRefs: vi.fn(real.classifyRefs) };
+});
+
+vi.mock("node:fs", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:fs")>();
+  return { ...real, readdirSync: vi.fn(real.readdirSync) };
+});
 
 function ctxWith(root: string): StepContext {
   return {
@@ -76,18 +88,24 @@ describe("ownInputs: a live campaign's own input files against the upload rules"
     ]);
   });
 
-  test("a symlinked inputs folder is never read through: every entry is failed", () => {
+  test("a symlinked inputs folder is refused: its names are not listed", () => {
     root = makeRoot();
     writeAt(root, "elsewhere/logo.png", PNG);
     linkAt(root, "assets/inputs/camp", join(root, "elsewhere"));
-    expect(ownInputs(ctxWith(root), "camp")).toEqual([
-      {
-        name: "logo.png",
-        ref: "assets/inputs/camp/logo.png",
-        state: "failed",
-        reason: '"inputs/camp" is a symlinked directory; the importer never follows one',
-      },
-    ]);
+    const ctx = ctxWith(root);
+    expect(() => ownInputs(ctx, "camp")).toThrow(
+      "assets/inputs/camp is a symlink; the importer never follows one",
+    );
+  });
+
+  test("a dangling symlink where the inputs folder belongs is refused, not read as no inputs", () => {
+    root = makeRoot();
+    writeAt(root, "elsewhere/logo.png", PNG);
+    linkAt(root, "assets/inputs/camp", join(root, "nowhere"));
+    const ctx = ctxWith(root);
+    expect(() => ownInputs(ctx, "camp")).toThrow(
+      "assets/inputs/camp is a symlink; the importer never follows one",
+    );
   });
 
   test("an inputs folder that cannot be listed throws; it is not an empty list", () => {
@@ -95,6 +113,39 @@ describe("ownInputs: a live campaign's own input files against the upload rules"
     writeAt(root, "assets/inputs/camp", PNG);
     const ctx = ctxWith(root);
     expect(() => ownInputs(ctx, "camp")).toThrow(/ENOTDIR/);
+  });
+
+  test("a classifier that answers out of step is an error, not a shifted verdict", async () => {
+    root = makeRoot();
+    writeAt(root, "assets/inputs/camp/good.png", PNG);
+    writeAt(root, "assets/inputs/camp/second.png", PNG);
+    const real = (await vi.importActual<typeof import("../classify.js")>("../classify.js"))
+      .classifyRefs;
+    const ctx = ctxWith(root);
+    vi.mocked(classifyRefs).mockImplementationOnce((...args) => real(...args).slice(1));
+    expect(() => ownInputs(ctx, "camp")).toThrow(
+      "the classifier did not answer one result per entry, in order",
+    );
+    vi.mocked(classifyRefs).mockImplementationOnce((...args) =>
+      real(...args)
+        .slice()
+        .reverse(),
+    );
+    expect(() => ownInputs(ctx, "camp")).toThrow(
+      "the classifier did not answer one result per entry, in order",
+    );
+  });
+
+  test("an inputs folder that vanishes between the look and the list reads as no inputs", () => {
+    root = makeRoot();
+    writeAt(root, "assets/inputs/camp/good.png", PNG);
+    const gone = new Error("gone") as NodeJS.ErrnoException;
+    gone.code = "ENOENT";
+    vi.mocked(readdirSync).mockImplementationOnce(() => {
+      throw gone;
+    });
+    const ctx = ctxWith(root);
+    expect(ownInputs(ctx, "camp")).toEqual([]);
   });
 });
 

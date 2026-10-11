@@ -1,1 +1,91 @@
-{"version": 1, "lane": "PT-8e2a", "mutations": [{"file": "apps/api/server/lib/import/normalise-inputs.ts", "before": "    return blocksImport(found)", "after": "    return found.ref === \"\"", "because": "Grok PT-8e 2: only a file that passes D222 becomes an asset; a symlink or an oversized file listed ok would be read and written.", "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/normalise-inputs.test.ts", "-t", "a file that fails a rule is listed failed with the rule's reason, beside the ones that pass"], "verdict": "caught"}, {"file": "apps/api/server/lib/import/normalise-inputs.ts", "before": "    if (isErrno(error, \"ENOENT\")) return [];", "after": "    return [];", "because": "A folder that cannot be listed is not 'no inputs': answered as empty, a live campaign's uploads would silently get no asset row.", "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/normalise-inputs.test.ts", "-t", "an inputs folder that cannot be listed throws; it is not an empty list"], "verdict": "caught"}, {"file": "apps/api/server/lib/import/normalise-inputs.ts", "before": "  if (again === body) return undefined;", "after": "  if (again.length === body.length) return undefined;", "because": "Grok PT-8e 3: if the re-serialised body differs outside the ref fields, refuse and write nothing. The check is byte for byte.", "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/normalise-inputs.test.ts", "-t", "a body with the same content in another key order, or with other spacing, drifts"], "verdict": "caught"}]}
+{
+  "version": 1,
+  "lane": "PT-8e2a",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/normalise-inputs.ts",
+      "before": "    return blocksImport(found)",
+      "after": "    return found.ref === \"\"",
+      "because": "Grok PT-8e 2: only a file that passes D222 becomes an asset; a symlink or an oversized file listed ok would be read and written.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/normalise-inputs.test.ts",
+        "-t",
+        "a file that fails a rule is listed failed with the rule's reason, beside the ones that pass"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/normalise-inputs.ts",
+      "before": "    if (isErrno(error, \"ENOENT\")) return [];",
+      "after": "    return [];",
+      "because": "A folder that cannot be listed is not 'no inputs': answered as empty, a live campaign's uploads would silently get no asset row.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/normalise-inputs.test.ts",
+        "-t",
+        "an inputs folder that cannot be listed throws; it is not an empty list"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/normalise-inputs.ts",
+      "before": "  if (again === body) return undefined;",
+      "after": "  if (again.length === body.length) return undefined;",
+      "because": "Grok PT-8e 3: if the re-serialised body differs outside the ref fields, refuse and write nothing. The check is byte for byte.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/normalise-inputs.test.ts",
+        "-t",
+        "a body with the same content in another key order, or with other spacing, drifts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/normalise-inputs.ts",
+      "before": "    classified.some((found, index) => found.ref !== refs[index])",
+      "after": "    false",
+      "because": "Grok review of #809: if the classifier answers in another order, a file would get another file's verdict; the reversed case is what catches it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/normalise-inputs.test.ts",
+        "-t",
+        "a classifier that answers out of step is an error, not a shifted verdict"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/normalise-inputs.ts",
+      "before": "  if (folder.isSymbolicLink()) {",
+      "after": "  if (false) {",
+      "because": "Grok review of #809: a symlinked inputs folder must be refused, not listed through: the importer never follows one, and a dangling link is not 'no inputs'.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/normalise-inputs.test.ts",
+        "-t",
+        "a symlinked inputs folder is refused: its names are not listed"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
