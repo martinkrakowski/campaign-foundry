@@ -1,4 +1,13 @@
-import { lstatSync, mkdirSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  lstatSync,
+  mkdirSync,
+  rmSync,
+  truncateSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
+import { open as openFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { fingerprint } from "../digest.js";
@@ -30,6 +39,21 @@ function render(rel: string, bytes: Buffer | string = BYTES): string {
 const stamps = (entries: Record<string, string>): Map<string, string> =>
   new Map(Object.entries(entries));
 
+/** An `open` for the reader that first does `before`: a change made after the reader's check. */
+const openAfter = (before: (file: string) => void) =>
+  vi.fn(async (file: string, flags: number) => {
+    before(file);
+    return openFile(file, flags);
+  });
+/** An `open` whose file answers the stat taken at open; `after` then changes the file under it. */
+const openThen = (after: (file: string) => void) =>
+  vi.fn(async (file: string, flags: number) => {
+    const fh = await openFile(file, flags);
+    const st = await fh.stat();
+    after(file);
+    return Object.assign(fh, { stat: async () => st });
+  });
+
 describe("readReviewedRender: the reviewed stamp", () => {
   test("a render whose size and time are the reviewed stamp is read whole", async () => {
     const reviewed = stamps({ [ONE]: render(ONE) });
@@ -44,18 +68,18 @@ describe("readReviewedRender: the reviewed stamp", () => {
   });
 
   test("a render whose time or size differs from the reviewed stamp is refused and never read", async () => {
-    const read = vi.fn(async () => BYTES);
+    const open = openAfter(() => undefined);
     const file = join(output, ONE);
     const reviewed = stamps({ [ONE]: render(ONE) });
     // The same size, another time.
     utimesSync(file, OLD, OLD);
-    expect(await readReviewedRender(output, ONE, reviewed, { read })).toEqual(CHANGED);
+    expect(await readReviewedRender(output, ONE, reviewed, { open })).toEqual(CHANGED);
     // The same time, another size.
     const sameTime = stamps({ [ONE]: fingerprint(lstatSync(file)) });
     writeFileSync(file, Buffer.concat([BYTES, BYTES]));
     utimesSync(file, OLD, OLD);
-    expect(await readReviewedRender(output, ONE, sameTime, { read })).toEqual(CHANGED);
-    expect(read).not.toHaveBeenCalled();
+    expect(await readReviewedRender(output, ONE, sameTime, { open })).toEqual(CHANGED);
+    expect(open).not.toHaveBeenCalled();
   });
 });
 
@@ -123,20 +147,20 @@ describe("readReviewedRender: never through a symlink", () => {
 
 describe("readReviewedRender: the size cap and the read", () => {
   test("a render over the cap is refused with its size and never read; one at the cap is read", async () => {
-    const read = vi.fn(async () => BYTES);
+    const open = openAfter(() => undefined);
     const reviewed = stamps({
       "camp/p1/five.mp4": render("camp/p1/five.mp4", "12345"),
       "camp/p1/four.mp4": render("camp/p1/four.mp4", "1234"),
     });
     const over = await readReviewedRender(output, "camp/p1/five.mp4", reviewed, {
       maxBytes: 4,
-      read,
+      open,
     });
     expect(over).toEqual({
       state: "refused",
       reason: "camp/p1/five.mp4 is 5 bytes; the render cap is 4 bytes.",
     });
-    expect(read).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
     const atCap = await readReviewedRender(output, "camp/p1/four.mp4", reviewed, { maxBytes: 4 });
     expect(atCap).toEqual({ state: "ok", bytes: Buffer.from("1234") });
   });
@@ -147,29 +171,13 @@ describe("readReviewedRender: the size cap and the read", () => {
     const file = writeAt(output, big, "");
     // A sparse file: it has the size, and no byte of it is written or read.
     truncateSync(file, MAX_RENDER_BYTES + 1);
-    const read = vi.fn(async () => BYTES);
+    const open = openAfter(() => undefined);
     const reviewed = stamps({ [big]: fingerprint(lstatSync(file)) });
-    expect(await readReviewedRender(output, big, reviewed, { read })).toEqual({
+    expect(await readReviewedRender(output, big, reviewed, { open })).toEqual({
       state: "refused",
       reason: `${big} is 536870913 bytes; the render cap is 536870912 bytes.`,
     });
-    expect(read).not.toHaveBeenCalled();
-  });
-
-  test("bytes that are not the reviewed size, and a read that fails, are refused and never thrown", async () => {
-    const reviewed = stamps({ [ONE]: render(ONE) });
-    const short = async (): Promise<Buffer> => Buffer.from("short");
-    expect(await readReviewedRender(output, ONE, reviewed, { read: short })).toEqual({
-      state: "refused",
-      reason: `${ONE} changed while it was read`,
-    });
-    const broken = async (): Promise<Buffer> => {
-      throw new Error("the disk went away");
-    };
-    expect(await readReviewedRender(output, ONE, reviewed, { read: broken })).toEqual({
-      state: "refused",
-      reason: "the disk went away",
-    });
+    expect(open).not.toHaveBeenCalled();
   });
 });
 
@@ -180,5 +188,123 @@ describe("renderFingerprints", () => {
       { rel: ONE, fingerprint: "size:4:mtime:1000" },
     ];
     expect([...renderFingerprints(files)]).toEqual([[ONE, "size:4:mtime:1000"]]);
+  });
+});
+
+describe("readReviewedRender: the checked file is opened once and never followed", () => {
+  test("a file swapped for a symlink after the check is refused and the link is never followed", async () => {
+    const file = join(output, ONE);
+    render(ONE);
+    utimesSync(file, OLD, OLD);
+    const reviewed = stamps({ [ONE]: fingerprint(lstatSync(file)) });
+    // Another file with the same size and the same time: only the link gives it away.
+    const target = writeAt(output, "elsewhere/other.png", Buffer.alloc(BYTES.length, "x"));
+    utimesSync(target, OLD, OLD);
+    const open = openAfter((name) => {
+      rmSync(name);
+      linkAt(output, ONE, target);
+    });
+    expect(await readReviewedRender(output, ONE, reviewed, { open })).toEqual({
+      state: "refused",
+      reason: `${ONE} changed while it was read`,
+    });
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  test("a file rewritten with the same size after the check is refused", async () => {
+    const reviewed = stamps({ [ONE]: render(ONE) });
+    const open = openAfter((name) => utimesSync(name, OLD, OLD));
+    expect(await readReviewedRender(output, ONE, reviewed, { open })).toEqual({
+      state: "refused",
+      reason: `${ONE} changed while it was read`,
+    });
+  });
+
+  test("a file swapped for a directory after the check is refused", async () => {
+    const reviewed = stamps({ [ONE]: render(ONE) });
+    const open = openAfter((name) => {
+      rmSync(name);
+      mkdirSync(name);
+    });
+    expect(await readReviewedRender(output, ONE, reviewed, { open })).toEqual({
+      state: "refused",
+      reason: `${ONE} changed while it was read`,
+    });
+  });
+});
+
+describe("readReviewedRender: no more than the reviewed size is read", () => {
+  test("a file that grows after it was opened is refused", async () => {
+    const reviewed = stamps({ [ONE]: render(ONE) });
+    const open = openThen((name) => appendFileSync(name, "grown after the check"));
+    expect(await readReviewedRender(output, ONE, reviewed, { open })).toEqual({
+      state: "refused",
+      reason: `${ONE} changed while it was read`,
+    });
+  });
+
+  test("a file that shrinks after it was opened is refused", async () => {
+    const reviewed = stamps({ [ONE]: render(ONE) });
+    const open = openThen((name) => truncateSync(name, 4));
+    expect(await readReviewedRender(output, ONE, reviewed, { open })).toEqual({
+      state: "refused",
+      reason: `${ONE} changed while it was read`,
+    });
+  });
+});
+
+describe("readReviewedRender: an open or a close that fails", () => {
+  test("an open that fails is refused and never thrown", async () => {
+    const reviewed = stamps({ [ONE]: render(ONE) });
+    const open = openAfter(() => {
+      throw new Error("the disk went away");
+    });
+    expect(await readReviewedRender(output, ONE, reviewed, { open })).toEqual({
+      state: "refused",
+      reason: "the disk went away",
+    });
+  });
+
+  test("the file is closed once and a close that fails is not thrown", async () => {
+    const reviewed = stamps({ [ONE]: render(ONE) });
+    let closed = 0;
+    const open = vi.fn(async (file: string, flags: number) => {
+      const fh = await openFile(file, flags);
+      const close = fh.close.bind(fh);
+      return Object.assign(fh, {
+        close: async () => {
+          closed += 1;
+          await close();
+          throw new Error("the close failed");
+        },
+      });
+    });
+    const got = await readReviewedRender(output, ONE, reviewed, { open });
+    expect(got).toEqual({ state: "ok", bytes: BYTES });
+    expect(closed).toBe(1);
+  });
+});
+
+describe("readReviewedRender: pinned answers", () => {
+  test("a file that is not there under a symlinked directory is absent, or changed when the digest named it", async () => {
+    mkdirSync(join(output, "elsewhere/empty"), { recursive: true });
+    linkAt(output, "camp/linked", join(output, "elsewhere/empty"));
+    const missing = "camp/linked/x.png";
+    expect(await readReviewedRender(output, missing, stamps({}))).toEqual({ state: "absent" });
+    const named = stamps({ [missing]: "size:4:mtime:1000" });
+    expect(await readReviewedRender(output, missing, named)).toEqual({
+      state: "refused",
+      reason: `${missing} changed since the digest`,
+    });
+  });
+
+  test("a changed render over the cap is reported as changed, not as too large", async () => {
+    const five = "camp/p1/five.mp4";
+    const reviewed = stamps({ [five]: render(five, "12345") });
+    utimesSync(join(output, five), OLD, OLD);
+    expect(await readReviewedRender(output, five, reviewed, { maxBytes: 4 })).toEqual({
+      state: "refused",
+      reason: `${five} changed since the digest`,
+    });
   });
 });
