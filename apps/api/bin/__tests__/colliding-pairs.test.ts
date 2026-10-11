@@ -116,4 +116,9 @@ describe("yarn report:colliding-pairs", () => {
     ).rejects.toThrow(USAGE_COLLIDING);
     expect(seen).toEqual([]);
   });
+
+  test("a refused argument never opens the database: the parameter defaults stay unused", async () => {
+    await expect(main(["--fix"])).rejects.toThrow(USAGE_COLLIDING);
+    expect(seen).toEqual([]);
+  });
 });
