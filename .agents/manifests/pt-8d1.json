@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "lane": "PT-8d1",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "          const objects = [...(entry.minted.objects ?? []), ...mintedNow];",
+      "after": "          const objects = [...mintedNow];",
+      "because": "D229: the result file lists every object the run minted. Two follow-up steps can each mint; keeping only the last step's objects loses the first step's keys from the record a rollback deletes by.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply.test.ts", "-t", "the objects later steps minted join the campaign's minted record in step order and are counted"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "          objectsMinted += mintedNow.length;",
+      "after": "          objectsMinted += 0;",
+      "because": "The summary's objectsMinted is what tells a run that wrote objects from one that wrote nothing.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply.test.ts", "-t", "the result file lists the objects a later step minted and its summary counts them"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "  if (counts.objectsMinted > 0) return 1;",
+      "after": "  if (counts.objectsMinted > 1) return 1;",
+      "because": "Exit 3 means the run wrote nothing. One minted object is a write.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply.test.ts", "-t", "a run that minted an object never exits 3, also when a campaign was refused beside it"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "            ...(mintedNow.length > 0 ? { minted: { ...entry.minted, objects } } : {}),",
+      "after": "            ...(mintedNow.length >= 0 ? { minted: { ...entry.minted, objects } } : {}),",
+      "because": "A line whose steps minted nothing has no objects list, so every existing line stays byte for byte what it was.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply.test.ts", "-t", "a later step's rows join the campaign's line and the minted ids stay"],
+      "verdict": "caught"
+    }
+  ]
+}
