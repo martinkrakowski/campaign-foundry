@@ -9,6 +9,8 @@ import {
   type EraseUserCounts,
   type EraseUserRef,
 } from "../server/lib/deletion/erase-user.js";
+import { databaseSettings } from "../server/lib/config.js";
+import { databaseConfig, type DatabaseSettings } from "../server/lib/db/database-config.js";
 import { connect } from "./db.js";
 
 export const USAGE_ERASE =
@@ -119,12 +121,24 @@ export function parseEraseArgs(args: readonly string[]): EraseArgs {
   return { mode: "erase", ref: email !== undefined ? { email } : { userId: user! }, apply };
 }
 
+/**
+ * The host name of the database a run reaches, for its first line. Parsed by the
+ * same `databaseConfig` that `connect` uses, so the two cannot disagree; the CA
+ * file is not read. Only the host leaves this function: never the URL, the user,
+ * the password, the port, the database name or the query string.
+ */
+export function databaseHost(settings: DatabaseSettings): string {
+  return databaseConfig(settings, () => "").host;
+}
+
 export async function runErase(
   args: readonly string[],
   open: () => SqlClient,
   log: (line: string) => void,
+  host: () => string,
 ): Promise<void> {
   const parsed = parseEraseArgs(args);
+  log(`  Database host: ${host()}`);
   const db = open();
   try {
     if (parsed.mode === "finish") {
@@ -174,7 +188,8 @@ export async function runErase(
 
 /* istanbul ignore next -- CLI entry guard; runErase() is covered directly in tests */
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  runErase(process.argv.slice(2), connect, console.log).catch((error: unknown) => {
+  const host = (): string => databaseHost(databaseSettings());
+  runErase(process.argv.slice(2), connect, console.log, host).catch((error: unknown) => {
     process.exitCode = reportFailure(error, console.error);
   });
 }
