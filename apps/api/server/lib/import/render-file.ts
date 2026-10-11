@@ -1,5 +1,5 @@
-import type { Stats } from "node:fs";
-import { lstat, readFile } from "node:fs/promises";
+import { constants, type Stats } from "node:fs";
+import { lstat, open, type FileHandle } from "node:fs/promises";
 import { relative } from "node:path";
 import { errorMessage } from "@campaignfoundry/shared";
 import { isErrno } from "../brief-files.js";
@@ -22,13 +22,18 @@ export type RenderFileState =
       readonly rel: string;
       readonly file: string;
       readonly size: number;
+      readonly dev: number;
+      readonly ino: number;
     }
   | { readonly state: "refused"; readonly reason: string };
 
-/** `maxBytes`: the cap, 512 MiB when absent. `read`: how the bytes are read, `readFile` when absent. */
+/**
+ * `maxBytes`: the cap, 512 MiB when absent. `open`: how the checked file is opened
+ * for reading, `open` of `node:fs/promises` when absent. A test changes the file in it.
+ */
 export interface RenderFileOptions {
   readonly maxBytes?: number;
-  readonly read?: (file: string) => Promise<Buffer>;
+  readonly open?: (file: string, flags: number) => Promise<FileHandle>;
 }
 
 /**
@@ -49,7 +54,11 @@ export function renderFingerprints(files: readonly DigestFile[]): Map<string, st
  * through a symlink (the file or a directory above it), a regular file, its
  * `lstat` size and time equal to the reviewed stamp, and not over the cap. A
  * file that is not there is `absent` unless the digest named it: then it was
- * removed after the review. It never throws.
+ * removed after the review. A file that is not there under a symlinked
+ * directory answers the same way (absent, or changed when the digest named
+ * it) before the directories are checked: no byte is read through the link (the
+ * `lstat` does resolve through it),
+ * and `plan` and `readReviewed` answer the same. It never throws.
  */
 export async function statReviewedRender(
   outputRoot: string,
@@ -84,13 +93,19 @@ export async function statReviewedRender(
   if (st.size > maxBytes) {
     return refused(`${rel} is ${st.size} bytes; the render cap is ${maxBytes} bytes.`);
   }
-  return { state: "ok", rel, file, size: st.size };
+  return { state: "ok", rel, file, size: st.size, dev: st.dev, ino: st.ino };
 }
 
 /**
- * Read one render for the import: {@link statReviewedRender} first, then the
- * bytes, whole. Bytes that are not the size just checked are refused (the file
- * changed while it was read). It never throws: a read that fails is refused.
+ * Read one render for the import: {@link statReviewedRender} first. Then the
+ * file is opened ONCE, the file itself never through a symlink (`O_NOFOLLOW`; a
+ * directory above it is covered by the device and inode of the checked file),
+ * and the open file itself must still be a regular file with the reviewed
+ * stamp. No more than its reviewed size plus one byte is read: a file that
+ * grew, shrank or was swapped after the check is refused ("changed while it
+ * was read"). The stamp is taken again after the read: a file rewritten in
+ * place while it was read is refused. It never throws: an open or a read
+ * that fails is refused; a failed close is ignored.
  */
 export async function readReviewedRender(
   outputRoot: string,
@@ -100,14 +115,34 @@ export async function readReviewedRender(
 ): Promise<Reviewed> {
   const found = await statReviewedRender(outputRoot, path, fingerprints, options);
   if (found.state !== "ok") return found;
-  const read = options.read ?? ((file: string) => readFile(file));
+  const changed: Reviewed = { state: "refused", reason: `${found.rel} changed while it was read` };
+  const opener = options.open ?? open;
+  let fh: FileHandle | undefined;
   try {
-    const bytes = await read(found.file);
-    if (bytes.length !== found.size) {
-      return { state: "refused", reason: `${found.rel} changed while it was read` };
+    fh = await opener(found.file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const st = await fh.stat();
+    const same =
+      st.isFile() &&
+      fingerprint(st) === fingerprints.get(found.rel) &&
+      st.dev === found.dev &&
+      st.ino === found.ino;
+    if (!same) return changed;
+    // One byte more than the reviewed size: a file that grew fills it, and is refused.
+    const bytes = Buffer.alloc(found.size + 1);
+    let filled = 0;
+    while (filled < bytes.length) {
+      const { bytesRead } = await fh.read(bytes, filled, bytes.length - filled, filled);
+      if (bytesRead === 0) break;
+      filled += bytesRead;
     }
-    return { state: "ok", bytes };
+    if (filled !== found.size) return changed;
+    const after = await fh.stat();
+    if (fingerprint(after) !== fingerprints.get(found.rel)) return changed;
+    return { state: "ok", bytes: bytes.subarray(0, found.size) };
   } catch (error) {
+    if (isErrno(error, "ELOOP")) return changed;
     return { state: "refused", reason: errorMessage(error) };
+  } finally {
+    await fh?.close().catch(() => undefined);
   }
 }

@@ -1,0 +1,178 @@
+{
+  "version": 1,
+  "lane": "FU-render-file-open",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    fh = await opener(found.file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);",
+      "after": "    fh = await opener(found.file, constants.O_RDONLY | constants.O_NONBLOCK);",
+      "because": "A render swapped for a symlink between the check and the read must not be followed: without O_NOFOLLOW the bytes of another file with the same size and time are imported under the reviewed path.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/render-file.test.ts",
+        "-t",
+        "a file swapped for a symlink after the check is refused and the link is never followed"
+      ],
+      "verdict": "caught",
+      "retired": "Review of #811: without O_NOFOLLOW the open now follows the link, but the device-and-inode check on the open file (F1) refuses the swap before any byte is read, so the guarded outcome — no bytes of another file imported under the reviewed path — is still refused and the test still passes. The mutant is subsumed; the line stays as defense in depth."
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    const same =\n      st.isFile() &&\n      fingerprint(st) === fingerprints.get(found.rel) &&\n      st.dev === found.dev &&\n      st.ino === found.ino;",
+      "after": "    const same = st.isFile() && st.dev === found.dev && st.ino === found.ino;",
+      "because": "Grok PT-8d 2 (owner, 2026-10-11): a render whose size and mtime differ from the reviewed stamp is refused. The stamp is checked again on the open file, so a rewrite between the check and the read is seen.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/render-file.test.ts",
+        "-t",
+        "a file rewritten with the same size after the check is refused"
+      ],
+      "verdict": "caught",
+      "retired": "Review of #811: the stamp is now taken again after the read (F2), so a rewrite between the check and the read is refused even when the fingerprint comparison at open is removed. The guarded outcome is still refused and the test still passes; the mutant is subsumed by the stronger check."
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    if (filled !== found.size) return changed;",
+      "after": "    if (filled < found.size) return changed;",
+      "because": "A render that grew after the check is refused, and no more than its reviewed size plus one byte is read. Accepting the first bytes of a longer file imports a file nobody reviewed.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/render-file.test.ts",
+        "-t",
+        "a file that grows after it was opened is refused"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    if (filled !== found.size) return changed;",
+      "after": "    if (filled > found.size) return changed;",
+      "because": "A render that shrank after the check is refused: the buffer would otherwise be imported with zero bytes where the file ended.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/render-file.test.ts",
+        "-t",
+        "a file that shrinks after it was opened is refused"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    await fh?.close().catch(() => undefined);",
+      "after": "    await Promise.resolve(fh);",
+      "because": "The opened render is closed on every path; an import of thousands of renders must not run out of file descriptors.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/render-file.test.ts",
+        "-t",
+        "the file is closed once and a close that fails is not thrown"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    if (isErrno(error, \"ELOOP\")) return changed;",
+      "after": "    if (isErrno(error, \"ENOENT\")) return changed;",
+      "because": "A symlink met at open (ELOOP) is reported as a change while reading, with the render's own path, not as a raw system error.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/render-file.test.ts",
+        "-t",
+        "a file swapped for a symlink after the check is refused and the link is never followed"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    const same =\n      st.isFile() &&\n      fingerprint(st) === fingerprints.get(found.rel) &&\n      st.dev === found.dev &&\n      st.ino === found.ino;",
+      "after": "    const same = st.isFile() && fingerprint(st) === fingerprints.get(found.rel);",
+      "because": "Review of #811: a directory above the checked file can be swapped for a symlink between the check and the open, and a file with the same size and time then passes the stamp. The device and inode of the checked file refuse it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/render-file.test.ts",
+        "-t",
+        "a directory above the file swapped for a link to a same-stamp file is refused"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    if (fingerprint(after) !== fingerprints.get(found.rel)) return changed;",
+      "after": "    if (false) return changed;",
+      "because": "Review of #811: the stamp is taken again after the read, so a file rewritten in place while it was read, with the same size, is refused instead of imported under the reviewed stamp.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/render-file.test.ts",
+        "-t",
+        "a file rewritten in place while it is read is refused"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    const bytes = Buffer.alloc(found.size + 1);",
+      "after": "    const bytes = Buffer.alloc(found.size + 4096);",
+      "because": "Review of #811: no read may ask for bytes beyond the reviewed size plus one; a larger buffer would read bytes nobody reviewed.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/render-file.test.ts",
+        "-t",
+        "no read asks for bytes beyond the reviewed size plus one"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    fh = await opener(found.file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);",
+      "after": "    fh = await opener(found.file, constants.O_RDONLY | constants.O_NOFOLLOW);",
+      "because": "Review of #811: a named pipe swapped in after the check must be refused at once by the regular-file check; without O_NONBLOCK the open waits for a writer for ever and the import hangs.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/render-file.test.ts",
+        "-t",
+        "a named pipe swapped in after the check is refused and the open does not wait"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
