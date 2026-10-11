@@ -12,10 +12,17 @@ import {
 import { copyPoolProblem, type PoolStorePort } from "../ports/pool-store.port.js";
 import { ReportConflictError, type ReportStorePort } from "../ports/report-store.port.js";
 import { parentsAreReal, readBounded } from "./census.js";
+import { hasExpectedHashes } from "./campaign-step.js";
+import { importTenant } from "./import-tenant.js";
 import { decisionMapProblem } from "./plan.js";
+import { getDecisionStore, getPoolStore, getReportStore } from "../ports/index.js";
+import type { FollowUpStep } from "./steps.js";
 
-/** What one row write did: stored now, already stored with these bytes, or left alone. */
-export type RowStatus = "written" | "skipped" | "refused";
+/**
+ * What one row write did: stored now, already stored and equal, left alone, or
+ * `failed`: the store threw, so whether the row was written is not known.
+ */
+export type RowStatus = "written" | "skipped" | "refused" | "failed";
 
 /**
  * One imported row's result (PT-8c). `revision` is the revision the source has
@@ -308,3 +315,45 @@ export async function importDecisions(
     (bytes) => importDecisionsRow(decisions, slug, bytes),
   );
 }
+
+/**
+ * The follow-up step for PT-8c: one imported campaign's report, pool and
+ * decisions, in that order (owner, 2026-10-11). The pool does not name the
+ * report, so it is written whatever the report did. A decision names the run it
+ * was given against, so decisions are not written while the report is refused;
+ * a campaign with no report file is not blocked. A store that throws is that
+ * row `failed`: the rows before it stay recorded and no later row is tried.
+ * Any row that is not written or skipped makes the campaign's line partial.
+ */
+export const importRowsStep: FollowUpStep = async (ctx, campaign) => {
+  if (!hasExpectedHashes(ctx)) throw new Error("no reviewed source hashes in the step context");
+  const scope = importTenant(ctx.orgId);
+  const slug = campaign.slug;
+  const rows: RowResult[] = [];
+  let kind: RowResult["kind"] = "report";
+  try {
+    const report = await importReport(getReportStore(scope), ctx, slug);
+    if (report !== undefined) rows.push(report);
+    kind = "pool";
+    const pool = await importPool(getPoolStore(scope), ctx, slug);
+    if (pool !== undefined) rows.push(pool);
+    kind = "decisions";
+    if (report?.status === "refused") {
+      const file = await readReviewed(ctx.outputRoot, `decisions/${slug}.json`, ctx.expectedHashes);
+      if (file.state !== "absent") {
+        rows.push({
+          kind,
+          status: "refused",
+          reason: `not written: the report for ${slug} was refused, and a decision names the report it was given against`,
+        });
+      }
+    } else {
+      const decisions = await importDecisions(getDecisionStore(scope), ctx, slug);
+      if (decisions !== undefined) rows.push(decisions);
+    }
+  } catch (error) {
+    rows.push({ kind, status: "failed", reason: errorMessage(error) });
+  }
+  const unclean = rows.some((row) => row.status === "refused" || row.status === "failed");
+  return unclean ? { rows, partial: true } : { rows };
+};

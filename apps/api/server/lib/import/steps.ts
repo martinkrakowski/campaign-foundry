@@ -1,4 +1,5 @@
 import { importCampaignStep } from "./campaign-step.js";
+import { importRowsStep } from "./rows-step.js";
 
 export type StepContext = {
   orgId: string;
@@ -50,4 +51,4 @@ export type FollowUpStep = (ctx: StepContext, campaign: PlannedCampaign) => Prom
 /** The campaign step first, then the steps that add to its line, in order. */
 export type ImportSteps = readonly [ImportStep, ...FollowUpStep[]];
 
-export const IMPORT_STEPS: ImportSteps = [importCampaignStep];
+export const IMPORT_STEPS: ImportSteps = [importCampaignStep, importRowsStep];
