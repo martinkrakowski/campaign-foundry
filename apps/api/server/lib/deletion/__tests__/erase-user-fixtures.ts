@@ -1,20 +1,25 @@
 import { randomUUID } from "node:crypto";
 import type { SqlClient, SqlQuery } from "../../db/sql-client.js";
 
+// Ids have the shape safeId() mints (32 lowercase hex); erase:user refuses any other.
 /** The four fixture users. No id, email or name is a substring of another's. */
-export const TARGET = { id: "u-target", email: "target@example.com", name: "Target Person" };
+export const TARGET = {
+  id: "4444444444444444444444444444dddd",
+  email: "target@example.com",
+  name: "Target Person",
+};
 export const BYSTANDER = {
-  id: "u-bystander",
+  id: "2222222222222222222222222222bbbb",
   email: "bystander@example.com",
   name: "Bystander Person",
 };
 export const LOCAL_OWNER = {
-  id: "u-local-owner",
+  id: "3333333333333333333333333333cccc",
   email: "local-owner@example.com",
   name: "Local Owner",
 };
 export const ACME_OWNER = {
-  id: "u-acme-owner",
+  id: "1111111111111111111111111111aaaa",
   email: "acme-owner@example.com",
   name: "Acme Owner",
 };
@@ -70,15 +75,15 @@ export async function seedWorld(db: SqlClient): Promise<World> {
 
   await db.query(
     'insert into team_member (id, team_id, user_id, "membershipKey", created_at) values ($1, $2, $3, $4, now())',
-    ["tm-target-a", "team-a", TARGET.id, "local:team-a:u-target"],
+    ["tm-target-a", "team-a", TARGET.id, `local:team-a:${TARGET.id}`],
   );
   await db.query(
     'insert into team_member (id, team_id, user_id, "membershipKey", created_at) values ($1, $2, $3, $4, now())',
-    ["tm-bystander-a", "team-a", BYSTANDER.id, "local:team-a:u-bystander"],
+    ["tm-bystander-a", "team-a", BYSTANDER.id, `local:team-a:${BYSTANDER.id}`],
   );
   await db.query(
     'insert into team_member (id, team_id, user_id, "membershipKey", created_at) values ($1, $2, $3, $4, now())',
-    ["tm-bystander-b", "team-b", BYSTANDER.id, "local:team-b:u-bystander"],
+    ["tm-bystander-b", "team-b", BYSTANDER.id, `local:team-b:${BYSTANDER.id}`],
   );
 
   const { rows: localRows } = await db.query<{ id: string }>(

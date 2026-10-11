@@ -87,7 +87,7 @@ describe("eraseUser (D240)", () => {
   test("eraseUser finds the user by id", async () => {
     const before = await dumpDatabase(db);
 
-    const outcome = await eraseUser(db, { userId: "u-target" }, { apply: false });
+    const outcome = await eraseUser(db, { userId: TARGET.id }, { apply: false });
 
     expect(outcome).toMatchObject({ outcome: "planned" });
     expect(await dumpDatabase(db)).toEqual(before);
@@ -601,14 +601,14 @@ describe("eraseUser (D240)", () => {
 
   test("eraseUser leaves another org and another user untouched", async () => {
     const beforeAcme = await rowsContaining(db, "acme");
-    const beforeBystander = await rowsContaining(db, "u-bystander");
+    const beforeBystander = await rowsContaining(db, BYSTANDER.id);
     expect(beforeAcme.length).toBeGreaterThan(0);
     expect(beforeBystander.length).toBeGreaterThan(0);
 
     await applyTarget();
 
     expect(await rowsContaining(db, "acme")).toEqual(beforeAcme);
-    expect(await rowsContaining(db, "u-bystander")).toEqual(beforeBystander);
+    expect(await rowsContaining(db, BYSTANDER.id)).toEqual(beforeBystander);
   });
 
   test("eraseUser leaves no row anywhere holding the email name or user id", async () => {

@@ -16,6 +16,14 @@ export function safeId(): string {
   return randomBytes(16).toString("hex");
 }
 
+/**
+ * The exact shape `safeId()` mints: 32 lowercase hex characters. Narrower
+ * than `SAFE_ID_PATTERN` on purpose: `erase:user` uses it to refuse a
+ * `--user` value Better Auth could never have minted, before it opens a
+ * database. Change it only together with `safeId()`.
+ */
+export const MINTED_ID_PATTERN = /^[0-9a-f]{32}$/;
+
 /** A defensive check: `safeId()`'s output must always satisfy the pattern it exists to satisfy. */
 export function isSafeId(id: string): boolean {
   return SAFE_ID_PATTERN.test(id);

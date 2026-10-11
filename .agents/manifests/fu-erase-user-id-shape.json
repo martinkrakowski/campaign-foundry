@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "FU-erase-user-id-shape",
+  "mutations": [
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "if (!MINTED_ID_PATTERN.test(val)) throw new Error(USAGE_ERASE);",
+      "after": "if (false) throw new Error(USAGE_ERASE);",
+      "because": "With the shape rule disabled, an email address, a non-user actor value such as operator or cli:erase-user, or a real id wrapped in whitespace all pass the --user check and reach open() unchanged, so the test fails on expect(message).toBe(USAGE_ERASE) because the caught message is a database error or TypeError rather than the usage string.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "erase CLI refuses a user id that is not shaped like a minted id before opening anything"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/auth/id.ts",
+      "before": "export const MINTED_ID_PATTERN = /^[0-9a-f]{32}$/;",
+      "after": "export const MINTED_ID_PATTERN = /^[0-9a-e]{32}$/;",
+      "because": "A rule stricter than safeId() mints would refuse some real ids, so a person could not be erased by id and an incomplete erasure could not be finished. 200 minted ids always include at least one f, and with the alphabet narrowed to 0-9a-e the first such id fails the test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "erase CLI accepts every id that safeId mints"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
