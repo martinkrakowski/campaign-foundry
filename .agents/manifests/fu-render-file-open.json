@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "lane": "FU-render-file-open",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    fh = await opener(found.file, constants.O_RDONLY | constants.O_NOFOLLOW);",
+      "after": "    fh = await opener(found.file, constants.O_RDONLY);",
+      "because": "A render swapped for a symlink between the check and the read must not be followed: without O_NOFOLLOW the bytes of another file with the same size and time are imported under the reviewed path.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/render-file.test.ts", "-t", "a file swapped for a symlink after the check is refused and the link is never followed"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    const same = st.isFile() && fingerprint(st) === fingerprints.get(found.rel);",
+      "after": "    const same = st.isFile();",
+      "because": "Grok PT-8d 2 (owner, 2026-10-11): a render whose size and mtime differ from the reviewed stamp is refused. The stamp is checked again on the open file, so a rewrite between the check and the read is seen.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/render-file.test.ts", "-t", "a file rewritten with the same size after the check is refused"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    if (filled !== found.size) return changed;",
+      "after": "    if (filled < found.size) return changed;",
+      "because": "A render that grew after the check is refused, and no more than its reviewed size plus one byte is read. Accepting the first bytes of a longer file imports a file nobody reviewed.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/render-file.test.ts", "-t", "a file that grows after it was opened is refused"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    if (filled !== found.size) return changed;",
+      "after": "    if (filled > found.size) return changed;",
+      "because": "A render that shrank after the check is refused: the buffer would otherwise be imported with zero bytes where the file ended.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/render-file.test.ts", "-t", "a file that shrinks after it was opened is refused"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    await fh?.close().catch(() => undefined);",
+      "after": "    await Promise.resolve(fh);",
+      "because": "The opened render is closed on every path; an import of thousands of renders must not run out of file descriptors.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/render-file.test.ts", "-t", "the file is closed once and a close that fails is not thrown"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    if (isErrno(error, \"ELOOP\")) return changed;",
+      "after": "    if (isErrno(error, \"ENOENT\")) return changed;",
+      "because": "A symlink met at open (ELOOP) is reported as a change while reading, with the render's own path, not as a raw system error.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/render-file.test.ts", "-t", "a file swapped for a symlink after the check is refused and the link is never followed"],
+      "verdict": "caught"
+    }
+  ]
+}
