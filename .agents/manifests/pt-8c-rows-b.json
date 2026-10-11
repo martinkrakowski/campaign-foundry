@@ -25,6 +25,14 @@
       "because": "D221: null writes decisions only while none are stored; undefined is an unconditional write that replaces a reviewer's decisions.",
       "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/rows-pool-decisions.test.ts", "-t", "different stored decisions are refused and left as they were"],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "  if (!Buffer.from(text, \"utf8\").equals(bytes)) {",
+      "after": "  if (!Buffer.from(text, \"utf8\").equals(Buffer.from(text, \"utf8\"))) {",
+      "because": "A pool or decisions file with a byte that is not valid UTF-8 would be decoded to other text and stored changed (a reviewer's name, a pool entry). It is refused, as a report is.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/rows-pool-decisions.test.ts", "-t", "a decisions file that is not valid UTF-8 is refused and nothing is written"],
+      "verdict": "caught"
     }
   ]
 }

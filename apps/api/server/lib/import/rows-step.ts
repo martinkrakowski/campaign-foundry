@@ -181,8 +181,14 @@ function parseJson(
 ):
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly reason: string } {
+  const text = bytes.toString("utf8");
+  // As for a report: bytes that do not survive the UTF-8 round trip would be
+  // parsed, and then stored, as OTHER text. Refuse them instead.
+  if (!Buffer.from(text, "utf8").equals(bytes)) {
+    return { ok: false, reason: `${rel} is not valid UTF-8` };
+  }
   try {
-    return { ok: true, value: JSON.parse(bytes.toString("utf8")) };
+    return { ok: true, value: JSON.parse(text) };
   } catch (error) {
     return { ok: false, reason: `${rel} is not JSON (${errorMessage(error)})` };
   }
