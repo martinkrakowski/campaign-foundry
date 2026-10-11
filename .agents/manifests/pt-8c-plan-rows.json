@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "lane": "PT-8c-plan-rows",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "  const dry = dryRowStores(getReportStore(scope), getPoolStore(scope), getDecisionStore(scope));",
+      "after": "  const dry = { reports: getReportStore(scope), pools: getPoolStore(scope), decisions: getDecisionStore(scope) };",
+      "because": "Owner's decision 8, 2026-10-11: plan's probe is read-only; with the real stores plan would write the rows it is only meant to predict.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/plan-rows.test.ts", "-t", "on an empty target plan predicts a write for every row, flags the pool it would re-canonicalise, and writes nothing"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "        if (current !== undefined) throw new ReportConflictError(slug, current);",
+      "after": "        if (current !== undefined && slug === \"\") throw new ReportConflictError(slug, current);",
+      "because": "Owner's decision 8: a report already stored is predicted skip or refuse, as apply would record it; without the dry store's conflict it is predicted write.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/plan-rows.test.ts", "-t", "the prediction follows the target and is what apply then records: write, then skip, then refuse"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "    const rows = state === \"refused\" ? undefined : await predictRows(dry, hashed, scanned.slug);",
+      "after": "    const rows = state === \"refused\" && scanned.slug === \"\" ? undefined : await predictRows(dry, hashed, scanned.slug);",
+      "because": "A refused campaign gets no later step in apply, so plan predicts no row for it.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/plan-rows.test.ts", "-t", "a campaign whose probe is refused gets no row prediction"],
+      "verdict": "caught"
+    }
+  ]
+}
