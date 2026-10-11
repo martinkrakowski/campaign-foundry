@@ -6,6 +6,7 @@ import { findCollidingPairs } from "../colliding-pairs.js";
 const A = "11111111-1111-4111-8111-111111111111";
 const B = "22222222-2222-4222-8222-222222222222";
 const C = "33333333-3333-4333-8333-333333333333";
+const D = "abcdefab-cdef-4abc-8def-abcdefabcdef";
 
 let db: SqlClient;
 
@@ -53,10 +54,21 @@ describe("findCollidingPairs", () => {
   });
 
   test("an upper-case spelling of the uuid is reported, as the 409 check compares uuids", async () => {
-    await campaign("acme", A, B.toUpperCase());
-    await campaign("acme", B, "winter");
+    await campaign("acme", A, D.toUpperCase());
+    await campaign("acme", D, "winter");
     const pairs = await findCollidingPairs(db);
     expect(pairs).toHaveLength(1);
-    expect(pairs[0]).toMatchObject({ slugOwnerId: A, idOwnerId: B });
+    expect(pairs[0]).toMatchObject({
+      slugOwnerId: A,
+      slugOwnerSlug: D.toUpperCase(),
+      idOwnerId: D,
+    });
+  });
+
+  test("tombstoned campaigns count on both sides, as the 409 check does not look at deleted_at", async () => {
+    await campaign("acme", A, B);
+    await campaign("acme", B, "winter");
+    await db.query(`update campaign set deleted_at = now() where id = any($1::uuid[])`, [[A, B]]);
+    expect(await findCollidingPairs(db)).toHaveLength(1);
   });
 });

@@ -62,7 +62,8 @@ describe("yarn report:colliding-pairs", () => {
       () => spy(db),
       (l) => lines.push(l),
     );
-    expect(code).toBe(EXIT_FOUND);
+    expect(code).toBe(2);
+    expect(EXIT_FOUND).toBe(2);
     expect(lines).toEqual([
       `  org acme: campaign ${A} has slug "${B}", which is the uuid of campaign ${B} (slug "winter")`,
       "  1 colliding pair(s). Nothing was changed.",
