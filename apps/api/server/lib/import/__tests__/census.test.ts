@@ -146,6 +146,7 @@ describe("assembleCensus (reqs 14 and 17)", () => {
         "refusedBriefs",
         "samples",
         "templates",
+        "unreferencedInputs",
         "usage",
       ].sort(),
     );
@@ -277,6 +278,38 @@ describe("assembleCensus (reqs 14 and 17)", () => {
     expect(census.drafts).toEqual({ count: 0 });
     expect(census.nonBriefFiles).toEqual({ count: 0 });
     expect(census.lastOpened).toEqual({ count: 0 });
+  });
+
+  test("the unreferenced inputs are counted over all campaigns and named <slug>/<name>", async () => {
+    root = makeRoot();
+
+    const census = await assembleCensus(
+      context(root),
+      { refusals: [], samples: { skipped: 0, imported: 0 } },
+      new Set(),
+      [
+        { slug: "camp-a", count: 2, names: ["a.png", "b.png"] },
+        { slug: "camp-b", count: 1, names: ["c.png"] },
+      ],
+    );
+
+    expect(census.unreferencedInputs).toEqual({
+      count: 3,
+      names: ["camp-a/a.png", "camp-a/b.png", "camp-b/c.png"],
+    });
+  });
+
+  test("with no unreferenced inputs the category answers 0 and names nothing", async () => {
+    root = makeRoot();
+
+    const census = await assembleCensus(
+      context(root),
+      { refusals: [], samples: { skipped: 0, imported: 0 } },
+      new Set(),
+    );
+
+    expect(census.unreferencedInputs).toEqual({ count: 0 });
+    expect(census.unreferencedInputs.names).toBeUndefined();
   });
 
   test("parentsAreReal refuses a parent it cannot lstat, and a file's own name is not asked", async () => {

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "lane": "FU-plan-unreferenced-inputs",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/plan.ts",
+      "before": "    if (campaign.refs.some((ref) => blocksImport(ref))) continue;\n",
+      "after": "\n",
+      "because": "`apply` refuses a campaign with a blocking ref before it counts anything, so the plan must list nothing for it: its refusal is already on the list and a files-left-behind line for a campaign that is not imported at all would mislead the reviewer. Without this line the plan lists the spare file of a campaign whose ref is missing. The test plants a spare file beside a missing ref and expects no entry.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/plan.test.ts", "-t", "a campaign with a ref that blocks the import is not listed, as apply counts nothing for it"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/census.ts",
+      "before": "count: unreferenced.reduce((sum, each) => sum + each.count, 0),",
+      "after": "count: unreferenced.length,",
+      "because": "The census count is the number of FILES left behind, not the number of campaigns that have some. Counting entries instead of summing their counts understates it as soon as one campaign has two spare files. The census test passes two campaigns with two and one files and expects 3, where the mutant says 2.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/census.test.ts", "-t", "the unreferenced inputs are counted over all campaigns and named <slug>/<name>"],
+      "verdict": "caught"
+    }
+  ]
+}
