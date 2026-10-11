@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "lane": "PT-8d2",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/renders-step.ts",
+      "before": "      await objects.put(key, source.bytes, { contentType, ifNoneMatch: \"*\" });",
+      "after": "      await objects.put(key, source.bytes, { contentType });",
+      "because": "PT-8d's own mutation (plan row): without ifNoneMatch a re-run over a changed source file silently overwrites the stored render. D221: put with ifNoneMatch, on 412 get and compare sha256, equal is skip, else refused.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/renders-step.test.ts", "-t", "a different render already stored is refused and the stored bytes stay"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/renders-step.ts",
+      "before": "    if (result.status === \"failed\") break;",
+      "after": "    if (result.status === \"refused\") break;",
+      "because": "After a store failure no later render is tried; a refused render must not stop the others.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/renders-step.test.ts", "-t", "a failed render stops the campaign's renders, and a failed or missing render is never listed as minted"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/renders-step.ts",
+      "before": "    result.status === \"written\" ? [{ key: result.key, path: result.path }] : [],",
+      "after": "    result.status === \"skipped\" ? [{ key: result.key, path: result.path }] : [],",
+      "because": "D229: the result file lists the objects the run created. Only a written render is one; a skipped render was there before the run.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/renders-step.test.ts", "-t", "each distinct path is imported once, in first-seen order, and the written ones are the minted ones"],
+      "verdict": "caught"
+    }
+  ]
+}
