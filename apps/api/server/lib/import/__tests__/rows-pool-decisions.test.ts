@@ -107,6 +107,21 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importPoolRow", () => {
     });
     expect(await poolRow(env)).toBeUndefined();
   });
+
+  test("a pool file that is not valid UTF-8 is refused and nothing is written", async () => {
+    const head = Buffer.from(
+      '{"briefId":"camp","generatedAt":"2026-09-01T10:00:00.000Z","model":"a-mod',
+      "utf8",
+    );
+    const tail = Buffer.from('el","entries":[]}', "utf8");
+    const broken = Buffer.concat([head, Buffer.from([0xff]), tail]);
+    expect(await importPoolRow(pools, "camp", broken)).toEqual({
+      kind: "pool",
+      status: "refused",
+      reason: "briefs/camp/pools.json is not valid UTF-8",
+    });
+    expect(await poolRow(env)).toBeUndefined();
+  });
 });
 
 const DECISIONS = {
@@ -226,6 +241,18 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importDecisionsRow", () => {
     await expect(importDecisionsRow(failing, "camp", DEC_CANONICAL)).rejects.toThrow(
       "the database went away",
     );
+  });
+
+  test("a decisions file that is not valid UTF-8 is refused and nothing is written", async () => {
+    const head = Buffer.from('{"camp/a.png":{"verdict":"approved","actor":"an', "utf8");
+    const tail = Buffer.from('a","at":"2026-09-01T10:00:00.000Z","run":"r1"}}', "utf8");
+    const broken = Buffer.concat([head, Buffer.from([0xff]), tail]);
+    expect(await importDecisionsRow(decisions, "camp", broken)).toEqual({
+      kind: "decisions",
+      status: "refused",
+      reason: "decisions/camp.json is not valid UTF-8",
+    });
+    expect((await decisionRows(env)).revision).toBeUndefined();
   });
 });
 
