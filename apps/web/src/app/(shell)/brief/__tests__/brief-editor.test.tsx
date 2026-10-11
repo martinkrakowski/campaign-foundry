@@ -11,6 +11,7 @@ import {
 } from "@/__tests__/helpers";
 import { API, useRun, DEFAULT_BRIEF } from "@/lib/run-context";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
+import { useEditorPanels } from "@/lib/editor-panels-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
 import { CreateCampaignDialog } from "@/components/shell/CreateCampaignDialog";
 import { BrowseBriefsButton } from "@/components/shell/Sidebar";
@@ -59,6 +60,10 @@ const renderWithRun = (ui: React.ReactElement) =>
  * way Next does when the user arrives (or reloads) there.
  */
 const Editor = ({ id }: { id?: string }) => <BriefEditor briefId={id} />;
+
+const PublishedRefs = () => (
+  <output data-testid="published-refs">{JSON.stringify(useEditorPanels().assetRefs)}</output>
+);
 
 /** Corrected for D35's verb model: Save is the bar's primary, one press; Save as…
  *  lives in the overflow — the old disclosure that hid Save behind Save is gone. */
@@ -3100,6 +3105,45 @@ describe("BriefPage — the editor is one scrolling column (SG1 / SG-D2)", () =>
     );
     // …and the drawer closed with the choice, the way the in-section drawer did.
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Asset Bin" })).toBeNull());
+  });
+
+  test("the editor publishes the asset refs of its draft for the sidebar's bin", async () => {
+    // The same fetch mock routes() installs, plus the bin's listing endpoint — the
+    // hoisted drawer fetches against the brief's id exactly as it did in the section.
+    vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+      const u = String(url);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (u.includes("/campaigns/assets")) {
+        return Promise.resolve(
+          json({ assets: [{ name: "brand-logo.png", size: 4096, type: "image/png" }] }),
+        );
+      }
+      if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+        return Promise.resolve(json({ briefs: [entry("ok", "r1")] }));
+      }
+      if (method === "GET" && u.includes("/campaigns/capabilities")) {
+        return Promise.resolve(json({ motion: true }));
+      }
+      return Promise.resolve(json({}, 404));
+    });
+    const user = userEvent.setup();
+    renderWithRun(
+      <>
+        <Editor id="ok" />
+        <PublishedRefs />
+      </>,
+    );
+    await adopt(user, "ok");
+
+    await user.click(screen.getAllByRole("button", { name: messages.logoChooseFromBin })[0]);
+    await screen.findByRole("dialog", { name: "Asset Bin" });
+    await user.click(await screen.findByRole("button", { name: "Choose brand-logo.png" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("published-refs").textContent).toContain(
+        "assets/inputs/ok/brand-logo.png",
+      ),
+    );
   });
 
   /**

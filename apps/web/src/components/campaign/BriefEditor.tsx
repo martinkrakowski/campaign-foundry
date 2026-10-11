@@ -558,7 +558,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // lost its warning (and how a settled one stole somebody else's).
   const draftWriteWriter = useDraftWriteWriter();
   const { openCreateDialog } = useCreateCampaign();
-  const { setPanels, setTopPanels, setRail } = useEditorPanelPublisher();
+  const { setPanels, setTopPanels, setRail, setAssetRefs } = useEditorPanelPublisher();
   // VE1 — history lives in the hook, never in `EditorState` (R6): `state` is the
   // present draft, so persistence and the stored-draft diff see exactly what they
   // saw before, and `dispatch` is a drop-in for the reducer's. The keyboard
@@ -2094,6 +2094,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     deleteCreative,
   ]);
   useEffect(() => () => setPanels(null), []);
+  // The sidebar's Project Bin reads these to hide Delete on an asset a field here
+  // still names, saved or not. The provider keeps the same array when nothing changed.
+  useEffect(() => {
+    setAssetRefs(currentAssetRefs(state));
+  }, [state, setAssetRefs]);
+  useEffect(() => () => setAssetRefs([]), [setAssetRefs]);
 
   /**
    * The preview rail's BODY — `PlayheadHost`'s own slot (CC5), published up to
