@@ -2097,8 +2097,15 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // The sidebar's Project Bin reads these to hide Delete on an asset a field here
   // still names, saved or not. The provider keeps the same array when nothing changed.
   useEffect(() => {
+    // The same silence as the panel publishers above: on a route that names no
+    // loadable brief this page is not an editor, so the bin must not keep
+    // protecting the previous draft's refs.
+    if (unknownId !== null || failedRouteId !== null || failedMetaId !== null) {
+      setAssetRefs([]);
+      return;
+    }
     setAssetRefs(currentAssetRefs(state));
-  }, [state, setAssetRefs]);
+  }, [state, setAssetRefs, unknownId, failedRouteId, failedMetaId]);
   useEffect(() => () => setAssetRefs([]), [setAssetRefs]);
 
   /**
