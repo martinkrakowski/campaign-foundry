@@ -70,6 +70,64 @@ describe("yarn report:colliding-pairs", () => {
     ]);
   });
 
+  test("a query that fails is the failure reported, even when closing the connection fails too", async () => {
+    let ends = 0;
+    const failing: SqlClient = {
+      ...spy(db),
+      query: async () => {
+        throw new Error("the query failed");
+      },
+      end: async () => {
+        ends += 1;
+        throw new Error("the close failed");
+      },
+    };
+    await expect(
+      main(
+        [],
+        () => failing,
+        (l) => lines.push(l),
+      ),
+    ).rejects.toThrow("the query failed");
+    expect(ends).toBe(1);
+    expect(lines).toEqual([]);
+  });
+
+  test("a close that fails after a clean report still fails the command", async () => {
+    const closing: SqlClient = {
+      ...spy(db),
+      end: async () => {
+        throw new Error("the close failed");
+      },
+    };
+    await expect(
+      main(
+        [],
+        () => closing,
+        (l) => lines.push(l),
+      ),
+    ).rejects.toThrow("the close failed");
+    expect(lines).toEqual(["  No colliding campaign pairs found."]);
+  });
+
+  test("a slug with DEL, C1 or bidirectional control characters is printed escaped", async () => {
+    const slug = "w\u007fi\u0080n\u0085t\u009fe\u061cr\u200e\u200f\u202a\u202e\u2066\u2069 \u00e9";
+    await db.query(`insert into campaign (id, org_id, slug) values ($1, 'acme', $2)`, [A, B]);
+    await db.query(`insert into campaign (id, org_id, slug) values ($1, 'acme', $2)`, [B, slug]);
+    const code = await main(
+      [],
+      () => spy(db),
+      (l) => lines.push(l),
+    );
+    expect(code).toBe(2);
+    expect(lines[0]).toBe(
+      `  org acme: campaign ${A} has slug "${B}", which is the uuid of campaign ${B} (slug "w\\u007fi\\u0080n\\u0085t\\u009fe\\u061cr\\u200e\\u200f\\u202a\\u202e\\u2066\\u2069 \u00e9")`,
+    );
+    expect(lines.join("\n")).not.toMatch(
+      /[\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/,
+    );
+  });
+
   test("a slug equal to a campaign uuid of another organisation is not reported", async () => {
     await db.query(`insert into campaign (id, org_id, slug) values ($1, 'acme', $2)`, [A, B]);
     await db.query(`insert into campaign (id, org_id, slug) values ($1, 'other', 'winter')`, [B]);
