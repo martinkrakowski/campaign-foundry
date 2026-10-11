@@ -343,6 +343,9 @@ describe("readReviewedRender: review of #811", () => {
           if (!rewritten) {
             rewritten = true;
             writeFileSync(file, Buffer.alloc(BYTES.length, "y"));
+            // Another time than the reviewed one, set by hand: a rewrite within the
+            // same millisecond keeps the stamp, and no check by size and time sees it.
+            utimesSync(file, OLD, OLD);
           }
           return read(...args);
         },
