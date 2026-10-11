@@ -45,6 +45,14 @@ function scan(...slugs: readonly string[]): ScanResult {
   };
 }
 
+/**
+ * A report as `writeReport` stores it (`report.ts`): `{ halted, assets, log }`, with
+ * the render paths on each ROW of `assets`, never on the report object itself.
+ */
+function rowsReport(...rows: readonly Record<string, unknown>[]): string {
+  return JSON.stringify({ halted: false, assets: rows, log: [] });
+}
+
 describe("reports (req 13)", () => {
   let root: string | undefined;
 
@@ -62,7 +70,7 @@ describe("reports (req 13)", () => {
     writeAt(
       output,
       "reports/camp-a.json",
-      JSON.stringify({
+      rowsReport({
         outputPath: "camp-a/out.png",
         videoPath: "camp-a/clip.mp4",
         htmlFallbackPath: "camp-a/fallback.html",
@@ -120,7 +128,7 @@ describe("reports (req 13)", () => {
     writeAt(
       join(root, "output"),
       "reports/camp-a.json",
-      JSON.stringify({ outputPath: "camp-a/gone.png" }),
+      rowsReport({ outputPath: "camp-a/gone.png" }),
     );
 
     const plan = await assemblePlan(context(root), scan("camp-a"));
@@ -147,7 +155,7 @@ describe("reports (req 13)", () => {
     root = makeRoot();
     const output = join(root, "output");
     writeAt(output, "camp-a/notes.txt", "text\n");
-    writeAt(output, "reports/camp-a.json", JSON.stringify({ outputPath: "camp-a/notes.txt" }));
+    writeAt(output, "reports/camp-a.json", rowsReport({ outputPath: "camp-a/notes.txt" }));
 
     const plan = await assemblePlan(context(root), scan("camp-a"));
 
@@ -165,7 +173,7 @@ describe("reports (req 13)", () => {
     writeAt(
       join(root, "output"),
       "reports/camp-a.json",
-      JSON.stringify({ outputPath: "../../gone/secret.png" }),
+      rowsReport({ outputPath: "../../gone/secret.png" }),
     );
 
     const plan = await assemblePlan(context(root), scan("camp-a"));
@@ -192,7 +200,7 @@ describe("reports (req 13)", () => {
     const output = join(root, "output");
     const real = writeAt(output, "secret/real.png", "png\n");
     linkAt(output, "camp-a/link.png", real);
-    writeAt(output, "reports/camp-a.json", JSON.stringify({ outputPath: "camp-a/link.png" }));
+    writeAt(output, "reports/camp-a.json", rowsReport({ outputPath: "camp-a/link.png" }));
 
     const plan = await assemblePlan(context(root), scan("camp-a"));
 
@@ -207,7 +215,7 @@ describe("reports (req 13)", () => {
     const output = join(root, "output");
     writeAt(join(root, "elsewhere"), "out.png", "png\n");
     linkAt(output, "camp-a/sub", join(root, "elsewhere"));
-    writeAt(output, "reports/camp-a.json", JSON.stringify({ outputPath: "camp-a/sub/out.png" }));
+    writeAt(output, "reports/camp-a.json", rowsReport({ outputPath: "camp-a/sub/out.png" }));
 
     const plan = await assemblePlan(context(root), scan("camp-a"));
 
@@ -221,7 +229,7 @@ describe("reports (req 13)", () => {
     root = makeRoot();
     const output = join(root, "output");
     writeAt(output, "camp-a/a-dir/inside.png", "png\n");
-    writeAt(output, "reports/camp-a.json", JSON.stringify({ outputPath: "camp-a/a-dir" }));
+    writeAt(output, "reports/camp-a.json", rowsReport({ outputPath: "camp-a/a-dir" }));
 
     const dirTarget = await assemblePlan(context(root), scan("camp-a"));
     expect(dirTarget.reports[0]!.fields[0]).toEqual({
@@ -238,7 +246,7 @@ describe("reports (req 13)", () => {
     writeAt(
       join(root, "output"),
       "reports/camp-a.json",
-      JSON.stringify({ outputPath: "camp-a/sub/out.png" }),
+      rowsReport({ outputPath: "camp-a/sub/out.png" }),
     );
     const throughFile = await assemblePlan(context(root), scan("camp-a"));
     expect(throughFile.reports[0]!.fields[0]).toMatchObject({
@@ -253,7 +261,7 @@ describe("reports (req 13)", () => {
     root = makeRoot();
     const output = join(root, "output");
     writeAt(output, "camp-b/x.png", "png\n");
-    writeAt(output, "reports/camp-a.json", JSON.stringify({ outputPath: "camp-b/x.png" }));
+    writeAt(output, "reports/camp-a.json", rowsReport({ outputPath: "camp-b/x.png" }));
 
     const plan = await assemblePlan(context(root), scan("camp-a"));
 
@@ -274,7 +282,7 @@ describe("reports (req 13)", () => {
     writeAt(
       join(root, "elsewhere"),
       "reports/camp-a.json",
-      JSON.stringify({ outputPath: "camp-a/out.png" }),
+      rowsReport({ outputPath: "camp-a/out.png" }),
     );
     writeAt(output, "camp-a/out.png", "png\n");
     linkAt(output, "reports", join(root, "elsewhere", "reports"));
@@ -661,6 +669,109 @@ describe("unreferenced own inputs (owner's decision, 2026-10-11)", () => {
         slug: "camp-a",
         sourcePath: join(root, "assets", "inputs", "camp-a"),
         reason: expect.stringContaining("ENOTDIR"),
+      },
+    ]);
+  });
+});
+
+describe("reports: the render paths are on the rows of assets[] (PT-8d0)", () => {
+  let root: string | undefined;
+
+  afterEach(() => {
+    dropRoot(root);
+    root = undefined;
+  });
+
+  test("a stored report's renders are planned from its rows, each distinct path once", async () => {
+    root = makeRoot();
+    const output = join(root, "output");
+    for (const file of ["p1/1x1/v0.png", "p1/9x16/v0.png", "p1/9x16/v0.mp4", "proofs/p1.pdf"]) {
+      writeAt(output, `camp-a/${file}`, "bytes\n");
+    }
+    const assets = [
+      {
+        productId: "p1",
+        aspectRatio: "1:1",
+        outputPath: "camp-a/p1/1x1/v0.png",
+        proofPath: "camp-a/proofs/p1.pdf",
+      },
+      {
+        productId: "p1",
+        aspectRatio: "9:16",
+        outputPath: "camp-a/p1/9x16/v0.png",
+        videoPath: "camp-a/p1/9x16/v0.mp4",
+        proofPath: "camp-a/proofs/p1.pdf",
+      },
+    ];
+    const report = { halted: false, assets, log: ["rendered 2 creatives"] };
+    writeAt(output, "reports/camp-a.json", JSON.stringify(report, null, 2));
+
+    const plan = await assemblePlan(context(root), scan("camp-a"));
+
+    const fields = plan.reports[0]!.fields;
+    expect(fields.map((one) => `${one.field}:${one.path}:${one.status}`)).toEqual([
+      "outputPath:camp-a/p1/1x1/v0.png:ok",
+      "proofPath:camp-a/proofs/p1.pdf:ok",
+      "outputPath:camp-a/p1/9x16/v0.png:ok",
+      "videoPath:camp-a/p1/9x16/v0.mp4:ok",
+    ]);
+    expect(fields[0]).toEqual({
+      field: "outputPath",
+      path: "camp-a/p1/1x1/v0.png",
+      status: "ok",
+      resolved: join(output, "camp-a/p1/1x1/v0.png"),
+    });
+    expect(plan.refusals).toEqual([]);
+  });
+  test("a path at the top level of a report is left unread", async () => {
+    root = makeRoot();
+    const output = join(root, "output");
+    writeAt(output, "camp-a/top.png", "bytes\n");
+    const report = {
+      halted: false,
+      assets: [],
+      log: [],
+      outputPath: "camp-a/top.png",
+      proofPath: "../../etc/passwd",
+    };
+    writeAt(output, "reports/camp-a.json", JSON.stringify(report));
+
+    const plan = await assemblePlan(context(root), scan("camp-a"));
+
+    expect(plan.reports[0]!.fields).toEqual([]);
+    expect(plan.reports).toEqual([{ slug: "camp-a", present: true, fields: [], problems: [] }]);
+    expect(plan.refusals).toEqual([]);
+  });
+
+  test("a row path whose first segment is not the slug (an old <productId>/… path) is refused for that field, never planned", async () => {
+    root = makeRoot();
+    const output = join(root, "output");
+    writeAt(output, "city-backpack/1x1/v0.png", "bytes\n");
+    writeAt(
+      output,
+      "reports/camp-a.json",
+      rowsReport({ productId: "city-backpack", outputPath: "city-backpack/1x1/v0.png" }),
+    );
+
+    const plan = await assemblePlan(context(root), scan("camp-a"));
+
+    const reason =
+      '"city-backpack/1x1/v0.png" names "city-backpack"\'s render area, not "camp-a"\'s.';
+    expect(plan.reports[0]!.fields).toEqual([
+      {
+        field: "outputPath",
+        path: "city-backpack/1x1/v0.png",
+        status: "refused",
+        resolved: join(output, "city-backpack/1x1/v0.png"),
+        reason,
+      },
+    ]);
+    expect(plan.refusals).toEqual([
+      {
+        slug: "camp-a",
+        sourcePath: join(output, "reports", "camp-a.json"),
+        reason,
+        field: "outputPath",
       },
     ]);
   });

@@ -441,7 +441,11 @@ describe("the plan file, the exit classes and the pool (PT-8a2 reqs 18 and 20)",
     writeAt(
       output!,
       "reports/camp-one.json",
-      JSON.stringify({ outputPath: "camp-one/logo.png", proofPath: "../../etc/passwd" }),
+      JSON.stringify({
+        halted: false,
+        assets: [{ outputPath: "camp-one/logo.png", proofPath: "../../etc/passwd" }],
+        log: [],
+      }),
     );
     const outPath = join(root!, "plan.json");
     const { out, err, deps } = io();

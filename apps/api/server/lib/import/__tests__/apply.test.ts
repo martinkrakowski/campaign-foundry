@@ -1947,14 +1947,24 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       writeAt(
         root,
         "output/reports/camp.json",
-        JSON.stringify({ outputPath: "camp/logo.png", proofPath: "../../etc/passwd" }),
+        JSON.stringify({
+          halted: false,
+          assets: [
+            { outputPath: "camp/logo.png", proofPath: "../../etc/passwd" },
+            { outputPath: "p1/1x1/v0.png" },
+          ],
+          log: [],
+        }),
       );
+      // An old-shape path: its first segment is a product id, not the slug.
+      writeAt(root, "output/p1/1x1/v0.png", PNG);
       const { files, expectedHashes } = await replan(ctxWith(root, output));
       const renderEntry = files.find((f) => f.rel === "camp/logo.png");
       expect(renderEntry).toBeDefined();
       expect(renderEntry!.sha256).toBeUndefined();
       expect(renderEntry!.fingerprint).toBeDefined();
       expect(expectedHashes.has("camp/logo.png")).toBe(false);
+      expect(files.some((f) => f.rel === "p1/1x1/v0.png")).toBe(false);
       expect(expectedHashes.has("briefs/camp.yaml")).toBe(true);
     } finally {
       dropRoot(root);
