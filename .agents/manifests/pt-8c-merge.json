@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "lane": "PT-8c-merge",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "          entry = { ...entry, partial: true, stepError: errorMessage(error) };",
+      "after": "          entry = { ...entry, outcome: \"refused\", minted: { assets: [] }, partial: true, stepError: errorMessage(error) };",
+      "because": "A later step that throws must not turn a campaign that exists into refused or drop its minted ids: D229 rolls back by those ids, and exit 3 means the run wrote nothing.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply.test.ts", "-t", "a later step that throws keeps the campaign's outcome and minted ids, and the line is partial"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "    if (entry.outcome !== \"refused\") {",
+      "after": "    if (entry.outcome !== \"refused\" || campaigns.length > 0) {",
+      "because": "F3, D221: a campaign the campaign step refused gets no later step, so no report, pool or decision row is written for a same-slug campaign a user owns.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply.test.ts", "-t", "a refused campaign does not run the later steps"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "            rows: [...(entry.rows ?? []), ...added.rows],",
+      "after": "            rows: [...added.rows],",
+      "because": "A later step adds its rows to the line; it never replaces the rows an earlier later step recorded.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply.test.ts", "-t", "a later step's rows join the campaign's line and the minted ids stay"],
+      "verdict": "caught"
+    }
+  ]
+}
