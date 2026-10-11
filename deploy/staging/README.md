@@ -8,12 +8,12 @@ Campaign Foundry's staging environment runs on the owner's k3s node `midnight`
 
 ## What runs (namespace `campaign-foundry-staging`)
 
-| Piece | How | Notes |
-|---|---|---|
-| Web + API | `app.yaml`: one Pod, two containers from one image | The web app proxies `/api/pipeline/*` to `127.0.0.1:3001`, fixed at build time; sharing the Pod keeps that right. |
-| Files | PVC `campaign-foundry-data` (local-path, 20Gi) at `/data` | Fonts and the seed samples. The Kafka certificates are Secret mounts layered under `/data/certs`, not PVC data. Input assets and outputs written since PT-4j are in the object store's bucket instead; briefs are Postgres rows. Seeded from the image's samples on first start. |
-| PostgreSQL | CloudNativePG `Cluster` `cf-pg` | TLS; the app verifies against the operator's CA (`cf-pg-ca`). Migrated on every deploy. The app runs `STORE_BACKEND=postgres` and `AUTH_MODE=better-auth` (since 2026-09-26: staging is where the platform is proven), so it starts with empty tables until PT-8 imports the seeded file data. Separate from the Aiven database. |
-| Kafka | Strimzi `Kafka` `cf-kafka`, KRaft, one node | TLS listener with client-certificate auth, as on Aiven. `KafkaUser` `campaign-foundry`, with ACLs on topic `cf.run-requests` and group `cf-workers`. The API publishes queued runs there and consumes them itself (`KAFKA_CONSUME=true`, PT-6b2/PT-6b3); its client certificate and the cluster CA are mounted under `/data/certs`. |
+| Piece        | How                                                                                                               | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------ | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web + API    | `app.yaml`: one Pod, two containers from one image                                                                | The web app proxies `/api/pipeline/*` to `127.0.0.1:3001`, fixed at build time; sharing the Pod keeps that right.                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Files        | PVC `campaign-foundry-data` (local-path, 20Gi) at `/data`                                                         | Fonts and the seed samples. The Kafka certificates are Secret mounts layered under `/data/certs`, not PVC data. Input assets and outputs written since PT-4j are in the object store's bucket instead; briefs are Postgres rows. Seeded from the image's samples on first start.                                                                                                                                                                                                                                  |
+| PostgreSQL   | CloudNativePG `Cluster` `cf-pg`                                                                                   | TLS; the app verifies against the operator's CA (`cf-pg-ca`). Migrated on every deploy. The app runs `STORE_BACKEND=postgres` and `AUTH_MODE=better-auth` (since 2026-09-26: staging is where the platform is proven), so it starts with empty tables until PT-8 imports the seeded file data. Separate from the Aiven database.                                                                                                                                                                                  |
+| Kafka        | Strimzi `Kafka` `cf-kafka`, KRaft, one node                                                                       | TLS listener with client-certificate auth, as on Aiven. `KafkaUser` `campaign-foundry`, with ACLs on topic `cf.run-requests` and group `cf-workers`. The API publishes queued runs there and consumes them itself (`KAFKA_CONSUME=true`, PT-6b2/PT-6b3); its client certificate and the cluster CA are mounted under `/data/certs`.                                                                                                                                                                               |
 | Object store | `seaweedfs.yaml`: one SeaweedFS Pod (master, volume server, filer and S3 gateway), Service `seaweedfs-s3` on 8333 | In-cluster on `http://seaweedfs-s3:8333`, and from a browser on **https://s3.midnight.lan** (path-style, `midnight-ca`) so a presigned URL is the same URL on both sides. Bucket `campaign-foundry`, created by `jobs/s3-bootstrap.yaml` on every deploy. The `api` container runs `OBJECT_STORE=s3` on that bucket (PT-4j), with the app key from the `seaweedfs-s3` Secret rather than the admin key; `deploy.sh` proves that key round-trips an object before it rolls the app out (`jobs/s3-app-probe.yaml`). |
 
 No image-provider keys are configured, so renders are procedural and spend no
@@ -320,6 +320,167 @@ ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging delete 
 The Kafka copy of a run request expires too: topic `cf.run-requests` keeps messages for 24 hours
 (`retention.ms: 86400000`, D244) and rolls its segments hourly (`segment.ms: 3600000`), because
 retention deletes only closed segments. Database backups and logs follow the host's own retention.
+
+## Importing legacy data (PT-8g)
+
+`jobs/import.yaml` is the Job `cf-import`: one run of `apps/api/bin/import.ts` (the command
+behind `yarn import`) from the deployed image, with the data volume mounted **read-only**. It
+brings into Postgres and the bucket what staging still keeps only on that volume
+(`docs/planning/2026-10-04_pt-8-data-migration.md`): the legacy file campaigns, and the inputs
+and renders of campaigns created before the object storage switch.
+
+**The Job is applied by hand, by the owner, one subcommand per run.** `deploy.sh` never applies
+it and the kustomization does not list it. **`plan` always comes first:** it is read-only and
+prints a digest. **`apply` needs `--expect <digest>`:** the digest of the plan that was read and
+accepted. `apply` plans again, and refuses before any write when the source changed since.
+
+**Nothing in this section has been run.** As of this commit the manifest and every command
+below were written from the other manifests and from the command's source, and checked only by
+parsing. The first run of each line is a first run: run one line at a time and read its output.
+
+**When each step may be run** (owner, 2026-10-11). "The image the Job runs" is the deployed
+one: its tag is the short commit that `yarn deploy:staging` built.
+
+- A staging `plan` waits until PT-8d0 is in the image the Job runs.
+- `apply` waits until PT-8d4, PT-8e3 and PT-8f3 are in that image and the plan has been read,
+  including path-shape refusals, drafts and unreferenced files.
+- The Job is not applied while `verify` is still unimplemented. As of this commit
+  `apps/api/bin/import.ts` answers `verify: not yet implemented` and exits 1.
+
+**`--switched-at`.** Every subcommand takes the same `--switched-at`, from the owner's own
+record of the PT-4j deploy. This repository has no deploy log. The value is the instant staging
+first rolled out with `OBJECT_STORE=s3` (PT-4j, #677, commit `cf68396e`), as an ISO instant
+with its offset (`Z` or `+02:00`); the owner fills it in. There is no default. Left as it is below, the command refuses
+the run (`--switched-at <iso> is not a valid date`), and an `apply` with another value than
+the plan's is refused by `--expect`, because the digest covers it. Set it once, in the shell
+you use for all six steps:
+
+```sh
+SWITCHED_AT='SWITCHED_AT_ISO_INSTANT'
+```
+
+**One run.** Steps 1, 4 and 5 set `STEP` and `ARGS` and then use these five lines, from a
+checkout of the deployed commit. Run them one at a time. The third follows the pod's log and
+keeps a copy; the fourth prints the command's exit code (nothing yet means the pod has not
+ended: run it again). **The fifth deletes the Job, and the pod, its log and its `/tmp` with
+it:** run it only when the log file holds the whole run and, after an `apply`, the result file
+has been copied out (step 4).
+
+```sh
+TAG=$(ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging get deployment campaign-foundry -o jsonpath="{.spec.template.spec.containers[0].image}"' | sed 's#.*:##')
+sed -e "s#IMAGE_TAG#$TAG#" -e "s#IMPORT_ARGS#$ARGS#" -e "s#SWITCHED_AT_ISO_INSTANT#$SWITCHED_AT#" deploy/staging/jobs/import.yaml | ssh m 'KUBECONFIG=$HOME/.kube/config kubectl apply -f -'
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging logs -f --pod-running-timeout=2m job/cf-import' | tee "cf-import-$STEP.log"
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging get pods -l job-name=cf-import -o jsonpath="{.items[0].status.containerStatuses[0].state.terminated.exitCode}"'; echo
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging delete job cf-import'
+```
+
+The manifest sets `backoffLimit: 0` and sets no `ttlSecondsAfterFinished`. A retry is a new
+pod with an empty `/tmp`, so the exists-check (`apply` refuses a result file that already
+exists) would not see the first result, and `apply` would run a second time unattended.
+Nothing removes the Job but the fifth line. Applied with the image tag placeholder left in,
+the image does not exist and the pod never starts (delete the Job). With another placeholder
+left in, the command prints its usage or refuses `--switched-at`, and exits 1. Either way
+nothing is imported.
+
+**1. `plan`.** Read-only; the app may stay up.
+
+```sh
+STEP=plan
+ARGS='"plan"'
+```
+
+Run the five lines. The log's `org:` line names the org the import writes to; `apply` uses the
+same one. The log's one long JSON line is the plan: `campaigns` (what would be imported),
+`refusals` (what would not, each with its reason: read every one, the path-shape refusals
+too), `unreferencedInputs` (files no brief names), `probes` (per campaign, what `apply` would
+do against this database, row by row), `existingCampaigns` and `census` (what is counted and
+never imported). Read it, drafts included, before going on. The full digest for step 4:
+
+```sh
+grep -o '"digest":"[0-9a-f]*"' cf-import-plan.log
+```
+
+**2. Stop the app,** so that nobody creates a campaign under a slug the import is writing, and
+so that the dump of step 3 holds everything (a row written after the dump would not survive a
+rollback). Go on only when the second line has returned without an error:
+
+```sh
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging scale deployment/campaign-foundry --replicas=0'
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging wait --for=delete pod -l app=campaign-foundry --timeout=3m'
+```
+
+**3. Back up the database (D229).** No backup of staging's Postgres is configured, and a
+rollback of the import is this dump restored. `cf-pg-1` is the cluster's one instance
+(`kubectl -n campaign-foundry-staging get pods -l cnpg.io/cluster=cf-pg` names it if that
+changed). Keep the file with the plan log. **Do not go on to step 4 unless the first line
+printed `pg_dump exit: 0` and the second lists the dump's contents** (it reads the file back
+through `pg_restore -l` in the database pod): a dump that stopped half way can still be a file
+that is not empty.
+
+```sh
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec cf-pg-1 -c postgres -- pg_dump -Fc campaign_foundry' > cf-pg-before-import.dump; echo "pg_dump exit: $?"
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec -i cf-pg-1 -c postgres -- pg_restore -l' < cf-pg-before-import.dump | tail -5
+ls -l cf-pg-before-import.dump
+```
+
+**4. `apply`,** with the digest from step 1. `--result` is `/tmp/cf-import-result.jsonl`.
+
+```sh
+STEP=apply
+DIGEST='PUT-THE-DIGEST-HERE'
+ARGS="\"apply\", \"--expect\", \"$DIGEST\", \"--result\", \"/tmp/cf-import-result.jsonl\""
+```
+
+Run the first three of the five lines. The log ends with `cf-import: the command exited with
+code <n>` and, when the result file was written, `cf-import: HOLDING this pod`: the pod now
+waits. Stop following the log (Ctrl-C; `cf-import-apply.log` keeps what was printed).
+**Copy that file out of the pod before deleting the Job.** The pod-local file dies with the
+Job. Copy it, then check the copy: the two checksums must be equal, and its first line is the header
+and carries the digest of step 1. A copy that failed or was cut short leaves an empty or
+partial file: run the copy again, the pod waits.
+
+```sh
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec job/cf-import -- cat /tmp/cf-import-result.jsonl' > cf-import-result.jsonl; echo "copy exit: $?"
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec job/cf-import -- sha256sum /tmp/cf-import-result.jsonl'; shasum -a 256 cf-import-result.jsonl
+wc -l cf-import-result.jsonl; head -c 300 cf-import-result.jsonl; echo
+```
+
+**Only when the checksums are equal,** let the pod end. After this line the file in the pod
+cannot be read again:
+
+```sh
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec job/cf-import -- touch /tmp/cf-import-copied'
+```
+
+Then run the fourth and the fifth line. Exit code `0`: nothing was refused and nothing is
+partial. `1`: at least one campaign is partial, or the run failed, or it wrote something and
+refused a campaign. `3`: it wrote nothing, and at least one campaign was refused before any
+write. On `1` or `3`, read the log before step 6. Keep `cf-import-result.jsonl` and
+`cf-import-apply.log` with the dump: a rollback is the dump restored and then exactly the keys
+this run minted deleted from the bucket (D229). Stdout prints every minted asset key and every
+minted render key. So the log names them too if the copy was lost. As of this commit it prints
+the asset keys only (`asset <id> <name> <key>`); the render keys come with PT-8d4, which is
+one reason `apply` waits for it.
+
+**5. `verify`** (PT-8f). Read-only; it exits non-zero on any mismatch. As of this commit it is
+not built: the command answers `verify: not yet implemented` and exits 1. PT-8f3 fixes its
+flags and updates this step; it takes the same `--switched-at`, which the manifest already
+passes.
+
+```sh
+STEP=verify
+ARGS='"verify"'
+```
+
+**6. Start the app again:**
+
+```sh
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging scale deployment/campaign-foundry --replicas=1'
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging rollout status deployment/campaign-foundry --timeout=10m'
+```
+
+Afterwards: an imported brief starts at a new revision (the file's own revision is not kept),
+and packages are not imported; make them again from the campaign's export page.
 
 ## Known limits
 
