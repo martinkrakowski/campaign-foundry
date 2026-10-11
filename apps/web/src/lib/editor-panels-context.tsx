@@ -115,8 +115,7 @@ export function EditorPanelsProvider({ children }: { children: ReactNode }) {
   // The editor publishes on every keystroke; an unchanged list must keep its identity
   // so the sidebar (which reads it) does not re-render for it.
   const setAssetRefs = useCallback(
-    (next: readonly string[]) =>
-      setAssetRefsState((prev) => (sameRefs(prev, next) ? prev : next)),
+    (next: readonly string[]) => setAssetRefsState((prev) => (sameRefs(prev, next) ? prev : next)),
     [],
   );
   const [sinks, setSinks] = useState(0);

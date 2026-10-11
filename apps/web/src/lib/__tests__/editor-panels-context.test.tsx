@@ -16,7 +16,9 @@ const Publish = ({ node }: { node: React.ReactNode }) => {
   return null;
 };
 const Slot = () => <>{useEditorPanels().panels}</>;
-const Refs = () => <output data-testid="refs">{JSON.stringify(useEditorPanels().assetRefs)}</output>;
+const Refs = () => (
+  <output data-testid="refs">{JSON.stringify(useEditorPanels().assetRefs)}</output>
+);
 const PublishRefs = ({ refs }: { refs: readonly string[] }) => {
   const { setAssetRefs } = useEditorPanelPublisher();
   useEffect(() => {
