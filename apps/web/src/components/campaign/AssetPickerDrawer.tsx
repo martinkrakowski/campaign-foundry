@@ -76,6 +76,9 @@ export function AssetPickerDrawer({
   const [deleteError, setDeleteError] = useState<string | undefined>();
   const [notice, setNotice] = useState("");
   const [focusTick, setFocusTick] = useState(0);
+  // Bumped when a delete is refused and its row stays: focus goes back to the
+  // button that was pressed (see the effect below).
+  const [refocusTick, setRefocusTick] = useState(0);
   // A synchronous latch (the mscyu pattern): `deletingName` is state, so two confirmations
   // inside one render window both reach `runDelete` before the buttons disable.
   const deletingRef = useRef(false);
@@ -93,6 +96,8 @@ export function AssetPickerDrawer({
   const briefIdRef = useRef(briefId);
   briefIdRef.current = briefId;
   const headingRef = useRef<HTMLDivElement>(null);
+  // The row's Delete button that opened the confirmation.
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -129,6 +134,13 @@ export function AssetPickerDrawer({
   useEffect(() => {
     if (focusTick > 0) headingRef.current?.focus();
   }, [focusTick]);
+
+  // While the request is out every Delete button is disabled, so the confirmation
+  // could not hand focus back and it fell to the drawer's first control. This runs
+  // after the render that enables the button again.
+  useEffect(() => {
+    if (refocusTick > 0) triggerRef.current?.focus();
+  }, [refocusTick]);
 
   /** Best-effort: a failed refetch leaves the list as it is (the row was already removed). */
   const refetch = async () => {
@@ -177,6 +189,7 @@ export function AssetPickerDrawer({
         }
         if (epoch !== epochRef.current) return;
         if (gone) setFocusTick((tick) => tick + 1);
+        if (!gone) setRefocusTick((tick) => tick + 1);
         setDeleteError(deleteFailureMessage(err, asset.name));
       } finally {
         deletingRef.current = false;
@@ -313,7 +326,10 @@ export function AssetPickerDrawer({
                             : messages.assetDeleteRowLabel(asset.name)
                         }
                         disabled={deletingName !== undefined}
-                        onClick={() => setConfirmTarget(asset)}
+                        onClick={(event) => {
+                          triggerRef.current = event.currentTarget;
+                          setConfirmTarget(asset);
+                        }}
                       >
                         {deletingName === asset.name
                           ? messages.assetDeletePending

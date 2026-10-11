@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "FU-merge-prs-agent-wait",
+  "mutations": [
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "select(.s != \"completed\" and (.n | test($re)))",
+      "after": "select(.s == \"in_progress\" and (.n | test($re)))",
+      "because": "A queued review has not started yet, but it will still post its findings once it does — counting only `in_progress` makes the wait treat it as already finished. The script then merges past a review that lands afterwards, which is exactly the race this lane exists to close. The test that plants a `queued` PR-Agent run with a single read expects the PR to be refused with the run named, and instead sees it merged.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "a PR-Agent run still queued when the wait runs out refuses the PR and names the run"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "scripts/merge-prs.sh",
+      "before": "select(.s != \"completed\" and (.n | test($re)))",
+      "after": "select(.s != \"completed\")",
+      "because": "The name filter is what keeps the wait about PR-Agent and nothing else: without it, every unfinished run on the branch counts. A CI run still in progress on an older head of the same branch is waited for and then refuses a healthy pull request. The test that plants a completed PR-Agent pair beside an in-progress CI run expects the merge to go on without ever printing the waiting line, and instead the script refuses.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "tools",
+        "tools/merge-prs",
+        "-t",
+        "completed, skipped and other workflows' runs are not waited for"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

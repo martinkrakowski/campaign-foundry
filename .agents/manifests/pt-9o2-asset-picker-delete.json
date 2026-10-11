@@ -4,8 +4,8 @@
   "mutations": [
     {
       "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
-      "before": "onClick={() => setConfirmTarget(asset)}",
-      "after": "onClick={() => runDelete(asset)}",
+      "before": "setConfirmTarget(asset);",
+      "after": "runDelete(asset);",
       "because": "PT-9o2 mutation 1: wiring the row's Delete button straight to runDelete skips the confirmation, so clicking it sends a DELETE immediately and opens no dialog. FAILS ON: expect(deletes()).toHaveLength(0)",
       "command": [
         "yarn",

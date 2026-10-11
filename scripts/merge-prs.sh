@@ -74,6 +74,8 @@
 #   3. Wait for CI on the new head — poll until checks are REGISTERED, then watch
 #      (`gh pr checks --watch --fail-fast`). A fixed sleep races the forge; see #206.
 #   4. Wait a bounded settle period for review bots (a wait, not proof any bot ran),
+#      then wait, bounded, for any PR-Agent review still queued or running on the
+#      branch (AGENT_RUN_POLL_ATTEMPTS x AGENT_RUN_POLL_SECONDS) and refuse if it outlasts that,
 #      then ask the merge condition of `yarn sweep gate`:
 #      zero unresolved review threads on the final head, and a head unchanged since
 #      its check-runs were read. Both are decided in TypeScript (tools/sweep).
@@ -473,6 +475,15 @@ CHECK_VERDICTS_JQ='group_by(.n) | map(map(select(.c != "cancelled")) as $r | {n:
 # refusal text below names that bound, which is the bound a real run has.
 CHECK_POLL_ATTEMPTS=${CHECK_POLL_ATTEMPTS:-120}
 CHECK_POLL_SECONDS=${CHECK_POLL_SECONDS:-15}
+# How long a PR-Agent review that is still queued or running gets to finish
+# before the merge condition is asked: 120 reads at 15s, the same ~30 minutes
+# the conclusion poll has, and longer than the reviewers' own 25-minute job
+# timeout. The reviewers run once per PR (opened/reopened/ready_for_review),
+# so their run sits on the head the PR was OPENED on and the check-runs of
+# the refreshed head never show it; it is read per branch instead.
+AGENT_RUN_POLL_ATTEMPTS=${AGENT_RUN_POLL_ATTEMPTS:-120}
+AGENT_RUN_POLL_SECONDS=${AGENT_RUN_POLL_SECONDS:-15}
+AGENT_RUN_NAME=${AGENT_RUN_NAME:-'^PR-Agent'}
 # How long the review bots get to post on the refreshed head before the merge
 # condition is asked about. Bounded: a bot that has not run yet is invisible to
 # a check-run read, so this waits, but a wave must not be able to stall here.
@@ -706,15 +717,50 @@ pr_body() {
   # point of the merge condition is the finding that lands after CI is green.
   # This is a wait, not a proof: only bots that re-run on push (Qodo,
   # CodeRabbit) can post on a refreshed head at all — the PR-Agent workflows
-  # trigger on opened/reopened/ready_for_review only — and nothing here checks
-  # that any bot actually ran. What IS enforced is below: zero unresolved
-  # threads, and a head unchanged since its checks were read.
+  # trigger on opened/reopened/ready_for_review only — and the sleep itself
+  # checks nothing; the wait just below is what sees a PR-Agent run that has
+  # not finished. What IS enforced is below: zero unresolved threads, and a
+  # head unchanged since its checks were read.
   # nounset and pipefail are on but errexit is not, so a bad duration must be
   # refused here: `sleep` failing would otherwise skip the wait silently.
   [[ "$REVIEW_SETTLE_SECONDS" == <-> ]] \
     || die "REVIEW_SETTLE_SECONDS must be a whole number of seconds (got '$REVIEW_SETTLE_SECONDS')"
   echo "settling ${REVIEW_SETTLE_SECONDS}s for review bots on $head_sha …"
   sleep "$REVIEW_SETTLE_SECONDS" || die "the review-bot settle wait failed — not merging #$pr"
+
+  # A PR-Agent review still queued or running on this PR's branch would post
+  # after the merge. Wait for it, bounded; refuse when the bound runs out.
+  [[ "$AGENT_RUN_POLL_ATTEMPTS" == <-> && "$AGENT_RUN_POLL_SECONDS" == <-> ]] \
+    || die "AGENT_RUN_POLL_ATTEMPTS and AGENT_RUN_POLL_SECONDS must be whole numbers"
+  agent_running=''
+  agent_unreadable=1
+  agent_said=0
+  for _ in $(seq 1 $AGENT_RUN_POLL_ATTEMPTS); do
+    # The branch goes in as a FIELD, which gh encodes: interpolated into the
+    # URL, a branch named `feat/a&b` would be read as `branch=feat/a` and an
+    # empty answer would let the merge through.
+    agent_runs=$(gh api --paginate -X GET "repos/{owner}/{repo}/actions/runs" \
+      -f branch="$branch" -f event=pull_request -F per_page=100 \
+      --jq '[.workflow_runs[] | {n:.name, s:.status, id:.id}]' 2>/dev/null)
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      agent_unreadable=1
+    else
+      agent_unreadable=0
+      agent_running=$(printf '%s' "$agent_runs" | jq -rs --arg re "$AGENT_RUN_NAME" 'add // [] | map(select(.s != "completed" and (.n | test($re))) | "\(.n) (run \(.id), \(.s))") | join(", ")') \
+        || die "the PR-Agent runs for #$pr could not be judged — not merging"
+      [ -n "$agent_running" ] || break
+      if [ "$agent_said" -eq 0 ]; then
+        echo "waiting for PR-Agent on $branch: $agent_running …"
+        agent_said=1
+      fi
+    fi
+    sleep $AGENT_RUN_POLL_SECONDS
+  done
+  [ "$agent_unreadable" -eq 0 ] \
+    || die "PR-Agent runs could not be read for #$pr ($branch) — not merging"
+  [ -z "$agent_running" ] \
+    || die "PR-Agent review still running for #$pr after $AGENT_RUN_POLL_ATTEMPTS reads: $agent_running — not merging"
 
   # The merge condition itself, decided in TypeScript (`tools/sweep`, `yarn sweep gate`):
   # zero unresolved review threads on every page, and a head that is still the

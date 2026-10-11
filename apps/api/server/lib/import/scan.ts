@@ -5,6 +5,7 @@ import { isReservedCampaignId, type CampaignBrief } from "@campaignfoundry/Campa
 import { errorMessage } from "@campaignfoundry/shared";
 import { isBriefSourceName, isErrno } from "../brief-files.js";
 import { parseBriefText } from "../load-brief.js";
+import { UUID_PATTERN } from "../object-store/object-keys.js";
 import { blocksImport, classifyRefs, type RefClassification } from "./classify.js";
 import type { PlannedCampaign, StepContext } from "./steps.js";
 
@@ -81,7 +82,7 @@ function refuse(refusals: ScanRefusal[], slug: string | null, path: string, reas
 }
 
 /**
- * D218's reserved-slug rule, and **only** that rule.
+ * D218's reserved-slug rule and N6's uuid-shape rule, and **only** those two.
  *
  * The `SAFE_ID_PATTERN` half of D218 is NOT re-checked here, because it cannot be:
  * `parseBrief` calls `assertSafeId(record.id, "Campaign id")` (`load-brief.ts:1216`) with
@@ -90,8 +91,14 @@ function refuse(refusals: ScanRefusal[], slug: string | null, path: string, reas
  * (`Campaign id must be a path-safe slug…`). A second copy would be unreachable code, and
  * `scan.test.ts` pins the refusal where it actually happens. Nothing renames (F2): a rename
  * would rewrite every report path and drop the report revision, so this is a refusal.
+ *
+ * **A uuid-shaped slug is refused HERE in the words `preflight` uses** (`campaign-step.ts`,
+ * N6): `apply` refuses it before any write, so a plan that listed it as importable would
+ * disagree with the apply it is reviewed for. `preflight` keeps its own check, and a test
+ * in `campaign-step.test.ts` holds the two reasons equal.
  */
 function slugProblem(slug: string): string | undefined {
+  if (UUID_PATTERN.test(slug)) return `a uuid-shaped slug is refused: ${slug}`;
   return isReservedCampaignId(slug)
     ? `${JSON.stringify(slug)} is a reserved campaign id.`
     : undefined;
