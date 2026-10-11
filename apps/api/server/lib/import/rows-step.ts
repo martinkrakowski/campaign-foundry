@@ -271,6 +271,15 @@ export async function importPoolRow(
   }
 }
 
+/** U+0000: JSON allows it in a string (as an escape); Postgres stores it in no text. */
+const NUL = String.fromCharCode(0);
+
+/** The first text of one decision that holds U+0000: its key, its actor or its run. */
+function nulField(key: string, record: DecisionMap[string]): string | undefined {
+  if (key.includes(NUL)) return "key";
+  return (["actor", "run"] as const).find((field) => record[field].includes(NUL));
+}
+
 /**
  * Store a legacy decisions file as the campaign's decisions (PT-8c item 3; owner,
  * 2026-10-11). The plan's own checks first (the map's shape, the server's time
@@ -299,6 +308,16 @@ export async function importDecisionsRow(
     if (!isDecisionTime(at)) {
       return refused(
         `the decision for ${JSON.stringify(key)} has a time that is not the ISO instant the server stamps: ${JSON.stringify(at)}`,
+      );
+    }
+  }
+  // The store sends the map to Postgres as jsonb, which refuses U+0000: refuse it
+  // here, in the function `plan` and `apply` both run, so they say the same.
+  for (const key of Object.keys(map).sort()) {
+    const field = nulField(key, map[key]!);
+    if (field !== undefined) {
+      return refused(
+        `decisions/${slug}.json: the decision for ${JSON.stringify(key)} has the character U+0000 in its ${field}, which the database cannot store`,
       );
     }
   }
