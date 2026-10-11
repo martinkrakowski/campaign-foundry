@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "lane": "PT-8f1",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/verify.ts",
+      "before": "    if (hashBytes(stored) === sourceSha) {",
+      "after": "    if (stored.length === bytes.length) {",
+      "because": "PT-8f: verify trusts the bytes read by id, hashed, never a cheaper property. A size compare accepts an object with one flipped byte.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/verify.test.ts",
+        "-t",
+        "one flipped byte in a stored object is a mismatch that names the asset"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/verify.ts",
+      "before": "  const dry = dryRowStores(stores.reports, stores.pools, stores.decisions);",
+      "after": "  const dry = stores as never;",
+      "because": "verify is read-only: the row check runs over stores that cannot write. Through the real stores it would write the row it was asked to look for.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/verify.test.ts",
+        "-t",
+        "a source row the target does not hold is a mismatch: not stored, and verify does not write it"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/verify.ts",
+      "before": "  if (dumpBrief(rewritten) !== dumpBrief(stored.brief)) {",
+      "after": "  if (dumpBrief(rewritten) !== dumpBrief(rewritten)) {",
+      "because": "A campaign matches only when the stored latest version equals the source rewritten with the verified asset ids. A vacuous compare accepts a brief changed since the import.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/verify.test.ts",
+        "-t",
+        "a stored brief that differs from the rewritten source is a mismatch, its assets still match"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
