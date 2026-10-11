@@ -1168,6 +1168,13 @@ describe("AssetPickerDrawer delete", () => {
     expect(
       screen.queryByRole("button", { name: messages.assetDeleteRowLabel("logo.png") }),
     ).toBeNull();
-    expect(screen.getAllByText(messages.assetDeleteProtectedHint)).toHaveLength(1);
+    // The refusal is announced with the existing hint in the drawer's status line (so the
+    // text is there twice: the row and the status line), and focus moves to the list
+    // heading, because the Delete button that opened the confirmation is gone.
+    expect(screen.getByRole("status").textContent).toBe(messages.assetDeleteProtectedHint);
+    expect(screen.getAllByText(messages.assetDeleteProtectedHint)).toHaveLength(2);
+    expect(document.activeElement).toBe(
+      screen.getByText("This campaign's assets (2)").parentElement,
+    );
   });
 });
