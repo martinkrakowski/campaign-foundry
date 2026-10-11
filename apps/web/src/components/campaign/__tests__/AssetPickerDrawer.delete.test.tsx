@@ -380,7 +380,9 @@ describe("AssetPickerDrawer delete", () => {
 
     await waitFor(() => expect(screen.queryByText("logo.png")).toBeNull());
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByText("Assets (1)").parentElement),
+      expect(document.activeElement).toBe(
+        screen.getByText("This campaign's assets (1)").parentElement,
+      ),
     );
     expect(screen.getByRole("status").textContent).toBe(messages.assetDeleted("logo.png"));
   });
@@ -618,7 +620,9 @@ describe("AssetPickerDrawer delete", () => {
     // The 404 removes the row holding focus, so focus moves to the list header — as on
     // success — even though the row was filtered out rather than deleted here.
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByText("Assets (1)").parentElement),
+      expect(document.activeElement).toBe(
+        screen.getByText("This campaign's assets (1)").parentElement,
+      ),
     );
   });
 
@@ -1029,10 +1033,12 @@ describe("AssetPickerDrawer delete", () => {
     });
     await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
     expect(onDeleted).toHaveBeenCalledWith(logo);
-    await screen.findByText("Assets (1)");
+    await screen.findByText("This campaign's assets (1)");
     expect(screen.queryByText("logo.png")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(document.activeElement).not.toBe(screen.getByText("Assets (1)").parentElement);
+    expect(document.activeElement).not.toBe(
+      screen.getByText("This campaign's assets (1)").parentElement,
+    );
   });
 
   test("a protected asset referenced by an unsaved field has no Delete button (PROVE DEFECT)", async () => {
