@@ -21,8 +21,8 @@
     },
     {
       "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
-      "before": "if ((protectedRefs ?? []).some((ref) => refMatchesAsset(ref, asset, briefId))) return;",
-      "after": "if (false) return;",
+      "before": "    if ((protectedRefs ?? []).some((ref) => refMatchesAsset(ref, asset, briefId))) {",
+      "after": "    if (asset === undefined) {",
       "because": "A confirm for an asset the editor has since come to name sends the DELETE; the test fails on the expectation that no delete was sent.",
       "command": [
         "yarn",
@@ -50,6 +50,23 @@
         "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
         "-t",
         "the editor clears its published asset refs when it unmounts"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "      setNotice(messages.assetDeleteProtectedHint);",
+      "after": "      setNotice(\"\");",
+      "because": "A confirm refused because the asset is now in use must be announced in the status line; without it the dialog closes and nothing says why.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "a confirm for an asset the editor has since come to name"
       ],
       "verdict": "caught"
     }
