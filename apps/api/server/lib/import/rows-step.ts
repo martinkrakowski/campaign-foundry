@@ -44,6 +44,25 @@ export type Reviewed =
   | { readonly state: "ok"; readonly bytes: Buffer }
   | { readonly state: "refused"; readonly reason: string };
 
+/** The store calls the row functions make: all a store has to offer them, real or dry. */
+export type ReportWriter = Pick<ReportStorePort, "writeReport">;
+export type PoolWriter = Pick<PoolStorePort, "readPool" | "writePool">;
+export type DecisionWriter = Pick<DecisionStorePort, "writeDecisions">;
+
+/** The three stores one campaign's rows go through. */
+export interface RowStores {
+  readonly reports: ReportWriter;
+  readonly pools: PoolWriter;
+  readonly decisions: DecisionWriter;
+}
+
+/** Where the rows' files are, and the reviewed hash of each (D221). */
+export interface RowSource {
+  readonly projectRoot: string;
+  readonly outputRoot: string;
+  readonly expectedHashes: ReadonlyMap<string, string>;
+}
+
 /**
  * Read `<root>/<rel>` only if it is still the file the plan's digest covered
  * (D221, D225): never through a symlink (the file or a parent directory), never
@@ -86,7 +105,7 @@ export async function readReviewed(
  * report with the same revision is `skipped`, any other is `refused` and untouched.
  */
 export async function importReportRow(
-  reports: ReportStorePort,
+  reports: ReportWriter,
   slug: string,
   bytes: Buffer,
 ): Promise<RowResult> {
@@ -160,7 +179,7 @@ async function fromReviewed(
  * blocks nothing. A file that is not the reviewed one is a refused row.
  */
 export async function importReport(
-  reports: ReportStorePort,
+  reports: ReportWriter,
   source: { readonly outputRoot: string; readonly expectedHashes: ReadonlyMap<string, string> },
   slug: string,
 ): Promise<RowResult | undefined> {
@@ -211,7 +230,7 @@ function parseJson(
  * (D225), which is what makes that safe.
  */
 export async function importPoolRow(
-  pools: PoolStorePort,
+  pools: PoolWriter,
   slug: string,
   bytes: Buffer,
 ): Promise<RowResult> {
@@ -251,7 +270,7 @@ export async function importPoolRow(
  * `recanonicalised` flag for decisions; the revision recorded is the stored one.
  */
 export async function importDecisionsRow(
-  decisions: DecisionStorePort,
+  decisions: DecisionWriter,
   slug: string,
   bytes: Buffer,
 ): Promise<RowResult> {
@@ -288,7 +307,7 @@ export async function importDecisionsRow(
 
 /** Import one campaign's pool from `<projectRoot>/briefs/<slug>/pools.json`; `undefined` when it has none. */
 export async function importPool(
-  pools: PoolStorePort,
+  pools: PoolWriter,
   source: { readonly projectRoot: string; readonly expectedHashes: ReadonlyMap<string, string> },
   slug: string,
 ): Promise<RowResult | undefined> {
@@ -303,7 +322,7 @@ export async function importPool(
 
 /** Import one campaign's decisions from `<outputRoot>/decisions/<slug>.json`; `undefined` when it has none. */
 export async function importDecisions(
-  decisions: DecisionStorePort,
+  decisions: DecisionWriter,
   source: { readonly outputRoot: string; readonly expectedHashes: ReadonlyMap<string, string> },
   slug: string,
 ): Promise<RowResult | undefined> {
@@ -317,7 +336,7 @@ export async function importDecisions(
 }
 
 /**
- * The follow-up step for PT-8c: one imported campaign's report, pool and
+ * The rows of PT-8c, through `stores`: one imported campaign's report, pool and
  * decisions, in that order (owner, 2026-10-11). The pool does not name the
  * report, so it is written whatever the report did. A decision names the run it
  * was given against, so decisions are not written while the report is refused;
@@ -326,17 +345,18 @@ export async function importDecisions(
  * A refused or failed row makes the campaign's line partial; `applyCampaigns`
  * reads that from the rows.
  */
-export const importRowsStep: FollowUpStep = async (ctx, campaign) => {
-  if (!hasExpectedHashes(ctx)) throw new Error("no reviewed source hashes in the step context");
-  const scope = importTenant(ctx.orgId);
-  const slug = campaign.slug;
+export async function importRows(
+  stores: RowStores,
+  ctx: RowSource,
+  slug: string,
+): Promise<RowResult[]> {
   const rows: RowResult[] = [];
   let kind: RowResult["kind"] = "report";
   try {
-    const report = await importReport(getReportStore(scope), ctx, slug);
+    const report = await importReport(stores.reports, ctx, slug);
     if (report !== undefined) rows.push(report);
     kind = "pool";
-    const pool = await importPool(getPoolStore(scope), ctx, slug);
+    const pool = await importPool(stores.pools, ctx, slug);
     if (pool !== undefined) rows.push(pool);
     kind = "decisions";
     if (report?.status === "refused") {
@@ -349,13 +369,96 @@ export const importRowsStep: FollowUpStep = async (ctx, campaign) => {
         });
       }
     } else {
-      const decisions = await importDecisions(getDecisionStore(scope), ctx, slug);
+      const decisions = await importDecisions(stores.decisions, ctx, slug);
       if (decisions !== undefined) rows.push(decisions);
     }
   } catch (error) {
     rows.push({ kind, status: "failed", reason: errorMessage(error) });
   }
+  return rows;
+}
+
+/** The follow-up step for PT-8c: {@link importRows} with the target's own stores. */
+export const importRowsStep: FollowUpStep = async (ctx, campaign) => {
+  if (!hasExpectedHashes(ctx)) throw new Error("no reviewed source hashes in the step context");
+  const scope = importTenant(ctx.orgId);
+  const stores = {
+    reports: getReportStore(scope),
+    pools: getPoolStore(scope),
+    decisions: getDecisionStore(scope),
+  };
   // No `partial` here: `applyCampaigns` makes the line partial from the rows
   // themselves (a refused or failed row), so it cannot be forgotten.
-  return { rows };
+  return { rows: await importRows(stores, ctx, campaign.slug) };
 };
+
+/**
+ * Stores for `plan`'s read-only probe (owner's decision 8, 2026-10-11). Each
+ * answers the ONE call a row function makes the way the real store would, from
+ * a read, and writes nothing: a report or decisions write "only while nothing
+ * is stored" throws the store's own conflict error when something is; a pool
+ * write answers the revision the pool would be stored under.
+ */
+export function dryRowStores(
+  reports: Pick<ReportStorePort, "getRevision">,
+  pools: Pick<PoolStorePort, "readPool">,
+  decisions: Pick<DecisionStorePort, "readDecisions">,
+): RowStores {
+  return {
+    reports: {
+      writeReport: async (slug) => {
+        const current = await reports.getRevision(slug);
+        if (current !== undefined) throw new ReportConflictError(slug, current);
+        return `reports/${slug}.json`;
+      },
+    },
+    pools: {
+      readPool: (slug) => pools.readPool(slug),
+      writePool: async (pool) => ({ pool, revision: canonicalRevision(pool) }),
+    },
+    decisions: {
+      writeDecisions: async (slug, map) => {
+        const current = (await decisions.readDecisions(slug)).revision;
+        if (current !== null) throw new DecisionConflictError(slug, current);
+        return canonicalRevision(map);
+      },
+    },
+  };
+}
+
+/**
+ * A row as `plan` shows it: what `apply` WOULD do with it. `failed` is not a
+ * prediction: the probe's read threw, so nothing is said about this row or the
+ * rows after it.
+ */
+export interface PlannedRow {
+  readonly kind: RowResult["kind"];
+  readonly predicted: "write" | "skip" | "refuse" | "failed";
+  readonly revision?: string;
+  readonly reason?: string;
+  readonly recanonicalised?: boolean;
+}
+
+const PREDICTED = {
+  written: "write",
+  skipped: "skip",
+  refused: "refuse",
+  failed: "failed",
+} as const;
+
+/**
+ * Predict one campaign's rows for `plan`. It RUNS {@link importRows}, the
+ * function `apply` runs, so the prediction cannot drift from the import; give
+ * it {@link dryRowStores} and it writes nothing.
+ */
+export async function predictRows(
+  stores: RowStores,
+  ctx: RowSource,
+  slug: string,
+): Promise<PlannedRow[]> {
+  return (await importRows(stores, ctx, slug)).map(({ kind, status, ...rest }) => ({
+    kind,
+    predicted: PREDICTED[status],
+    ...rest,
+  }));
+}
