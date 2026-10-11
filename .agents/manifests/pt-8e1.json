@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "lane": "PT-8e1",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/existing-campaigns.ts",
+      "before": "        order by c.id, bv.version desc",
+      "after": "        order by c.id, bv.version asc",
+      "because": "D228 reads the LATEST version: with the oldest one, a campaign is judged by a body no reader serves.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/plan-existing.test.ts", "-t", "the latest version decides; an id ref, a campaign with only ids and a versionless campaign are not listed"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/existing-campaigns.ts",
+      "before": "    return refused(row, errorMessage(error));",
+      "after": "    return undefined;",
+      "because": "PT-8-2: a body that fails to parse is listed refused, never silently dropped as listBriefs drops it.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/plan-existing.test.ts", "-t", "a latest body that does not parse is listed refused with the parser's message, never dropped"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/existing-campaigns.ts",
+      "before": "  }).filter((ref) => !isAssetId(ref.ref));",
+      "after": "  }).filter(() => true);",
+      "because": "A ref that is already an asset id is not a path ref: unfiltered, a campaign with only ids is listed and refused.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/plan-existing.test.ts", "-t", "the latest version decides; an id ref, a campaign with only ids and a versionless campaign are not listed"],
+      "verdict": "caught"
+    }
+  ]
+}

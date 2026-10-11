@@ -12,6 +12,7 @@ import type {
   ImportSteps,
   PlannedCampaign,
   RowEntry,
+  MintedObject,
 } from "./steps.js";
 import { IMPORT_STEPS } from "./steps.js";
 import { objectStore, storeBackend } from "../config.js";
@@ -199,7 +200,12 @@ export interface CampaignEntry {
   readonly outcome: CampaignOutcome;
   readonly reason?: string;
   readonly partial?: boolean;
-  readonly minted: { readonly campaignId?: string; readonly assets: readonly MintedAsset[] };
+  readonly minted: {
+    readonly campaignId?: string;
+    readonly assets: readonly MintedAsset[];
+    /** Objects the later steps created in this run (PT-8d, D229); absent when none did. */
+    readonly objects?: readonly MintedObject[];
+  };
   readonly unreferencedInputs: UnreferencedInputs;
   /** Rows the later steps wrote, skipped or refused (PT-8c); absent when no later step ran. */
   readonly rows?: readonly RowEntry[];
@@ -216,6 +222,8 @@ export interface ApplyCounts {
   readonly partial: boolean;
   /** Rows the later steps WROTE in this run (PT-8c): a run that wrote one did not "write nothing". */
   readonly rowsWritten: number;
+  /** Objects the later steps CREATED in this run (PT-8d): such a run did not "write nothing" either. */
+  readonly objectsMinted: number;
 }
 
 /** Read the wider {@link CampaignResult} a step returned; a bare `{ outcome }` gets empty minted. */
@@ -238,6 +246,7 @@ function toEntry(slug: string, result: CampaignResult): CampaignEntry {
  * and minted ids stay, also when a later step throws (owner, 2026-10-11). A
  * refused campaign gets no later step (PT-8-3, F3). `onResult` receives each
  * campaign's entry as the result file must record it (D229).
+ * The objects a later step says it minted join the line's minted.objects, in step order.
  */
 export async function applyCampaigns(
   ctx: HashedContext,
@@ -253,6 +262,7 @@ export async function applyCampaigns(
   };
   let partial = false;
   let rowsWritten = 0;
+  let objectsMinted = 0;
   const [campaignStep, ...laterSteps] = steps;
   for (const campaign of campaigns) {
     let entry: CampaignEntry;
@@ -282,9 +292,13 @@ export async function applyCampaigns(
             added.partial === true ||
             added.rows.some((row) => row.status === "refused" || row.status === "failed");
           rowsWritten += added.rows.filter((row) => row.status === "written").length;
+          const mintedNow = added.minted?.objects ?? [];
+          objectsMinted += mintedNow.length;
+          const objects = [...(entry.minted.objects ?? []), ...mintedNow];
           entry = {
             ...entry,
             ...(unclean ? { partial: true } : {}),
+            ...(mintedNow.length > 0 ? { minted: { ...entry.minted, objects } } : {}),
             rows: [...(entry.rows ?? []), ...added.rows],
           };
         } catch (error) {
@@ -306,6 +320,7 @@ export async function applyCampaigns(
     refused: tally.refused,
     partial,
     rowsWritten,
+    objectsMinted,
   };
 }
 
@@ -313,11 +328,12 @@ export async function applyCampaigns(
  * `apply`'s exit code, as `apply --help` states it (D229, D221). 1 whenever a
  * line is partial. Otherwise 0 with nothing refused; with a refusal, 3 only
  * when this run wrote NOTHING: no campaign created or completed and no row
- * written by a later step. `refused` counts the scan's refusals too.
+ * written and no object minted by a later step. `refused` counts the scan's refusals too.
  */
 export function exitCodeFor(counts: ApplyCounts, refused: number): 0 | 1 | 3 {
   if (counts.partial) return 1;
   if (refused === 0) return 0;
+  if (counts.objectsMinted > 0) return 1;
   return counts.created + counts.completed + counts.rowsWritten === 0 ? 3 : 1;
 }
 

@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 import type { SqlClient } from "../server/lib/db/sql-client.js";
 import { MINTED_ID_PATTERN } from "../server/lib/auth/id.js";
 import {
+  countActorRows,
   eraseUser,
   finishErasure,
   ErasePassTwoError,
@@ -9,10 +10,12 @@ import {
   type EraseUserCounts,
   type EraseUserRef,
 } from "../server/lib/deletion/erase-user.js";
+import { databaseSettings } from "../server/lib/config.js";
+import { databaseConfig, type DatabaseSettings } from "../server/lib/db/database-config.js";
 import { connect } from "./db.js";
 
 export const USAGE_ERASE =
-  "usage: yarn erase:user --email <email> [--apply] | yarn erase:user --user <id> [--apply] | yarn erase:user --finish <token> --user <id> --apply";
+  "usage: yarn erase:user --email <email> [--apply] | yarn erase:user --user <id> [--apply] | yarn erase:user --finish <token> --user <id> --apply | yarn erase:user --check --user <id>\n<id> is the 32-character lowercase hex id from the user table.";
 
 /** The count lines, in the order they print. */
 const COUNT_LINES: readonly (readonly [keyof EraseUserCounts, string])[] = [
@@ -41,7 +44,8 @@ export type EraseArgs =
       readonly token: string;
       readonly userId: string;
       readonly apply: boolean;
-    };
+    }
+  | { readonly mode: "check"; readonly userId: string };
 
 /** Thrown when rows still name the erased user after pass two. */
 export class EraseIncompleteError extends Error {
@@ -87,12 +91,14 @@ function logActorCounts(log: (line: string) => void, prefix: string, counts: Act
 export function parseEraseArgs(args: readonly string[]): EraseArgs {
   let apply = false;
   let dryRun = false;
+  let check = false;
   let email: string | undefined;
   let user: string | undefined;
   let finish: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--apply") apply = true;
+    else if (arg === "--check") check = true;
     else if (arg === "--dry-run") dryRun = true;
     else if (arg === "--finish" && finish === undefined) {
       const val = args[++i];
@@ -110,6 +116,11 @@ export function parseEraseArgs(args: readonly string[]): EraseArgs {
     } else throw new Error(USAGE_ERASE);
   }
   if (apply && dryRun) throw new Error(USAGE_ERASE);
+  if (check) {
+    const mixed = email !== undefined || finish !== undefined || apply || dryRun;
+    if (user === undefined || mixed) throw new Error(USAGE_ERASE);
+    return { mode: "check", userId: user };
+  }
   if (finish !== undefined) {
     if (user === undefined || email !== undefined) throw new Error(USAGE_ERASE);
     if (!apply) throw new Error(USAGE_ERASE);
@@ -119,12 +130,24 @@ export function parseEraseArgs(args: readonly string[]): EraseArgs {
   return { mode: "erase", ref: email !== undefined ? { email } : { userId: user! }, apply };
 }
 
+/**
+ * The host name of the database a run reaches, for its first line. Parsed by the
+ * same `databaseConfig` that `connect` uses, so the two cannot disagree; the CA
+ * file is not read. Only the host leaves this function: never the URL, the user,
+ * the password, the port, the database name or the query string.
+ */
+export function databaseHost(settings: DatabaseSettings): string {
+  return databaseConfig(settings, () => "").host;
+}
+
 export async function runErase(
   args: readonly string[],
   open: () => SqlClient,
   log: (line: string) => void,
+  host: () => string,
 ): Promise<void> {
   const parsed = parseEraseArgs(args);
+  log(`  Database host: ${host()}`);
   const db = open();
   try {
     if (parsed.mode === "finish") {
@@ -136,6 +159,15 @@ export async function runErase(
         throw new EraseIncompleteError(token, userId);
       }
       log(`  Finished. Token ${token}.`);
+      return;
+    }
+
+    if (parsed.mode === "check") {
+      // Reads only: one select, no transaction. For an erasure whose run was interrupted.
+      const naming = await countActorRows(db, parsed.userId);
+      logActorCounts(log, "STILL NAMING THE USER", naming);
+      const total = Object.values(naming).reduce((sum, n) => sum + n, 0);
+      log(`  Check: rows still naming that id: ${total}. Nothing was changed.`);
       return;
     }
 
@@ -174,7 +206,8 @@ export async function runErase(
 
 /* istanbul ignore next -- CLI entry guard; runErase() is covered directly in tests */
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  runErase(process.argv.slice(2), connect, console.log).catch((error: unknown) => {
+  const host = (): string => databaseHost(databaseSettings());
+  runErase(process.argv.slice(2), connect, console.log, host).catch((error: unknown) => {
     process.exitCode = reportFailure(error, console.error);
   });
 }
