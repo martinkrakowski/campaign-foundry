@@ -98,6 +98,15 @@ describe("copy pool persistence", () => {
     expect(readdirSync(join(dir, "briefs", "camp"))).toEqual(["pools.json"]);
   });
 
+  test("writePool hands an expectedRevision of null to the store: it writes only while nothing is stored", async () => {
+    const { writePool, readPool } = await filesFor(dir);
+    const first = await writePool(LOCAL_TENANT, pool(), { expectedRevision: null });
+    await expect(
+      writePool(LOCAL_TENANT, pool({ entries: [] }), { expectedRevision: null }),
+    ).rejects.toMatchObject({ code: "ECONFLICT", revision: first.revision });
+    expect((await readPool(LOCAL_TENANT, "camp"))?.revision).toBe(first.revision);
+  });
+
   test("cleans up the temp file when the atomic rename fails", async () => {
     const { writePool } = await filesFor(dir);
     mkdirSync(join(dir, "briefs", "camp", "pools.json"), { recursive: true });

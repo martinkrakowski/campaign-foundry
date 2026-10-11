@@ -33,11 +33,12 @@ export async function readPool(
  * Write the pool through the pool store port — an atomic replace of
  * `briefs/<pool.briefId>/pools.json`, conditional when `expectedRevision` is
  * given: a stale one is refused with `ECONFLICT` carrying the fresh revision.
+ * `expectedRevision: null` writes only while nothing is stored, as the port says.
  */
 export async function writePool(
   scope: StorageScope,
   pool: CopyPool,
-  options?: { expectedRevision?: string },
+  options?: { expectedRevision?: string | null },
 ): Promise<StoredPool> {
   return getPoolStore(scope).writePool(pool, options);
 }

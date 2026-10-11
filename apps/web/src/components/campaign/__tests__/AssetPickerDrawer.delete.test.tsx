@@ -1177,4 +1177,42 @@ describe("AssetPickerDrawer delete", () => {
       screen.getByText("This campaign's assets (2)").parentElement,
     );
   });
+
+  test("a confirm for an asset that has since become the selected one sends nothing and says the selected hint", async () => {
+    const user = userEvent.setup();
+    route({ lists: [[logo, banner]] });
+    const { rerender } = renderDrawer({ protectedRefs: [] });
+    const { dialog } = await openDelete(user);
+
+    // The form's target field now holds the asset whose confirmation is open; no
+    // other field does. The row hides Delete for it, so the guard must refuse it too.
+    rerender(
+      <AssetPickerDrawer
+        briefId="camp-1"
+        open
+        onClose={() => {}}
+        selectedRef={ID_LOGO}
+        protectedRefs={[]}
+      />,
+    );
+    await user.click(confirm(dialog));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.assetDeleteTitle })).toBeNull(),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(deletes()).toHaveLength(0);
+    expect(screen.getByText("logo.png")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: messages.assetDeleteRowLabel("logo.png") }),
+    ).toBeNull();
+    // The status line says what the row says in place of Delete: the selected hint.
+    expect(screen.getByRole("status").textContent).toBe(messages.assetDeleteSelectedHint);
+    expect(screen.getAllByText(messages.assetDeleteSelectedHint)).toHaveLength(2);
+    expect(document.activeElement).toBe(
+      screen.getByText("This campaign's assets (2)").parentElement,
+    );
+  });
 });
