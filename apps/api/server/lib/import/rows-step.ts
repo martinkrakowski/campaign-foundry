@@ -123,3 +123,19 @@ export async function importReportRow(
   }
   return { kind: "report", status: "written", revision };
 }
+
+/**
+ * Import one campaign's report from `<outputRoot>/reports/<slug>.json` (PT-8c).
+ * `undefined` when the campaign has no report file: that is a normal state and
+ * blocks nothing. A file that is not the reviewed one is a refused row.
+ */
+export async function importReport(
+  reports: ReportStorePort,
+  source: { readonly outputRoot: string; readonly expectedHashes: ReadonlyMap<string, string> },
+  slug: string,
+): Promise<RowResult | undefined> {
+  const file = await readReviewed(source.outputRoot, `reports/${slug}.json`, source.expectedHashes);
+  if (file.state === "absent") return undefined;
+  if (file.state === "refused") return { kind: "report", status: "refused", reason: file.reason };
+  return importReportRow(reports, slug, file.bytes);
+}

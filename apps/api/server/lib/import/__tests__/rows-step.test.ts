@@ -107,7 +107,10 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importReportRow", () => {
   });
 
   test("a report whose render path is bad is still stored verbatim", async () => {
-    const bad = Buffer.from('{"outputPath":"../../etc/passwd","videoPath":"camp/gone.mp4"}', "utf8");
+    const bad = Buffer.from(
+      '{"outputPath":"../../etc/passwd","videoPath":"camp/gone.mp4"}',
+      "utf8",
+    );
     const result = await importReportRow(reports, "camp", bad);
     expect(result).toEqual({ kind: "report", status: "written", revision: hashBytes(bad) });
     expect((await row(env))?.body).toBe(bad.toString("utf8"));
@@ -163,7 +166,9 @@ describe("rows-step: readReviewed", () => {
     linkAt(root, REL, target);
     const got = await readReviewed(root, REL, digest());
     expect(got.state).toBe("refused");
-    expect((got as { reason: string }).reason).toMatch(/is a symlink; the importer never follows one$/);
+    expect((got as { reason: string }).reason).toMatch(
+      /is a symlink; the importer never follows one$/,
+    );
   });
 
   test("a file the digest does not name is refused", async () => {
@@ -187,5 +192,48 @@ describe("rows-step: readReviewed", () => {
     const got = await readReviewed(root, REL, digest());
     expect(got.state).toBe("ok");
     expect((got as { bytes: Buffer }).bytes.equals(LOOSE)).toBe(true);
+  });
+});
+
+describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importReport", () => {
+  let env: Env;
+  let reports: ReportStorePort;
+  let root: string;
+  beforeEach(async () => {
+    env = await useApplyEnvironment();
+    reports = new PgReportStore(env.db, "local");
+    root = makeRoot();
+  });
+  afterEach(async () => {
+    dropRoot(root);
+    await restoreApplyEnvironment();
+  });
+  const source = (hashes: Map<string, string>) => ({ outputRoot: root, expectedHashes: hashes });
+
+  test("a campaign with no report file imports no report row", async () => {
+    expect(await importReport(reports, source(new Map()), "camp")).toBeUndefined();
+    expect(await row(env)).toBeUndefined();
+  });
+
+  test("a report changed since the digest is refused and no row is written", async () => {
+    writeAt(root, "reports/camp.json", '{"assets":["edited after the review"]}');
+    const hashes = new Map([["reports/camp.json", hashBytes(LOOSE)]]);
+    expect(await importReport(reports, source(hashes), "camp")).toEqual({
+      kind: "report",
+      status: "refused",
+      reason: "reports/camp.json changed since the digest",
+    });
+    expect(await row(env)).toBeUndefined();
+  });
+
+  test("the reviewed report is stored with its exact bytes", async () => {
+    writeAt(root, "reports/camp.json", LOOSE);
+    const hashes = new Map([["reports/camp.json", hashBytes(LOOSE)]]);
+    expect(await importReport(reports, source(hashes), "camp")).toEqual({
+      kind: "report",
+      status: "written",
+      revision: hashBytes(LOOSE),
+    });
+    expect((await row(env))?.revision).toBe(hashBytes(LOOSE));
   });
 });
