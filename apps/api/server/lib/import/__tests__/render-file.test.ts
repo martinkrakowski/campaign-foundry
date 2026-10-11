@@ -2,13 +2,16 @@ import {
   appendFileSync,
   lstatSync,
   mkdirSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   truncateSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { open as openFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { fingerprint } from "../digest.js";
 import {
@@ -59,7 +62,7 @@ describe("readReviewedRender: the reviewed stamp", () => {
     const reviewed = stamps({ [ONE]: render(ONE) });
     const got = await readReviewedRender(output, ONE, reviewed);
     expect(got).toEqual({ state: "ok", bytes: BYTES });
-    expect(await statReviewedRender(output, ONE, reviewed)).toEqual({
+    expect(await statReviewedRender(output, ONE, reviewed)).toMatchObject({
       state: "ok",
       rel: ONE,
       file: join(output, ONE),
@@ -306,5 +309,129 @@ describe("readReviewedRender: pinned answers", () => {
       state: "refused",
       reason: `${five} changed since the digest`,
     });
+  });
+});
+
+describe("readReviewedRender: review of #811", () => {
+  test("a directory above the file swapped for a link to a same-stamp file is refused", async () => {
+    const file = join(output, ONE);
+    render(ONE);
+    utimesSync(file, OLD, OLD);
+    const reviewed = stamps({ [ONE]: fingerprint(lstatSync(file)) });
+    // Another file of the same length and the same time, under the swapped directory.
+    const decoy = writeAt(output, "elsewhere/p1/1x1.png", Buffer.alloc(BYTES.length, "x"));
+    utimesSync(decoy, OLD, OLD);
+    const open = openAfter((name) => {
+      const parent = dirname(name);
+      renameSync(parent, join(output, "camp/p1-old"));
+      symlinkSync(join(output, "elsewhere/p1"), parent);
+    });
+    expect(await readReviewedRender(output, ONE, reviewed, { open })).toEqual({
+      state: "refused",
+      reason: `${ONE} changed while it was read`,
+    });
+  });
+
+  test("a file rewritten in place while it is read is refused", async () => {
+    const reviewed = stamps({ [ONE]: render(ONE) });
+    let rewritten = false;
+    const open = vi.fn(async (file: string, flags: number) => {
+      const fh = await openFile(file, flags);
+      const read = fh.read.bind(fh);
+      return Object.assign(fh, {
+        read: async (...args: Parameters<typeof read>) => {
+          if (!rewritten) {
+            rewritten = true;
+            writeFileSync(file, Buffer.alloc(BYTES.length, "y"));
+          }
+          return read(...args);
+        },
+      });
+    });
+    expect(await readReviewedRender(output, ONE, reviewed, { open })).toEqual({
+      state: "refused",
+      reason: `${ONE} changed while it was read`,
+    });
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "a named pipe swapped in after the check is refused and the open does not wait",
+    { timeout: 5000 },
+    async () => {
+      const reviewed = stamps({ [ONE]: render(ONE) });
+      const open = openAfter((name) => {
+        rmSync(name);
+        execFileSync("mkfifo", [name]);
+      });
+      expect(await readReviewedRender(output, ONE, reviewed, { open })).toEqual({
+        state: "refused",
+        reason: `${ONE} changed while it was read`,
+      });
+    },
+  );
+
+  test("no read asks for bytes beyond the reviewed size plus one", async () => {
+    const reviewed = stamps({ [ONE]: render(ONE) });
+    const asked: number[] = [];
+    const open = vi.fn(async (file: string, flags: number) => {
+      const fh = await openFile(file, flags);
+      const read = fh.read.bind(fh);
+      return Object.assign(fh, {
+        read: async (buf: Buffer, offset: number, length: number, position: number) => {
+          asked.push(offset + length);
+          return read(buf, offset, length, position);
+        },
+      });
+    });
+    const got = await readReviewedRender(output, ONE, reviewed, { open });
+    expect(got).toEqual({ state: "ok", bytes: BYTES });
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((end) => end <= BYTES.length + 1)).toBe(true);
+  });
+
+  test("a read that fails is refused, never thrown, and the file is closed", async () => {
+    const reviewed = stamps({ [ONE]: render(ONE) });
+    let closed = 0;
+    const open = vi.fn(async (file: string, flags: number) => {
+      const fh = await openFile(file, flags);
+      const close = fh.close.bind(fh);
+      return Object.assign(fh, {
+        read: async () => {
+          throw new Error("the read failed");
+        },
+        close: async () => {
+          closed += 1;
+          await close();
+        },
+      });
+    });
+    expect(await readReviewedRender(output, ONE, reviewed, { open })).toEqual({
+      state: "refused",
+      reason: "the read failed",
+    });
+    expect(closed).toBe(1);
+  });
+
+  test("a stat of the open file that fails is refused, never thrown, and the file is closed", async () => {
+    const reviewed = stamps({ [ONE]: render(ONE) });
+    let closed = 0;
+    const open = vi.fn(async (file: string, flags: number) => {
+      const fh = await openFile(file, flags);
+      const close = fh.close.bind(fh);
+      return Object.assign(fh, {
+        stat: async () => {
+          throw new Error("the stat failed");
+        },
+        close: async () => {
+          closed += 1;
+          await close();
+        },
+      });
+    });
+    expect(await readReviewedRender(output, ONE, reviewed, { open })).toEqual({
+      state: "refused",
+      reason: "the stat failed",
+    });
+    expect(closed).toBe(1);
   });
 });

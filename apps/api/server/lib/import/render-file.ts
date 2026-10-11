@@ -22,6 +22,8 @@ export type RenderFileState =
       readonly rel: string;
       readonly file: string;
       readonly size: number;
+      readonly dev: number;
+      readonly ino: number;
     }
   | { readonly state: "refused"; readonly reason: string };
 
@@ -54,7 +56,8 @@ export function renderFingerprints(files: readonly DigestFile[]): Map<string, st
  * file that is not there is `absent` unless the digest named it: then it was
  * removed after the review. A file that is not there under a symlinked
  * directory answers the same way (absent, or changed when the digest named
- * it) before the directories are checked: nothing is read through the link,
+ * it) before the directories are checked: no byte is read through the link (the
+ * `lstat` does resolve through it),
  * and `plan` and `readReviewed` answer the same. It never throws.
  */
 export async function statReviewedRender(
@@ -90,16 +93,19 @@ export async function statReviewedRender(
   if (st.size > maxBytes) {
     return refused(`${rel} is ${st.size} bytes; the render cap is ${maxBytes} bytes.`);
   }
-  return { state: "ok", rel, file, size: st.size };
+  return { state: "ok", rel, file, size: st.size, dev: st.dev, ino: st.ino };
 }
 
 /**
  * Read one render for the import: {@link statReviewedRender} first. Then the
- * file is opened ONCE, never through a symlink (`O_NOFOLLOW`), and the open
- * file itself must still be a regular file with the reviewed stamp. No more
- * than its reviewed size plus one byte is read: a file that grew, shrank or
- * was swapped after the check is refused ("changed while it was read"). It
- * never throws: an open or a read that fails is refused; a failed close is ignored.
+ * file is opened ONCE, the file itself never through a symlink (`O_NOFOLLOW`; a
+ * directory above it is covered by the device and inode of the checked file),
+ * and the open file itself must still be a regular file with the reviewed
+ * stamp. No more than its reviewed size plus one byte is read: a file that
+ * grew, shrank or was swapped after the check is refused ("changed while it
+ * was read"). The stamp is taken again after the read: a file rewritten in
+ * place while it was read is refused. It never throws: an open or a read
+ * that fails is refused; a failed close is ignored.
  */
 export async function readReviewedRender(
   outputRoot: string,
@@ -113,9 +119,13 @@ export async function readReviewedRender(
   const opener = options.open ?? open;
   let fh: FileHandle | undefined;
   try {
-    fh = await opener(found.file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    fh = await opener(found.file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const st = await fh.stat();
-    const same = st.isFile() && fingerprint(st) === fingerprints.get(found.rel);
+    const same =
+      st.isFile() &&
+      fingerprint(st) === fingerprints.get(found.rel) &&
+      st.dev === found.dev &&
+      st.ino === found.ino;
     if (!same) return changed;
     // One byte more than the reviewed size: a file that grew fills it, and is refused.
     const bytes = Buffer.alloc(found.size + 1);
@@ -126,6 +136,8 @@ export async function readReviewedRender(
       filled += bytesRead;
     }
     if (filled !== found.size) return changed;
+    const after = await fh.stat();
+    if (fingerprint(after) !== fingerprints.get(found.rel)) return changed;
     return { state: "ok", bytes: bytes.subarray(0, found.size) };
   } catch (error) {
     if (isErrno(error, "ELOOP")) return changed;
