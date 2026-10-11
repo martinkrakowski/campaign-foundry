@@ -162,16 +162,30 @@ export function AssetPickerDrawer({
     void refetch();
   };
 
+  /**
+   * The one rule for "this asset may not be deleted from the bin": the form's target
+   * field holds it, or another field of the open draft does. The row and the confirm
+   * guard both ask it, so the two cannot drift apart.
+   */
+  const isProtectedAsset = (asset: AssetEntry): boolean =>
+    refMatchesAsset(selectedRef, asset, briefId) ||
+    (protectedRefs ?? []).some((ref) => refMatchesAsset(ref, asset, briefId));
+
   /** The confirmation was accepted: close it, then send exactly one request. */
   const runDelete = (asset: AssetEntry) => {
     setConfirmTarget(null);
     // Protection was decided when the row rendered; the editor's draft may have come to
     // name this asset while the confirmation was open. The row now shows the in-use hint.
-    if ((protectedRefs ?? []).some((ref) => refMatchesAsset(ref, asset, briefId))) {
+    if (isProtectedAsset(asset)) {
       // Say so where a delete is announced, and move focus to the list heading: the
       // Delete button that opened the confirmation is no longer there to return to.
       setDeleteError(undefined);
-      setNotice(messages.assetDeleteProtectedHint);
+      // The status line says what the row now says in place of Delete.
+      if (refMatchesAsset(selectedRef, asset, briefId)) {
+        setNotice(messages.assetDeleteSelectedHint);
+      } else {
+        setNotice(messages.assetDeleteProtectedHint);
+      }
       setFocusTick((tick) => tick + 1);
       return;
     }
@@ -259,9 +273,7 @@ export function AssetPickerDrawer({
             <ul className="space-y-2" aria-label="Asset list">
               {assets.map((asset) => {
                 const isSelected = refMatchesAsset(selectedRef, asset, briefId);
-                const isProtected =
-                  isSelected ||
-                  (protectedRefs ?? []).some((ref) => refMatchesAsset(ref, asset, briefId));
+                const isProtected = isProtectedAsset(asset);
                 const canDelete = !isProtected;
                 const displayType = (asset.type ?? "image/png").replace("image/", "").toUpperCase();
 
