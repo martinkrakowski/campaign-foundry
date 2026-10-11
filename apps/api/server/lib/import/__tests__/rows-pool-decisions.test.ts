@@ -4,7 +4,7 @@ import type { DecisionStorePort } from "../../ports/decision-store.port.js";
 import { PgDecisionStore } from "../../ports/pg-decision-store.js";
 import { PgPoolStore } from "../../ports/pg-pool-store.js";
 import type { PoolStorePort } from "../../ports/pool-store.port.js";
-import { importPoolRow, importReport } from "../rows-step.js";
+import { importDecisionsRow, importPoolRow, importReport } from "../rows-step.js";
 import {
   ON_A_REAL_TEST_SERVER,
   restoreApplyEnvironment,
@@ -100,5 +100,108 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importPoolRow", () => {
       reason: 'pools.json names briefId "other", not "camp"',
     });
     expect(await poolRow(env)).toBeUndefined();
+  });
+});
+
+const DECISIONS = {
+  "camp/a.png": { verdict: "approved", actor: "ana", at: "2026-09-01T10:00:00.000Z", run: "r1" },
+  "camp/b.png": { verdict: "rejected", actor: "ben", at: "2026-09-02T11:30:00.000Z", run: "r1" },
+};
+const DEC_CANONICAL = Buffer.from(`${JSON.stringify(DECISIONS, null, 2)}\n`, "utf8");
+const DEC_HAND = Buffer.from(JSON.stringify(DECISIONS), "utf8");
+
+/** What is stored for `camp`: the set's revision and each decision's key and actor, in order. */
+async function decisionRows(env: Env): Promise<{ revision: string | undefined; actors: string[] }> {
+  const set = await env.db.query<{ revision: string }>(
+    "select revision from decision_set where org_id = $1 and campaign_id = $2",
+    ["local", "camp"],
+  );
+  const rows = await env.db.query<{ asset_key: string; actor: string }>(
+    "select asset_key, actor from decision where org_id = $1 and campaign_id = $2 order by ordinal",
+    ["local", "camp"],
+  );
+  return {
+    revision: set.rows[0]?.revision,
+    actors: rows.rows.map((r) => `${r.asset_key}=${r.actor}`),
+  };
+}
+
+describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importDecisionsRow", () => {
+  let env: Env;
+  let decisions: DecisionStorePort;
+  beforeEach(async () => {
+    env = await useApplyEnvironment();
+    decisions = new PgDecisionStore(env.db, "local");
+  });
+  afterEach(async () => {
+    await restoreApplyEnvironment();
+  });
+
+  test("decisions are written with the recorded actors and the canonical revision", async () => {
+    const result = await importDecisionsRow(decisions, "camp", DEC_CANONICAL);
+    expect(result).toEqual({ kind: "decisions", status: "written", revision: hashBytes(DEC_CANONICAL) });
+    expect(await decisionRows(env)).toEqual({
+      revision: hashBytes(DEC_CANONICAL),
+      actors: ["camp/a.png=ana", "camp/b.png=ben"],
+    });
+  });
+
+  test("a hand-formatted decisions file gets the canonical revision and no extra flag", async () => {
+    const result = await importDecisionsRow(decisions, "camp", DEC_HAND);
+    expect(result).toEqual({ kind: "decisions", status: "written", revision: hashBytes(DEC_CANONICAL) });
+    expect((await decisionRows(env)).revision).toBe(hashBytes(DEC_CANONICAL));
+  });
+
+  test("a second import of the same decisions is skipped and nothing is touched", async () => {
+    await importDecisionsRow(decisions, "camp", DEC_HAND);
+    const before = await decisionRows(env);
+    const result = await importDecisionsRow(decisions, "camp", DEC_HAND);
+    expect(result).toEqual({ kind: "decisions", status: "skipped", revision: hashBytes(DEC_CANONICAL) });
+    expect(await decisionRows(env)).toEqual(before);
+  });
+
+  test("different stored decisions are refused and left as they were", async () => {
+    await decisions.writeDecisions("camp", {
+      "camp/a.png": { verdict: "rejected", actor: "a user", at: "2026-10-05T09:00:00.000Z", run: "r2" },
+    });
+    const before = await decisionRows(env);
+    const result = await importDecisionsRow(decisions, "camp", DEC_CANONICAL);
+    expect(result).toEqual({
+      kind: "decisions",
+      status: "refused",
+      reason: `different decisions are already stored for camp (revision ${before.revision})`,
+    });
+    expect(await decisionRows(env)).toEqual(before);
+  });
+
+  test("a file that is not JSON, not a decision map, or has a hand-typed time is refused", async () => {
+    const notJson = await importDecisionsRow(decisions, "camp", Buffer.from("[", "utf8"));
+    expect(notJson.reason).toMatch(/^decisions\/camp\.json is not JSON \(/);
+    expect(await importDecisionsRow(decisions, "camp", Buffer.from("[]", "utf8"))).toEqual({
+      kind: "decisions",
+      status: "refused",
+      reason: "the decisions must be an object keyed by review key.",
+    });
+    const badTime = { "camp/a.png": { ...DECISIONS["camp/a.png"], at: "2026-09-01 10:00" } };
+    expect(
+      await importDecisionsRow(decisions, "camp", Buffer.from(JSON.stringify(badTime), "utf8")),
+    ).toEqual({
+      kind: "decisions",
+      status: "refused",
+      reason:
+        'the decision for "camp/a.png" has a time that is not the ISO instant the server stamps: "2026-09-01 10:00"',
+    });
+    expect((await decisionRows(env)).revision).toBeUndefined();
+  });
+
+  test("a store failure that is not a conflict is thrown, not turned into a refusal", async () => {
+    const failing = {
+      writeDecisions: async () => {
+        throw new Error("the database went away");
+      },
+    } as unknown as DecisionStorePort;
+    await expect(importDecisionsRow(failing, "camp", DEC_CANONICAL)).rejects.toThrow(
+      "the database went away",
+    );
   });
 });

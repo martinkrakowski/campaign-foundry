@@ -209,3 +209,47 @@ export async function importPoolRow(
   const written = await pools.writePool(pool);
   return { kind: "pool", status: "written", revision: written.revision, ...flag };
 }
+
+/**
+ * Store a legacy decisions file as the campaign's decisions (PT-8c item 3; owner,
+ * 2026-10-11). The plan's own checks first (the map's shape, the server's time
+ * form), then `writeDecisions(slug, map, null)`: it writes only while nothing is
+ * stored, in one atomic step. Stored decisions with the same canonical revision
+ * are `skipped`, any other are `refused` and untouched. There is no
+ * `recanonicalised` flag for decisions; the revision recorded is the stored one.
+ */
+export async function importDecisionsRow(
+  decisions: DecisionStorePort,
+  slug: string,
+  bytes: Buffer,
+): Promise<RowResult> {
+  const refused = (reason: string): RowResult => ({
+    kind: "decisions",
+    status: "refused",
+    reason,
+  });
+  const parsed = parseJson(bytes, `decisions/${slug}.json`);
+  if (!parsed.ok) return refused(parsed.reason);
+  const shape = decisionMapProblem(parsed.value);
+  if (shape !== undefined) return refused(shape);
+  const map = parsed.value as DecisionMap;
+  for (const key of Object.keys(map).sort()) {
+    const at = map[key]!.at;
+    if (!isDecisionTime(at)) {
+      return refused(
+        `the decision for ${JSON.stringify(key)} has a time that is not the ISO instant the server stamps: ${JSON.stringify(at)}`,
+      );
+    }
+  }
+  const revision = canonicalRevision(map);
+  try {
+    await decisions.writeDecisions(slug, map, null);
+  } catch (error) {
+    if (!(error instanceof DecisionConflictError)) throw error;
+    if (error.revision === revision) return { kind: "decisions", status: "skipped", revision };
+    return refused(
+      `different decisions are already stored for ${slug} (revision ${error.revision})`,
+    );
+  }
+  return { kind: "decisions", status: "written", revision };
+}
