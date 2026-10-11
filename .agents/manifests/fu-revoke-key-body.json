@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "FU-revoke-key-body",
+  "mutations": [
+    {
+      "file": "apps/web/src/lib/provider-keys-api.ts",
+      "before": "  if (res.ok && init?.method === \"DELETE\") {",
+      "after": "  if (res.ok && init?.method === \"delete\") {",
+      "because": "With the comparison never true, the body of a successful revoke is read again, the stream's rejection becomes a `Network error`, and the test that hands back a 200 whose `text()` rejects sees a rejected promise. The case-sensitive method check is the whole guard, so lowercasing it removes the protection.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/provider-keys-api.test.ts",
+        "-t",
+        "resolves on a 2xx whose body cannot be read"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/provider-keys-api.ts",
+      "before": "  if (res.ok && init?.method === \"DELETE\") {",
+      "after": "  if (!res.ok && init?.method === \"DELETE\") {",
+      "because": "The skip must apply to a success only; flipped, a failed revoke returns `null` without reading its body, so the 403 resolves instead of throwing a `ProviderKeysApiError` with the server's message. The failure's body carries the message nobody then reads.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/provider-keys-api.test.ts",
+        "-t",
+        "rejects with 403 when caller is not owner or admin"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
