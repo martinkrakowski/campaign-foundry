@@ -107,6 +107,16 @@ async function requestJson(
   } catch {
     throw new ProviderKeysApiError("Network error", 0);
   }
+  // A DELETE that succeeded: its one caller (`revokeProviderKey`) does not read
+  // the answer, so the body is not read at all. Reading it could only turn a
+  // finished revoke into a failure, because the body is a stream that can still
+  // reject after the status line arrived (the twin of briefs-api.ts's rule).
+  // A FAILURE is read as before: its body carries the message. A future DELETE
+  // caller that needs its answer must not rely on this function returning it.
+  if (res.ok && init?.method === "DELETE") {
+    void res.body?.cancel().catch(() => undefined);
+    return null;
+  }
   let data: unknown;
   try {
     data = await parseJsonBody(res);
