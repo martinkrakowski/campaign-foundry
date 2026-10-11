@@ -3,6 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { main } from "../../../../bin/import.js";
+import { renderObjectKey } from "@campaignfoundry/Distribution";
+import { objectStoreClient } from "../../object-store/index.js";
+import { renderPrefix } from "../../object-store/object-keys.js";
 import type { StoredBrief } from "../../ports/brief-store.port.js";
 import { PgReportStore } from "../../ports/pg-report-store.js";
 import {
@@ -15,7 +18,16 @@ import {
 import { replan, type CampaignEntry } from "../apply.js";
 import { importTenant } from "../import-tenant.js";
 import type { StepContext } from "../steps.js";
-import { verifyCampaign, verifyImport, type VerifyStores } from "../verify.js";
+import type { ReportFieldPlan } from "../plan.js";
+import { renderFingerprints } from "../render-file.js";
+import {
+  summarise,
+  verifyCampaign,
+  verifyImport,
+  verifyRenders,
+  verifyRows,
+  type VerifyStores,
+} from "../verify.js";
 import {
   ON_A_REAL_TEST_SERVER,
   restoreApplyEnvironment,
@@ -120,6 +132,7 @@ function stores(): VerifyStores {
     reports: getReportStore(scope),
     pools: getPoolStore(scope),
     decisions: getDecisionStore(scope),
+    objects: objectStoreClient(),
   };
 }
 
@@ -147,9 +160,7 @@ async function watched<T>(
 async function verify(env: Env, root: string, output: string) {
   const ctx = ctxWith(root, output);
   const planned = await replan(ctx);
-  return watched(env, () =>
-    verifyImport(stores(), ctx, planned.result.campaigns, planned.expectedHashes),
-  );
+  return watched(env, () => verifyImport(stores(), ctx, planned));
 }
 
 /** `verifyCampaign` for `camp` on the real stores, except that its latest version reads as `latest` says. */
@@ -207,6 +218,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("verify: campaigns, assets and rows", () 
       report: { checked: 1, matched: 1 },
       pool: { checked: 1, matched: 1 },
       decisions: { checked: 1, matched: 1 },
+      render: { checked: 0, matched: 0 },
     });
     expect(got.ok).toBe(true);
     expect(sent).toEqual(READ_ONLY);
@@ -409,5 +421,248 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("verify: campaigns, assets and rows", () 
     expect(sent).toEqual(READ_ONLY);
     const rows = await env.db.query("select 1 from pool where org_id = $1", ["local"]);
     expect(rows.rows).toEqual([]);
+  });
+});
+
+const RENDER = "camp/p1/1x1.png";
+const OLD_SHAPE = "p1/old.mp4";
+/** A report whose one row names RENDER under two fields, and a path of the old `<productId>/…` shape. */
+const REPORT_R = Buffer.from(
+  JSON.stringify({ assets: [{ outputPath: RENDER, proofPath: RENDER, videoPath: OLD_SHAPE }] }),
+  "utf8",
+);
+
+/** `tree`, plus the render file RENDER names. */
+function renderTree(files: Parameters<typeof tree>[0]): { root: string; output: string } {
+  const t = tree(files);
+  writeAt(t.output, RENDER, PNG);
+  return t;
+}
+
+/** The key the app reads `path` of campaign `camp` with. Call it after the import. */
+async function renderKey(env: Env, path: string): Promise<string> {
+  env.reinstall();
+  const meta = await getBriefStore(importTenant("local")).campaignMeta("camp");
+  return renderObjectKey(renderPrefix("local", meta!.campaignId), "camp", path);
+}
+
+const statuses = (checks: readonly { entity: string; status: string }[]): string[] =>
+  checks.map((check) => `${check.entity}:${check.status}`);
+
+describe.skipIf(ON_A_REAL_TEST_SERVER)("verify: renders and expected refusals", () => {
+  let env: Env;
+  let root: string | undefined;
+  beforeEach(async () => {
+    env = await useApplyEnvironment();
+  });
+  afterEach(async () => {
+    dropRoot(root);
+    root = undefined;
+    for (const path of results.splice(0)) rmSync(path, { force: true });
+    await restoreApplyEnvironment();
+  });
+  test("a render object with the source file's bytes matches, once per path; a path the plan refused is expected and not counted", async () => {
+    const t = renderTree({ report: REPORT_R });
+    root = t.root;
+    await apply(env, t.root, t.output, "r1");
+    await env.objects.put(await renderKey(env, RENDER), PNG);
+    const { got, sent } = await verify(env, t.root, t.output);
+    expect(statuses(got.checks)).toEqual([
+      "campaign:match",
+      "asset:match",
+      "report:match",
+      "render:match",
+      "render:expected",
+    ]);
+    expect(got.checks[3]).toEqual({
+      entity: "render",
+      slug: "camp",
+      item: RENDER,
+      status: "match",
+    });
+    expect(got.checks[4]).toMatchObject({
+      item: OLD_SHAPE,
+      reason: expect.stringMatching(/^not written: .*render area/),
+    });
+    expect(got.counts.render).toEqual({ checked: 1, matched: 1 });
+    expect(got.ok).toBe(true);
+    expect(sent).toEqual(READ_ONLY);
+  });
+
+  test("one flipped byte in a render object is a mismatch that names its key", async () => {
+    const t = renderTree({ report: REPORT_R });
+    root = t.root;
+    await apply(env, t.root, t.output, "r2");
+    const key = await renderKey(env, RENDER);
+    const flipped = Buffer.from(PNG);
+    flipped[flipped.length - 1] = flipped[flipped.length - 1]! ^ 0xff;
+    await env.objects.put(key, flipped);
+    const { got, sent } = await verify(env, t.root, t.output);
+    expect(got.checks[3]).toEqual({
+      entity: "render",
+      slug: "camp",
+      item: RENDER,
+      status: "mismatch",
+      reason: `the object at ${key} differs from the source file`,
+    });
+    expect(got.counts.render).toEqual({ checked: 1, matched: 0 });
+    expect(got.ok).toBe(false);
+    expect(sent).toEqual(READ_ONLY);
+  });
+  test("a render the target does not hold is a mismatch", async () => {
+    const t = renderTree({ report: REPORT_R });
+    root = t.root;
+    await apply(env, t.root, t.output, "r3");
+    const key = await renderKey(env, RENDER);
+    await env.objects.put(key, PNG);
+    await env.objects.delete(key);
+    const { got, sent } = await verify(env, t.root, t.output);
+    expect(got.checks[3]).toMatchObject({
+      entity: "render",
+      status: "mismatch",
+      reason: `no object is stored at ${key}`,
+    });
+    expect(got.ok).toBe(false);
+    expect(sent).toEqual(READ_ONLY);
+  });
+
+  test("a render the import does not write is expected: over the cap, no source file, no key; a file that is not the reviewed one is a mismatch", async () => {
+    const t = renderTree({ report: REPORT_R });
+    root = t.root;
+    const ctx = ctxWith(t.root, t.output);
+    const planned = await replan(ctx);
+    const reviewed = renderFingerprints(planned.files);
+    const campaign = { campaignId: "00000000-0000-4000-8000-000000000001", slug: "camp" };
+    const ok = (path: string): ReportFieldPlan => ({
+      field: "outputPath",
+      path,
+      status: "ok",
+      resolved: join(t.output, path),
+    });
+    const { got, sent } = await watched(env, async () => [
+      ...(await verifyRenders(env.objects, ctx, campaign, [ok(RENDER)], reviewed, 10)),
+      ...(await verifyRenders(env.objects, ctx, campaign, [ok("camp/p1/gone.png")], new Map())),
+      ...(await verifyRenders(env.objects, ctx, campaign, [ok("camp/p1/../p1/1x1.png")], reviewed)),
+      ...(await verifyRenders(env.objects, ctx, campaign, [ok(RENDER)], new Map())),
+    ]);
+    expect(got.map((check) => [check.status, check.reason])).toEqual([
+      ["expected", `not written: ${PNG.length} bytes is over the render cap`],
+      ["expected", "not written: no source file"],
+      ["expected", expect.stringMatching(/^not written: Refusing an object key/)],
+      ["mismatch", `${RENDER} is not in the reviewed digest`],
+    ]);
+    expect(sent).toEqual(READ_ONLY);
+  });
+  test("rows the plan already refuses are expected, and so are decisions left unwritten because of such a report", async () => {
+    const t = tree({
+      report: Buffer.from("[1]"),
+      pool: Buffer.from("{not json"),
+      decisions: DECISIONS,
+    });
+    root = t.root;
+    await apply(env, t.root, t.output, "r5");
+    const { got, sent } = await verify(env, t.root, t.output);
+    expect(statuses(got.checks)).toEqual([
+      "campaign:match",
+      "asset:match",
+      "report:expected",
+      "pool:expected",
+      "decisions:expected",
+    ]);
+    expect(got.counts.report).toEqual({ checked: 0, matched: 0 });
+    expect(got.counts.pool).toEqual({ checked: 0, matched: 0 });
+    expect(got.counts.decisions).toEqual({ checked: 0, matched: 0 });
+    expect(got.ok).toBe(true);
+    expect(sent).toEqual(READ_ONLY);
+  });
+
+  test("a file changed since the digest is a mismatch, also when the plan's refusal list names it", async () => {
+    const t = tree({ report: REPORT });
+    root = t.root;
+    await apply(env, t.root, t.output, "r6");
+    const planned = await replan(ctxWith(t.root, t.output));
+    writeAt(t.output, "reports/camp.json", '{"assets":[],"changed":true}');
+    const source = {
+      projectRoot: t.root,
+      outputRoot: t.output,
+      expectedHashes: planned.expectedHashes,
+    };
+    const listed = [
+      { slug: "camp", sourcePath: join(t.output, "reports", "camp.json"), reason: "listed" },
+    ];
+    const { got, sent } = await watched(env, () => verifyRows(stores(), source, "camp", listed));
+    expect(got).toEqual([
+      {
+        entity: "report",
+        slug: "camp",
+        status: "mismatch",
+        reason: "reports/camp.json changed since the digest",
+      },
+    ]);
+    expect(sent).toEqual(READ_ONLY);
+  });
+  test("a store that throws while a row is read makes that row a mismatch, and the rows after it are not checked", async () => {
+    const t = tree({ report: REPORT, pool: POOL_CANONICAL });
+    root = t.root;
+    await apply(env, t.root, t.output, "r7");
+    const planned = await replan(ctxWith(t.root, t.output));
+    const source = {
+      projectRoot: t.root,
+      outputRoot: t.output,
+      expectedHashes: planned.expectedHashes,
+    };
+    const { got, sent } = await watched(env, () => {
+      const real = stores();
+      const reports: VerifyStores["reports"] = {
+        getRevision: async () => {
+          throw new Error("the report store is down");
+        },
+      };
+      return verifyRows({ ...real, reports }, source, "camp", []);
+    });
+    expect(got).toEqual([
+      { entity: "report", slug: "camp", status: "mismatch", reason: "the report store is down" },
+    ]);
+    expect(sent).toEqual(READ_ONLY);
+  });
+
+  test("a different stored report is a mismatch although one of its render paths is on the refusal list; equal stored decisions still match; no render is checked", async () => {
+    const t = renderTree({ report: REPORT_R, decisions: DECISIONS });
+    root = t.root;
+    await apply(env, t.root, t.output, "r8");
+    await new PgReportStore(env.db, "local").writeReport("camp", THEIRS);
+    const { got, sent } = await verify(env, t.root, t.output);
+    expect(statuses(got.checks)).toEqual([
+      "campaign:match",
+      "asset:match",
+      "report:mismatch",
+      "decisions:match",
+    ]);
+    expect(got.counts.render).toEqual({ checked: 0, matched: 0 });
+    expect(got.ok).toBe(false);
+    expect(sent).toEqual(READ_ONLY);
+  });
+  test("decisions left unwritten because a DIFFERENT report is stored are a mismatch", async () => {
+    const t = tree({ report: REPORT });
+    root = t.root;
+    await apply(env, t.root, t.output, "r9");
+    await new PgReportStore(env.db, "local").writeReport("camp", THEIRS);
+    writeAt(t.output, "decisions/camp.json", DECISIONS);
+    const { got, sent } = await verify(env, t.root, t.output);
+    expect(statuses(got.checks)).toEqual([
+      "campaign:match",
+      "asset:match",
+      "report:mismatch",
+      "decisions:mismatch",
+    ]);
+    expect(got.checks[3]!.reason).toMatch(/^not written: the report for camp was refused/);
+    expect(sent).toEqual(READ_ONLY);
+  });
+
+  test("nothing to check is ok, with every count at zero", () => {
+    const empty = summarise([]);
+    expect(empty.ok).toBe(true);
+    expect(empty.checks).toEqual([]);
+    expect(Object.values(empty.counts)).toEqual(Array(6).fill({ checked: 0, matched: 0 }));
   });
 });
