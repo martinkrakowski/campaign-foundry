@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "lane": "FU-bin-refs-followups",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "    if (unknownId !== null || failedRouteId !== null || failedMetaId !== null) {\n      setAssetRefs([]);",
+      "after": "    if (false) {\n      setAssetRefs([]);",
+      "because": "The refs effect no longer goes silent on a route-error page, so the bin keeps protecting the previous draft's refs; the test fails on the final expectation that the published refs are `[]`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "a route the editor cannot load publishes no asset refs"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "if ((protectedRefs ?? []).some((ref) => refMatchesAsset(ref, asset, briefId))) return;",
+      "after": "if (false) return;",
+      "because": "A confirm for an asset the editor has since come to name sends the DELETE; the test fails on the expectation that no delete was sent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "a confirm for an asset the editor has since come to name"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "useEffect(() => () => setAssetRefs([]), [setAssetRefs]);",
+      "after": "useEffect(() => () => undefined, [setAssetRefs]);",
+      "because": "The editor no longer clears its refs when it unmounts, so the bin keeps protecting a draft nobody can see; the test fails on the final expectation that the published refs are `[]`.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "the editor clears its published asset refs when it unmounts"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
