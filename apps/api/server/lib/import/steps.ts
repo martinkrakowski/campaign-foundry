@@ -35,6 +35,14 @@ export interface RowEntry {
   readonly recanonicalised?: boolean;
 }
 
+/** One object a later step CREATED in this run, as the result file lists it (D229). */
+export interface MintedObject {
+  /** The object key exactly as it was written: a rollback deletes exactly this key. */
+  readonly key: string;
+  /** What the key holds, as the source names it (for a render: its path in the report). */
+  readonly path: string;
+}
+
 /**
  * What a step AFTER the campaign step answers. It has no `outcome`: a later
  * step adds to the campaign's line and can never replace what the campaign
@@ -44,6 +52,13 @@ export interface RowEntry {
 export interface StepAddition {
   readonly rows: readonly RowEntry[];
   readonly partial?: boolean;
+  /**
+   * What this step CREATED in this run (D229); absent when it created nothing.
+   * Never an object that was already there, and never one whose write failed.
+   * A step that writes objects must not throw once it has written one: it
+   * catches its own failure and answers what it minted, with `partial: true`.
+   */
+  readonly minted?: { readonly objects: readonly MintedObject[] };
 }
 
 export type FollowUpStep = (ctx: StepContext, campaign: PlannedCampaign) => Promise<StepAddition>;
