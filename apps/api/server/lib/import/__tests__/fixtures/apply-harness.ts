@@ -15,7 +15,13 @@ import type { SqlClient, SqlQuery } from "../../../db/sql-client.js";
 import { migratedDatabase } from "../../../db/__tests__/pglite-client.js";
 import { resetDatabase, setDatabase } from "../../../db/database.js";
 import { resetObjectStoreClient, setObjectStoreClient } from "../../../object-store/index.js";
-import { resetAssetStore, resetBriefStore } from "../../../ports/index.js";
+import {
+  resetAssetStore,
+  resetBriefStore,
+  resetDecisionStore,
+  resetPoolStore,
+  resetReportStore,
+} from "../../../ports/index.js";
 import type { AssetStorePort } from "../../../ports/asset-store.port.js";
 import type { BriefStorePort } from "../../../ports/brief-store.port.js";
 import { makeRoot, writeAt } from "./tree.js";
@@ -202,6 +208,9 @@ export async function useApplyEnvironment(): Promise<{
   setObjectStoreClient(objects);
   resetBriefStore();
   resetAssetStore();
+  resetReportStore();
+  resetPoolStore();
+  resetDecisionStore();
 
   return {
     db,
@@ -211,6 +220,9 @@ export async function useApplyEnvironment(): Promise<{
       setDatabase(db);
       resetBriefStore();
       resetAssetStore();
+      resetReportStore();
+      resetPoolStore();
+      resetDecisionStore();
     },
   };
 }
@@ -226,6 +238,9 @@ export async function restoreApplyEnvironment(): Promise<void> {
   resetObjectStoreClient();
   resetBriefStore();
   resetAssetStore();
+  resetReportStore();
+  resetPoolStore();
+  resetDecisionStore();
   if (realDb !== undefined) {
     await realDb.end();
     realDb = undefined;

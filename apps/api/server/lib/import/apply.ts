@@ -207,6 +207,8 @@ export interface ApplyCounts {
   readonly unchanged: number;
   readonly refused: number;
   readonly partial: boolean;
+  /** Rows the later steps WROTE in this run (PT-8c): a run that wrote one did not "write nothing". */
+  readonly rowsWritten: number;
 }
 
 /** Read the wider {@link CampaignResult} a step returned; a bare `{ outcome }` gets empty minted. */
@@ -243,6 +245,7 @@ export async function applyCampaigns(
     refused: 0,
   };
   let partial = false;
+  let rowsWritten = 0;
   const [campaignStep, ...laterSteps] = steps;
   for (const campaign of campaigns) {
     let entry: CampaignEntry;
@@ -265,7 +268,13 @@ export async function applyCampaigns(
       for (const step of laterSteps) {
         try {
           const added = await step(ctx, campaign);
-          const unclean = entry.partial === true || added.partial === true;
+          // Owner, 2026-10-11: a refused row makes the line partial. Read it from the
+          // rows, so a step that forgets to say `partial` cannot make a line look clean.
+          const unclean =
+            entry.partial === true ||
+            added.partial === true ||
+            added.rows.some((row) => row.status === "refused" || row.status === "failed");
+          rowsWritten += added.rows.filter((row) => row.status === "written").length;
           entry = {
             ...entry,
             ...(unclean ? { partial: true } : {}),
@@ -289,7 +298,36 @@ export async function applyCampaigns(
     unchanged: tally.unchanged,
     refused: tally.refused,
     partial,
+    rowsWritten,
   };
+}
+
+/**
+ * `apply`'s exit code, as `apply --help` states it (D229, D221). 1 whenever a
+ * line is partial. Otherwise 0 with nothing refused; with a refusal, 3 only
+ * when this run wrote NOTHING: no campaign created or completed and no row
+ * written by a later step. `refused` counts the scan's refusals too.
+ */
+export function exitCodeFor(counts: ApplyCounts, refused: number): 0 | 1 | 3 {
+  if (counts.partial) return 1;
+  if (refused === 0) return 0;
+  return counts.created + counts.completed + counts.rowsWritten === 0 ? 3 : 1;
+}
+
+/**
+ * The lines `apply` prints under a campaign for what the later steps did: one
+ * per row, and one for a later step that threw. A pure function, so every
+ * wording is tested without planting a failure in a real run.
+ */
+export function entryNotes(entry: CampaignEntry): string[] {
+  const notes = (entry.rows ?? []).map(
+    (row) =>
+      `  ${row.kind}: ${row.status}` +
+      (row.recanonicalised ? " (re-canonicalised)" : "") +
+      (row.reason ? `: ${row.reason}` : ""),
+  );
+  if (entry.stepError) notes.push(`  a later step failed: ${entry.stepError}`);
+  return notes;
 }
 
 /**
