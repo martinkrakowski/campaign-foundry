@@ -20,7 +20,7 @@ import {
 import { IMPORT_STEPS } from "../server/lib/import/steps.js";
 import type { HashedContext } from "../server/lib/import/campaign-step.js";
 import { scanBriefs } from "../server/lib/import/scan.js";
-import { assemblePlan } from "../server/lib/import/plan.js";
+import { assemblePlan, unreferencedInputsPlan } from "../server/lib/import/plan.js";
 import { assembleCensus } from "../server/lib/import/census.js";
 import { digestSourceFiles, planDigest } from "../server/lib/import/digest.js";
 
@@ -161,6 +161,11 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
     const { ctx, backend, switchedAtIso } = outcome.source;
     const result = await scanBriefs(ctx);
     const assembled = await assemblePlan(ctx, result);
+    // Read-only, like the rest of `plan`: the own inputs no ref names (owner's decision,
+    // 2026-10-11). They are not imported and not in the digest; a folder that cannot be
+    // listed joins the refusal list instead of ending the plan.
+    const unreferenced = unreferencedInputsPlan(ctx, result);
+    const refusals = [...assembled.refusals, ...unreferenced.refusals];
     // The renders a report row names (req 13's lexical resolutions, refused or
     // not) are what separate an orphan render from a named one (D223); the OK
     // ones are what the import would WRITE, and the digest fingerprints them.
@@ -174,7 +179,7 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
         report.fields.flatMap((field) => (field.status === "ok" ? [field.resolved] : [])),
       ),
     );
-    const census = await assembleCensus(ctx, result, named);
+    const census = await assembleCensus(ctx, result, named, unreferenced.entries);
     const files = await digestSourceFiles(ctx, result, planned);
     const digest = planDigest({
       files,
@@ -202,11 +207,12 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
       backend,
       includeSamples: ctx.includeSamples,
       campaigns: result.campaigns,
-      refusals: assembled.refusals,
+      refusals,
       samples: result.samples,
       reports: assembled.reports,
       pools: assembled.pools,
       decisions: assembled.decisions,
+      unreferencedInputs: unreferenced.entries,
       census,
       digest,
       probes,
@@ -223,7 +229,7 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
     io.stdout(`backend: ${backend}`);
     io.stdout(json);
     io.stdout(
-      `${result.campaigns.length} importable, ${assembled.refusals.length} refused, ` +
+      `${result.campaigns.length} importable, ${refusals.length} refused, ` +
         `digest ${digest.slice(0, 12)}`,
     );
     return 0;

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { MAX_IMPORT_JSON_BYTES } from "../census.js";
-import { assemblePlan } from "../plan.js";
+import { assemblePlan, unreferencedInputsPlan } from "../plan.js";
 import type { ScanResult } from "../scan.js";
 import type { StepContext } from "../steps.js";
 import { dropRoot, linkAt, makeRoot, writeAt } from "./fixtures/tree.js";
@@ -580,5 +580,88 @@ describe("decisions (req 16)", () => {
     const unparseable = await assemblePlan(context(root), scan("camp-a"));
     expect(unparseable.decisions[0]!.problems).toHaveLength(1);
     expect(unparseable.decisions[0]!.problems[0]).toContain("JSON");
+  });
+});
+
+describe("unreferenced own inputs (owner's decision, 2026-10-11)", () => {
+  let root: string | undefined;
+
+  afterEach(() => {
+    dropRoot(root);
+    root = undefined;
+  });
+
+  /** One importable campaign with the refs given (the `scan` helper above gives none). */
+  function scanWithRefs(slug: string, refs: ScanResult["campaigns"][number]["refs"]): ScanResult {
+    const base = scan(slug);
+    return { ...base, campaigns: [{ ...base.campaigns[0]!, refs }] };
+  }
+
+  test("lists the files no clean ref names, sorted, and not the file a ref names", () => {
+    root = makeRoot();
+    writeAt(root, "assets/inputs/camp-a/logo.png", "bytes\n");
+    writeAt(root, "assets/inputs/camp-a/zeta.png", "bytes\n");
+    writeAt(root, "assets/inputs/camp-a/alpha.png", "bytes\n");
+
+    const planned = unreferencedInputsPlan(
+      context(root),
+      scanWithRefs("camp-a", [{ ref: "assets/inputs/camp-a/logo.png", kind: "own-campaign" }]),
+    );
+
+    expect(planned.entries).toEqual([
+      { slug: "camp-a", count: 2, names: ["alpha.png", "zeta.png"] },
+    ]);
+    expect(planned.refusals).toEqual([]);
+  });
+
+  test("a campaign with nothing unreferenced, or no input folder, has no entry", () => {
+    root = makeRoot();
+    writeAt(root, "assets/inputs/camp-a/logo.png", "bytes\n");
+
+    const planned = unreferencedInputsPlan(context(root), {
+      ...scan("camp-a", "camp-b"),
+      campaigns: scan("camp-a", "camp-b").campaigns.map((one, index) => ({
+        ...one,
+        refs:
+          index === 0
+            ? [{ ref: "assets/inputs/camp-a/logo.png", kind: "own-campaign" as const }]
+            : [],
+      })),
+    });
+
+    // camp-a: its only file is named by a ref. camp-b: no folder at all (ENOENT is zero).
+    expect(planned.entries).toEqual([]);
+    expect(planned.refusals).toEqual([]);
+  });
+
+  test("a campaign with a ref that blocks the import is not listed, as apply counts nothing for it", () => {
+    root = makeRoot();
+    writeAt(root, "assets/inputs/camp-a/spare.png", "bytes\n");
+
+    const planned = unreferencedInputsPlan(
+      context(root),
+      scanWithRefs("camp-a", [
+        { ref: "assets/inputs/camp-a/gone.png", kind: "missing", reason: "no file" },
+      ]),
+    );
+
+    expect(planned.entries).toEqual([]);
+    expect(planned.refusals).toEqual([]);
+  });
+
+  test("an input folder that cannot be listed is that campaign's refusal, not a throw", () => {
+    root = makeRoot();
+    writeAt(root, "assets/inputs/camp-a", "a plain file where a folder should be\n");
+
+    const planned = unreferencedInputsPlan(context(root), scan("camp-a"));
+
+    expect(planned.entries).toEqual([]);
+    expect(planned.refusals).toEqual([
+      {
+        slug: "camp-a",
+        sourcePath: join(root, "assets", "inputs", "camp-a"),
+        reason: expect.stringContaining("ENOTDIR"),
+      },
+    ]);
   });
 });
