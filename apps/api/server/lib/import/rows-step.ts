@@ -424,8 +424,10 @@ export const importRowsStep: FollowUpStep = async (ctx, campaign) => {
  * Stores for `plan`'s read-only probe (owner's decision 8, 2026-10-11). Each
  * answers the ONE call a row function makes the way the real store would, from
  * a read, and writes nothing: a report or decisions write "only while nothing
- * is stored" throws the store's own conflict error when something is; a pool
- * write answers the revision the pool would be stored under.
+ * is stored" throws the store's own conflict error when something is. The pool
+ * write is insert-only too (`expectedRevision: null`), and `importPoolRow` makes
+ * it only after `readPool` found nothing stored: so here it answers the revision
+ * the pool would be stored under, without asking again.
  */
 export function dryRowStores(
   reports: Pick<ReportStorePort, "getRevision">,
