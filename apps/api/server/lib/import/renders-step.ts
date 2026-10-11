@@ -110,7 +110,8 @@ export async function importRender(
  * this call CREATED and is awaited BEFORE the next render is tried (Grok PT-8d
  * 6): a crash between two writes leaves no created object without a record.
  * The import itself never throws. A `record` that throws is NOT caught: a
- * record that cannot be kept must stop the run before the next write.
+ * record that cannot be kept must stop the run before the next write. The
+ * error names the object that was created and not recorded.
  */
 export async function importRenders(
   objects: RenderObjects,
@@ -123,7 +124,16 @@ export async function importRenders(
   for (const path of new Set(paths)) {
     const result = await importRender(objects, campaign, path, read);
     results.push(result);
-    if (result.status === "written") await record?.({ key: result.key, path: result.path });
+    if (result.status === "written") {
+      try {
+        await record?.({ key: result.key, path: result.path });
+      } catch (error) {
+        throw new Error(
+          `created ${result.key} (${result.path}) but could not record it: ${errorMessage(error)}`,
+          { cause: error },
+        );
+      }
+    }
     if (result.status === "failed") break;
   }
   return results;
@@ -149,6 +159,15 @@ export function mintedRenders(
  */
 export type MintRecord = (object: MintedObject) => Promise<void>;
 
+function isJson(bytes: Buffer): boolean {
+  try {
+    JSON.parse(bytes.toString("utf8"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The render paths a report file names, from its reviewed bytes: the one walk
  * `plan` uses (`reportRenderPaths`), each distinct path once, in first-seen
@@ -168,7 +187,7 @@ export function reportPaths(bytes: Buffer): string[] {
  * The renders of a campaign whose report row this run neither wrote nor
  * skipped (Grok PT-8d 4): none is written, and each distinct path is listed
  * `refused` with a reason that starts "not written:". `plan` lists the same
- * paths with the same reason in the future tense (`renders-plan.ts`).
+ * paths with the same reason in the future tense (lane PT-8d3b).
  */
 export function notWrittenRenders(slug: string, paths: readonly string[]): RenderResult[] {
   const reason = `not written: this run neither wrote nor skipped the report for ${slug}`;
@@ -194,9 +213,10 @@ export interface CampaignRenders {
  * a refused or failed row every path is listed as not written.
  *
  * It throws only BEFORE the first write (the report file is no longer the
- * reviewed one although its row was kept; the target does not hold the
- * campaign; the lookup failed) or when `record` throws. After a write, a
- * failure is a `failed` render in the answer, never a throw.
+ * reviewed one although its row was kept; the report file is not JSON although
+ * its row was kept; the target does not hold the campaign; the lookup failed)
+ * or when `record` throws. After a write, a failure is a `failed` render in the
+ * answer, never a throw.
  */
 export async function importCampaignRenders(
   objects: RenderObjects,
@@ -210,6 +230,11 @@ export async function importCampaignRenders(
     if (!kept) return [];
     throw new Error(
       `reports/${slug}.json is no longer the reviewed file; none of its renders was written`,
+    );
+  }
+  if (kept && !isJson(input.reportFile.bytes)) {
+    throw new Error(
+      `reports/${slug}.json is not JSON although its row was kept; none of its renders was written`,
     );
   }
   const paths = reportPaths(input.reportFile.bytes);

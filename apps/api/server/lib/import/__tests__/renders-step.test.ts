@@ -212,6 +212,25 @@ describe("importRenders", () => {
     expect(mintedRenders(got)).toEqual([{ key: ONE_KEY, path: ONE }]);
     expect(await objects.get(`${PREFIX}p1/16x9.png`)).toBeUndefined();
   });
+
+  test("a put that fails after the store created the object is failed with its key, not recorded, and the object is there", async () => {
+    const inner = store();
+    const broken: RenderObjects = {
+      put: async (...args) => {
+        await inner.put(...args);
+        throw new Error("the connection dropped");
+      },
+      get: inner.get.bind(inner),
+      head: inner.head.bind(inner),
+    };
+    const record = vi.fn(async (): Promise<void> => {});
+    const got = await importRenders(broken, CAMPAIGN, [ONE, PROOF], fromPath, record);
+    expect(got).toEqual([
+      { path: ONE, status: "failed", key: ONE_KEY, reason: "the connection dropped" },
+    ]);
+    expect(record).not.toHaveBeenCalled();
+    expect(await inner.head(ONE_KEY)).not.toBeUndefined();
+  });
 });
 
 describe("importRenders: the record of each created object", () => {
@@ -273,11 +292,22 @@ describe("importRenders: the record of each created object", () => {
     const record = vi.fn(async (): Promise<void> => {
       throw new Error("the result file is full");
     });
-    await expect(
-      importRenders(objects, CAMPAIGN, [ONE, PROOF, VIDEO], fromPath, record),
-    ).rejects.toThrow("the result file is full");
+    const error = await importRenders(
+      objects,
+      CAMPAIGN,
+      [ONE, PROOF, VIDEO],
+      fromPath,
+      record,
+    ).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(String(error)).toContain("the result file is full");
+    expect(String(error)).toContain(ONE_KEY);
+    expect(String(error)).toContain("could not record it");
     expect(record).toHaveBeenCalledTimes(1);
     expect(objects.putCount).toBe(1);
+    expect(await objects.head(ONE_KEY)).not.toBeUndefined();
     expect((await objects.list(PREFIX)).map((object) => object.key)).toEqual([ONE_KEY]);
   });
 });
@@ -418,6 +448,24 @@ describe("importCampaignRenders", () => {
     await expect(
       importCampaignRenders(objects, input("skipped", gone), fromPath, record),
     ).rejects.toThrow("reports/camp.json is no longer the reviewed file");
+    expect(objects.putCount).toBe(0);
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  test("a kept report that is not JSON is an error before any write", async () => {
+    const objects = store();
+    const read = vi.fn(fromPath);
+    const record = vi.fn(async (): Promise<void> => {});
+    const notJson: Reviewed = { state: "ok", bytes: Buffer.from("not json") };
+    await expect(
+      importCampaignRenders(objects, input("written", notJson), read, record),
+    ).rejects.toThrow("is not JSON although its row was kept");
+    expect(objects.putCount).toBe(0);
+    expect(record).not.toHaveBeenCalled();
+    expect(await importCampaignRenders(objects, input("refused", notJson), read, record)).toEqual(
+      [],
+    );
+    expect(read).not.toHaveBeenCalled();
     expect(objects.putCount).toBe(0);
     expect(record).not.toHaveBeenCalled();
   });
