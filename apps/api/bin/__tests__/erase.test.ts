@@ -4,7 +4,8 @@ import { migratedDatabase } from "../../server/lib/db/__tests__/pglite-client.js
 import {
   USAGE_ERASE,
   parseEraseArgs,
-  runErase,
+  runErase as runEraseOn,
+  databaseHost,
   EraseIncompleteError,
   exitCodeFor,
   reportFailure,
@@ -24,6 +25,17 @@ import type { World } from "../../server/lib/deletion/__tests__/erase-user-fixtu
 /** Two well-formed ids (the shape `safeId()` mints) that name no user. */
 const ID_A = "a".repeat(32);
 const ID_B = "b".repeat(32);
+
+/** The host every test run is told it reaches; `runErase` prints it first. */
+const HOST = "db.example.test";
+const HOST_LINE = `  Database host: ${HOST}`;
+
+/** `runErase` with the test host, so every call below keeps its three arguments. */
+const runErase = (
+  args: readonly string[],
+  open: () => SqlClient,
+  log: (line: string) => void,
+): Promise<void> => runEraseOn(args, open, log, () => HOST);
 
 /** Insert one surviving row per actor column, all carrying `TARGET.id`. */
 async function insertSurvivors(db: SqlClient, world: World): Promise<void> {
@@ -164,6 +176,24 @@ describe("erase CLI (bin/erase.ts)", () => {
     expect(log).toEqual([]);
   });
 
+  test("the usage text says what an id is and echoes nothing that was passed", async () => {
+    const lines = USAGE_ERASE.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^usage: yarn erase:user --email <email> \[--apply\] \| /);
+    expect(lines[1]).toBe("<id> is the 32-character lowercase hex id from the user table.");
+    const passed = "Not-An-Id-0123";
+    const open = vi.fn();
+    let message = "";
+    try {
+      await runErase(["--user", passed], open, () => {});
+    } catch (e) {
+      message = e instanceof Error ? e.message : String(e);
+    }
+    expect(message).toBe(USAGE_ERASE);
+    expect(message).not.toContain(passed);
+    expect(open).not.toHaveBeenCalled();
+  });
+
   test("erase CLI accepts every id that safeId mints", () => {
     const token = "erased:00000000-0000-4000-8000-000000000000";
     for (let i = 0; i < 200; i++) {
@@ -240,6 +270,7 @@ describe("erase CLI (bin/erase.ts)", () => {
     );
 
     expect(log).toEqual([
+      HOST_LINE,
       "  brief versions re-attributed: 1",
       "  decisions re-attributed: 1",
       "  provider keys re-attributed: 1",
@@ -345,7 +376,7 @@ describe("erase CLI (bin/erase.ts)", () => {
     expect(message).not.toContain(LOCAL_OWNER.email);
     expect(message).not.toContain(LOCAL_OWNER.name);
     expect(message).not.toContain(LOCAL_OWNER.id);
-    expect(log).toEqual([]);
+    expect(log).toEqual([HOST_LINE]);
     expect(await dumpDatabase(db)).toEqual(before);
   });
 
@@ -381,6 +412,173 @@ describe("erase CLI (bin/erase.ts)", () => {
       ),
     ).rejects.toThrow("boom");
     expect(broken.end).toHaveBeenCalledTimes(1);
+  });
+
+  test("every run prints the database host first, a dry run included", async () => {
+    const dry: string[] = [];
+    await runErase(
+      ["--email", TARGET.email],
+      () => db,
+      (l) => dry.push(l),
+    );
+    expect(dry[0]).toBe(HOST_LINE);
+    expect(dry.filter((l) => l === HOST_LINE)).toHaveLength(1);
+    const applied: string[] = [];
+    await runErase(
+      ["--user", TARGET.id, "--apply"],
+      () => db,
+      (l) => applied.push(l),
+    );
+    expect(applied[0]).toBe(HOST_LINE);
+    const token = applied[applied.length - 1]!.match(/Token (erased:[0-9a-f-]{36})/)![1]!;
+    const finished: string[] = [];
+    await runErase(
+      ["--finish", token, "--user", TARGET.id, "--apply"],
+      () => db,
+      (l) => finished.push(l),
+    );
+    expect(finished[0]).toBe(HOST_LINE);
+    const refused: string[] = [];
+    await expect(
+      runErase(
+        ["--email", "nobody@example.com"],
+        () => db,
+        (l) => refused.push(l),
+      ),
+    ).rejects.toThrow("erase: no such user.");
+    expect(refused).toEqual([HOST_LINE]);
+  });
+
+  test("the database host is printed before the database is opened, and a host that cannot be read opens nothing", async () => {
+    const events: string[] = [];
+    const opening = (): SqlClient => {
+      events.push("open");
+      return db;
+    };
+    await runEraseOn(
+      ["--email", TARGET.email],
+      opening,
+      (l) => events.push(l),
+      () => HOST,
+    );
+    expect(events.slice(0, 2)).toEqual([HOST_LINE, "open"]);
+    const open = vi.fn();
+    const noHost = (): string => {
+      throw new Error("DATABASE_URL is not set.");
+    };
+    await expect(runEraseOn(["--email", TARGET.email], open, () => {}, noHost)).rejects.toThrow(
+      "DATABASE_URL is not set.",
+    );
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  test("a database URL that carries a password prints only the host", async () => {
+    const url =
+      "postgres://erase_op:s3cr3t-pw@db-7.example.test:16543/cf_prod?sslmode=require&application_name=erase";
+    expect(databaseHost({ url, caPath: "certs/ca.pem" })).toBe("db-7.example.test");
+    expect(databaseHost({ url: "postgres://me:pw@[::1]:5433/cf" })).toBe("::1");
+    const log: string[] = [];
+    const host = (): string => databaseHost({ url, caPath: "certs/ca.pem" });
+    await runEraseOn(
+      ["--email", TARGET.email],
+      () => db,
+      (l) => log.push(l),
+      host,
+    );
+    expect(log[0]).toBe("  Database host: db-7.example.test");
+    const out = log.join("\n");
+    for (const part of [
+      "s3cr3t-pw",
+      "erase_op",
+      "16543",
+      "cf_prod",
+      "sslmode",
+      "application_name",
+      "//",
+      "@",
+    ]) {
+      expect(out).not.toContain(part);
+    }
+  });
+
+  test("erase CLI check prints how many rows still name an id and writes nothing", async () => {
+    const outcome = await eraseUser(db, { userId: TARGET.id }, { apply: true });
+    if (outcome.outcome !== "erased") throw new Error("expected erased");
+    await db.query(
+      `insert into decision (org_id, campaign_id, asset_key, ordinal, verdict, actor, decided_at, run) values ($1, $2, $3, 1, 'approved', $4, now(), 'run-3')`,
+      ["local", world.localCampaignId, "ak-after-kill", TARGET.id],
+    );
+    const before = await dumpDatabase(db);
+    const sent: string[] = [];
+    const transaction = vi.fn();
+    const watched = {
+      ...db,
+      transaction,
+      query: async <R = Record<string, unknown>>(
+        text: string,
+        params?: readonly unknown[],
+      ): Promise<{ rows: R[] }> => {
+        sent.push(text);
+        return db.query<R>(text, params);
+      },
+    } as unknown as SqlClient;
+    const log: string[] = [];
+    await runErase(
+      ["--check", "--user", TARGET.id],
+      () => watched,
+      (l) => log.push(l),
+    );
+    expect(log).toEqual([
+      HOST_LINE,
+      "  STILL NAMING THE USER: 1 decisions re-attributed",
+      "  Check: rows still naming that id: 1. Nothing was changed.",
+    ]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatch(/^\s*select\b/);
+    expect(transaction).not.toHaveBeenCalled();
+    expect(await dumpDatabase(db)).toEqual(before);
+    expect(log.join("\n")).not.toContain(TARGET.id);
+    expect(endSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("erase CLI check of an id that no row names prints a zero and writes nothing", async () => {
+    const before = await dumpDatabase(db);
+    const log: string[] = [];
+    await runErase(
+      ["--check", "--user", ID_A],
+      () => db,
+      (l) => log.push(l),
+    );
+    expect(log).toEqual([HOST_LINE, "  Check: rows still naming that id: 0. Nothing was changed."]);
+    expect(await dumpDatabase(db)).toEqual(before);
+  });
+
+  test("erase CLI check takes a user id and nothing else", async () => {
+    expect(parseEraseArgs(["--check", "--user", ID_A])).toEqual({ mode: "check", userId: ID_A });
+    expect(USAGE_ERASE).toContain(" | yarn erase:user --check --user <id>\n");
+    const token = "erased:00000000-0000-4000-8000-000000000000";
+    const refusedShapes: readonly (readonly string[])[] = [
+      ["--check"],
+      ["--check", "--email", "a@x.com"],
+      ["--check", "--user", ID_A, "--email", "a@x.com"],
+      ["--check", "--user", ID_A, "--apply"],
+      ["--check", "--user", ID_A, "--dry-run"],
+      ["--check", "--finish", token, "--user", ID_A],
+      ["--check", "--user", TARGET.email],
+    ];
+    const open = vi.fn();
+    const log: string[] = [];
+    for (const args of refusedShapes) {
+      let message = "";
+      try {
+        await runErase(args, open, (l) => log.push(l));
+      } catch (e) {
+        message = e instanceof Error ? e.message : String(e);
+      }
+      expect(message).toBe(USAGE_ERASE);
+    }
+    expect(open).not.toHaveBeenCalled();
+    expect(log).toEqual([]);
   });
 
   // ---- New tests for PT-9l3 repair ----
@@ -835,7 +1033,7 @@ describe("erase CLI (bin/erase.ts)", () => {
       () => db,
       (l) => log.push(l),
     );
-    expect(log).toEqual([`  Finished. Token ${outcome.token}.`]);
+    expect(log).toEqual([HOST_LINE, `  Finished. Token ${outcome.token}.`]);
     expect(log.join("\n")).not.toContain(TARGET.id);
   });
 
