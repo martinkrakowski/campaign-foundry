@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "lane": "PT-8e2b",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/normalise-step.ts",
+      "before": "  if (current !== campaign.revision) {",
+      "after": "  if (current === \"\") {",
+      "because": "Grok PT-8e 3: check the revision before the first asset write.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/normalise-step.test.ts", "-t", "a revision that moved since the plan is a conflict before the first asset write"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/normalise-step.ts",
+      "before": "  if (drift !== undefined) return stopped(campaign, \"refused\", drift, \"body\");",
+      "after": "  if (drift === \"\") return stopped(campaign, \"refused\", drift, \"body\");",
+      "because": "Grok PT-8e 3: if the re-serialised body differs outside the ref fields, refuse and write nothing.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/normalise-step.test.ts", "-t", "a stored body the parser would write back differently is refused, and nothing is written"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/normalise-step.ts",
+      "before": "  if (drafts > 0) {",
+      "after": "  if (drafts > 99) {",
+      "because": "Grok PT-8e 8: apply skips normalising a campaign that has a draft; a new version makes the resume route delete it.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/normalise-step.test.ts", "-t", "a campaign that has a draft is not normalised, and nothing is written"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/normalise-step.ts",
+      "before": "    if (reviewed !== hashBytes(bytes)) {",
+      "after": "    if (reviewed === \"\") {",
+      "because": "Grok PT-8e 1: the bytes written are the bytes whose sha256 was reviewed.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/normalise-step.test.ts", "-t", "a ref target that changed since the digest, or is not in it, refuses the campaign and nothing is written"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/normalise-step.ts",
+      "before": "  const kept = { assets: minted };",
+      "after": "  const kept = { assets: [] };",
+      "because": "Grok PT-8e 3: a 409 leaves the assets and lists them; rollback needs the keys.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/normalise-step.test.ts", "-t", "a 409 from the version write leaves the assets and lists exactly them as a conflict; the next run reuses them"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/normalise-step.ts",
+      "before": "    const stored = await deps.briefs.rewriteBrief(rewritten, { expectedRevision: revision });",
+      "after": "    const stored = await deps.briefs.rewriteBrief(rewritten, { expectedRevision: undefined });",
+      "because": "D228: the version is written against the planned revision; without it the import overwrites a user's save.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/normalise-step.test.ts", "-t", "a 409 from the version write leaves the assets and lists exactly them as a conflict; the next run reuses them"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/normalise-step.ts",
+      "before": "  const kept = { assets: minted };",
+      "after": "  const kept = { assets: [] };",
+      "because": "Grok PT-8e 3: a later failure leaves the assets and lists them; a result that forgets a mint leaves an object no rollback deletes.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/normalise-step.test.ts", "-t", "a store that throws on the second asset write yields a result that lists the first mint, and no version is written"],
+      "verdict": "caught"
+    }
+  ]
+}
