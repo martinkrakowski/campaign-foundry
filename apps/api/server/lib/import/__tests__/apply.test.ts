@@ -1037,7 +1037,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       });
       const expectedHashes = (await replan(ctxWith(root, output))).expectedHashes;
       const hashedCtx: HashedContext = { ...ctxWith(root, output), expectedHashes };
-        const spy = vi.fn(async (): Promise<StepAddition> => ({ rows: [] }));
+      const spy = vi.fn(async (): Promise<StepAddition> => ({ rows: [] }));
       const seen: string[] = [];
       const entries: CampaignEntry[] = [];
       await applyCampaigns(
@@ -1065,6 +1065,107 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
     } finally {
       dropRoot(root);
     }
+  });
+
+  test("a later step's rows join the campaign's line and the minted ids stay", async () => {
+    const hashedCtx = { ...ctxWith("", ""), expectedHashes: new Map() } as HashedContext;
+    const minted = { campaignId: "c-1", assets: [{ id: "a-1", name: "logo.png", key: "k/1" }] };
+    const first = async (): Promise<CampaignResult> => ({
+      outcome: "created",
+      minted,
+      unreferencedInputs: { count: 1, names: ["spare.png"] },
+    });
+    const report = async (): Promise<StepAddition> => ({
+      rows: [{ kind: "report", status: "refused", reason: "a different report is stored" }],
+      partial: true,
+    });
+    const pool = async (): Promise<StepAddition> => ({
+      rows: [{ kind: "pool", status: "written", revision: "r-pool" }],
+    });
+    const entries: CampaignEntry[] = [];
+    const counts = await applyCampaigns(
+      hashedCtx,
+      [{ slug: "camp", sourcePath: "x" }],
+      [first, report, pool],
+      async (entry: CampaignEntry) => {
+        entries.push(entry);
+      },
+    );
+    expect(entries).toEqual([
+      {
+        slug: "camp",
+        outcome: "created",
+        partial: true,
+        minted,
+        unreferencedInputs: { count: 1, names: ["spare.png"] },
+        rows: [
+          { kind: "report", status: "refused", reason: "a different report is stored" },
+          { kind: "pool", status: "written", revision: "r-pool" },
+        ],
+      },
+    ]);
+    expect(counts).toEqual({ created: 1, completed: 0, unchanged: 0, refused: 0, partial: true });
+  });
+
+  test("a later step with nothing refused leaves the line clean", async () => {
+    const hashedCtx = { ...ctxWith("", ""), expectedHashes: new Map() } as HashedContext;
+    const first = async (): Promise<{ outcome: CampaignOutcome }> => ({ outcome: "unchanged" });
+    const rows = async (): Promise<StepAddition> => ({
+      rows: [{ kind: "decisions", status: "skipped", revision: "r-dec" }],
+    });
+    const entries: CampaignEntry[] = [];
+    const counts = await applyCampaigns(
+      hashedCtx,
+      [{ slug: "camp", sourcePath: "x" }],
+      [first, rows],
+      async (entry: CampaignEntry) => {
+        entries.push(entry);
+      },
+    );
+    expect(entries[0]!.outcome).toBe("unchanged");
+    expect(entries[0]!.partial).toBeUndefined();
+    expect(entries[0]!.stepError).toBeUndefined();
+    expect(entries[0]!.rows).toEqual([{ kind: "decisions", status: "skipped", revision: "r-dec" }]);
+    expect(counts).toEqual({ created: 0, completed: 0, unchanged: 1, refused: 0, partial: false });
+  });
+
+  test("a later step that throws keeps the campaign's outcome and minted ids, and the line is partial", async () => {
+    const hashedCtx = { ...ctxWith("", ""), expectedHashes: new Map() } as HashedContext;
+    const minted = { campaignId: "c-1", assets: [{ id: "a-1", name: "logo.png", key: "k/1" }] };
+    const first = async (): Promise<CampaignResult> => ({
+      outcome: "completed",
+      minted,
+      unreferencedInputs: { count: 0, names: [] },
+    });
+    const boom = async (): Promise<StepAddition> => {
+      throw new Error("the report store went away");
+    };
+    const after = vi.fn(async (): Promise<StepAddition> => ({ rows: [] }));
+    const entries: CampaignEntry[] = [];
+    const counts = await applyCampaigns(
+      hashedCtx,
+      [
+        { slug: "a", sourcePath: "x" },
+        { slug: "b", sourcePath: "y" },
+      ],
+      [first, boom, after],
+      async (entry: CampaignEntry) => {
+        entries.push(entry);
+      },
+    );
+    // The step after the one that threw does not run; the next campaign does.
+    expect(after).not.toHaveBeenCalled();
+    expect(entries.map((e) => e.slug)).toEqual(["a", "b"]);
+    expect(entries[0]).toEqual({
+      slug: "a",
+      outcome: "completed",
+      partial: true,
+      minted,
+      unreferencedInputs: { count: 0, names: [] },
+      stepError: "the report store went away",
+    });
+    // Never "refused" and never exit 3: the campaign row exists.
+    expect(counts).toEqual({ created: 0, completed: 2, unchanged: 0, refused: 0, partial: true });
   });
 
   test("applyCampaigns runs the registered IMPORT_STEPS by default", async () => {
