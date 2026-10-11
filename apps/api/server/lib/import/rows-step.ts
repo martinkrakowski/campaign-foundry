@@ -1,9 +1,18 @@
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
+import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import { errorMessage } from "@campaignfoundry/shared";
 import { hashBytes, isErrno } from "../brief-files.js";
+import {
+  DecisionConflictError,
+  isDecisionTime,
+  type DecisionMap,
+  type DecisionStorePort,
+} from "../ports/decision-store.port.js";
+import { copyPoolProblem, type PoolStorePort } from "../ports/pool-store.port.js";
 import { ReportConflictError, type ReportStorePort } from "../ports/report-store.port.js";
 import { parentsAreReal, readBounded } from "./census.js";
+import { decisionMapProblem } from "./plan.js";
 
 /** What one row write did: stored now, already stored with these bytes, or left alone. */
 export type RowStatus = "written" | "skipped" | "refused";
@@ -138,4 +147,65 @@ export async function importReport(
   if (file.state === "absent") return undefined;
   if (file.state === "refused") return { kind: "report", status: "refused", reason: file.reason };
   return importReportRow(reports, slug, file.bytes);
+}
+
+/**
+ * The revision either store gives a JSON document it keeps canonically: the
+ * SHA-256 of `JSON.stringify(value, null, 2)` plus a newline (F6).
+ */
+function canonicalRevision(value: unknown): string {
+  return hashBytes(Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8"));
+}
+
+/** Parse a source file's bytes as JSON, or say why not, naming the file. */
+function parseJson(
+  bytes: Buffer,
+  rel: string,
+): { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly reason: string } {
+  try {
+    return { ok: true, value: JSON.parse(bytes.toString("utf8")) };
+  } catch (error) {
+    return { ok: false, reason: `${rel} is not JSON (${errorMessage(error)})` };
+  }
+}
+
+/**
+ * Store a legacy `pools.json` as the campaign's pool row (PT-8c item 2; owner,
+ * 2026-10-11). The store keeps the canonical form, so the revision compared and
+ * recorded is the canonical one, and `recanonicalised` says the file's own bytes
+ * differ from it. `writePool` has no "only if absent" form: the stored pool is
+ * read first, and a stored pool with another revision is refused and untouched.
+ * The read and the write are two statements: `apply` runs against a quiet target
+ * (D225), which is what makes that safe.
+ */
+export async function importPoolRow(
+  pools: PoolStorePort,
+  slug: string,
+  bytes: Buffer,
+): Promise<RowResult> {
+  const refused = (reason: string): RowResult => ({ kind: "pool", status: "refused", reason });
+  const parsed = parseJson(bytes, `briefs/${slug}/pools.json`);
+  if (!parsed.ok) return refused(parsed.reason);
+  const problem = copyPoolProblem(parsed.value);
+  if (problem !== undefined) return refused(problem);
+  const pool = parsed.value as CopyPool;
+  if (pool.briefId !== slug) {
+    return refused(
+      `pools.json names briefId ${JSON.stringify(pool.briefId)}, not ${JSON.stringify(slug)}`,
+    );
+  }
+  const revision = canonicalRevision(pool);
+  const recanonicalised = revision !== hashBytes(bytes);
+  const flag = recanonicalised ? { recanonicalised: true } : {};
+  const stored = await pools.readPool(slug);
+  if (stored !== undefined) {
+    if (stored.revision !== revision) {
+      return refused(
+        `a different pool is already stored for ${slug} (revision ${stored.revision})`,
+      );
+    }
+    return { kind: "pool", status: "skipped", revision, ...flag };
+  }
+  const written = await pools.writePool(pool);
+  return { kind: "pool", status: "written", revision: written.revision, ...flag };
 }
