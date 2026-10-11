@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "lane": "FU-colliding-pairs",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/deletion/colliding-pairs.ts",
+      "before": "                 on b.org_id = a.org_id and b.id <> a.id and b.id::text = lower(a.slug)",
+      "after": "                 on b.id <> a.id and b.id::text = lower(a.slug)",
+      "because": "The report must mirror #774's rule, which compares only inside one organisation; without the condition a slug equal to another organisation's campaign uuid is reported as a collision, though it shares no storage key.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/colliding-pairs.test.ts",
+        "-t",
+        "a slug equal to a campaign uuid of ANOTHER organisation is not reported"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/colliding-pairs.ts",
+      "before": "    return EXIT_FOUND;",
+      "after": "    return 0;",
+      "because": "Owner, 2026-10-11: the command is a check; a run that found a pair must say so by its exit code, or a job that reads the code would call the data clean.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/colliding-pairs.test.ts",
+        "-t",
+        "one pair is printed with the count and the run exits 2"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/colliding-pairs.ts",
+      "before": "                 on b.org_id = a.org_id and b.id <> a.id and b.id::text = lower(a.slug)",
+      "after": "                 on b.org_id = a.org_id and b.id <> a.id and b.id::text = a.slug",
+      "because": "#774 compares uuids without regard to case, so a slug that spells the uuid in upper case is a collision; without lower() the report misses it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/colliding-pairs.test.ts",
+        "-t",
+        "an upper-case spelling of the uuid is reported, as the 409 check compares uuids"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
