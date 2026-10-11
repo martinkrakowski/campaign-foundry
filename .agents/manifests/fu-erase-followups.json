@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "lane": "FU-erase-followups",
+  "mutations": [
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "log(`  Database host: ${host()}`);",
+      "after": "void host;",
+      "because": "The operator must see which database a run reaches before anything is opened or changed. Without the line a dry run and an apply start with a count line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "every run prints the database host first, a dry run included"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "return databaseConfig(settings, () => \"\").host;",
+      "after": "return settings.url ?? \"\";",
+      "because": "Only the host may leave databaseHost. Returning the URL prints the user, the password, the port and the query string on the first line of every run.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "a database URL that carries a password prints only the host"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "\\n<id> is the 32-character lowercase hex id from the user table.",
+      "after": "\\n<id> is an id.",
+      "because": "The usage text is the only help a refused --user value gets, since a refusal echoes nothing: it must say what an id looks like and where it is read.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "the usage text says what an id is and echoes nothing that was passed"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "const naming = await countActorRows(db, parsed.userId);",
+      "after": "const naming = await db.transaction((tx) => countActorRows(tx, parsed.userId));",
+      "because": "--check is read-only by contract: one select and no transaction. A check that opens a transaction is one edit away from a check that writes.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "erase CLI check prints how many rows still name an id and writes nothing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/erase.ts",
+      "before": "const mixed = email !== undefined || finish !== undefined || apply || dryRun;",
+      "after": "const mixed = email !== undefined || finish !== undefined || dryRun;",
+      "because": "--check with --apply must be a usage error. Accepted, it would read as a check that applies something.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/erase.test.ts",
+        "-t",
+        "erase CLI check takes a user id and nothing else"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
