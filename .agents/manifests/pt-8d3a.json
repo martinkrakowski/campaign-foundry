@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "lane": "PT-8d3a",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "  if (fingerprint(st) !== reviewed) return refused(`${rel} changed since the digest`);",
+      "after": "  if (!reviewed.startsWith(`size:${st.size}:`)) return refused(`${rel} changed since the digest`);",
+      "because": "Grok PT-8d 2 (owner, 2026-10-11): apply refuses a render whose lstat size and mtime differ from the reviewed stamp. Comparing the size alone accepts a file rewritten with the same size.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/render-file.test.ts", "-t", "a render whose time or size differs from the reviewed stamp is refused and never read"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "  if (st.size > maxBytes) {",
+      "after": "  if (st.size > maxBytes + 1) {",
+      "because": "Grok PT-8d 3 (owner, 2026-10-11): a render over 512 MiB is refused and listed. The cap must be exact: one byte over is refused.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/render-file.test.ts", "-t", "a render over the cap is refused with its size and never read; one at the cap is read"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "  if (st.isSymbolicLink()) return refused(`${rel} is a symlink; the importer never follows one`);",
+      "after": "  if (st.isSymbolicLink() && rel === \"\") return refused(`${rel} is a symlink; the importer never follows one`);",
+      "because": "A symlinked render is refused as a link and never followed, even when the link's own stamp is in the digest.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/render-file.test.ts", "-t", "a symlinked file is refused as a link, although its own stamp is the reviewed one"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "  if (parents !== undefined) return refused(parents);",
+      "after": "  if (parents !== undefined && rel === \"\") return refused(parents);",
+      "because": "A file under a symlinked directory is not the file the output tree holds: without the parent check the bytes come from wherever the link points.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/render-file.test.ts", "-t", "a file under a symlinked directory is refused, although its stamp is the reviewed one"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/render-file.ts",
+      "before": "    if (!fingerprints.has(rel)) return { state: \"absent\" };",
+      "after": "    if (fingerprints.has(rel) || rel !== \"\") return { state: \"absent\" };",
+      "because": "D225: a file the digest named and that is gone was removed after the review. That is a change, not an absent file.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/render-file.test.ts", "-t", "a file that is not there is absent, unless the digest named it: then it changed"],
+      "verdict": "caught"
+    }
+  ]
+}
