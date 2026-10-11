@@ -501,6 +501,86 @@ describe("erase CLI (bin/erase.ts)", () => {
     }
   });
 
+  test("erase CLI check prints how many rows still name an id and writes nothing", async () => {
+    const outcome = await eraseUser(db, { userId: TARGET.id }, { apply: true });
+    if (outcome.outcome !== "erased") throw new Error("expected erased");
+    await db.query(
+      `insert into decision (org_id, campaign_id, asset_key, ordinal, verdict, actor, decided_at, run) values ($1, $2, $3, 1, 'approved', $4, now(), 'run-3')`,
+      ["local", world.localCampaignId, "ak-after-kill", TARGET.id],
+    );
+    const before = await dumpDatabase(db);
+    const sent: string[] = [];
+    const transaction = vi.fn();
+    const watched = {
+      ...db,
+      transaction,
+      query: async <R = Record<string, unknown>>(
+        text: string,
+        params?: readonly unknown[],
+      ): Promise<{ rows: R[] }> => {
+        sent.push(text);
+        return db.query<R>(text, params);
+      },
+    } as unknown as SqlClient;
+    const log: string[] = [];
+    await runErase(
+      ["--check", "--user", TARGET.id],
+      () => watched,
+      (l) => log.push(l),
+    );
+    expect(log).toEqual([
+      HOST_LINE,
+      "  STILL NAMING THE USER: 1 decisions re-attributed",
+      "  Check: rows still naming that id: 1. Nothing was changed.",
+    ]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatch(/^\s*select\b/);
+    expect(transaction).not.toHaveBeenCalled();
+    expect(await dumpDatabase(db)).toEqual(before);
+    expect(log.join("\n")).not.toContain(TARGET.id);
+    expect(endSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("erase CLI check of an id that no row names prints a zero and writes nothing", async () => {
+    const before = await dumpDatabase(db);
+    const log: string[] = [];
+    await runErase(
+      ["--check", "--user", ID_A],
+      () => db,
+      (l) => log.push(l),
+    );
+    expect(log).toEqual([HOST_LINE, "  Check: rows still naming that id: 0. Nothing was changed."]);
+    expect(await dumpDatabase(db)).toEqual(before);
+  });
+
+  test("erase CLI check takes a user id and nothing else", async () => {
+    expect(parseEraseArgs(["--check", "--user", ID_A])).toEqual({ mode: "check", userId: ID_A });
+    expect(USAGE_ERASE).toContain(" | yarn erase:user --check --user <id>\n");
+    const token = "erased:00000000-0000-4000-8000-000000000000";
+    const refusedShapes: readonly (readonly string[])[] = [
+      ["--check"],
+      ["--check", "--email", "a@x.com"],
+      ["--check", "--user", ID_A, "--email", "a@x.com"],
+      ["--check", "--user", ID_A, "--apply"],
+      ["--check", "--user", ID_A, "--dry-run"],
+      ["--check", "--finish", token, "--user", ID_A],
+      ["--check", "--user", TARGET.email],
+    ];
+    const open = vi.fn();
+    const log: string[] = [];
+    for (const args of refusedShapes) {
+      let message = "";
+      try {
+        await runErase(args, open, (l) => log.push(l));
+      } catch (e) {
+        message = e instanceof Error ? e.message : String(e);
+      }
+      expect(message).toBe(USAGE_ERASE);
+    }
+    expect(open).not.toHaveBeenCalled();
+    expect(log).toEqual([]);
+  });
+
   // ---- New tests for PT-9l3 repair ----
 
   test("8. apply with rows repaired in pass two prints 'repaired after commit' lines, no throw", async () => {
