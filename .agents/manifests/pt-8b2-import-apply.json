@@ -139,9 +139,9 @@
       "verdict": "caught"
     },
     {
-      "file": "apps/api/bin/import.ts",
-      "before": "      return counts.created + counts.completed === 0 ? 3 : 1;\n",
-      "after": "      return 3;\n",
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "  return counts.created + counts.completed + counts.rowsWritten === 0 ? 3 : 1;\n",
+      "after": "  return 3;\n",
       "because": "Mutant forces exit 3 even when a run wrote a campaign and also refused one after it, so an operator is told to reuse the (already-valid) result for a partial run. Caught by `a run that writes one campaign and refuses another exits 1 and names the refused one`.",
       "command": [
         "yarn",
