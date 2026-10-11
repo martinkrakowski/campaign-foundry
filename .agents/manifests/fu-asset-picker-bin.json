@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "FU-asset-picker-bin",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/shell/Sidebar.tsx",
+      "before": "protectedRefs={assetRefs}",
+      "after": "protectedRefs={[]}",
+      "because": "The sidebar's drawer is back to protecting nothing, so the bin offers Delete on an asset an open editor field names; the test fails on the line that expects the Delete button to be absent.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/shell/__tests__/sidebar-project-bin-delete.test.tsx",
+        "-t",
+        "a bin row whose asset an open editor field names has no Delete and shows the in-use hint"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/BriefEditor.tsx",
+      "before": "setAssetRefs(currentAssetRefs(state));",
+      "after": "setAssetRefs([]);",
+      "because": "The editor publishes no refs, so the sidebar cannot know what the draft names; the test fails on the toContain of the published refs.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/app/(shell)/brief/__tests__/brief-editor.test.tsx",
+        "-t",
+        "the editor publishes the asset refs of its draft for the sidebar's bin"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

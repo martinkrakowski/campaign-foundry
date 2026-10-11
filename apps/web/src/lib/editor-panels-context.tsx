@@ -50,6 +50,13 @@ interface EditorPanelSlots {
    * on one of them.
    */
   hasSink: boolean;
+  /**
+   * Every asset ref the open editor's draft holds, saved or not (what
+   * `currentAssetRefs` returns), so a bin opened from the sidebar can refuse to
+   * delete an asset an open field still names. Empty when no editor is mounted.
+   * Same contract as `panels`: the editor publishes, the bar only reads.
+   */
+  assetRefs: readonly string[];
 }
 
 /** The setters, in a context of their own — see {@link useEditorPanelPublisher}. */
@@ -57,6 +64,7 @@ interface EditorPanelPublisher {
   setPanels: (panels: ReactNode | null) => void;
   setTopPanels: (panels: ReactNode | null) => void;
   setRail: (rail: RailPanel | null) => void;
+  setAssetRefs: (refs: readonly string[]) => void;
   registerSink: () => () => void;
 }
 
@@ -64,6 +72,12 @@ export interface RailPanel {
   /** The landmark's accessible name — see the `rail` slot above. */
   label: string;
   content: ReactNode;
+}
+
+const NO_ASSET_REFS: readonly string[] = [];
+
+function sameRefs(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((ref, index) => ref === b[index]);
 }
 
 const EditorPanelsContext = createContext<EditorPanelSlots | null>(null);
@@ -97,18 +111,27 @@ export function EditorPanelsProvider({ children }: { children: ReactNode }) {
   const setTopPanels = useCallback((next: ReactNode | null) => setTopPanelsState(next), []);
   const [rail, setRailState] = useState<RailPanel | null>(null);
   const setRail = useCallback((next: RailPanel | null) => setRailState(next), []);
+  const [assetRefs, setAssetRefsState] = useState<readonly string[]>(NO_ASSET_REFS);
+  // The editor publishes on every keystroke; an unchanged list must keep its identity
+  // so the sidebar (which reads it) does not re-render for it.
+  const setAssetRefs = useCallback(
+    (next: readonly string[]) => setAssetRefsState((prev) => (sameRefs(prev, next) ? prev : next)),
+    [],
+  );
   const [sinks, setSinks] = useState(0);
   const registerSink = useCallback(() => {
     setSinks((n) => n + 1);
     return () => setSinks((n) => n - 1);
   }, []);
   const publisher = useMemo<EditorPanelPublisher>(
-    () => ({ setPanels, setTopPanels, setRail, registerSink }),
-    [setPanels, setTopPanels, setRail, registerSink],
+    () => ({ setPanels, setTopPanels, setRail, setAssetRefs, registerSink }),
+    [setPanels, setTopPanels, setRail, setAssetRefs, registerSink],
   );
   return (
     <EditorPanelPublisherContext.Provider value={publisher}>
-      <EditorPanelsContext.Provider value={{ panels, topPanels, rail, hasSink: sinks > 0 }}>
+      <EditorPanelsContext.Provider
+        value={{ panels, topPanels, rail, hasSink: sinks > 0, assetRefs }}
+      >
         {children}
       </EditorPanelsContext.Provider>
     </EditorPanelPublisherContext.Provider>
