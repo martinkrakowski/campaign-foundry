@@ -1138,4 +1138,35 @@ describe("AssetPickerDrawer delete", () => {
       screen.getByRole("button", { name: messages.assetDeleteRowLabel("banner.png") }),
     ).toBeTruthy();
   });
+
+  test("a confirm for an asset the editor has since come to name sends nothing and leaves the row with the in-use hint", async () => {
+    const user = userEvent.setup();
+    route({ lists: [[logo, banner]] });
+    const { rerender } = renderDrawer({ protectedRefs: [] });
+    const { dialog } = await openDelete(user);
+
+    // The editor's draft now names the asset whose confirmation is open.
+    rerender(
+      <AssetPickerDrawer
+        briefId="camp-1"
+        open
+        onClose={() => {}}
+        protectedRefs={[ID_LOGO]}
+      />,
+    );
+    await user.click(confirm(dialog));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.assetDeleteTitle })).toBeNull(),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(deletes()).toHaveLength(0);
+    expect(screen.getByText("logo.png")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: messages.assetDeleteRowLabel("logo.png") }),
+    ).toBeNull();
+    expect(screen.getAllByText(messages.assetDeleteProtectedHint)).toHaveLength(1);
+  });
 });
