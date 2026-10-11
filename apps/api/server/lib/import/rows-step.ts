@@ -323,7 +323,8 @@ export async function importDecisions(
  * was given against, so decisions are not written while the report is refused;
  * a campaign with no report file is not blocked. A store that throws is that
  * row `failed`: the rows before it stay recorded and no later row is tried.
- * Any row that is not written or skipped makes the campaign's line partial.
+ * A refused or failed row makes the campaign's line partial; `applyCampaigns`
+ * reads that from the rows.
  */
 export const importRowsStep: FollowUpStep = async (ctx, campaign) => {
   if (!hasExpectedHashes(ctx)) throw new Error("no reviewed source hashes in the step context");
@@ -354,6 +355,7 @@ export const importRowsStep: FollowUpStep = async (ctx, campaign) => {
   } catch (error) {
     rows.push({ kind, status: "failed", reason: errorMessage(error) });
   }
-  const unclean = rows.some((row) => row.status === "refused" || row.status === "failed");
-  return unclean ? { rows, partial: true } : { rows };
+  // No `partial` here: `applyCampaigns` makes the line partial from the rows
+  // themselves (a refused or failed row), so it cannot be forgotten.
+  return { rows };
 };

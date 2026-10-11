@@ -9,6 +9,7 @@ import { getBriefStore, getPoolStore, setPoolStore } from "../../ports/index.js"
 import { replan, type CampaignEntry } from "../apply.js";
 import { importTenant } from "../import-tenant.js";
 import type { StepContext } from "../steps.js";
+import { importRowsStep } from "../rows-step.js";
 import {
   ON_A_REAL_TEST_SERVER,
   failOnNth,
@@ -360,5 +361,13 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply: report, pool and decision rows", 
       rowsWritten: 1,
     });
     expect(got.code).toBe(1);
+  });
+});
+
+describe("apply: importRowsStep", () => {
+  test("a context without the reviewed hashes is an error, never a silent import", async () => {
+    await expect(
+      importRowsStep(ctxWith("/nowhere", "/nowhere"), { slug: "camp", sourcePath: "x" }),
+    ).rejects.toThrow("no reviewed source hashes in the step context");
   });
 });
