@@ -224,10 +224,10 @@ function parseJson(
  * Store a legacy `pools.json` as the campaign's pool row (PT-8c item 2; owner,
  * 2026-10-11). The store keeps the canonical form, so the revision compared and
  * recorded is the canonical one, and `recanonicalised` says the file's own bytes
- * differ from it. `writePool` has no "only if absent" form: the stored pool is
- * read first, and a stored pool with another revision is refused and untouched.
- * The read and the write are two statements: `apply` runs against a quiet target
- * (D225), which is what makes that safe.
+ * differ from it. The stored pool is read first, and a stored pool with another
+ * revision is refused and untouched. The write is `expectedRevision: null`: it
+ * happens only while nothing is stored, in one atomic step in Postgres, so a
+ * pool stored between the read and the write is compared, never overwritten.
  */
 export async function importPoolRow(
   pools: PoolWriter,
@@ -257,8 +257,17 @@ export async function importPoolRow(
     }
     return { kind: "pool", status: "skipped", revision, ...flag };
   }
-  const written = await pools.writePool(pool);
-  return { kind: "pool", status: "written", revision: written.revision, ...flag };
+  try {
+    const written = await pools.writePool(pool, { expectedRevision: null });
+    return { kind: "pool", status: "written", revision: written.revision, ...flag };
+  } catch (error) {
+    // `null` writes only while nothing is stored: a pool stored since the read
+    // above is compared like any stored pool, and never overwritten.
+    if (!isErrno(error, "ECONFLICT")) throw error;
+    const current = (error as { revision?: string }).revision;
+    if (current === revision) return { kind: "pool", status: "skipped", revision, ...flag };
+    return refused(`a different pool is already stored for ${slug} (revision ${current})`);
+  }
 }
 
 /**

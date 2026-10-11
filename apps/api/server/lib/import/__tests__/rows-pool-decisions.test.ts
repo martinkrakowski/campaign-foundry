@@ -89,6 +89,48 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importPoolRow", () => {
     expect(await poolRow(env)).toEqual(before);
   });
 
+  /** The store as a writer that read "nothing stored" just before another writer stored a pool. */
+  const readsNothing = (): PoolStorePort =>
+    Object.create(pools, { readPool: { value: async () => undefined } }) as PoolStorePort;
+
+  test("a pool stored between the read and the write is refused and left as it was", async () => {
+    await pools.writePool({ ...POOL, model: "a user edited this pool after the switch" } as never);
+    const before = await poolRow(env);
+    const result = await importPoolRow(readsNothing(), "camp", CANONICAL);
+    expect(result).toEqual({
+      kind: "pool",
+      status: "refused",
+      reason: `a different pool is already stored for camp (revision ${before?.revision})`,
+    });
+    expect(await poolRow(env)).toEqual(before);
+  });
+
+  test("the same pool stored between the read and the write is skipped and not rewritten", async () => {
+    await pools.writePool(POOL as never);
+    const before = await poolRow(env);
+    const result = await importPoolRow(readsNothing(), "camp", HAND_EDITED);
+    expect(result).toEqual({
+      kind: "pool",
+      status: "skipped",
+      revision: hashBytes(CANONICAL),
+      recanonicalised: true,
+    });
+    expect(await poolRow(env)).toEqual(before);
+  });
+
+  test("a pool store failure that is not a conflict is thrown, not turned into a refusal", async () => {
+    const broken = Object.create(pools, {
+      writePool: {
+        value: async () => {
+          throw new Error("the pool store went away");
+        },
+      },
+    }) as PoolStorePort;
+    await expect(importPoolRow(broken, "camp", CANONICAL)).rejects.toThrow(
+      "the pool store went away",
+    );
+  });
+
   test("a file that is not JSON, not a pool, or another campaign's pool is refused and nothing is written", async () => {
     const notJson = await importPoolRow(pools, "camp", Buffer.from("{", "utf8"));
     expect(notJson.status).toBe("refused");

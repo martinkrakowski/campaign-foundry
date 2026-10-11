@@ -16,7 +16,8 @@
       "after": "  if (stored !== undefined && stored.revision === revision) {",
       "because": "D221; owner, 2026-10-11: a stored pool with another revision is refused and untouched. writePool with no expected revision overwrites, so the read before it is the only guard.",
       "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/rows-pool-decisions.test.ts", "-t", "a different stored pool is refused and left as it was"],
-      "verdict": "caught"
+      "verdict": "caught",
+      "retired": "Retired by the orchestrator with PT-8c-notes (2026-10-11), because its premise is gone, not because the claim was dropped. This entry said the read before `writePool` is the ONLY guard against overwriting a different stored pool. PT-8c-notes made the write itself insert-only (`writePool(pool, null)`), so with this mutation applied the store's conflict still refuses the different pool and the named test stays green: observed `survived` in that lane's replay. The claim (a different stored pool is refused and left as it was) is now carried by pt-8c-notes.json, whose mutations turn the insert-only write back into an unconditional one and are caught. If the `null` form is ever removed from `importPoolRow`, this entry must be re-instated."
     },
     {
       "file": "apps/api/server/lib/import/rows-step.ts",

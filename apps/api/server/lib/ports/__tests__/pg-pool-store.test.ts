@@ -100,6 +100,33 @@ describe("PgPoolStore (PT-3e, D169)", () => {
     expect(third.pool.entries).toEqual([]);
   });
 
+  test("an expected revision of null writes only while nothing is stored", async () => {
+    const store = new PgPoolStore(db, "local");
+    const row = async (): Promise<unknown> =>
+      (
+        await db.query(
+          "select body, revision, updated_at::text as at from pool where org_id = $1 and campaign_id = $2",
+          ["local", "camp"],
+        )
+      ).rows[0];
+    const first = await store.writePool(pool(), { expectedRevision: null });
+    expect((await store.readPool("camp"))?.revision).toBe(first.revision);
+    const before = await row();
+    // A different pool, and then the very same one: neither is written.
+    await expect(
+      store.writePool(pool({ entries: [] }), { expectedRevision: null }),
+    ).rejects.toMatchObject({
+      message: "Headline pool was modified by another user.",
+      code: "ECONFLICT",
+      revision: first.revision,
+    });
+    await expect(store.writePool(pool(), { expectedRevision: null })).rejects.toMatchObject({
+      code: "ECONFLICT",
+      revision: first.revision,
+    });
+    expect(await row()).toEqual(before);
+  });
+
   test("copyPool copies within the org and rewrites the pool's own briefId; undefined when the source is absent", async () => {
     const store = new PgPoolStore(db, "local");
     expect(await store.copyPool("camp", "copy")).toBeUndefined();
