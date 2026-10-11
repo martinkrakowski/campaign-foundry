@@ -262,6 +262,24 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply: report, pool and decision rows", 
     expect(got.out.join("\n")).not.toContain("nothing of theirs was written");
   });
 
+  test("a refused report with no decisions file writes the pool and names no decision row", async () => {
+    const t = tree({ report: REPORT, pool: POOL_CANONICAL });
+    root = t.root;
+    // A different report is already stored for the slug.
+    const theirs = '{"assets":["a run made after the switch"]}';
+    await new PgReportStore(env.db, "local").writeReport("camp", theirs);
+    const got = await apply(env, t.root, t.output, "r4b");
+    expect(got.code).toBe(1);
+    expect(got.lines[0]!.partial).toBe(true);
+    expect(got.lines[0]!.rows?.map((row) => `${row.kind}:${row.status}`)).toEqual([
+      "report:refused",
+      "pool:written",
+    ]);
+    expect(got.lines[0]!.rows?.[0]?.reason).toMatch(
+      /^a different report is already stored for camp/,
+    );
+  });
+
   test("a campaign with no report file still gets its decisions", async () => {
     const t = tree({ decisions: DECISIONS });
     root = t.root;
