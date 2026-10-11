@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "PT-8c-notes",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/ports/pg-pool-store.ts",
+      "before": "             on conflict (org_id, campaign_id) do nothing returning 1`,",
+      "after": "             on conflict (org_id, campaign_id) do update set revision = excluded.revision returning 1`,",
+      "because": "PT-8c: null writes a pool only while none is stored; an upsert would overwrite a pool stored since the import's read.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/pg-pool-store.test.ts",
+        "-t",
+        "an expected revision of null writes only while nothing is stored"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/ports/fs-pool-store.ts",
+      "before": "      if (present !== undefined) {",
+      "after": "      if (false) {",
+      "because": "PT-8c: the file store refuses a null write when a pool is stored, as the report and decision stores do.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/ports/__tests__/fs-pool-store.test.ts",
+        "-t",
+        "an expectedRevision of null writes only while nothing is stored"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "    const written = await pools.writePool(pool, { expectedRevision: null });",
+      "after": "    const written = await pools.writePool(pool);",
+      "because": "Owner, 2026-10-11: a stored pool with another revision is refused and untouched; an unconditional write overwrites a pool stored between the import's read and its write.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/rows-pool-decisions.test.ts",
+        "-t",
+        "a pool stored between the read and the write is refused and left as it was"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "    if (!isErrno(error, \"ECONFLICT\")) throw error;",
+      "after": "    if (isErrno(error, \"ECONFLICT\")) throw error;",
+      "because": "A pool store failure that is not a conflict is a failed row, never a refusal that claims nothing was touched.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/rows-pool-decisions.test.ts",
+        "-t",
+        "a pool store failure that is not a conflict is thrown, not turned into a refusal"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
