@@ -28,7 +28,7 @@ import {
   briefBody,
   PNG,
 } from "./fixtures/tree.js";
-import type { StepContext, CampaignOutcome, PlannedCampaign } from "../steps.js";
+import type { StepContext, CampaignOutcome, PlannedCampaign, StepAddition } from "../steps.js";
 import {
   replan,
   applyCampaigns,
@@ -1037,9 +1037,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       });
       const expectedHashes = (await replan(ctxWith(root, output))).expectedHashes;
       const hashedCtx: HashedContext = { ...ctxWith(root, output), expectedHashes };
-      const spy = vi.fn(
-        async (): Promise<{ outcome: CampaignOutcome }> => ({ outcome: "created" }),
-      );
+        const spy = vi.fn(async (): Promise<StepAddition> => ({ rows: [] }));
       const seen: string[] = [];
       const entries: CampaignEntry[] = [];
       await applyCampaigns(
@@ -1060,6 +1058,10 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       // The created campaign ran the spy; the refused one did not reach it.
       expect(entries[0]!.outcome).toBe("created");
       expect(entries[1]!.outcome).toBe("refused");
+      // The later step added to the created campaign's line and replaced nothing.
+      expect(entries[0]!.minted.campaignId).toBeDefined();
+      expect(entries[0]!.rows).toEqual([]);
+      expect(entries[1]!.rows).toBeUndefined();
     } finally {
       dropRoot(root);
     }

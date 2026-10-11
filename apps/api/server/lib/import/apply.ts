@@ -6,7 +6,7 @@ import { assemblePlan } from "./plan.js";
 import type { PlanAssembled } from "./plan.js";
 import { scanBriefs } from "./scan.js";
 import type { ScanResult } from "./scan.js";
-import type { StepContext, CampaignOutcome, ImportStep, PlannedCampaign } from "./steps.js";
+import type { StepContext, CampaignOutcome, ImportSteps, PlannedCampaign, RowEntry } from "./steps.js";
 import { IMPORT_STEPS } from "./steps.js";
 import { objectStore, storeBackend } from "../config.js";
 import type { UnreferencedInputs } from "./asset-step.js";
@@ -188,6 +188,10 @@ export interface CampaignEntry {
   readonly partial?: boolean;
   readonly minted: { readonly campaignId?: string; readonly assets: readonly MintedAsset[] };
   readonly unreferencedInputs: UnreferencedInputs;
+  /** Rows the later steps wrote, skipped or refused (PT-8c); absent when no later step ran. */
+  readonly rows?: readonly RowEntry[];
+  /** A later step's thrown error. The outcome and the minted ids above are still true. */
+  readonly stepError?: string;
 }
 
 /** What {@link applyCampaigns} returns to the caller for its exit code and summary. */
@@ -213,14 +217,17 @@ function toEntry(slug: string, result: CampaignResult): CampaignEntry {
 
 /**
  * Run each campaign through `steps` in plan order, feeding each a `HashedContext`
- * (the reviewed hashes ride the context, D221), and stop a campaign's chain at
- * the first `refused` (PT-8-3). `onResult` receives each campaign's entry as the
- * result file must record it — after each campaign AND at the end (D229).
+ * (the reviewed hashes ride the context, D221). The FIRST step is the campaign
+ * step: its answer is the campaign's line. Every later step only ADDS to that
+ * line (its rows, and `partial` when a row was refused); the campaign's outcome
+ * and minted ids stay, also when a later step throws (owner, 2026-10-11). A
+ * refused campaign gets no later step (PT-8-3, F3). `onResult` receives each
+ * campaign's entry as the result file must record it (D229).
  */
 export async function applyCampaigns(
   ctx: HashedContext,
   campaigns: readonly PlannedCampaign[],
-  steps: readonly ImportStep[] = IMPORT_STEPS,
+  steps: ImportSteps = IMPORT_STEPS,
   onResult: (entry: CampaignEntry) => Promise<void>,
 ): Promise<ApplyCounts> {
   const tally: Record<CampaignOutcome, number> = {
@@ -230,31 +237,41 @@ export async function applyCampaigns(
     refused: 0,
   };
   let partial = false;
+  const [campaignStep, ...laterSteps] = steps;
   for (const campaign of campaigns) {
-    let entry: CampaignEntry = {
-      slug: campaign.slug,
-      outcome: "refused",
-      minted: { assets: [] },
-      unreferencedInputs: { count: 0, names: [] },
-    };
-    for (const step of steps) {
-      let result: CampaignResult;
-      try {
-        result = (await step(ctx, campaign)) as CampaignResult;
-      } catch (error) {
-        // A thrown step becomes this campaign's entry, not a run abort (N8b2):
-        // refused, the error named, partial (a throw proves nothing kept), empty
-        // minted; the loop then continues with the next campaign.
-        result = {
-          outcome: "refused",
-          reason: errorMessage(error),
-          partial: true,
-          minted: { assets: [] },
-          unreferencedInputs: { count: 0, names: [] },
-        };
+    let entry: CampaignEntry;
+    try {
+      entry = toEntry(campaign.slug, (await campaignStep(ctx, campaign)) as CampaignResult);
+    } catch (error) {
+      // A thrown campaign step becomes this campaign's entry, not a run abort
+      // (N8b2): refused, the error named, partial (a throw proves nothing kept),
+      // empty minted; the loop then continues with the next campaign.
+      entry = {
+        slug: campaign.slug,
+        outcome: "refused",
+        reason: errorMessage(error),
+        partial: true,
+        minted: { assets: [] },
+        unreferencedInputs: { count: 0, names: [] },
+      };
+    }
+    if (entry.outcome !== "refused") {
+      for (const step of laterSteps) {
+        try {
+          const added = await step(ctx, campaign);
+          const unclean = entry.partial === true || added.partial === true;
+          entry = {
+            ...entry,
+            ...(unclean ? { partial: true } : {}),
+            rows: [...(entry.rows ?? []), ...added.rows],
+          };
+        } catch (error) {
+          // The campaign row and its minted ids exist: the line keeps them and
+          // says what failed. Partial, so the run exits 1 and never 3.
+          entry = { ...entry, partial: true, stepError: errorMessage(error) };
+          break;
+        }
       }
-      entry = toEntry(campaign.slug, result);
-      if (result.outcome === "refused") break;
     }
     if (entry.partial) partial = true;
     tally[entry.outcome]++;
