@@ -9,6 +9,7 @@ import { copyPoolProblem } from "../ports/pool-store.port.js";
 import { countUnreferencedInputs, resolveRefTargets } from "./asset-step.js";
 import { blocksImport } from "./classify.js";
 import { parentsAreReal, readBounded, type UnreferencedInputsEntry } from "./census.js";
+import { reportRenderPaths, type ReportPathField } from "./report-paths.js";
 import type { ScanRefusal, ScanResult, ScannedCampaign } from "./scan.js";
 import type { StepContext } from "./steps.js";
 
@@ -22,18 +23,6 @@ import type { StepContext } from "./steps.js";
  * about one file each, and the reviewer reads them beside the plan, not
  * instead of it. Nothing here is written anywhere.
  */
-
-/** The five report fields signed-urls resolves to URLs (`signed-urls.ts:126-146`). */
-const REPORT_FIELDS = [
-  "outputPath",
-  "videoPath",
-  "htmlFallbackPath",
-  "proofPath",
-  "htmlBundlePath",
-] as const;
-
-/** The five report fields, as a type, so a refusal can name its field structurally. */
-export type ReportPathField = (typeof REPORT_FIELDS)[number];
 
 /**
  * A refusal as the plan carries it: a scan refusal, plus the structured field
@@ -242,13 +231,12 @@ async function reportPlan(
     append(reason);
     return { slug, present: true, fields: [], problems: [reason] };
   }
-  const record = parsed as Record<string, unknown>;
-  const fields: ReportFieldPlan[] = [];
-  for (const field of REPORT_FIELDS) {
-    const path = record[field];
-    if (typeof path !== "string" || path === "") continue;
-    fields.push(planReportField(ctx, refusals, slug, reportPath, field, path));
-  }
+  // The render paths are on the ROWS of `assets[]`, where `writeReport` stores
+  // them and `withAssetUrls` reads them (PT-8d0). A path on the report object
+  // itself is no render any reader asks for, and is left unread.
+  const fields = reportRenderPaths(parsed).map(({ field, path }) =>
+    planReportField(ctx, refusals, slug, reportPath, field, path),
+  );
   return { slug, present: true, fields, problems: [] };
 }
 

@@ -418,7 +418,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply: report, pool and decision rows", 
   });
 
   test("a report with a render path that cannot be used is stored, and the field is not a campaign refusal", async () => {
-    const bad = Buffer.from('{"outputPath":"camp/gone.png"}', "utf8");
+    const bad = Buffer.from('{"assets":[{"outputPath":"camp/gone.png"}]}', "utf8");
     const t = tree({ report: bad });
     root = t.root;
     const got = await apply(env, t.root, t.output, "r5");
