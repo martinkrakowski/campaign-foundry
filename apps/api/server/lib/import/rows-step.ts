@@ -86,6 +86,29 @@ export async function importReportRow(
       reason: `reports/${slug}.json is not valid UTF-8, so its exact bytes cannot be stored`,
     };
   }
+  // Owner, 2026-10-11: a report is stored verbatim when it is a JSON object, bad
+  // render paths included (the grid shows its placeholder, D223). Anything else
+  // is refused: `readReport` parses the body, so such a row would look present
+  // and fail every later read.
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch (error) {
+    return {
+      kind: "report",
+      status: "refused",
+      revision,
+      reason: `reports/${slug}.json is not JSON (${errorMessage(error)})`,
+    };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return {
+      kind: "report",
+      status: "refused",
+      revision,
+      reason: `reports/${slug}.json is not a JSON object, so no later read could use it`,
+    };
+  }
   try {
     await reports.writeReport(slug, payload, null);
   } catch (error) {

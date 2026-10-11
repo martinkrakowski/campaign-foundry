@@ -84,6 +84,34 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importReportRow", () => {
     } as unknown as ReportStorePort;
     await expect(importReportRow(failing, "camp", LOOSE)).rejects.toThrow("the database went away");
   });
+
+  test("bytes that are not JSON are refused before any write", async () => {
+    const broken = Buffer.from('{"assets": [', "utf8");
+    const result = await importReportRow(reports, "camp", broken);
+    expect(result.status).toBe("refused");
+    expect(result.reason).toMatch(/^reports\/camp\.json is not JSON \(/);
+    expect(await row(env)).toBeUndefined();
+  });
+
+  test("JSON that is not an object is refused before any write", async () => {
+    for (const text of ["[1,2]", "null", '"a report"', "7"]) {
+      const result = await importReportRow(reports, "camp", Buffer.from(text, "utf8"));
+      expect(result).toEqual({
+        kind: "report",
+        status: "refused",
+        revision: hashBytes(Buffer.from(text, "utf8")),
+        reason: "reports/camp.json is not a JSON object, so no later read could use it",
+      });
+    }
+    expect(await row(env)).toBeUndefined();
+  });
+
+  test("a report whose render path is bad is still stored verbatim", async () => {
+    const bad = Buffer.from('{"outputPath":"../../etc/passwd","videoPath":"camp/gone.mp4"}', "utf8");
+    const result = await importReportRow(reports, "camp", bad);
+    expect(result).toEqual({ kind: "report", status: "written", revision: hashBytes(bad) });
+    expect((await row(env))?.body).toBe(bad.toString("utf8"));
+  });
 });
 
 describe("rows-step: readReviewed", () => {
