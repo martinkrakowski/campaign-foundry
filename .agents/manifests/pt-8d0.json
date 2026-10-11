@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "lane": "PT-8d0",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/plan.ts",
+      "before": "  const fields = reportRenderPaths(parsed).map(({ field, path }) =>",
+      "after": "  const fields = reportRenderPaths({ assets: [parsed] }).map(({ field, path }) =>",
+      "because": "Grok PT-8d 1 and Defect, owner 2026-10-11: reportPlan reads the five path fields only from object rows of assets[]; a top-level path is left unread. Reading the report object as a row is the defect this lane fixes.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/plan.test.ts",
+        "-t",
+        "a path at the top level of a report is left unread"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/report-paths.ts",
+      "before": "  const assets = report[\"assets\"];",
+      "after": "  const assets = [report];",
+      "because": "The exported walk is the one place that says where a report's render paths are; the render step will import it. It must not read the report object itself.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/report-paths.test.ts",
+        "-t",
+        "a path on the report object itself is not returned"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/report-paths.ts",
+      "before": "      if (seen.has(key)) continue;",
+      "after": "      if (seen.has(path)) continue;",
+      "because": "One proof PDF is named by every row of a product. Each distinct field and path is planned once, so a missing file is one refusal, not one per row.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/report-paths.test.ts",
+        "-t",
+        "the paths come from the object rows of assets\\[], each distinct field and path once, in first-seen order"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/report-paths.ts",
+      "before": "    if (!isRecord(row)) continue;",
+      "after": "    if (row === undefined) continue;",
+      "because": "A report is file content and is never trusted: a row that is null, a string or a list is skipped, never a throw into the plan.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/report-paths.test.ts",
+        "-t",
+        "a row that is not an object is skipped, and so is a value that is not a non-empty string"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/report-paths.ts",
+      "before": "  \"htmlBundlePath\",",
+      "after": "  \"htmlBundleUrl\",",
+      "because": "D226: the import has one list of which fields are render paths. A field missing from it is a render that plan never reviews and the render step never writes.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/plan.test.ts",
+        "-t",
+        "a report with all five fields present and valid plans every one of them"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -11,7 +11,7 @@ import {
 import { dropRoot, linkAt, makeRoot, writeAt } from "./fixtures/tree.js";
 
 /** A report as a hand might leave it: valid JSON, but not the bytes `JSON.stringify` writes. */
-const LOOSE = Buffer.from('{\n  "assets":  [ ],\n\t"outputPath": "camp/a.png"  }\n', "utf8");
+const LOOSE = Buffer.from('{\n  "assets":  [ {\t"outputPath": "camp/a.png" } ]  }\n', "utf8");
 
 type Env = Awaited<ReturnType<typeof useApplyEnvironment>>;
 
@@ -108,7 +108,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importReportRow", () => {
 
   test("a report whose render path is bad is still stored verbatim", async () => {
     const bad = Buffer.from(
-      '{"outputPath":"../../etc/passwd","videoPath":"camp/gone.mp4"}',
+      '{"assets":[{"outputPath":"../../etc/passwd","videoPath":"camp/gone.mp4"}]}',
       "utf8",
     );
     const result = await importReportRow(reports, "camp", bad);
