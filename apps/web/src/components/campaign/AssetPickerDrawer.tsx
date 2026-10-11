@@ -214,7 +214,7 @@ export function AssetPickerDrawer({
 
         <div className="space-y-3">
           <div ref={headingRef} tabIndex={-1} className="flex items-center justify-between">
-            <Eyebrow as="h4">Assets ({assets.length})</Eyebrow>
+            <Eyebrow as="h4">{messages.assetBinHeading(assets.length)}</Eyebrow>
           </div>
           <p className="text-[12px] text-text-muted">
             Uploaded campaign assets available for logos and product backgrounds.

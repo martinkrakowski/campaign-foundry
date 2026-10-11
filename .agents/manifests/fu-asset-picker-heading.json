@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "FU-asset-picker-heading",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/messages.ts",
+      "before": "return `This campaign's assets (${count})`;",
+      "after": "return `Assets (${count})`;",
+      "because": "The heading goes back to the old words that do not say whose assets these are; the test fails on the heading text.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.test.tsx",
+        "-t",
+        "the list heading says these are this campaign's assets, with the count"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "{messages.assetBinHeading(assets.length)}",
+      "after": "{messages.assetBinHeading(0)}",
+      "because": "The heading stops counting the listed assets, so it shows zero over a full list; the test fails on the heading text with 2.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.test.tsx",
+        "-t",
+        "the list heading says these are this campaign's assets, with the count"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
