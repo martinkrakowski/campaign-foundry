@@ -19,7 +19,14 @@ import type { UnreferencedInputs } from "./asset-step.js";
 import type { MintedAsset, CampaignResult, HashedContext } from "./campaign-step.js";
 import { preflight, probeCampaign } from "./campaign-step.js";
 import { importTenant } from "./import-tenant.js";
-import { getBriefStore, getAssetStore } from "../ports/index.js";
+import {
+  getAssetStore,
+  getBriefStore,
+  getDecisionStore,
+  getPoolStore,
+  getReportStore,
+} from "../ports/index.js";
+import { dryRowStores, predictRows, type PlannedRow } from "./rows-step.js";
 import { errorMessage } from "@campaignfoundry/shared";
 import type { ScannedCampaign } from "./scan.js";
 /**
@@ -399,6 +406,12 @@ export type PlanProbe = {
   readonly slug: string;
   readonly state: "absent" | "unchanged" | "refused" | "completable";
   readonly reason?: string;
+  /**
+   * What `apply` would do with each of the campaign's rows (owner's decision 8).
+   * Absent for a `refused` probe: a refused campaign gets no later step. Read
+   * from the target after the digest was computed, so never part of it.
+   */
+  readonly rows?: readonly PlannedRow[];
 };
 
 /**
@@ -415,6 +428,9 @@ export async function planProbes(
 ): Promise<PlanProbe[]> {
   const briefs = getBriefStore(importTenant(ctx.orgId));
   const assets = getAssetStore(importTenant(ctx.orgId));
+  const scope = importTenant(ctx.orgId);
+  const dry = dryRowStores(getReportStore(scope), getPoolStore(scope), getDecisionStore(scope));
+  const hashed = { ...ctx, expectedHashes };
   const probes: PlanProbe[] = [];
   for (const scanned of campaigns) {
     const pf = await preflight(ctx, scanned, expectedHashes);
@@ -429,10 +445,14 @@ export async function planProbes(
       probes.push({ slug: scanned.slug, state: "refused", reason: errorMessage(error) });
       continue;
     }
+    const state = decision.kind === "versionless" ? "completable" : decision.kind;
+    // A refused campaign gets no later step in `apply`, so no prediction here.
+    const rows = state === "refused" ? undefined : await predictRows(dry, hashed, scanned.slug);
     probes.push({
       slug: scanned.slug,
-      state: decision.kind === "versionless" ? "completable" : decision.kind,
+      state,
       reason: decision.kind === "refused" ? decision.reason : undefined,
+      ...(rows === undefined ? {} : { rows }),
     });
   }
   return probes;
