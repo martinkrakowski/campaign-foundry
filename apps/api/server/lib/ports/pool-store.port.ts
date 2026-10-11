@@ -95,8 +95,13 @@ export interface PoolStorePort {
    * already offers. Without it the write is unconditional, as that one is: the
    * compare and the write are not fused on a filesystem, so the caller's
    * `withPoolLock` is still what makes a read→merge→write atomic (D79).
+   *
+   * `expectedRevision: null` (PT-8c, mirroring `ReportStorePort.writeReport`)
+   * writes only while nothing is stored, and otherwise throws the same
+   * `ECONFLICT` error carrying the stored `revision`. In `PgPoolStore` the
+   * check and the write are one atomic step; on files they are two (D79).
    */
-  writePool(pool: CopyPool, options?: { expectedRevision?: string }): Promise<StoredPool>;
+  writePool(pool: CopyPool, options?: { expectedRevision?: string | null }): Promise<StoredPool>;
 
   /**
    * Copy the pool from `fromBriefId` to `toBriefId`, rewriting the copied

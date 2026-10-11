@@ -6,14 +6,27 @@ import { assemblePlan } from "./plan.js";
 import type { PlanAssembled } from "./plan.js";
 import { scanBriefs } from "./scan.js";
 import type { ScanResult } from "./scan.js";
-import type { StepContext, CampaignOutcome, ImportStep, PlannedCampaign } from "./steps.js";
+import type {
+  StepContext,
+  CampaignOutcome,
+  ImportSteps,
+  PlannedCampaign,
+  RowEntry,
+} from "./steps.js";
 import { IMPORT_STEPS } from "./steps.js";
 import { objectStore, storeBackend } from "../config.js";
 import type { UnreferencedInputs } from "./asset-step.js";
 import type { MintedAsset, CampaignResult, HashedContext } from "./campaign-step.js";
 import { preflight, probeCampaign } from "./campaign-step.js";
 import { importTenant } from "./import-tenant.js";
-import { getBriefStore, getAssetStore } from "../ports/index.js";
+import {
+  getAssetStore,
+  getBriefStore,
+  getDecisionStore,
+  getPoolStore,
+  getReportStore,
+} from "../ports/index.js";
+import { dryRowStores, predictRows, type PlannedRow } from "./rows-step.js";
 import { errorMessage } from "@campaignfoundry/shared";
 import type { ScannedCampaign } from "./scan.js";
 /**
@@ -188,6 +201,10 @@ export interface CampaignEntry {
   readonly partial?: boolean;
   readonly minted: { readonly campaignId?: string; readonly assets: readonly MintedAsset[] };
   readonly unreferencedInputs: UnreferencedInputs;
+  /** Rows the later steps wrote, skipped or refused (PT-8c); absent when no later step ran. */
+  readonly rows?: readonly RowEntry[];
+  /** A later step's thrown error. The outcome and the minted ids above are still true. */
+  readonly stepError?: string;
 }
 
 /** What {@link applyCampaigns} returns to the caller for its exit code and summary. */
@@ -197,6 +214,8 @@ export interface ApplyCounts {
   readonly unchanged: number;
   readonly refused: number;
   readonly partial: boolean;
+  /** Rows the later steps WROTE in this run (PT-8c): a run that wrote one did not "write nothing". */
+  readonly rowsWritten: number;
 }
 
 /** Read the wider {@link CampaignResult} a step returned; a bare `{ outcome }` gets empty minted. */
@@ -213,14 +232,17 @@ function toEntry(slug: string, result: CampaignResult): CampaignEntry {
 
 /**
  * Run each campaign through `steps` in plan order, feeding each a `HashedContext`
- * (the reviewed hashes ride the context, D221), and stop a campaign's chain at
- * the first `refused` (PT-8-3). `onResult` receives each campaign's entry as the
- * result file must record it — after each campaign AND at the end (D229).
+ * (the reviewed hashes ride the context, D221). The FIRST step is the campaign
+ * step: its answer is the campaign's line. Every later step only ADDS to that
+ * line (its rows, and `partial` when a row was refused); the campaign's outcome
+ * and minted ids stay, also when a later step throws (owner, 2026-10-11). A
+ * refused campaign gets no later step (PT-8-3, F3). `onResult` receives each
+ * campaign's entry as the result file must record it (D229).
  */
 export async function applyCampaigns(
   ctx: HashedContext,
   campaigns: readonly PlannedCampaign[],
-  steps: readonly ImportStep[] = IMPORT_STEPS,
+  steps: ImportSteps = IMPORT_STEPS,
   onResult: (entry: CampaignEntry) => Promise<void>,
 ): Promise<ApplyCounts> {
   const tally: Record<CampaignOutcome, number> = {
@@ -230,31 +252,48 @@ export async function applyCampaigns(
     refused: 0,
   };
   let partial = false;
+  let rowsWritten = 0;
+  const [campaignStep, ...laterSteps] = steps;
   for (const campaign of campaigns) {
-    let entry: CampaignEntry = {
-      slug: campaign.slug,
-      outcome: "refused",
-      minted: { assets: [] },
-      unreferencedInputs: { count: 0, names: [] },
-    };
-    for (const step of steps) {
-      let result: CampaignResult;
-      try {
-        result = (await step(ctx, campaign)) as CampaignResult;
-      } catch (error) {
-        // A thrown step becomes this campaign's entry, not a run abort (N8b2):
-        // refused, the error named, partial (a throw proves nothing kept), empty
-        // minted; the loop then continues with the next campaign.
-        result = {
-          outcome: "refused",
-          reason: errorMessage(error),
-          partial: true,
-          minted: { assets: [] },
-          unreferencedInputs: { count: 0, names: [] },
-        };
+    let entry: CampaignEntry;
+    try {
+      entry = toEntry(campaign.slug, (await campaignStep(ctx, campaign)) as CampaignResult);
+    } catch (error) {
+      // A thrown campaign step becomes this campaign's entry, not a run abort
+      // (N8b2): refused, the error named, partial (a throw proves nothing kept),
+      // empty minted; the loop then continues with the next campaign.
+      entry = {
+        slug: campaign.slug,
+        outcome: "refused",
+        reason: errorMessage(error),
+        partial: true,
+        minted: { assets: [] },
+        unreferencedInputs: { count: 0, names: [] },
+      };
+    }
+    if (entry.outcome !== "refused") {
+      for (const step of laterSteps) {
+        try {
+          const added = await step(ctx, campaign);
+          // Owner, 2026-10-11: a refused row makes the line partial. Read it from the
+          // rows, so a step that forgets to say `partial` cannot make a line look clean.
+          const unclean =
+            entry.partial === true ||
+            added.partial === true ||
+            added.rows.some((row) => row.status === "refused" || row.status === "failed");
+          rowsWritten += added.rows.filter((row) => row.status === "written").length;
+          entry = {
+            ...entry,
+            ...(unclean ? { partial: true } : {}),
+            rows: [...(entry.rows ?? []), ...added.rows],
+          };
+        } catch (error) {
+          // The campaign row and its minted ids exist: the line keeps them and
+          // says what failed. Partial, so the run exits 1 and never 3.
+          entry = { ...entry, partial: true, stepError: errorMessage(error) };
+          break;
+        }
       }
-      entry = toEntry(campaign.slug, result);
-      if (result.outcome === "refused") break;
     }
     if (entry.partial) partial = true;
     tally[entry.outcome]++;
@@ -266,7 +305,36 @@ export async function applyCampaigns(
     unchanged: tally.unchanged,
     refused: tally.refused,
     partial,
+    rowsWritten,
   };
+}
+
+/**
+ * `apply`'s exit code, as `apply --help` states it (D229, D221). 1 whenever a
+ * line is partial. Otherwise 0 with nothing refused; with a refusal, 3 only
+ * when this run wrote NOTHING: no campaign created or completed and no row
+ * written by a later step. `refused` counts the scan's refusals too.
+ */
+export function exitCodeFor(counts: ApplyCounts, refused: number): 0 | 1 | 3 {
+  if (counts.partial) return 1;
+  if (refused === 0) return 0;
+  return counts.created + counts.completed + counts.rowsWritten === 0 ? 3 : 1;
+}
+
+/**
+ * The lines `apply` prints under a campaign for what the later steps did: one
+ * per row, and one for a later step that threw. A pure function, so every
+ * wording is tested without planting a failure in a real run.
+ */
+export function entryNotes(entry: CampaignEntry): string[] {
+  const notes = (entry.rows ?? []).map(
+    (row) =>
+      `  ${row.kind}: ${row.status}` +
+      (row.recanonicalised ? " (re-canonicalised)" : "") +
+      (row.reason ? `: ${row.reason}` : ""),
+  );
+  if (entry.stepError) notes.push(`  a later step failed: ${entry.stepError}`);
+  return notes;
 }
 
 /**
@@ -338,6 +406,12 @@ export type PlanProbe = {
   readonly slug: string;
   readonly state: "absent" | "unchanged" | "refused" | "completable";
   readonly reason?: string;
+  /**
+   * What `apply` would do with each of the campaign's rows (owner's decision 8).
+   * Absent for a `refused` probe: a refused campaign gets no later step. Read
+   * from the target after the digest was computed, so never part of it.
+   */
+  readonly rows?: readonly PlannedRow[];
 };
 
 /**
@@ -354,6 +428,9 @@ export async function planProbes(
 ): Promise<PlanProbe[]> {
   const briefs = getBriefStore(importTenant(ctx.orgId));
   const assets = getAssetStore(importTenant(ctx.orgId));
+  const scope = importTenant(ctx.orgId);
+  const dry = dryRowStores(getReportStore(scope), getPoolStore(scope), getDecisionStore(scope));
+  const hashed = { ...ctx, expectedHashes };
   const probes: PlanProbe[] = [];
   for (const scanned of campaigns) {
     const pf = await preflight(ctx, scanned, expectedHashes);
@@ -368,10 +445,14 @@ export async function planProbes(
       probes.push({ slug: scanned.slug, state: "refused", reason: errorMessage(error) });
       continue;
     }
+    const state = decision.kind === "versionless" ? "completable" : decision.kind;
+    // A refused campaign gets no later step in `apply`, so no prediction here.
+    const rows = state === "refused" ? undefined : await predictRows(dry, hashed, scanned.slug);
     probes.push({
       slug: scanned.slug,
-      state: decision.kind === "versionless" ? "completable" : decision.kind,
+      state,
       reason: decision.kind === "refused" ? decision.reason : undefined,
+      ...(rows === undefined ? {} : { rows }),
     });
   }
   return probes;

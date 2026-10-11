@@ -71,9 +71,20 @@ export type CensusKey =
   | "orphanRenders"
   | "nonBriefFiles"
   | "refusedBriefs"
-  | "samples";
+  | "samples"
+  | "unreferencedInputs";
 
-/** The D227 census: thirteen named categories, every one answered. */
+/**
+ * One campaign's own inputs that no ref names (`assets/inputs/<slug>/`): counted and
+ * listed by `plan`, never imported (owner's decision, 2026-10-11).
+ */
+export type UnreferencedInputsEntry = {
+  readonly slug: string;
+  readonly count: number;
+  readonly names: readonly string[];
+};
+
+/** The D227 census: fourteen named categories, every one answered. */
 export type Census = Record<CensusKey, CensusCategory>;
 
 /**
@@ -263,15 +274,18 @@ async function orphanWalk(
 }
 
 /**
- * The D227 census: thirteen named categories, every one answered, nothing
+ * The D227 census: fourteen named categories, every one answered, nothing
  * silent. `namedRenders` is the set of absolute paths the plan's reports name
  * (plan.ts resolved them) — the only thing that separates an orphan render
  * from one a report row names.
+ * `unreferenced` is the plan's list of own inputs no ref names (see
+ * `unreferencedInputsPlan`); the census only counts and names them.
  */
 export async function assembleCensus(
   ctx: StepContext,
   scan: CensusScanInput,
   namedRenders: ReadonlySet<string>,
+  unreferenced: readonly UnreferencedInputsEntry[] = [],
 ): Promise<Census> {
   const briefsDir = join(ctx.projectRoot, "briefs");
   const { orphans, packages: slugPackages } = await orphanWalk(ctx, namedRenders);
@@ -353,6 +367,13 @@ export async function assembleCensus(
     refusedBriefs: { count: refusedBriefs },
     samples: {
       count: ctx.includeSamples ? scan.samples.imported : scan.samples.skipped,
+    },
+    unreferencedInputs: {
+      count: unreferenced.reduce((sum, each) => sum + each.count, 0),
+      names:
+        unreferenced.length > 0
+          ? unreferenced.flatMap((each) => each.names.map((name) => `${each.slug}/${name}`))
+          : undefined,
     },
   };
 }

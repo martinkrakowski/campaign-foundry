@@ -28,7 +28,7 @@ import {
   briefBody,
   PNG,
 } from "./fixtures/tree.js";
-import type { StepContext, CampaignOutcome, PlannedCampaign } from "../steps.js";
+import type { StepContext, CampaignOutcome, PlannedCampaign, StepAddition } from "../steps.js";
 import {
   replan,
   applyCampaigns,
@@ -36,6 +36,8 @@ import {
   ResultWriter,
   openResult,
   describeResultRefusal,
+  entryNotes,
+  exitCodeFor,
   type CampaignEntry,
 } from "../apply.js";
 import { importCampaignStep, type HashedContext, type CampaignResult } from "../campaign-step.js";
@@ -526,7 +528,14 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         minted: { assets: [] },
         unreferencedInputs: { count: 0, names: [] },
       });
-      await writer.summary({ created: 0, completed: 0, unchanged: 1, refused: 0, partial: false });
+      await writer.summary({
+        created: 0,
+        completed: 0,
+        unchanged: 1,
+        refused: 0,
+        partial: false,
+        rowsWritten: 0,
+      });
       await writer.close();
       const seed = readFileSync(result, "utf8");
 
@@ -886,7 +895,14 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
         [step],
         async (entry: CampaignEntry) => writer.add(entry),
       );
-      await writer.summary({ created: 0, completed: 0, unchanged: 0, refused: 0, partial: false });
+      await writer.summary({
+        created: 0,
+        completed: 0,
+        unchanged: 0,
+        refused: 0,
+        partial: false,
+        rowsWritten: 0,
+      });
       await writer.close();
 
       // After campaign "a" is appended and synced, the step for "b" may run.
@@ -1037,9 +1053,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       });
       const expectedHashes = (await replan(ctxWith(root, output))).expectedHashes;
       const hashedCtx: HashedContext = { ...ctxWith(root, output), expectedHashes };
-      const spy = vi.fn(
-        async (): Promise<{ outcome: CampaignOutcome }> => ({ outcome: "created" }),
-      );
+      const spy = vi.fn(async (): Promise<StepAddition> => ({ rows: [] }));
       const seen: string[] = [];
       const entries: CampaignEntry[] = [];
       await applyCampaigns(
@@ -1060,9 +1074,217 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply", () => {
       // The created campaign ran the spy; the refused one did not reach it.
       expect(entries[0]!.outcome).toBe("created");
       expect(entries[1]!.outcome).toBe("refused");
+      // The later step added to the created campaign's line and replaced nothing.
+      expect(entries[0]!.minted.campaignId).toBeDefined();
+      expect(entries[0]!.rows).toEqual([]);
+      expect(entries[1]!.rows).toBeUndefined();
     } finally {
       dropRoot(root);
     }
+  });
+
+  test("a later step's rows join the campaign's line and the minted ids stay", async () => {
+    const hashedCtx = { ...ctxWith("", ""), expectedHashes: new Map() } as HashedContext;
+    const minted = { campaignId: "c-1", assets: [{ id: "a-1", name: "logo.png", key: "k/1" }] };
+    const first = async (): Promise<CampaignResult> => ({
+      outcome: "created",
+      minted,
+      unreferencedInputs: { count: 1, names: ["spare.png"] },
+    });
+    const report = async (): Promise<StepAddition> => ({
+      rows: [{ kind: "report", status: "refused", reason: "a different report is stored" }],
+      partial: true,
+    });
+    const pool = async (): Promise<StepAddition> => ({
+      rows: [{ kind: "pool", status: "written", revision: "r-pool" }],
+    });
+    const entries: CampaignEntry[] = [];
+    const counts = await applyCampaigns(
+      hashedCtx,
+      [{ slug: "camp", sourcePath: "x" }],
+      [first, report, pool],
+      async (entry: CampaignEntry) => {
+        entries.push(entry);
+      },
+    );
+    expect(entries).toEqual([
+      {
+        slug: "camp",
+        outcome: "created",
+        partial: true,
+        minted,
+        unreferencedInputs: { count: 1, names: ["spare.png"] },
+        rows: [
+          { kind: "report", status: "refused", reason: "a different report is stored" },
+          { kind: "pool", status: "written", revision: "r-pool" },
+        ],
+      },
+    ]);
+    expect(counts).toEqual({
+      created: 1,
+      completed: 0,
+      unchanged: 0,
+      refused: 0,
+      partial: true,
+      rowsWritten: 1,
+    });
+  });
+
+  test("a later step with nothing refused leaves the line clean", async () => {
+    const hashedCtx = { ...ctxWith("", ""), expectedHashes: new Map() } as HashedContext;
+    const first = async (): Promise<{ outcome: CampaignOutcome }> => ({ outcome: "unchanged" });
+    const rows = async (): Promise<StepAddition> => ({
+      rows: [{ kind: "decisions", status: "skipped", revision: "r-dec" }],
+    });
+    const entries: CampaignEntry[] = [];
+    const counts = await applyCampaigns(
+      hashedCtx,
+      [{ slug: "camp", sourcePath: "x" }],
+      [first, rows],
+      async (entry: CampaignEntry) => {
+        entries.push(entry);
+      },
+    );
+    expect(entries[0]!.outcome).toBe("unchanged");
+    expect(entries[0]!.partial).toBeUndefined();
+    expect(entries[0]!.stepError).toBeUndefined();
+    expect(entries[0]!.rows).toEqual([{ kind: "decisions", status: "skipped", revision: "r-dec" }]);
+    expect(counts).toEqual({
+      created: 0,
+      completed: 0,
+      unchanged: 1,
+      refused: 0,
+      partial: false,
+      rowsWritten: 0,
+    });
+  });
+
+  test("a later step that throws keeps the campaign's outcome and minted ids, and the line is partial", async () => {
+    const hashedCtx = { ...ctxWith("", ""), expectedHashes: new Map() } as HashedContext;
+    const minted = { campaignId: "c-1", assets: [{ id: "a-1", name: "logo.png", key: "k/1" }] };
+    const first = async (): Promise<CampaignResult> => ({
+      outcome: "completed",
+      minted,
+      unreferencedInputs: { count: 0, names: [] },
+    });
+    const boom = async (): Promise<StepAddition> => {
+      throw new Error("the report store went away");
+    };
+    const after = vi.fn(async (): Promise<StepAddition> => ({ rows: [] }));
+    const entries: CampaignEntry[] = [];
+    const counts = await applyCampaigns(
+      hashedCtx,
+      [
+        { slug: "a", sourcePath: "x" },
+        { slug: "b", sourcePath: "y" },
+      ],
+      [first, boom, after],
+      async (entry: CampaignEntry) => {
+        entries.push(entry);
+      },
+    );
+    // The step after the one that threw does not run; the next campaign does.
+    expect(after).not.toHaveBeenCalled();
+    expect(entries.map((e) => e.slug)).toEqual(["a", "b"]);
+    expect(entries[0]).toEqual({
+      slug: "a",
+      outcome: "completed",
+      partial: true,
+      minted,
+      unreferencedInputs: { count: 0, names: [] },
+      stepError: "the report store went away",
+    });
+    // Never "refused" and never exit 3: the campaign row exists.
+    expect(counts).toEqual({
+      created: 0,
+      completed: 2,
+      unchanged: 0,
+      refused: 0,
+      partial: true,
+      rowsWritten: 0,
+    });
+  });
+
+  test("a refused or failed row makes the line partial even when the step does not say so", async () => {
+    const hashedCtx = { ...ctxWith("", ""), expectedHashes: new Map() } as HashedContext;
+    const first = async (): Promise<{ outcome: CampaignOutcome }> => ({ outcome: "created" });
+    const refusing = async (): Promise<StepAddition> => ({
+      rows: [{ kind: "report", status: "refused", reason: "a different report is stored" }],
+    });
+    const failing = async (): Promise<StepAddition> => ({
+      rows: [{ kind: "pool", status: "failed", reason: "the pool store went away" }],
+    });
+    for (const later of [refusing, failing]) {
+      const entries: CampaignEntry[] = [];
+      const counts = await applyCampaigns(
+        hashedCtx,
+        [{ slug: "camp", sourcePath: "x" }],
+        [first, later],
+        async (entry: CampaignEntry) => {
+          entries.push(entry);
+        },
+      );
+      expect(entries[0]!.outcome).toBe("created");
+      expect(entries[0]!.partial).toBe(true);
+      expect(counts.partial).toBe(true);
+      expect(counts.rowsWritten).toBe(0);
+    }
+  });
+
+  test("exit 3 needs a run that wrote nothing: a row written for an unchanged campaign makes a refusal exit 1", async () => {
+    const hashedCtx = { ...ctxWith("", ""), expectedHashes: new Map() } as HashedContext;
+    const first = async (): Promise<{ outcome: CampaignOutcome }> => ({ outcome: "unchanged" });
+    const writes = async (): Promise<StepAddition> => ({
+      rows: [
+        { kind: "report", status: "written", revision: "r1" },
+        { kind: "pool", status: "skipped", revision: "r2" },
+      ],
+    });
+    const counts = await applyCampaigns(
+      hashedCtx,
+      [{ slug: "camp", sourcePath: "x" }],
+      [first, writes],
+      async () => {},
+    );
+    expect(counts).toEqual({
+      created: 0,
+      completed: 0,
+      unchanged: 1,
+      refused: 0,
+      partial: false,
+      rowsWritten: 1,
+    });
+    // One campaign refused at the scan, beside it: the run wrote a row, so 1, not 3.
+    expect(exitCodeFor(counts, 1)).toBe(1);
+    expect(exitCodeFor(counts, 0)).toBe(0);
+    const nothing = { ...counts, rowsWritten: 0 };
+    expect(exitCodeFor(nothing, 1)).toBe(3);
+    expect(exitCodeFor({ ...nothing, completed: 1 }, 1)).toBe(1);
+    expect(exitCodeFor({ ...nothing, partial: true }, 0)).toBe(1);
+  });
+
+  test("entryNotes prints one line per row and one for a later step that threw", () => {
+    const base: CampaignEntry = {
+      slug: "camp",
+      outcome: "created",
+      minted: { assets: [] },
+      unreferencedInputs: { count: 0, names: [] },
+    };
+    expect(entryNotes(base)).toEqual([]);
+    expect(
+      entryNotes({
+        ...base,
+        rows: [
+          { kind: "report", status: "refused", reason: "a different report is stored" },
+          { kind: "pool", status: "written", revision: "r", recanonicalised: true },
+        ],
+        stepError: "the rows step blew up",
+      }),
+    ).toEqual([
+      "  report: refused: a different report is stored",
+      "  pool: written (re-canonicalised)",
+      "  a later step failed: the rows step blew up",
+    ]);
   });
 
   test("applyCampaigns runs the registered IMPORT_STEPS by default", async () => {

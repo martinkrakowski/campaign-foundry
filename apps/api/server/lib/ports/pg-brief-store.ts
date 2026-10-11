@@ -8,6 +8,7 @@ import { collectRefs } from "../asset-files.js";
 import { BRIEF_SOURCE_EXTS, hashBytes, isErrno } from "../brief-files.js";
 import type { SqlClient, SqlQuery } from "../db/sql-client.js";
 import { parseBriefText, type ParseBriefOptions } from "../load-brief.js";
+import { UUID_PATTERN } from "../object-store/object-keys.js";
 import { isAssetId } from "./asset-store.port.js";
 import type {
   BriefStorePort,
@@ -381,6 +382,36 @@ export class PgBriefStore implements BriefStorePort {
   }
 
   /**
+   * FU-slug-uuid-409: a create whose slug is a uuid must not land on an id of
+   * THIS org, live or tombstoned, visible to the caller's team or not — the two
+   * would share storage keys, so `purgeCampaign` would then refuse to erase the
+   * original campaign forever and there is no rename path to recover.
+   *
+   * The `not exists (slug = $2::text)` sub-clause leaves a slug that ALREADY
+   * names a campaign row grandfathered, so the existing first-Save / EEXIST
+   * branch handles it unchanged; this refuses only a slug that is BOTH a
+   * campaign id in the org AND not already a campaign slug in the org.
+   *
+   * There is no versionless condition: the collision is refused for a
+   * campaign whether or not it already carries a brief_version, since the two
+   * rows would share storage keys the purge guard can never split.
+   */
+  private async assertSlugIsNoCampaignId(tx: SqlQuery, slug: string): Promise<void> {
+    if (!UUID_PATTERN.test(slug)) return;
+    const { rows } = await tx.query<{ one: number }>(
+      `select 1 from campaign c where c.org_id = $1 and c.id = $2::uuid
+        and not exists (select 1 from campaign where org_id = $1 and slug = $2::text)
+        limit 1`,
+      [this.orgId, slug],
+    );
+    if (rows.length > 0) {
+      const err = new Error(`Brief "${slug}" already exists.`);
+      (err as { code?: string }).code = "EEXIST";
+      throw err;
+    }
+  }
+
+  /**
    * D236: a brief version may only name ids that are `asset` rows of THIS
    * campaign, checked inside the very transaction that writes the version.
    * The write-side checks in `brief-asset-refs.ts` ran in an EARLIER one, so
@@ -459,6 +490,7 @@ export class PgBriefStore implements BriefStorePort {
     return this.db.transaction(async (tx) => {
       await this.assertOrgLive(tx);
       if (teamId !== null && teamId !== undefined) await this.assertTeamInOrg(tx, teamId);
+      await this.assertSlugIsNoCampaignId(tx, brief.id);
       const { rows: inserted } = await tx.query<{ id: string }>(
         `insert into campaign (org_id, slug, team_id) values ($1, $2, $3)
          on conflict (org_id, slug) do nothing
@@ -570,6 +602,7 @@ export class PgBriefStore implements BriefStorePort {
     return this.db.transaction(async (tx) => {
       await this.assertOrgLive(tx);
       if (teamId !== null) await this.assertTeamInOrg(tx, teamId);
+      await this.assertSlugIsNoCampaignId(tx, slug);
       const { rows } = await tx.query<{ id: string }>(
         `insert into campaign (org_id, slug, team_id, name, type) values ($1, $2, $3, $4, $5)
          on conflict (org_id, slug) do nothing

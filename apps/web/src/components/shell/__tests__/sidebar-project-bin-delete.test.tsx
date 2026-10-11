@@ -1,10 +1,11 @@
 import { describe, test, expect } from "vitest";
 import { screen, within, waitFor } from "@testing-library/react";
-import { createElement } from "react";
+import { createElement, useEffect } from "react";
 import userEvent from "@testing-library/user-event";
 import type { Asset } from "@/lib/run-context";
 import { renderWithRun, seedPersistedRun, mockPipelineApi, json } from "@/__tests__/helpers";
 import { Sidebar } from "../Sidebar";
+import { useEditorPanelPublisher } from "@/lib/editor-panels-context";
 import * as messages from "@/components/campaign/messages";
 
 const logo = {
@@ -22,7 +23,43 @@ const banner = {
   thumbnailUrl: "",
 } as unknown as Asset;
 
+// Stands in for the open editor: it publishes the refs its draft holds.
+const PublishRefs = ({ refs }: { refs: readonly string[] }) => {
+  const { setAssetRefs } = useEditorPanelPublisher();
+  useEffect(() => {
+    setAssetRefs(refs);
+    return () => setAssetRefs([]);
+  }, [refs, setAssetRefs]);
+  return null;
+};
+const LOGO_ID = "11111111-2222-4333-8444-555555555555";
+const NAMED_REFS = [LOGO_ID];
+
 describe("Sidebar Project Bin delete", () => {
+  test("a bin row whose asset an open editor field names has no Delete and shows the in-use hint", async () => {
+    const user = userEvent.setup();
+    seedPersistedRun([logo, banner]);
+    renderWithRun(
+      <>
+        <PublishRefs refs={NAMED_REFS} />
+        <Sidebar />
+      </>,
+    );
+    await screen.findByText("logo.png");
+
+    await user.click(screen.getByRole("button", { name: "Browse" }));
+    const drawer = await screen.findByRole("dialog", { name: "Asset Bin" });
+    // The other row still offers Delete, so the list has loaded.
+    await within(drawer).findByRole("button", {
+      name: messages.assetDeleteRowLabel("banner.png"),
+    });
+    expect(
+      within(drawer).queryByRole("button", { name: messages.assetDeleteRowLabel("logo.png") }),
+    ).toBeNull();
+    // The editor's own hint, once, on the protected row.
+    expect(within(drawer).getAllByText(messages.assetDeleteProtectedHint)).toHaveLength(1);
+  });
+
   test("deleting an asset from the bin updates the count and removes its preview", async () => {
     const user = userEvent.setup();
     seedPersistedRun([logo, banner]);

@@ -1899,6 +1899,11 @@ export const deleteCampaignUnsupported =
 /** Any other failure that carries no message of its own. */
 export const deleteCampaignFailed = "Could not delete the campaign — try again.";
 
+/** The Asset Bin's list heading: the bin holds one campaign's assets, never the organisation's. */
+export function assetBinHeading(count: number): string {
+  return `This campaign's assets (${count})`;
+}
+
 /* ── Deleting an asset from the Asset Bin (PT-9o) ── */
 
 /** The row button's visible word. */

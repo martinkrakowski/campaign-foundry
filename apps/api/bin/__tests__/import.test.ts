@@ -153,6 +153,62 @@ describe("import CLI (PT-8a)", () => {
     expect(plan.refusals).toEqual([expect.objectContaining({ slug: "camp-broken" })]);
   });
 
+  test("plan lists the unreferenced own inputs, counts them in the census, and leaves the digest alone", async () => {
+    type Printed = {
+      unreferencedInputs: readonly { slug: string; count: number; names: readonly string[] }[];
+      census: { unreferencedInputs: { count: number; names?: readonly string[] } };
+      digest: string;
+    };
+    const first = io();
+    expect(await main(planArgv(), first.deps)).toBe(0);
+    const before = JSON.parse(first.out[3]!) as Printed;
+    expect(before.unreferencedInputs).toEqual([]);
+    expect(before.census.unreferencedInputs).toEqual({ count: 0 });
+
+    writeAt(root!, "assets/inputs/camp-one/spare.png", PNG);
+    writeAt(root!, "assets/inputs/camp-one/another.png", PNG);
+    const second = io();
+    expect(await main(planArgv(), second.deps)).toBe(0);
+    const after = JSON.parse(second.out[3]!) as Printed;
+
+    expect(after.unreferencedInputs).toEqual([
+      { slug: "camp-one", count: 2, names: ["another.png", "spare.png"] },
+    ]);
+    expect(after.census.unreferencedInputs).toEqual({
+      count: 2,
+      names: ["camp-one/another.png", "camp-one/spare.png"],
+    });
+    // The owner's decision: the digest is NOT changed by an unreferenced file. It was
+    // true before this lane (the digest hashes only briefs, sidecars and CLEAN refs),
+    // and this holds it so.
+    expect(after.digest).toBe(before.digest);
+    expect(second.out[4]).toBe(first.out[4]);
+    // `plan` is read-only: the spare files are still there.
+    expect(existsSync(join(root!, "assets/inputs/camp-one/spare.png"))).toBe(true);
+  });
+
+  test("plan lists a uuid-shaped slug as refused, not as importable", async () => {
+    const { out, deps } = io();
+    const uuid = "11111111-1111-1111-1111-111111111111";
+    writeBrief(root!, `${uuid}.yaml`, {
+      id: uuid,
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/logo.png" },
+      ],
+    });
+
+    expect(await main(planArgv(), deps)).toBe(0);
+    const plan = JSON.parse(out[3]!) as {
+      campaigns: readonly { slug: string }[];
+      refusals: readonly { slug: string | null; reason: string }[];
+    };
+    expect(plan.campaigns.map((one) => one.slug)).toEqual(["camp-one"]);
+    expect(plan.refusals).toEqual([
+      expect.objectContaining({ slug: uuid, reason: `a uuid-shaped slug is refused: ${uuid}` }),
+    ]);
+    expect(out[4]).toMatch(/^1 importable, 1 refused, digest /);
+  });
+
   test("--include-samples is read by plan", async () => {
     const { out, deps } = io();
     writeBrief(root!, "sample-demo.yaml", {
@@ -283,10 +339,10 @@ describe("import CLI (PT-8a)", () => {
     const text = out.join("\n");
     expect(text).toContain("0  nothing was refused and nothing is partial");
     expect(text).toContain(
-      "1  at least one campaign is partial, or the run itself failed, or the run wrote at least one campaign and refused at least one",
+      "1  at least one campaign is partial (a write of it failed, or one of its report, pool or decision rows was refused), or the run itself failed, or the run wrote something and refused at least one campaign",
     );
     expect(text).toContain(
-      "3  the run wrote nothing: at least one campaign was refused before any write, none was created or completed, nothing is partial",
+      "3  the run wrote nothing: at least one campaign was refused before any write, none was created or completed, no row was written, nothing is partial",
     );
   });
 
@@ -461,6 +517,7 @@ describe("the plan file, the exit classes and the pool (PT-8a2 reqs 18 and 20)",
         "refusedBriefs",
         "samples",
         "templates",
+        "unreferencedInputs",
         "usage",
       ].sort(),
     );

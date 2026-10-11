@@ -345,6 +345,28 @@ describe("provider-keys-api", () => {
       expect(requestMethod).toBe("DELETE");
     });
 
+    test("resolves on a 2xx whose body cannot be read", async () => {
+      // The status line arrived, so the server has answered; the body is a stream
+      // that can still fail afterwards. Nobody reads a revoke's body, so a body
+      // that cannot be read must not turn a finished revoke into a failure.
+      const text = vi.fn(() => Promise.reject(new Error("stream closed")));
+      mockFetch(() => ({ ok: true, status: 200, text }) as unknown as Response);
+
+      await expect(revokeProviderKey("gemini")).resolves.toBeUndefined();
+      expect(text).not.toHaveBeenCalled();
+    });
+
+    test("resolves on a 2xx whose body cannot even be cancelled", async () => {
+      // The unread body is cancelled, best effort: a stream that is locked or
+      // already errored rejects the cancel, and that rejection is nobody's
+      // failure either. It must be swallowed, not left unhandled.
+      const cancel = vi.fn(() => Promise.reject(new Error("locked")));
+      mockFetch(() => ({ ok: true, status: 200, body: { cancel } }) as unknown as Response);
+
+      await expect(revokeProviderKey("gemini")).resolves.toBeUndefined();
+      expect(cancel).toHaveBeenCalledTimes(1);
+    });
+
     test("rejects with 403 when caller is not owner or admin", async () => {
       mockFetch(() => json({ error: "Only an owner or admin may manage provider keys." }, 403));
       await expect(revokeProviderKey("firefly")).rejects.toMatchObject({

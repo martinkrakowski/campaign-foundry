@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "lane": "PT-8c-rows-b",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "  const recanonicalised = revision !== hashBytes(bytes);",
+      "after": "  const recanonicalised = revision !== revision;",
+      "because": "F6: a hand-edited pools.json is stored in the canonical form under another revision, and the import must say so.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/rows-pool-decisions.test.ts", "-t", "a hand-edited pool file is stored in the canonical form and says so"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "  if (stored !== undefined) {",
+      "after": "  if (stored !== undefined && stored.revision === revision) {",
+      "because": "D221; owner, 2026-10-11: a stored pool with another revision is refused and untouched. writePool with no expected revision overwrites, so the read before it is the only guard.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/rows-pool-decisions.test.ts", "-t", "a different stored pool is refused and left as it was"],
+      "verdict": "caught",
+      "retired": "Retired by the orchestrator with PT-8c-notes (2026-10-11), because its premise is gone, not because the claim was dropped. This entry said the read before `writePool` is the ONLY guard against overwriting a different stored pool. PT-8c-notes made the write itself insert-only (`writePool(pool, null)`), so with this mutation applied the store's conflict still refuses the different pool and the named test stays green: observed `survived` in that lane's replay. The claim (a different stored pool is refused and left as it was) is now carried by pt-8c-notes.json, whose mutations turn the insert-only write back into an unconditional one and are caught. If the `null` form is ever removed from `importPoolRow`, this entry must be re-instated."
+    },
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "    await decisions.writeDecisions(slug, map, null);",
+      "after": "    await decisions.writeDecisions(slug, map, undefined);",
+      "because": "D221: null writes decisions only while none are stored; undefined is an unconditional write that replaces a reviewer's decisions.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/rows-pool-decisions.test.ts", "-t", "different stored decisions are refused and left as they were"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "  if (!Buffer.from(text, \"utf8\").equals(bytes)) {",
+      "after": "  if (!Buffer.from(text, \"utf8\").equals(Buffer.from(text, \"utf8\"))) {",
+      "because": "A pool or decisions file with a byte that is not valid UTF-8 would be decoded to other text and stored changed (a reviewer's name, a pool entry). It is refused, as a report is.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/rows-pool-decisions.test.ts", "-t", "a decisions file that is not valid UTF-8 is refused and nothing is written"],
+      "verdict": "caught"
+    }
+  ]
+}

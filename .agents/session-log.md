@@ -7120,3 +7120,13 @@ Nine lanes read "no-pr" on the waves page: their `merge settled` events carried 
 - **Open, the owner's decision:** a structured logger for the project (and with it the rollback helper's `console.warn`); whether a campaign purge that fails on every run should also fail the sweep (#753, "Challenge this").
 - **Deferred, unchanged:** the released-slug leftover on the file store; the over-copy for a ref ending in a bare slash (since #716, a defect that needs a fix, not a pin); a shape rule for user ids; the dry run of `purge:org` printing no org name; the required status check on main, refused by the previous session's permission layer and not attempted in this one, still queued for the owner.
 - **Owed to the tooling:** `wave:status --push` confirming what it sent.
+
+## 2026-10-11 — PT-8c-exit (implementer, GLM-5.3)
+
+Closed the two gaps before the rows step registers. `rowsWritten` joins `ApplyCounts`
+and counts against exit 3; a refused or failed row forces its line partial by itself;
+`apply` prints one note per row and one for a thrown later step (`entryNotes`), with
+`exitCodeFor` owning the exit code in BIN. Two commits on `feat/import-exit-and-notes`:
+`e28d4e17` (code + tests), `4fb95785` (manifest). Both mutations bite; pt-8c-merge and
+pt-8c-exit verify cleanly; pt-8b2-import-apply's mutation on the removed BIN exit-3
+line no longer matches — the orchestrator moves it.

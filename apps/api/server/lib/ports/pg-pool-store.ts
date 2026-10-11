@@ -86,7 +86,10 @@ export class PgPoolStore implements PoolStorePort {
     return { pool, revision: row.revision };
   }
 
-  async writePool(pool: CopyPool, options?: { expectedRevision?: string }): Promise<StoredPool> {
+  async writePool(
+    pool: CopyPool,
+    options?: { expectedRevision?: string | null },
+  ): Promise<StoredPool> {
     assertSafeCampaignId(pool.briefId);
     const body = poolBody(pool);
     const revision = revisionOf(body);
@@ -107,7 +110,7 @@ export class PgPoolStore implements PoolStorePort {
     campaignId: string,
     body: string,
     revision: string,
-    expected: string | undefined,
+    expected: string | null | undefined,
   ): Promise<void> {
     if (expected === undefined) {
       await tx.query(
@@ -119,12 +122,22 @@ export class PgPoolStore implements PoolStorePort {
       );
       return;
     }
-    const claimed = await tx.query(
-      `update pool set body = $3, revision = $4, updated_at = now()
+    // `null`: only while nothing is stored. The insert's unique key makes that
+    // check and the write one step, in any process (`PgReportStore.claim`).
+    const claimed =
+      expected === null
+        ? await tx.query(
+            `insert into pool (org_id, campaign_id, body, revision, updated_at)
+             values ($1, $2, $3, $4, now())
+             on conflict (org_id, campaign_id) do nothing returning 1`,
+            [this.orgId, campaignId, body, revision],
+          )
+        : await tx.query(
+            `update pool set body = $3, revision = $4, updated_at = now()
        where org_id = $1 and campaign_id = $2 and revision = $5
-       returning 1`,
-      [this.orgId, campaignId, body, revision, expected],
-    );
+             returning 1`,
+            [this.orgId, campaignId, body, revision, expected],
+          );
     if (claimed.rows.length === 0) {
       const current = await tx.query<{ revision: string }>(
         "select revision from pool where org_id = $1 and campaign_id = $2",

@@ -558,7 +558,7 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   // lost its warning (and how a settled one stole somebody else's).
   const draftWriteWriter = useDraftWriteWriter();
   const { openCreateDialog } = useCreateCampaign();
-  const { setPanels, setTopPanels, setRail } = useEditorPanelPublisher();
+  const { setPanels, setTopPanels, setRail, setAssetRefs } = useEditorPanelPublisher();
   // VE1 — history lives in the hook, never in `EditorState` (R6): `state` is the
   // present draft, so persistence and the stored-draft diff see exactly what they
   // saw before, and `dispatch` is a drop-in for the reducer's. The keyboard
@@ -711,10 +711,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         }
       })
       .catch(() => {
-        // An unreadable listing is an empty one, not an absent one: the display
-        // has to leave "Loading…" and the `[]` is what makes it do so.
+        // An unreadable FIRST listing is an empty one, not an absent one: the
+        // display has to leave "Loading…" and the `[]` is what makes it do so.
+        // An unreadable REFETCH keeps what this campaign's earlier listing
+        // already resolved, so tiles that already had names do not lose them.
         if (!cancelled) {
-          setStoredAssets({ briefId: state.briefId, assets: [] });
+          setStoredAssets((held) =>
+            held?.briefId === state.briefId ? held : { briefId: state.briefId, assets: [] },
+          );
           setAssetsRefetching(false);
         }
       });
@@ -2090,6 +2094,19 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
     deleteCreative,
   ]);
   useEffect(() => () => setPanels(null), []);
+  // The sidebar's Project Bin reads these to hide Delete on an asset a field here
+  // still names, saved or not. The provider keeps the same array when nothing changed.
+  useEffect(() => {
+    // The same silence as the panel publishers above: on a route that names no
+    // loadable brief this page is not an editor, so the bin must not keep
+    // protecting the previous draft's refs.
+    if (unknownId !== null || failedRouteId !== null || failedMetaId !== null) {
+      setAssetRefs([]);
+      return;
+    }
+    setAssetRefs(currentAssetRefs(state));
+  }, [state, setAssetRefs, unknownId, failedRouteId, failedMetaId]);
+  useEffect(() => () => setAssetRefs([]), [setAssetRefs]);
 
   /**
    * The preview rail's BODY — `PlayheadHost`'s own slot (CC5), published up to

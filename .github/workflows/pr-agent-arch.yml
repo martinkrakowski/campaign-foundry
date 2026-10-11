@@ -128,7 +128,9 @@ jobs:
           OPENROUTER__KEY: ${{ secrets.OPENROUTER_KEY }}
           config.restricted_mode: "true"
           config.model: ${{ steps.arm.outputs.model }}
-          config.fallback_models: '["openrouter/anthropic/claude-haiku-4.5"]'
+          # 2026-10-10 (owner): no Claude, Gemini or Grok model through OpenRouter in any
+          # pipeline seat. The fallback was Claude Haiku 4.5; it is GPT-6 Luna, which is neither arm.
+          config.fallback_models: '["openrouter/openai/gpt-6-luna"]'
           config.custom_model_max_tokens: "128000"
           config.max_model_tokens: "70000"
           # THE LINTER'S OWN RULES ARE CONTEXT (D2, P2.2). The reviewer cannot defer to a

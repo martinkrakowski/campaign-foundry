@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "FU-requestjson-body",
+  "mutations": [
+    {
+      "file": "apps/web/src/lib/briefs-api.ts",
+      "before": "  if (res.ok && init?.method === \"DELETE\") {",
+      "after": "  if (res.ok && init?.method === \"delete\") {",
+      "because": "With the comparison never true, the body of a successful delete is read again, so the stream's rejection escapes `requestJson` as a raw error. The test that hands back a 200 whose `text()` rejects therefore sees a rejected promise instead of a resolved one, and the delete is reported as failed even though the server already answered. The gate is the case-sensitive method check, so lowercasing it removes the entire protection.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/briefs-api.delete-asset.test.ts",
+        "-t",
+        "deleteAsset resolves on a 2xx whose body cannot be read"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/lib/briefs-api.ts",
+      "before": "  if (res.ok && init?.method === \"DELETE\") {",
+      "after": "  if (!res.ok && init?.method === \"DELETE\") {",
+      "because": "The skip must apply to a success only; flipped, a failed delete returns `null` without ever reading its body. The 400, 404 and 409 answers then resolve instead of throwing a `BriefsApiError` carrying that status, so the test that expects each to reject fails. A failure's body carries the message, the code and the revision, and none of it is read.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/lib/__tests__/briefs-api.delete-asset.test.ts",
+        "-t",
+        "deleteAsset maps 400 404 and 409 to a BriefsApiError carrying that status"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

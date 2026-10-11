@@ -89,9 +89,9 @@
     },
     {
       "file": "apps/api/server/lib/import/apply.ts",
-      "before": "      try {\n        result = (await step(ctx, campaign)) as CampaignResult;\n      } catch (error) {\n        // A thrown step becomes this campaign's entry, not a run abort (N8b2):\n        // refused, the error named, partial (a throw proves nothing kept), empty\n        // minted; the loop then continues with the next campaign.\n        result = {\n          outcome: \"refused\",\n          reason: errorMessage(error),\n          partial: true,\n          minted: { assets: [] },\n          unreferencedInputs: { count: 0, names: [] },\n        };\n      }",
-      "after": "      result = (await step(ctx, campaign)) as CampaignResult;",
-      "because": "Removing the try around the step lets a thrown error abort the run instead of recording it as refused+partial, violating N8b2. The step throws at apply.test.ts:1061, propagating through applyCampaigns at apply.ts:225; the test fails before reaching `expect(step).toHaveBeenCalledTimes(2)`.",
+      "before": "    try {\n      entry = toEntry(campaign.slug, (await campaignStep(ctx, campaign)) as CampaignResult);\n    } catch (error) {\n      // A thrown campaign step becomes this campaign's entry, not a run abort\n      // (N8b2): refused, the error named, partial (a throw proves nothing kept),\n      // empty minted; the loop then continues with the next campaign.\n      entry = {\n        slug: campaign.slug,\n        outcome: \"refused\",\n        reason: errorMessage(error),\n        partial: true,\n        minted: { assets: [] },\n        unreferencedInputs: { count: 0, names: [] },\n      };\n    }",
+      "after": "    entry = toEntry(campaign.slug, (await campaignStep(ctx, campaign)) as CampaignResult);",
+      "because": "Removing the try around the campaign step lets a thrown error abort the run instead of recording it as refused+partial, violating N8b2. The step throws in the test, propagating through applyCampaigns; the test fails before reaching `expect(step).toHaveBeenCalledTimes(2)`. (Anchor moved by PT-8c-merge, which split the loop into the campaign step and the later steps.)",
       "command": [
         "yarn",
         "vitest",
@@ -139,9 +139,9 @@
       "verdict": "caught"
     },
     {
-      "file": "apps/api/bin/import.ts",
-      "before": "      return counts.created + counts.completed === 0 ? 3 : 1;\n",
-      "after": "      return 3;\n",
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "  return counts.created + counts.completed + counts.rowsWritten === 0 ? 3 : 1;\n",
+      "after": "  return 3;\n",
       "because": "Mutant forces exit 3 even when a run wrote a campaign and also refused one after it, so an operator is told to reuse the (already-valid) result for a partial run. Caught by `a run that writes one campaign and refuses another exits 1 and names the refused one`.",
       "command": [
         "yarn",

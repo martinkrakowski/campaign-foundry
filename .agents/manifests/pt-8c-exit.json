@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "PT-8c-exit",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "  return counts.created + counts.completed + counts.rowsWritten === 0 ? 3 : 1;",
+      "after": "  return counts.created + counts.completed === 0 ? 3 : 1;",
+      "because": "Exit 3 means this run wrote nothing. A later step can write a row for a campaign found unchanged, so the rows written must count against it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply.test.ts",
+        "-t",
+        "exit 3 needs a run that wrote nothing: a row written for an unchanged campaign makes a refusal exit 1"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "            added.rows.some((row) => row.status === \"refused\" || row.status === \"failed\");",
+      "after": "            added.rows.some((row) => row.status === \"refused\" && row.status === \"failed\");",
+      "because": "Owner, 2026-10-11: a refused row makes the campaign's line partial. It follows from the rows, not from what the step says, so no line with a refused or failed row can look clean.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply.test.ts",
+        "-t",
+        "a refused or failed row makes the line partial even when the step does not say so"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ import {
 } from "@/__tests__/helpers";
 import { API, useRun, DEFAULT_BRIEF } from "@/lib/run-context";
 import { useEditorDirty } from "@/lib/editor-dirty-context";
+import { useEditorPanels } from "@/lib/editor-panels-context";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
 import { CreateCampaignDialog } from "@/components/shell/CreateCampaignDialog";
 import { BrowseBriefsButton } from "@/components/shell/Sidebar";
@@ -59,6 +60,10 @@ const renderWithRun = (ui: React.ReactElement) =>
  * way Next does when the user arrives (or reloads) there.
  */
 const Editor = ({ id }: { id?: string }) => <BriefEditor briefId={id} />;
+
+const PublishedRefs = () => (
+  <output data-testid="published-refs">{JSON.stringify(useEditorPanels().assetRefs)}</output>
+);
 
 /** Corrected for D35's verb model: Save is the bar's primary, one press; Save as…
  *  lives in the overflow — the old disclosure that hid Save behind Save is gone. */
@@ -3102,6 +3107,124 @@ describe("BriefPage — the editor is one scrolling column (SG1 / SG-D2)", () =>
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Asset Bin" })).toBeNull());
   });
 
+  test("the editor publishes the asset refs of its draft for the sidebar's bin", async () => {
+    // The same fetch mock routes() installs, plus the bin's listing endpoint — the
+    // hoisted drawer fetches against the brief's id exactly as it did in the section.
+    vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+      const u = String(url);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (u.includes("/campaigns/assets")) {
+        return Promise.resolve(
+          json({ assets: [{ name: "brand-logo.png", size: 4096, type: "image/png" }] }),
+        );
+      }
+      if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+        return Promise.resolve(json({ briefs: [entry("ok", "r1")] }));
+      }
+      if (method === "GET" && u.includes("/campaigns/capabilities")) {
+        return Promise.resolve(json({ motion: true }));
+      }
+      return Promise.resolve(json({}, 404));
+    });
+    const user = userEvent.setup();
+    renderWithRun(
+      <>
+        <Editor id="ok" />
+        <PublishedRefs />
+      </>,
+    );
+    await adopt(user, "ok");
+
+    await user.click(screen.getAllByRole("button", { name: messages.logoChooseFromBin })[0]);
+    await screen.findByRole("dialog", { name: "Asset Bin" });
+    await user.click(await screen.findByRole("button", { name: "Choose brand-logo.png" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("published-refs").textContent).toContain(
+        "assets/inputs/ok/brand-logo.png",
+      ),
+    );
+  });
+
+  const mockBinFetch = () => {
+    vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+      const u = String(url);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (u.includes("/campaigns/assets")) {
+        return Promise.resolve(
+          json({ assets: [{ name: "brand-logo.png", size: 4096, type: "image/png" }] }),
+        );
+      }
+      if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+        return Promise.resolve(json({ briefs: [entry("ok", "r1")] }));
+      }
+      if (method === "GET" && u.includes("/campaigns/capabilities")) {
+        return Promise.resolve(json({ motion: true }));
+      }
+      return Promise.resolve(json({}, 404));
+    });
+  };
+
+  /** Mounts the editor at "ok" beside the capture and picks the bin's logo, so the draft names a ref. */
+  const publishABinRef = async (user: ReturnType<typeof userEvent.setup>) => {
+    const view = renderWithRun(
+      <>
+        <Editor id="ok" />
+        <PublishedRefs />
+      </>,
+    );
+    await adopt(user, "ok");
+    await user.click(screen.getAllByRole("button", { name: messages.logoChooseFromBin })[0]);
+    await user.click(await screen.findByRole("button", { name: "Choose brand-logo.png" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("published-refs").textContent).toContain(
+        "assets/inputs/ok/brand-logo.png",
+      ),
+    );
+    return view;
+  };
+
+  test("a route the editor cannot load publishes no asset refs, though the same instance held some", async () => {
+    mockBinFetch();
+    const user = userEvent.setup();
+    const view = await publishABinRef(user);
+    // The route changes the way Next changes it: a new `briefId` on the SAME editor
+    // instance. "Bad_Id" fails SAFE_ID_PATTERN, so the editor answers "not found" and
+    // leaves its draft state alone: only the route-error gate can silence the refs.
+    view.rerender(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <>
+            <Editor id="Bad_Id" />
+            <PublishedRefs />
+          </>
+          <CreateCampaignDialog />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+    expect(await screen.findByText(messages.briefNotFound("Bad_Id"))).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId("published-refs").textContent).toBe("[]"));
+  });
+
+  test("the editor clears its published asset refs when it unmounts", async () => {
+    mockBinFetch();
+    const user = userEvent.setup();
+    const view = await publishABinRef(user);
+    // Unmount ONLY the editor: the provider (and the capture beside it) stay.
+    view.rerender(
+      <ShellProviders>
+        <CreateCampaignProvider>
+          <>
+            <PublishedRefs />
+          </>
+          <CreateCampaignDialog />
+        </CreateCampaignProvider>
+      </ShellProviders>,
+    );
+    await waitFor(() => expect(screen.queryByLabelText("Campaign Name")).toBeNull());
+    await waitFor(() => expect(screen.getByTestId("published-refs").textContent).toBe("[]"));
+  });
+
   /**
    * D203/#666, end to end and in both directions at once.
    *
@@ -3812,6 +3935,67 @@ describe("BriefPage — the editor is one scrolling column (SG1 / SG-D2)", () =>
         settleRefetch([entry(landed, "alpha.png"), entry(fresh, "beta.png")]);
       });
       expect(await screen.findByText("beta.png")).toBeTruthy();
+    });
+
+    test("a failed listing refetch keeps the names an earlier listing resolved", async () => {
+      const landed = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+      const fresh = "9c5b94b1-35ad-49bb-b118-8e8fc24af80e";
+      const entry = (id: string, name: string) => ({
+        id,
+        name,
+        type: "image/png",
+        size: 1,
+        thumbnailUrl: "",
+      });
+      let refetches = 0;
+      // The first listing resolves and names A; the refetch that the new id B opens
+      // FAILS — the catch must keep what the first listing resolved for this
+      // campaign, not replace it with an empty one.
+      const stored = {
+        ...brief("ok"),
+        products: [{ ...brief("ok").products[0], logoPath: landed }, brief("ok").products[1]],
+      };
+      vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+        const u = String(url);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (u.includes("/campaigns/assets?briefId=")) {
+          refetches += 1;
+          if (refetches === 1) {
+            return Promise.resolve(json({ assets: [entry(landed, "alpha.png")] }));
+          }
+          return Promise.resolve(json({ error: "listing unavailable" }, 500));
+        }
+        if (method === "GET" && u === `${API}/campaigns/capabilities`) {
+          return Promise.resolve(json({ motion: true }));
+        }
+        if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
+          return Promise.resolve(
+            json({ briefs: [{ file: "ok.yaml", brief: stored, revision: "r1" }] }),
+          );
+        }
+        return Promise.resolve(json({}, 404));
+      });
+      renderWithRun(<Editor id="ok" />);
+      await waitFor(() =>
+        expect((screen.getByLabelText("Campaign Name") as HTMLInputElement).value).toBe("ok"),
+      );
+      expect(await screen.findByText("alpha.png")).toBeTruthy();
+
+      // Product 1's logo becomes an id the landed listing has never seen, so the
+      // editor refetches — and that request is the one that fails.
+      const mirrors = screen
+        .getAllByLabelText("Logo Path")
+        .filter((el) => el.tagName === "INPUT" && el.getAttribute("type") !== "file");
+      fireEvent.change(mirrors[1] as HTMLInputElement, { target: { value: fresh } });
+      await waitFor(() => expect(refetches).toBe(2));
+
+      // A's tile keeps its name through the failed refetch; B reads unavailable,
+      // and nothing anywhere reads as still loading. The request being counted
+      // is not the same moment as its failure being handled, so the settled
+      // state is waited for rather than read in the same tick.
+      await waitFor(() => expect(screen.getByText(messages.assetUnavailable)).toBeTruthy());
+      expect(screen.getByText("alpha.png")).toBeTruthy();
+      expect(screen.queryByText(messages.assetPending)).toBeNull();
     });
   });
 

@@ -112,7 +112,7 @@ export function BrowseBriefsButton({ onActivate }: { onActivate?: () => void }) 
  */
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { brief } = useRun();
-  const { panels, topPanels } = useEditorPanels();
+  const { panels, topPanels, assetRefs } = useEditorPanels();
   usePanelSink();
   const { guardedPush } = useGuardedNavigation();
   const aspectsLabel = (() => {
@@ -269,7 +269,9 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         briefId={brief.id}
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        // The Sidebar has no editor state, so unsaved refs are not protected here.
+        // The open editor publishes the refs its draft holds (saved or not), so the bin
+        // opened from here hides Delete on them exactly as the editor's own drawer does.
+        protectedRefs={assetRefs}
         onDeleted={(gone) => {
           deletedKeysRef.current.add(gone.id ?? gone.name);
           setAssets((prev) => prev.filter((a) => (a.id ?? a.name) !== (gone.id ?? gone.name)));

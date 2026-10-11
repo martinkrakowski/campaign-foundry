@@ -380,7 +380,9 @@ describe("AssetPickerDrawer delete", () => {
 
     await waitFor(() => expect(screen.queryByText("logo.png")).toBeNull());
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByText("Assets (1)").parentElement),
+      expect(document.activeElement).toBe(
+        screen.getByText("This campaign's assets (1)").parentElement,
+      ),
     );
     expect(screen.getByRole("status").textContent).toBe(messages.assetDeleted("logo.png"));
   });
@@ -577,6 +579,28 @@ describe("AssetPickerDrawer delete", () => {
     ).toBe(true);
   });
 
+  test("a refused delete returns focus to the Delete button of its row", async () => {
+    const user = userEvent.setup();
+    route({
+      lists: [[logo, banner]],
+      del: () => json({ error: 'Asset "logo.png" is in use.' }, 409),
+    });
+    renderDrawer();
+    await screen.findByText("logo.png");
+
+    const { trigger, dialog } = await openDelete(user);
+    await user.click(confirm(dialog));
+
+    await screen.findByRole("alert");
+    // The row stays, so the button the user pressed is where a retry starts:
+    // focus goes back to it, not to the drawer's Close button.
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(trigger.hasAttribute("disabled")).toBe(false);
+    expect(screen.getByRole("button", { name: messages.assetDeleteRowLabel("logo.png") })).toBe(
+      trigger,
+    );
+  });
+
   test("a 404 removes the row and says the asset is already gone", async () => {
     const user = userEvent.setup();
     route({
@@ -596,7 +620,9 @@ describe("AssetPickerDrawer delete", () => {
     // The 404 removes the row holding focus, so focus moves to the list header — as on
     // success — even though the row was filtered out rather than deleted here.
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByText("Assets (1)").parentElement),
+      expect(document.activeElement).toBe(
+        screen.getByText("This campaign's assets (1)").parentElement,
+      ),
     );
   });
 
@@ -1007,10 +1033,12 @@ describe("AssetPickerDrawer delete", () => {
     });
     await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
     expect(onDeleted).toHaveBeenCalledWith(logo);
-    await screen.findByText("Assets (1)");
+    await screen.findByText("This campaign's assets (1)");
     expect(screen.queryByText("logo.png")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(document.activeElement).not.toBe(screen.getByText("Assets (1)").parentElement);
+    expect(document.activeElement).not.toBe(
+      screen.getByText("This campaign's assets (1)").parentElement,
+    );
   });
 
   test("a protected asset referenced by an unsaved field has no Delete button (PROVE DEFECT)", async () => {
@@ -1115,5 +1143,38 @@ describe("AssetPickerDrawer delete", () => {
     expect(
       screen.getByRole("button", { name: messages.assetDeleteRowLabel("banner.png") }),
     ).toBeTruthy();
+  });
+
+  test("a confirm for an asset the editor has since come to name sends nothing and leaves the row with the in-use hint", async () => {
+    const user = userEvent.setup();
+    route({ lists: [[logo, banner]] });
+    const { rerender } = renderDrawer({ protectedRefs: [] });
+    const { dialog } = await openDelete(user);
+
+    // The editor's draft now names the asset whose confirmation is open.
+    rerender(
+      <AssetPickerDrawer briefId="camp-1" open onClose={() => {}} protectedRefs={[ID_LOGO]} />,
+    );
+    await user.click(confirm(dialog));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: messages.assetDeleteTitle })).toBeNull(),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(deletes()).toHaveLength(0);
+    expect(screen.getByText("logo.png")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: messages.assetDeleteRowLabel("logo.png") }),
+    ).toBeNull();
+    // The refusal is announced with the existing hint in the drawer's status line (so the
+    // text is there twice: the row and the status line), and focus moves to the list
+    // heading, because the Delete button that opened the confirmation is gone.
+    expect(screen.getByRole("status").textContent).toBe(messages.assetDeleteProtectedHint);
+    expect(screen.getAllByText(messages.assetDeleteProtectedHint)).toHaveLength(2);
+    expect(document.activeElement).toBe(
+      screen.getByText("This campaign's assets (2)").parentElement,
+    );
   });
 });

@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AssetPickerDrawer, formatBytes } from "../AssetPickerDrawer";
 import { exerciseFocusTrap } from "@/__tests__/helpers";
@@ -48,7 +48,41 @@ describe("AssetPickerDrawer", () => {
     await waitFor(() => {
       expect(screen.getByText("No assets uploaded yet.")).toBeTruthy();
     });
-    expect(screen.getByText("Assets (0)")).toBeTruthy();
+    expect(screen.getByText("This campaign's assets (0)")).toBeTruthy();
+  });
+
+  test("the list heading says these are this campaign's assets, with the count", async () => {
+    vi.spyOn(briefsApi, "listAssets").mockResolvedValueOnce({
+      assets: [
+        { name: "logo.png", type: "image/png", size: 2048, thumbnailUrl: "" },
+        { name: "banner.png", type: "image/png", size: 512, thumbnailUrl: "" },
+      ],
+    });
+
+    render(<AssetPickerDrawer briefId="camp-1" open={true} onClose={() => {}} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("This campaign's assets (2)")).toBeTruthy();
+    });
+    expect(screen.queryByText("Assets (2)")).toBeNull();
+    // The dialog keeps its name; only the visible list heading changed.
+    expect(screen.getByRole("dialog", { name: "Asset Bin" })).toBeTruthy();
+  });
+
+  test("each asset the campaign has is listed once", async () => {
+    vi.spyOn(briefsApi, "listAssets").mockResolvedValueOnce({
+      assets: [
+        { name: "logo.png", type: "image/png", size: 2048, thumbnailUrl: "" },
+        { name: "banner.png", type: "image/png", size: 512, thumbnailUrl: "" },
+      ],
+    });
+
+    render(<AssetPickerDrawer briefId="camp-1" open={true} onClose={() => {}} />);
+
+    const list = await screen.findByRole("list", { name: "Asset list" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(list).getAllByText("logo.png")).toHaveLength(1);
+    expect(within(list).getAllByText("banner.png")).toHaveLength(1);
   });
 
   test("renders error message when asset listing fails", async () => {
