@@ -6,6 +6,8 @@ import { main } from "../../../../bin/import.js";
 import { hashBytes } from "../../brief-files.js";
 import { PgReportStore } from "../../ports/pg-report-store.js";
 import { getBriefStore, getPoolStore, setPoolStore } from "../../ports/index.js";
+import type { AssetStorePort } from "../../ports/asset-store.port.js";
+import type { PoolStorePort } from "../../ports/pool-store.port.js";
 import { replan, type CampaignEntry } from "../apply.js";
 import { importTenant } from "../import-tenant.js";
 import type { StepContext } from "../steps.js";
@@ -220,7 +222,14 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply: report, pool and decision rows", 
     await getBriefStoreFor().createBrief(
       briefBody({
         id: "camp",
-        products: [{ id: "p1", name: "SOMEONE ELSE", primaryColor: "#222222" }],
+        products: [
+          {
+            id: "p1",
+            name: "SOMEONE ELSE",
+            primaryColor: "#222222",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
+        ],
       }),
     );
     const got = await apply(env, t.root, t.output, "r2");
@@ -310,7 +319,13 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply: report, pool and decision rows", 
     const digestFirst = (await replan(ctxWith(t.root, t.output))).digest;
     expect(digestFirst).toHaveLength(64);
     env.reinstall();
-    setPoolStore(failOnNth(getPoolStore(importTenant("local")), "readPool", 1));
+    setPoolStore(
+      failOnNth(
+        getPoolStore(importTenant("local")) as PoolStorePort & AssetStorePort,
+        "readPool",
+        1,
+      ),
+    );
     const out: string[] = [];
     const result = freshResult("r6");
     const code = await main(
