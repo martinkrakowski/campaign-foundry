@@ -1,0 +1,123 @@
+# The legacy import (PT-8g; docs/planning/2026-10-04_pt-8-data-migration.md): ONE
+# run of `apps/api/bin/import.ts` from the deployed image, the command behind
+# `yarn import`. It is applied BY HAND by the owner, one subcommand per run
+# (README.md, "Importing legacy data"). deploy.sh does not apply it and the
+# kustomization does not list it: an import is a one-off, never part of a deploy.
+#
+# Three upper-case placeholders are replaced with sed when it is applied (the
+# README has the line): the image tag, the subcommand with its flags, and the
+# value of --switched-at. None has a default. Applied as it stands, the command
+# is given a subcommand it does not know, prints its usage and exits 1. With
+# only the --switched-at placeholder left in, the command refuses it ("is not a
+# valid date") before it reads the tree or the database. Either way an unedited
+# apply imports nothing.
+#
+# Every subcommand takes the same --switched-at: the ISO instant, with its
+# offset, at which staging first rolled out with OBJECT_STORE=s3 (PT-4j, #677,
+# commit cf68396e). Campaigns created before it still keep their bytes on the
+# data volume. This repository has no deploy log: the owner fills the value in
+# from his own record of that deploy.
+#
+# The data volume is mounted read-only: the import reads the legacy tree and
+# writes only rows and objects. `apply --result` is /tmp/cf-import-result.jsonl,
+# inside the pod (the command refuses a result path under either source root).
+# The pod-local file dies with the Job, and a finished pod cannot be read from.
+# So the script below keeps the pod alive after an `apply` until the owner has
+# copied the file out and created /tmp/cf-import-copied (README, step 4), and
+# then exits with the import's own exit code. `plan` writes no such file and
+# ends at once.
+#
+# backoffLimit: 0 and no ttlSecondsAfterFinished.
+# A retry is a new pod with an empty /tmp: the first run's result file would be
+# gone, `apply` would not see that it exists and would run a second time
+# unattended. Nothing removes the Job but the owner, after the copy. There is
+# no activeDeadlineSeconds either: a deadline would end the pod while it holds
+# the file.
+#
+# It carries no secret of its own: the database and bucket settings are the
+# `api` container's, by the same Secret references (app.yaml).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cf-import
+  namespace: campaign-foundry-staging
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+      containers:
+        - name: import
+          image: registry.midnight.lan/library/campaign-foundry:IMAGE_TAG
+          command:
+            - sh
+            - -c
+            - |
+              node node_modules/tsx/dist/cli.mjs apps/api/bin/import.ts "$@"
+              code=$?
+              echo "cf-import: the command exited with code $code"
+              if [ -e /tmp/cf-import-result.jsonl ]; then
+                echo "cf-import: HOLDING this pod. Copy /tmp/cf-import-result.jsonl out now, then create /tmp/cf-import-copied (README, step 4)."
+                while [ ! -e /tmp/cf-import-copied ]; do sleep 5; done
+              fi
+              exit "$code"
+            - cf-import
+          args: [IMPORT_ARGS, "--switched-at", "SWITCHED_AT_ISO_INSTANT"]
+          env:
+            - name: PROJECT_ROOT
+              value: /data
+            - name: OUTPUT_DIR
+              value: /data/output
+            - name: STORE_BACKEND
+              value: postgres
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cf-pg-app
+                  key: uri
+            - name: DATABASE_CA_PATH
+              value: /etc/campaign-foundry/db/ca.crt
+            - name: DATABASE_POOL_MAX
+              value: "3"
+            - name: OBJECT_STORE
+              value: "s3"
+            - name: S3_ENDPOINT
+              value: http://seaweedfs-s3:8333
+            - name: S3_PUBLIC_ENDPOINT
+              value: https://s3.midnight.lan
+            - name: S3_REGION
+              value: us-east-1
+            - name: S3_BUCKET
+              value: campaign-foundry
+            - name: S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3
+                  key: app-access-key
+            - name: S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: seaweedfs-s3
+                  key: app-secret-key
+          volumeMounts:
+            - name: data
+              mountPath: /data
+              readOnly: true
+            - name: db-ca
+              mountPath: /etc/campaign-foundry/db
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: campaign-foundry-data
+            readOnly: true
+        - name: db-ca
+          secret:
+            secretName: cf-pg-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
