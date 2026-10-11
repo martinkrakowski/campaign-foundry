@@ -49,7 +49,7 @@ export function planDigest(inputs: DigestInputs): string {
 }
 
 /** The `lstat`-only stamp a planned render enters the digest with. */
-function fingerprint(st: Stats): string {
+export function fingerprint(st: Stats): string {
   return `size:${st.size}:mtime:${Math.trunc(st.mtimeMs)}`;
 }
 
