@@ -48,12 +48,13 @@ export type Reviewed =
 export type ReportWriter = Pick<ReportStorePort, "writeReport">;
 export type PoolWriter = Pick<PoolStorePort, "readPool" | "writePool">;
 export type DecisionWriter = Pick<DecisionStorePort, "writeDecisions">;
+export type DecisionReader = Pick<DecisionStorePort, "readDecisions">;
 
 /** The three stores one campaign's rows go through. */
 export interface RowStores {
   readonly reports: ReportWriter;
   readonly pools: PoolWriter;
-  readonly decisions: DecisionWriter;
+  readonly decisions: DecisionWriter & DecisionReader;
 }
 
 /** Where the rows' files are, and the reviewed hash of each (D221). */
@@ -345,11 +346,26 @@ export async function importDecisions(
 }
 
 /**
+ * A decisions writer that cannot write: it answers every call with the store's own
+ * conflict error carrying the stored revision (`null`: none stored). Run through
+ * {@link importDecisions} it yields `skipped` when the stored decisions equal the
+ * file's, and `refused` otherwise; no insert, update or delete is ever issued.
+ */
+function compareOnly(decisions: DecisionReader): DecisionWriter {
+  return {
+    writeDecisions: async (slug) => {
+      throw new DecisionConflictError(slug, (await decisions.readDecisions(slug)).revision);
+    },
+  };
+}
+
+/**
  * The rows of PT-8c, through `stores`: one imported campaign's report, pool and
  * decisions, in that order (owner, 2026-10-11). The pool does not name the
  * report, so it is written whatever the report did. A decision names the run it
  * was given against, so decisions are not written while the report is refused;
- * a campaign with no report file is not blocked. A store that throws is that
+ * stored decisions equal to the file's are still `skipped` (a compare-only writer;
+ * nothing is written); a campaign with no report file is not blocked. A store that throws is that
  * row `failed`: the rows before it stay recorded and no later row is tried.
  * A refused or failed row makes the campaign's line partial; `applyCampaigns`
  * reads that from the rows.
@@ -369,8 +385,11 @@ export async function importRows(
     if (pool !== undefined) rows.push(pool);
     kind = "decisions";
     if (report?.status === "refused") {
-      const file = await readReviewed(ctx.outputRoot, `decisions/${slug}.json`, ctx.expectedHashes);
-      if (file.state !== "absent") {
+      // Nothing is written while the report is refused. Decisions already stored and
+      // equal are still `skipped`: a write would change nothing (owner, 2026-10-11).
+      const probe = await importDecisions(compareOnly(stores.decisions), ctx, slug);
+      if (probe?.status === "skipped") rows.push(probe);
+      else if (probe !== undefined) {
         rows.push({
           kind,
           status: "refused",
@@ -426,6 +445,7 @@ export function dryRowStores(
       writePool: async (pool) => ({ pool, revision: canonicalRevision(pool) }),
     },
     decisions: {
+      readDecisions: (slug) => decisions.readDecisions(slug),
       writeDecisions: async (slug, map) => {
         const current = (await decisions.readDecisions(slug)).revision;
         if (current !== null) throw new DecisionConflictError(slug, current);
