@@ -1147,12 +1147,7 @@ describe("AssetPickerDrawer delete", () => {
 
     // The editor's draft now names the asset whose confirmation is open.
     rerender(
-      <AssetPickerDrawer
-        briefId="camp-1"
-        open
-        onClose={() => {}}
-        protectedRefs={[ID_LOGO]}
-      />,
+      <AssetPickerDrawer briefId="camp-1" open onClose={() => {}} protectedRefs={[ID_LOGO]} />,
     );
     await user.click(confirm(dialog));
 
