@@ -400,23 +400,27 @@ never imported). Read it, drafts included, before going on. The full digest for 
 grep -o '"digest":"[0-9a-f]*"' cf-import-plan.log
 ```
 
-**2. Back up the database (D229).** No backup of staging's Postgres is configured, and a
-rollback of the import is this dump restored. `cf-pg-1` is the cluster's one instance
-(`kubectl -n campaign-foundry-staging get pods -l cnpg.io/cluster=cf-pg` names it if that
-changed). The file must not be empty; keep it with the plan log. The app is still up here:
-nothing written to staging between this dump and step 3 survives a rollback (to lose nothing,
-do step 3 first).
-
-```sh
-ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec cf-pg-1 -c postgres -- pg_dump -Fc campaign_foundry' > cf-pg-before-import.dump
-ls -l cf-pg-before-import.dump
-```
-
-**3. Stop the app,** so that nobody creates a campaign under a slug the import is writing:
+**2. Stop the app,** so that nobody creates a campaign under a slug the import is writing, and
+so that the dump of step 3 holds everything (a row written after the dump would not survive a
+rollback). Go on only when the second line has returned without an error:
 
 ```sh
 ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging scale deployment/campaign-foundry --replicas=0'
 ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging wait --for=delete pod -l app=campaign-foundry --timeout=3m'
+```
+
+**3. Back up the database (D229).** No backup of staging's Postgres is configured, and a
+rollback of the import is this dump restored. `cf-pg-1` is the cluster's one instance
+(`kubectl -n campaign-foundry-staging get pods -l cnpg.io/cluster=cf-pg` names it if that
+changed). Keep the file with the plan log. **Do not go on to step 4 unless the first line
+printed `pg_dump exit: 0` and the second lists the dump's contents** (it reads the file back
+through `pg_restore -l` in the database pod): a dump that stopped half way can still be a file
+that is not empty.
+
+```sh
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec cf-pg-1 -c postgres -- pg_dump -Fc campaign_foundry' > cf-pg-before-import.dump; echo "pg_dump exit: $?"
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec -i cf-pg-1 -c postgres -- pg_restore -l' < cf-pg-before-import.dump | tail -5
+ls -l cf-pg-before-import.dump
 ```
 
 **4. `apply`,** with the digest from step 1. `--result` is `/tmp/cf-import-result.jsonl`.
@@ -431,12 +435,20 @@ Run the first three of the five lines. The log ends with `cf-import: the command
 code <n>` and, when the result file was written, `cf-import: HOLDING this pod`: the pod now
 waits. Stop following the log (Ctrl-C; `cf-import-apply.log` keeps what was printed).
 **Copy that file out of the pod before deleting the Job.** The pod-local file dies with the
-Job. Check the copy (its first line is the header and carries the digest of step 1), and only
-then let the pod end:
+Job. Copy it, then check the copy: the two checksums must be equal, and its first line is the header
+and carries the digest of step 1. A copy that failed or was cut short leaves an empty or
+partial file: run the copy again, the pod waits.
 
 ```sh
-ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec job/cf-import -- cat /tmp/cf-import-result.jsonl' > cf-import-result.jsonl
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec job/cf-import -- cat /tmp/cf-import-result.jsonl' > cf-import-result.jsonl; echo "copy exit: $?"
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec job/cf-import -- sha256sum /tmp/cf-import-result.jsonl'; shasum -a 256 cf-import-result.jsonl
 wc -l cf-import-result.jsonl; head -c 300 cf-import-result.jsonl; echo
+```
+
+**Only when the checksums are equal,** let the pod end. After this line the file in the pod
+cannot be read again:
+
+```sh
 ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec job/cf-import -- touch /tmp/cf-import-copied'
 ```
 
