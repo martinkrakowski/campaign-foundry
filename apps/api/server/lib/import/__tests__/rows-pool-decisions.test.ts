@@ -4,7 +4,7 @@ import type { DecisionStorePort } from "../../ports/decision-store.port.js";
 import { PgDecisionStore } from "../../ports/pg-decision-store.js";
 import { PgPoolStore } from "../../ports/pg-pool-store.js";
 import type { PoolStorePort } from "../../ports/pool-store.port.js";
-import { importDecisionsRow, importPoolRow, importReport } from "../rows-step.js";
+import { importDecisions, importDecisionsRow, importPool, importPoolRow } from "../rows-step.js";
 import {
   ON_A_REAL_TEST_SERVER,
   restoreApplyEnvironment,
@@ -26,7 +26,9 @@ const CANONICAL = Buffer.from(`${JSON.stringify(POOL, null, 2)}\n`, "utf8");
 const HAND_EDITED = Buffer.from(JSON.stringify(POOL), "utf8");
 
 /** The stored pool row for `camp`, read straight from the table. */
-async function poolRow(env: Env): Promise<{ body: string; revision: string; at: string } | undefined> {
+async function poolRow(
+  env: Env,
+): Promise<{ body: string; revision: string; at: string } | undefined> {
   const { rows } = await env.db.query<{ body: string; revision: string; at: string }>(
     "select body, revision, updated_at::text as at from pool where org_id = $1 and campaign_id = $2",
     ["local", "camp"],
@@ -92,7 +94,11 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importPoolRow", () => {
     expect(notJson.status).toBe("refused");
     expect(notJson.reason).toMatch(/^briefs\/camp\/pools\.json is not JSON \(/);
     const notPool = await importPoolRow(pools, "camp", Buffer.from('{"entries":[]}', "utf8"));
-    expect(notPool).toEqual({ kind: "pool", status: "refused", reason: "briefId must be a string" });
+    expect(notPool).toEqual({
+      kind: "pool",
+      status: "refused",
+      reason: "briefId must be a string",
+    });
     const other = Buffer.from(JSON.stringify({ ...POOL, briefId: "other" }), "utf8");
     expect(await importPoolRow(pools, "camp", other)).toEqual({
       kind: "pool",
@@ -139,7 +145,11 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importDecisionsRow", () => {
 
   test("decisions are written with the recorded actors and the canonical revision", async () => {
     const result = await importDecisionsRow(decisions, "camp", DEC_CANONICAL);
-    expect(result).toEqual({ kind: "decisions", status: "written", revision: hashBytes(DEC_CANONICAL) });
+    expect(result).toEqual({
+      kind: "decisions",
+      status: "written",
+      revision: hashBytes(DEC_CANONICAL),
+    });
     expect(await decisionRows(env)).toEqual({
       revision: hashBytes(DEC_CANONICAL),
       actors: ["camp/a.png=ana", "camp/b.png=ben"],
@@ -148,7 +158,11 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importDecisionsRow", () => {
 
   test("a hand-formatted decisions file gets the canonical revision and no extra flag", async () => {
     const result = await importDecisionsRow(decisions, "camp", DEC_HAND);
-    expect(result).toEqual({ kind: "decisions", status: "written", revision: hashBytes(DEC_CANONICAL) });
+    expect(result).toEqual({
+      kind: "decisions",
+      status: "written",
+      revision: hashBytes(DEC_CANONICAL),
+    });
     expect((await decisionRows(env)).revision).toBe(hashBytes(DEC_CANONICAL));
   });
 
@@ -156,13 +170,22 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importDecisionsRow", () => {
     await importDecisionsRow(decisions, "camp", DEC_HAND);
     const before = await decisionRows(env);
     const result = await importDecisionsRow(decisions, "camp", DEC_HAND);
-    expect(result).toEqual({ kind: "decisions", status: "skipped", revision: hashBytes(DEC_CANONICAL) });
+    expect(result).toEqual({
+      kind: "decisions",
+      status: "skipped",
+      revision: hashBytes(DEC_CANONICAL),
+    });
     expect(await decisionRows(env)).toEqual(before);
   });
 
   test("different stored decisions are refused and left as they were", async () => {
     await decisions.writeDecisions("camp", {
-      "camp/a.png": { verdict: "rejected", actor: "a user", at: "2026-10-05T09:00:00.000Z", run: "r2" },
+      "camp/a.png": {
+        verdict: "rejected",
+        actor: "a user",
+        at: "2026-10-05T09:00:00.000Z",
+        run: "r2",
+      },
     });
     const before = await decisionRows(env);
     const result = await importDecisionsRow(decisions, "camp", DEC_CANONICAL);
@@ -203,5 +226,73 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importDecisionsRow", () => {
     await expect(importDecisionsRow(failing, "camp", DEC_CANONICAL)).rejects.toThrow(
       "the database went away",
     );
+  });
+});
+
+describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: pool and decisions from disk", () => {
+  let env: Env;
+  let root: string;
+  beforeEach(async () => {
+    env = await useApplyEnvironment();
+    root = makeRoot();
+  });
+  afterEach(async () => {
+    dropRoot(root);
+    await restoreApplyEnvironment();
+  });
+
+  test("a campaign with neither file imports neither row", async () => {
+    const source = {
+      projectRoot: root,
+      outputRoot: root,
+      expectedHashes: new Map<string, string>(),
+    };
+    expect(await importPool(new PgPoolStore(env.db, "local"), source, "camp")).toBeUndefined();
+    expect(
+      await importDecisions(new PgDecisionStore(env.db, "local"), source, "camp"),
+    ).toBeUndefined();
+  });
+
+  test("a pool or decisions file changed since the digest is refused and nothing is written", async () => {
+    writeAt(root, "briefs/camp/pools.json", HAND_EDITED);
+    writeAt(root, "decisions/camp.json", DEC_HAND);
+    const stale = new Map([
+      ["briefs/camp/pools.json", hashBytes(CANONICAL)],
+      ["decisions/camp.json", hashBytes(DEC_CANONICAL)],
+    ]);
+    const source = { projectRoot: root, outputRoot: root, expectedHashes: stale };
+    expect(await importPool(new PgPoolStore(env.db, "local"), source, "camp")).toEqual({
+      kind: "pool",
+      status: "refused",
+      reason: "briefs/camp/pools.json changed since the digest",
+    });
+    expect(await importDecisions(new PgDecisionStore(env.db, "local"), source, "camp")).toEqual({
+      kind: "decisions",
+      status: "refused",
+      reason: "decisions/camp.json changed since the digest",
+    });
+    expect(await poolRow(env)).toBeUndefined();
+    expect((await decisionRows(env)).revision).toBeUndefined();
+  });
+
+  test("the reviewed pool and decisions files are written", async () => {
+    writeAt(root, "briefs/camp/pools.json", HAND_EDITED);
+    writeAt(root, "decisions/camp.json", DEC_CANONICAL);
+    const reviewed = new Map([
+      ["briefs/camp/pools.json", hashBytes(HAND_EDITED)],
+      ["decisions/camp.json", hashBytes(DEC_CANONICAL)],
+    ]);
+    const source = { projectRoot: root, outputRoot: root, expectedHashes: reviewed };
+    expect(await importPool(new PgPoolStore(env.db, "local"), source, "camp")).toEqual({
+      kind: "pool",
+      status: "written",
+      revision: hashBytes(CANONICAL),
+      recanonicalised: true,
+    });
+    expect(await importDecisions(new PgDecisionStore(env.db, "local"), source, "camp")).toEqual({
+      kind: "decisions",
+      status: "written",
+      revision: hashBytes(DEC_CANONICAL),
+    });
   });
 });

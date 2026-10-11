@@ -133,6 +133,20 @@ export async function importReportRow(
   return { kind: "report", status: "written", revision };
 }
 
+/** One row from its reviewed file: `undefined` when the file is absent, refused when it is not the reviewed one. */
+async function fromReviewed(
+  kind: RowResult["kind"],
+  root: string,
+  rel: string,
+  expected: ReadonlyMap<string, string>,
+  write: (bytes: Buffer) => Promise<RowResult>,
+): Promise<RowResult | undefined> {
+  const file = await readReviewed(root, rel, expected);
+  if (file.state === "absent") return undefined;
+  if (file.state === "refused") return { kind, status: "refused", reason: file.reason };
+  return write(file.bytes);
+}
+
 /**
  * Import one campaign's report from `<outputRoot>/reports/<slug>.json` (PT-8c).
  * `undefined` when the campaign has no report file: that is a normal state and
@@ -143,10 +157,13 @@ export async function importReport(
   source: { readonly outputRoot: string; readonly expectedHashes: ReadonlyMap<string, string> },
   slug: string,
 ): Promise<RowResult | undefined> {
-  const file = await readReviewed(source.outputRoot, `reports/${slug}.json`, source.expectedHashes);
-  if (file.state === "absent") return undefined;
-  if (file.state === "refused") return { kind: "report", status: "refused", reason: file.reason };
-  return importReportRow(reports, slug, file.bytes);
+  return fromReviewed(
+    "report",
+    source.outputRoot,
+    `reports/${slug}.json`,
+    source.expectedHashes,
+    (bytes) => importReportRow(reports, slug, bytes),
+  );
 }
 
 /**
@@ -161,7 +178,9 @@ function canonicalRevision(value: unknown): string {
 function parseJson(
   bytes: Buffer,
   rel: string,
-): { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly reason: string } {
+):
+  | { readonly ok: true; readonly value: unknown }
+  | { readonly ok: false; readonly reason: string } {
   try {
     return { ok: true, value: JSON.parse(bytes.toString("utf8")) };
   } catch (error) {
@@ -252,4 +271,34 @@ export async function importDecisionsRow(
     );
   }
   return { kind: "decisions", status: "written", revision };
+}
+
+/** Import one campaign's pool from `<projectRoot>/briefs/<slug>/pools.json`; `undefined` when it has none. */
+export async function importPool(
+  pools: PoolStorePort,
+  source: { readonly projectRoot: string; readonly expectedHashes: ReadonlyMap<string, string> },
+  slug: string,
+): Promise<RowResult | undefined> {
+  return fromReviewed(
+    "pool",
+    source.projectRoot,
+    `briefs/${slug}/pools.json`,
+    source.expectedHashes,
+    (bytes) => importPoolRow(pools, slug, bytes),
+  );
+}
+
+/** Import one campaign's decisions from `<outputRoot>/decisions/<slug>.json`; `undefined` when it has none. */
+export async function importDecisions(
+  decisions: DecisionStorePort,
+  source: { readonly outputRoot: string; readonly expectedHashes: ReadonlyMap<string, string> },
+  slug: string,
+): Promise<RowResult | undefined> {
+  return fromReviewed(
+    "decisions",
+    source.outputRoot,
+    `decisions/${slug}.json`,
+    source.expectedHashes,
+    (bytes) => importDecisionsRow(decisions, slug, bytes),
+  );
 }
