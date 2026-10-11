@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "lane": "PT-8d4a",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/renders-step.ts",
+      "before": "        await record?.({ key: result.key, path: result.path });",
+      "after": "        void record?.({ key: result.key, path: result.path });",
+      "because": "Grok PT-8d 6 (owner, 2026-10-11): one result line per minted render is appended and synced BEFORE the next put. A record that is not awaited lets the next write start while the first object has no record.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/renders-step.test.ts",
+        "-t",
+        "each created object is recorded before the next render is written"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/renders-step.ts",
+      "before": "    if (result.status === \"written\") {",
+      "after": "    if (result.status !== \"failed\") {",
+      "because": "D229: a rollback deletes exactly the recorded keys. A skipped or present object was there before the run; recording it would make a rollback delete an object the run did not create.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/renders-step.test.ts",
+        "-t",
+        "only a created object is recorded: skipped, present, refused and failed renders are not"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/renders-step.ts",
+      "before": "        await record?.({ key: result.key, path: result.path });",
+      "after": "        await record?.({ key: result.key, path: result.path }).catch(() => {});",
+      "because": "A record that cannot be kept must stop the import before the next write; swallowing it writes objects no record lists.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/renders-step.test.ts",
+        "-t",
+        "a record that cannot be kept stops the import before the next write, and is thrown"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/renders-step.ts",
+      "before": "  return [...new Set(reportRenderPaths(parsed).map((found) => found.path))];",
+      "after": "  return reportRenderPaths(parsed).map((found) => found.path);",
+      "because": "One proof is named by many rows of a report: each distinct path is imported once.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/renders-step.test.ts",
+        "-t",
+        "the paths are the ones on the rows of the report's assets, each once, in first-seen order"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/renders-step.ts",
+      "before": "  const kept = input.reportStatus === \"written\" || input.reportStatus === \"skipped\";",
+      "after": "  const kept = true;",
+      "because": "Grok PT-8d 4 (owner, 2026-10-11): renders are written only when this run wrote or skipped the report row; when the row was refused each path is listed as not written.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/renders-step.test.ts",
+        "-t",
+        "with a refused or a failed report row every path is listed as not written"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/renders-step.ts",
+      "before": "          `created ${result.key} (${result.path}) but could not record it: ${errorMessage(error)}`,",
+      "after": "          `could not record it: ${errorMessage(error)}`,",
+      "because": "The error must name the object that was created and not recorded: without the key and path the operator cannot tell which object a rollback must consider.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/renders-step.test.ts",
+        "-t",
+        "a record that cannot be kept stops the import before the next write, and is thrown"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/renders-step.ts",
+      "before": "  if (kept && !isJson(input.reportFile.bytes)) {",
+      "after": "  if (false) {",
+      "because": "A kept report that is not JSON cannot name its renders: writing none of them silently would lose the campaign's renders without an error.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/renders-step.test.ts",
+        "-t",
+        "a kept report that is not JSON is an error before any write"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
