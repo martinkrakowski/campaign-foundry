@@ -321,6 +321,151 @@ The Kafka copy of a run request expires too: topic `cf.run-requests` keeps messa
 (`retention.ms: 86400000`, D244) and rolls its segments hourly (`segment.ms: 3600000`), because
 retention deletes only closed segments. Database backups and logs follow the host's own retention.
 
+## Importing legacy data (PT-8g)
+
+`jobs/import.yaml` is the Job `cf-import`: one run of `apps/api/bin/import.ts` (the command
+behind `yarn import`) from the deployed image, with the data volume mounted **read-only**. It
+brings into Postgres and the bucket what staging still keeps only on that volume
+(`docs/planning/2026-10-04_pt-8-data-migration.md`): the legacy file campaigns, and the inputs
+and renders of campaigns created before the object storage switch.
+
+**The Job is applied by hand, by the owner, one subcommand per run.** `deploy.sh` never applies
+it and the kustomization does not list it. **`plan` always comes first:** it is read-only and
+prints a digest. **`apply` needs `--expect <digest>`:** the digest of the plan that was read and
+accepted. `apply` plans again, and refuses before any write when the source changed since.
+
+**Nothing in this section has been run.** As of this commit the manifest and every command
+below were written from the other manifests and from the command's source, and checked only by
+parsing. The first run of each line is a first run: run one line at a time and read its output.
+
+**When each step may be run** (owner, 2026-10-11). "The image the Job runs" is the deployed
+one: its tag is the short commit that `yarn deploy:staging` built.
+
+- A staging `plan` waits until PT-8d0 is in the image the Job runs.
+- `apply` waits until PT-8d4, PT-8e3 and PT-8f3 are in that image and the plan has been read,
+  including path-shape refusals, drafts and unreferenced files.
+- The Job is not applied while `verify` is still unimplemented. As of this commit
+  `apps/api/bin/import.ts` answers `verify: not yet implemented` and exits 1.
+
+**`--switched-at`.** Every subcommand takes the same `--switched-at`: the instant staging first
+rolled out with `OBJECT_STORE=s3` (PT-4j, #677, commit `cf68396e`), as an ISO instant with its
+offset (`Z` or `+02:00`). This repository has no deploy log: the owner fills the value in from
+his own record of that deploy. There is no default. Left as it is below, the command refuses
+the run (`--switched-at <iso> is not a valid date`), and an `apply` with another value than
+the plan's is refused by `--expect`, because the digest covers it. Set it once, in the shell
+you use for all six steps:
+
+```sh
+SWITCHED_AT='SWITCHED_AT_ISO_INSTANT'
+```
+
+**One run.** Steps 1, 4 and 5 set `STEP` and `ARGS` and then use these five lines, from a
+checkout of the deployed commit. Run them one at a time. The third follows the pod's log and
+keeps a copy; the fourth prints the command's exit code (nothing yet means the pod has not
+ended: run it again). **The fifth deletes the Job, and the pod, its log and its `/tmp` with
+it:** run it only when the log file holds the whole run and, after an `apply`, the result file
+has been copied out (step 4).
+
+```sh
+TAG=$(ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging get deployment campaign-foundry -o jsonpath="{.spec.template.spec.containers[0].image}"' | sed 's#.*:##')
+sed -e "s#IMAGE_TAG#$TAG#" -e "s#IMPORT_ARGS#$ARGS#" -e "s#SWITCHED_AT_ISO_INSTANT#$SWITCHED_AT#" deploy/staging/jobs/import.yaml | ssh m 'KUBECONFIG=$HOME/.kube/config kubectl apply -f -'
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging logs -f --pod-running-timeout=2m job/cf-import' | tee "cf-import-$STEP.log"
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging get pods -l job-name=cf-import -o jsonpath="{.items[0].status.containerStatuses[0].state.terminated.exitCode}"'; echo
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging delete job cf-import'
+```
+
+The Job never retries (`backoffLimit: 0`) and nothing removes it but the fifth line (no
+`ttlSecondsAfterFinished`). A retry is a new pod with an empty `/tmp`: the first run's result
+file would be gone, and `apply` would run a second time unattended. Applied with a placeholder
+left in, the command prints its usage or refuses `--switched-at`, and exits 1: nothing is
+imported.
+
+**1. `plan`.** Read-only; the app may stay up.
+
+```sh
+STEP=plan
+ARGS='"plan"'
+```
+
+Run the five lines. The log's `org:` line names the org the import writes to; `apply` uses the
+same one. The log's one long JSON line is the plan: `campaigns` (what would be imported),
+`refusals` (what would not, each with its reason: read every one, the path-shape refusals
+too), `unreferencedInputs` (files no brief names), `probes` (per campaign, what `apply` would
+do against this database, row by row), `existingCampaigns` and `census` (what is counted and
+never imported). Read it, drafts included, before going on. The full digest for step 4:
+
+```sh
+grep -o '"digest":"[0-9a-f]*"' cf-import-plan.log
+```
+
+**2. Back up the database (D229).** No backup of staging's Postgres is configured, and a
+rollback of the import is this dump restored. `cf-pg-1` is the cluster's one instance
+(`kubectl -n campaign-foundry-staging get pods -l cnpg.io/cluster=cf-pg` names it if that
+changed). The file must not be empty; keep it with the plan log.
+
+```sh
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec cf-pg-1 -c postgres -- pg_dump -Fc campaign_foundry' > cf-pg-before-import.dump
+ls -l cf-pg-before-import.dump
+```
+
+**3. Stop the app,** so that nobody creates a campaign under a slug the import is writing:
+
+```sh
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging scale deployment/campaign-foundry --replicas=0'
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging wait --for=delete pod -l app=campaign-foundry --timeout=3m'
+```
+
+**4. `apply`,** with the digest from step 1. `--result` is `/tmp/cf-import-result.jsonl`.
+
+```sh
+STEP=apply
+DIGEST='PUT-THE-DIGEST-HERE'
+ARGS="\"apply\", \"--expect\", \"$DIGEST\", \"--result\", \"/tmp/cf-import-result.jsonl\""
+```
+
+Run the first three of the five lines. The log ends with `cf-import: the command exited with
+code <n>` and, when the result file was written, `cf-import: HOLDING this pod`: the pod now
+waits. Stop following the log (Ctrl-C; `cf-import-apply.log` keeps what was printed).
+**Copy that file out of the pod before deleting the Job.** The pod-local file dies with the
+Job. Check the copy (its first line is the header and carries the digest of step 1), and only
+then let the pod end:
+
+```sh
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec job/cf-import -- cat /tmp/cf-import-result.jsonl' > cf-import-result.jsonl
+wc -l cf-import-result.jsonl; head -c 300 cf-import-result.jsonl; echo
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec job/cf-import -- touch /tmp/cf-import-copied'
+```
+
+Then run the fourth and the fifth line. Exit code `0`: nothing was refused and nothing is
+partial. `1`: at least one campaign is partial, or the run failed, or it wrote something and
+refused a campaign. `3`: it wrote nothing, and at least one campaign was refused before any
+write. On `1` or `3`, read the log before step 6. Keep `cf-import-result.jsonl` and
+`cf-import-apply.log` with the dump: a rollback is the dump restored and then exactly the keys
+this run minted deleted from the bucket (D229). Stdout prints every minted asset key and every
+minted render key, so the log names them too if the copy was lost. As of this commit it prints
+the asset keys only (`asset <id> <name> <key>`); the render keys come with PT-8d4, which is
+one reason `apply` waits for it.
+
+**5. `verify`** (PT-8f). Read-only; it exits non-zero on any mismatch. As of this commit it is
+not built: the command answers `verify: not yet implemented` and exits 1. PT-8f3 fixes its
+flags and updates this step; it takes the same `--switched-at`, which the manifest already
+passes.
+
+```sh
+STEP=verify
+ARGS='"verify"'
+```
+
+**6. Start the app again:**
+
+```sh
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging scale deployment/campaign-foundry --replicas=1'
+ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging rollout status deployment/campaign-foundry --timeout=10m'
+```
+
+Afterwards: an imported brief starts at a new revision (the file's own revision is not kept),
+and packages are not imported; make them again from the campaign's export page.
+
 ## Known limits
 
 - One replica: the file stores assume one process, and the data volume is RWO.
