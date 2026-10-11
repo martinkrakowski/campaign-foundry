@@ -13,8 +13,17 @@ written with the user's id while the erasure ran.
 ## 1. Was it committed?
 
 Run the same command again WITHOUT `--apply` (a dry run writes nothing).
-`erase: no such user.` means the erasure was committed: go on to 2. Counts and
-`Dry run: nothing changed.` mean it was not: nothing to recover, run the erasure again.
+
+- `erase: no such user.` means the erasure was committed, PROVIDED the id or email is typed
+  exactly as in the killed run: an id or email that never existed prints the same line.
+  Check it against the request, then go on to 2.
+- Counts and `Dry run: nothing changed.` mean it was not committed: nothing to recover, run
+  the erasure again. One exception, for `--email` only: if the person registered again with
+  the same address after the killed run, the dry run finds the NEW account. Before running
+  the erasure again, confirm that the account's `created_at` in the `user` table is earlier
+  than the killed run; if it is later, the first erasure was committed (go on to 2) and the
+  new account is not the subject of the request.
+- `erase refused: the user is the only owner of org …` also means it was not committed.
 
 ## 2. Read the token (read-only)
 
