@@ -319,7 +319,7 @@ async function poolPlan(
  * because that file is not importable from here, and the disagreement it would
  * risk is the same one a second copy always risks.
  */
-function decisionMapProblem(value: unknown): string | undefined {
+export function decisionMapProblem(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return "the decisions must be an object keyed by review key.";
   }
