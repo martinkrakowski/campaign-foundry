@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "lane": "PT-8c1",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "    await reports.writeReport(slug, payload, null);",
+      "after": "    await reports.writeReport(slug, JSON.stringify(JSON.parse(payload)), null);",
+      "because": "PT-8c item 1, F6: the report row keeps the legacy file's revision only when the store is given the file's exact bytes, because the revision is the SHA-256 of the payload. Re-serialising the parsed JSON drops the file's own whitespace, so a hand-formatted report is stored under another revision and as other bytes. The test imports a report with non-canonical whitespace and compares the stored revision with the SHA-256 of the source bytes.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/rows-step.test.ts", "-t", "a report is stored with the file's exact bytes, so its revision is the sha256 of the source"],
+      "verdict": "caught"
+    }
+  ]
+}
