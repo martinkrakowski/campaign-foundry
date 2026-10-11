@@ -174,6 +174,24 @@ const OTHER_DECISIONS = {
 /** A statement that changes a decisions row (the `decision` or the `decision_set` table). */
 const DECISION_WRITE = /\b(insert\s+into\s+decision|delete\s+from\s+decision|update\s+decision)/i;
 
+/** The only statement a skipped decisions row may send that is not a read: the insert-only claim. */
+const INSERT_ONLY_CLAIM =
+  /^\s*insert into decision_set \(org_id, campaign_id, revision\) values \(\$1, \$2, \$3\)\s+on conflict \(org_id, campaign_id\) do nothing returning 1\s*$/;
+
+/** Every decisions row's version: a rewrite changes it even when the content is the same. */
+async function decisionVersions(env: Env): Promise<string[]> {
+  const result = await env.db.query<{ v: string }>(
+    `select 'set ' || campaign_id || ' ' || xmin::text || ' ' || ctid::text as v
+       from decision_set where org_id = $1
+     union all
+     select 'row ' || campaign_id || ' ' || asset_key || ' ' || xmin::text || ' ' || ctid::text as v
+       from decision where org_id = $1
+     order by v`,
+    ["local"],
+  );
+  return result.rows.map((row) => row.v);
+}
+
 const getBriefStoreFor = () => getBriefStore(importTenant("local"));
 
 describe.skipIf(ON_A_REAL_TEST_SERVER)("apply: report, pool and decision rows", () => {
@@ -217,6 +235,9 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply: report, pool and decision rows", 
     expect(before.reports).toHaveLength(1);
     expect(before.pools).toHaveLength(1);
     expect(before.decisionSets).toHaveLength(1);
+    const versionsBefore = await decisionVersions(env);
+    expect(versionsBefore).toHaveLength(2);
+    const from = env.queries.length;
 
     const second = await apply(env, t.root, t.output, "r1b");
     expect(second.code).toBe(0);
@@ -227,6 +248,10 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply: report, pool and decision rows", 
       "decisions:skipped",
     ]);
     expect(await stored(env)).toEqual(before);
+    const sent = env.queries.slice(from).filter((text) => DECISION_WRITE.test(text));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatch(INSERT_ONLY_CLAIM);
+    expect(await decisionVersions(env)).toEqual(versionsBefore);
   });
 
   test("a campaign the campaign step refused gets no report, pool or decision row", async () => {
