@@ -192,6 +192,21 @@ async function decisionVersions(env: Env): Promise<string[]> {
   return result.rows.map((row) => row.v);
 }
 
+/** Decisions whose actor holds U+0000. In the file it is a JSON escape, which is valid JSON. */
+const NUL_DECISIONS = Buffer.from(
+  JSON.stringify({
+    "camp/a.png": {
+      verdict: "approved",
+      actor: `an${String.fromCharCode(0)}a`,
+      at: "2026-09-01T10:00:00.000Z",
+      run: "r1",
+    },
+  }),
+  "utf8",
+);
+const NUL_REFUSED =
+  'decisions/camp.json: the decision for "camp/a.png" has the character U+0000 in its actor, which the database cannot store';
+
 const getBriefStoreFor = () => getBriefStore(importTenant("local"));
 
 describe.skipIf(ON_A_REAL_TEST_SERVER)("apply: report, pool and decision rows", () => {
@@ -384,6 +399,22 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply: report, pool and decision rows", 
     expect(got.lines[0]!.rows).toEqual([
       { kind: "decisions", status: "written", revision: hashBytes(DECISIONS) },
     ]);
+  });
+
+  test("a decisions file with a NUL character is refused, naming the file and the field, and nothing is written; the line is partial and exit 1", async () => {
+    const t = tree({ decisions: NUL_DECISIONS });
+    root = t.root;
+    const from = env.queries.length;
+    const got = await apply(env, t.root, t.output, "r4n");
+    expect(got.lines[0]!.rows).toEqual([
+      { kind: "decisions", status: "refused", reason: NUL_REFUSED },
+    ]);
+    expect(got.lines[0]!.outcome).toBe("created");
+    expect(got.lines[0]!.partial).toBe(true);
+    expect(got.code).toBe(1);
+    expect(got.out).toContain(`  decisions: refused: ${NUL_REFUSED}`);
+    expect(env.queries.slice(from).filter((text) => DECISION_WRITE.test(text))).toEqual([]);
+    expect((await stored(env)).decisionSets).toEqual([]);
   });
 
   test("a report with a render path that cannot be used is stored, and the field is not a campaign refusal", async () => {

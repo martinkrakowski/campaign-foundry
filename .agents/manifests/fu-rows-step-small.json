@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "lane": "FU-rows-step-small",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "  if (key.includes(NUL)) return \"key\";",
+      "after": "  if (key.includes(NUL)) return undefined;",
+      "because": "A decision's key is stored as text too (asset_key): U+0000 in it must be refused before the store is called, or the database refuses it and the row is failed.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/rows-pool-decisions.test.ts", "-t", "a decisions file with a NUL character in the key of a decision is refused and nothing is sent to the store"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "    if (field !== undefined) {",
+      "after": "    if (field === undefined) {",
+      "because": "With the test inverted the file reaches the store, Postgres refuses U+0000, and apply records the row failed where the reason must be a refusal naming the file and the field.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply-rows.test.ts", "-t", "a decisions file with a NUL character is refused, naming the file and the field, and nothing is written; the line is partial and exit 1"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "  return ([\"actor\", \"run\"] as const).find((field) => record[field].includes(NUL));",
+      "after": "  return undefined;",
+      "because": "plan predicts by running the same row function over a store that never sends the map to the database: without the check it predicts a write that apply cannot make.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/plan-rows.test.ts", "-t", "a decisions file with a NUL character is predicted decisions:refuse, and apply then records the same"],
+      "verdict": "caught"
+    }
+  ]
+}
