@@ -285,6 +285,30 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importDecisionsRow", () => {
     );
   });
 
+  test.each(["key", "actor", "run"] as const)(
+    "a decisions file with a NUL character in the %s of a decision is refused and nothing is sent to the store",
+    async (field) => {
+      const nul = String.fromCharCode(0);
+      const map = {
+        [field === "key" ? `camp/a${nul}.png` : "camp/a.png"]: {
+          verdict: "approved",
+          actor: field === "actor" ? `an${nul}a` : "ana",
+          at: "2026-09-01T10:00:00.000Z",
+          run: field === "run" ? `r${nul}1` : "r1",
+        },
+      };
+      const bytes = Buffer.from(JSON.stringify(map), "utf8");
+      const from = env.queries.length;
+      expect(await importDecisionsRow(decisions, "camp", bytes)).toEqual({
+        kind: "decisions",
+        status: "refused",
+        reason: `decisions/camp.json: the decision for ${JSON.stringify(Object.keys(map)[0])} has the character U+0000 in its ${field}, which the database cannot store`,
+      });
+      expect(env.queries.slice(from)).toEqual([]);
+      expect((await decisionRows(env)).revision).toBeUndefined();
+    },
+  );
+
   test("a decisions file that is not valid UTF-8 is refused and nothing is written", async () => {
     const head = Buffer.from('{"camp/a.png":{"verdict":"approved","actor":"an', "utf8");
     const tail = Buffer.from('a","at":"2026-09-01T10:00:00.000Z","run":"r1"}}', "utf8");

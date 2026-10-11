@@ -18,6 +18,19 @@ export const HELP_COLLIDING = [
 /** Exit code when at least one pair was found. */
 export const EXIT_FOUND = 2;
 
+/**
+ * A slug as printed: JSON's own quoting (which escapes the C0 controls, `"` and `\`),
+ * then DEL (U+007F), the C1 controls (U+0080 to U+009F) and the bidirectional controls
+ * (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to U+2069) as `\uXXXX`, so a stored
+ * slug cannot move the cursor or reorder the line it is printed on.
+ */
+function printable(slug: string): string {
+  return JSON.stringify(slug).replace(
+    /[\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,
+    (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
 export async function main(
   args: readonly string[],
   open: () => SqlClient = connect,
@@ -29,6 +42,7 @@ export async function main(
   }
   if (args.length > 0) throw new Error(USAGE_COLLIDING);
   const db = open();
+  let failed = false;
   try {
     const pairs = await findCollidingPairs(db);
     if (pairs.length === 0) {
@@ -37,13 +51,18 @@ export async function main(
     }
     for (const p of pairs) {
       log(
-        `  org ${p.orgId}: campaign ${p.slugOwnerId} has slug ${JSON.stringify(p.slugOwnerSlug)}, which is the uuid of campaign ${p.idOwnerId} (slug ${JSON.stringify(p.idOwnerSlug)})`,
+        `  org ${p.orgId}: campaign ${p.slugOwnerId} has slug ${printable(p.slugOwnerSlug)}, which is the uuid of campaign ${p.idOwnerId} (slug ${printable(p.idOwnerSlug)})`,
       );
     }
     log(`  ${pairs.length} colliding pair(s). Nothing was changed.`);
     return EXIT_FOUND;
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
-    await db.end();
+    // The first failure is the one reported: a close that fails too must not replace it.
+    if (failed) await db.end().catch(() => undefined);
+    else await db.end();
   }
 }
 

@@ -50,6 +50,21 @@ const DECISIONS = Buffer.from(
 const BLOCKED =
   "not written: the report for camp was refused, and a decision names the report it was given against";
 
+/** Decisions whose actor holds U+0000. In the file it is a JSON escape, which is valid JSON. */
+const NUL_DECISIONS = Buffer.from(
+  JSON.stringify({
+    "camp/a.png": {
+      verdict: "approved",
+      actor: `an${String.fromCharCode(0)}a`,
+      at: "2026-09-01T10:00:00.000Z",
+      run: "r1",
+    },
+  }),
+  "utf8",
+);
+const NUL_REFUSED =
+  'decisions/camp.json: the decision for "camp/a.png" has the character U+0000 in its actor, which the database cannot store';
+
 /** One campaign `camp` with a PNG input; `files` adds its report, pool and decisions. */
 function tree(files: { report?: Buffer; pool?: Buffer; decisions?: Buffer }): {
   root: string;
@@ -396,6 +411,21 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("plan: predicted report, pool and decisio
     const none = await plan(env, t.root, t.output);
     expect(none.code).toBe(0);
     expect(none.probes[0]!.rows).toEqual([]);
+  });
+
+  test("a decisions file with a NUL character is predicted decisions:refuse, and apply then records the same", async () => {
+    const t = tree({ decisions: NUL_DECISIONS });
+    root = t.root;
+    const got = await plan(env, t.root, t.output);
+    expect(got.probes[0]!.rows).toEqual([
+      { kind: "decisions", predicted: "refuse", reason: NUL_REFUSED },
+    ]);
+    expect(got.code).toBe(0);
+    expect(got.writes).toEqual([]);
+    const applied = await apply(env, t.root, t.output, got.digest, "n1");
+    expect(asPredicted(applied.lines[0]!.rows)).toEqual(got.probes[0]!.rows);
+    expect(applied.code).toBe(1);
+    expect((await stored(env)).decisionSets).toEqual([]);
   });
 
   test("a store that throws during the probe is that row failed: nothing is claimed for it or for the rows after it, and plan exits 0", async () => {

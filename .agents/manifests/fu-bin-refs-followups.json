@@ -21,7 +21,7 @@
     },
     {
       "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
-      "before": "    if ((protectedRefs ?? []).some((ref) => refMatchesAsset(ref, asset, briefId))) {",
+      "before": "    if (isProtectedAsset(asset)) {",
       "after": "    if (asset === undefined) {",
       "because": "A confirm for an asset the editor has since come to name sends the DELETE; the test fails on the expectation that no delete was sent.",
       "command": [

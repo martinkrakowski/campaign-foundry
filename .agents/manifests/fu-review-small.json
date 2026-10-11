@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "lane": "FU-review-small",
+  "mutations": [
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "    refMatchesAsset(selectedRef, asset, briefId) ||",
+      "after": "    false ||",
+      "because": "The row hides Delete for the selected asset, so the confirm guard must refuse it too: with the selected half gone from the one rule, a confirm for an asset that became the selected one sends the DELETE.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "a confirm for an asset that has since become the selected one sends nothing and says the selected hint"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/web/src/components/campaign/AssetPickerDrawer.tsx",
+      "before": "        setNotice(messages.assetDeleteSelectedHint);",
+      "after": "        setNotice(messages.assetDeleteProtectedHint);",
+      "because": "The status line says what the row says in place of Delete; for the selected asset that is the selected hint, not the used-elsewhere one.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "web",
+        "apps/web/src/components/campaign/__tests__/AssetPickerDrawer.delete.test.tsx",
+        "-t",
+        "a confirm for an asset that has since become the selected one sends nothing and says the selected hint"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/colliding-pairs.ts",
+      "before": "    if (failed) await db.end().catch(() => undefined);",
+      "after": "    if (failed) await db.end();",
+      "because": "When the query fails and the close fails too, the query's error is the one the operator must see; awaited bare, the close error replaces it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/colliding-pairs.test.ts",
+        "-t",
+        "a query that fails is the failure reported, even when closing the connection fails too"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/colliding-pairs.ts",
+      "before": "    else await db.end();",
+      "after": "    else await db.end().catch(() => undefined);",
+      "because": "A close that fails after a clean report is still a failure of the command (exit 1); swallowed, the run would exit 0 or 2 as if nothing went wrong.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/colliding-pairs.test.ts",
+        "-t",
+        "a close that fails after a clean report still fails the command"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/colliding-pairs.ts",
+      "before": "(slug ${printable(p.idOwnerSlug)})",
+      "after": "(slug ${JSON.stringify(p.idOwnerSlug)})",
+      "because": "JSON.stringify leaves DEL, the C1 controls and the bidirectional controls as they are, so another campaign's slug could reorder the printed line.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/colliding-pairs.test.ts",
+        "-t",
+        "a slug with DEL, C1 or bidirectional control characters is printed escaped"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
