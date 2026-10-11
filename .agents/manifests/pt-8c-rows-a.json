@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "PT-8c-rows-a",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "  if (reviewed !== hashBytes(read.bytes)) {",
+      "after": "  if (reviewed !== reviewed) {",
+      "because": "D221, D225: what is imported is what was reviewed. Without the SHA-256 compare a report edited after the plan was read is stored.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/rows-step.test.ts",
+        "-t",
+        "a report changed since the digest is refused and no row is written"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "  if (typeof parsed !== \"object\" || parsed === null || Array.isArray(parsed)) {",
+      "after": "  if (typeof parsed !== \"object\" || parsed === null) {",
+      "because": "Owner, 2026-10-11: a report that is not a JSON object is refused, because readReport parses the body and such a row would fail every later read.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/rows-step.test.ts",
+        "-t",
+        "JSON that is not an object is refused before any write"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
