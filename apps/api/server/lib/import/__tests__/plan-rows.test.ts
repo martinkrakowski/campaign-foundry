@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { main } from "../../../../bin/import.js";
 import { hashBytes } from "../../brief-files.js";
+import { PgDecisionStore } from "../../ports/pg-decision-store.js";
 import { PgReportStore } from "../../ports/pg-report-store.js";
 import { getBriefStore, getPoolStore, setPoolStore } from "../../ports/index.js";
 import type { AssetStorePort } from "../../ports/asset-store.port.js";
@@ -280,16 +281,80 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("plan: predicted report, pool and decisio
     expect(rows?.map((row) => `${row.kind}:${row.predicted}`)).toEqual([
       "report:refuse",
       "pool:skip",
-      "decisions:refuse",
+      "decisions:skip",
     ]);
     expect(rows?.[0]?.reason).toMatch(/^a different report is already stored for camp/);
-    expect(rows?.[2]?.reason).toBe(BLOCKED);
+    expect(rows?.[2]).toEqual({
+      kind: "decisions",
+      predicted: "skip",
+      revision: hashBytes(DECISIONS),
+    });
     expect(changed.writes).toEqual([]);
     expect(await stored(env)).toEqual(before);
     expect([full.digest, changed.digest]).toEqual([empty.digest, empty.digest]);
     const second = await apply(env, t.root, t.output, empty.digest, "p2");
     expect(second.code).toBe(1);
     expect(rows).toEqual(asPredicted(second.lines[0]!.rows));
+  });
+
+  test("a refused report predicts decisions that are not stored, or are different, as refused, and writes nothing", async () => {
+    const t = tree({ report: REPORT, pool: POOL_CANONICAL, decisions: DECISIONS });
+    root = t.root;
+    await new PgReportStore(env.db, "local").writeReport("camp", THEIRS);
+    const none = await plan(env, t.root, t.output);
+    expect(none.probes[0]!.rows?.[2]).toEqual({
+      kind: "decisions",
+      predicted: "refuse",
+      reason: BLOCKED,
+    });
+    await new PgDecisionStore(env.db, "local").writeDecisions(
+      "camp",
+      {
+        "camp/a.png": {
+          verdict: "rejected",
+          actor: "bo",
+          at: "2026-09-02T10:00:00.000Z",
+          run: "r2",
+        },
+      } as never,
+      null,
+    );
+    const before = await stored(env);
+    const different = await plan(env, t.root, t.output);
+    expect(different.probes[0]!.rows?.[2]).toEqual({
+      kind: "decisions",
+      predicted: "refuse",
+      reason: BLOCKED,
+    });
+    expect([none.writes, different.writes]).toEqual([[], []]);
+    expect(await stored(env)).toEqual(before);
+  });
+
+  test("a different stored pool is predicted pool:refuse, nothing written", async () => {
+    const t = tree({ pool: POOL_CANONICAL });
+    root = t.root;
+    const empty = await plan(env, t.root, t.output);
+    const first = await apply(env, t.root, t.output, empty.digest, "d1");
+    expect(first.code).toBe(0);
+    writeAt(
+      t.root,
+      "briefs/camp/pools.json",
+      Buffer.from(`${JSON.stringify({ ...POOL, model: "another-model" }, null, 2)}\n`, "utf8"),
+    );
+    const before = await stored(env);
+    const got = await plan(env, t.root, t.output);
+    expect(got.code).toBe(0);
+    expect(got.probes[0]!.rows).toEqual([
+      {
+        kind: "pool",
+        predicted: "refuse",
+        reason: expect.stringMatching(
+          /^a different pool is already stored for camp \(revision [0-9a-f]{64}\)$/,
+        ),
+      },
+    ]);
+    expect(got.writes).toEqual([]);
+    expect(await stored(env)).toEqual(before);
   });
 
   test("a campaign whose probe is refused gets no row prediction", async () => {

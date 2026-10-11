@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { main } from "../../../../bin/import.js";
 import { hashBytes } from "../../brief-files.js";
+import { PgDecisionStore } from "../../ports/pg-decision-store.js";
 import { PgReportStore } from "../../ports/pg-report-store.js";
 import { getBriefStore, getPoolStore, setPoolStore } from "../../ports/index.js";
 import type { AssetStorePort } from "../../ports/asset-store.port.js";
@@ -157,6 +158,22 @@ async function stored(
   };
 }
 
+const BLOCKED =
+  "not written: the report for camp was refused, and a decision names the report it was given against";
+const THEIR_REPORT = '{"assets":["a run made after the switch"]}';
+const DECISION_MAP = JSON.parse(DECISIONS.toString("utf8")) as never;
+const OTHER_DECISIONS = {
+  "camp/a.png": {
+    verdict: "rejected",
+    actor: "bo",
+    at: "2026-09-02T10:00:00.000Z",
+    run: "r2",
+  },
+} as never;
+
+/** A statement that changes a decisions row (the `decision` or the `decision_set` table). */
+const DECISION_WRITE = /\b(insert\s+into\s+decision|delete\s+from\s+decision|update\s+decision)/i;
+
 const getBriefStoreFor = () => getBriefStore(importTenant("local"));
 
 describe.skipIf(ON_A_REAL_TEST_SERVER)("apply: report, pool and decision rows", () => {
@@ -245,6 +262,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply: report, pool and decision rows", 
     // A different report is already stored for the slug.
     const theirs = '{"assets":["a run made after the switch"]}';
     await new PgReportStore(env.db, "local").writeReport("camp", theirs);
+    const from = env.queries.length;
     const got = await apply(env, t.root, t.output, "r3");
     expect(got.code).toBe(1);
     const line = got.lines[0]!;
@@ -266,9 +284,53 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply: report, pool and decision rows", 
     const rows = await stored(env);
     expect(rows.pools).toHaveLength(1);
     expect(rows.decisionSets).toEqual([]);
+    expect(env.queries.slice(from).filter((text) => DECISION_WRITE.test(text))).toEqual([]);
     expect(rows.reports).toHaveLength(1);
     expect(rows.reports[0]).toContain(hashBytes(Buffer.from(theirs, "utf8")));
     expect(got.out.join("\n")).not.toContain("nothing of theirs was written");
+  });
+
+  test("a refused report with the same decisions already stored records them skipped and writes nothing; the line stays partial and exit 1", async () => {
+    const t = tree({ report: REPORT, pool: POOL_CANONICAL, decisions: DECISIONS });
+    root = t.root;
+    await new PgReportStore(env.db, "local").writeReport("camp", THEIR_REPORT);
+    await new PgDecisionStore(env.db, "local").writeDecisions("camp", DECISION_MAP, null);
+    const before = await stored(env);
+    const from = env.queries.length;
+    const got = await apply(env, t.root, t.output, "r5a");
+    expect(got.code).toBe(1);
+    expect(got.lines[0]!.partial).toBe(true);
+    expect(got.summary).toMatchObject({ created: 1, refused: 0, partial: true });
+    expect(got.lines[0]!.rows).toEqual([
+      expect.objectContaining({ kind: "report", status: "refused" }),
+      expect.objectContaining({ kind: "pool", status: "written" }),
+      { kind: "decisions", status: "skipped", revision: hashBytes(DECISIONS) },
+    ]);
+    expect(got.out).toContain("  decisions: skipped");
+    expect(env.queries.slice(from).filter((text) => DECISION_WRITE.test(text))).toEqual([]);
+    const after = await stored(env);
+    expect(after.reports).toEqual(before.reports);
+    expect(after.decisionSets).toEqual(before.decisionSets);
+  });
+
+  test("a refused report with different decisions already stored records them refused and leaves the stored decisions as they were", async () => {
+    const t = tree({ report: REPORT, pool: POOL_CANONICAL, decisions: DECISIONS });
+    root = t.root;
+    await new PgReportStore(env.db, "local").writeReport("camp", THEIR_REPORT);
+    const store = new PgDecisionStore(env.db, "local");
+    await store.writeDecisions("camp", OTHER_DECISIONS, null);
+    const stored0 = await store.readDecisions("camp");
+    const from = env.queries.length;
+    const got = await apply(env, t.root, t.output, "r5b");
+    expect(got.code).toBe(1);
+    expect(got.lines[0]!.partial).toBe(true);
+    expect(got.lines[0]!.rows?.[2]).toEqual({
+      kind: "decisions",
+      status: "refused",
+      reason: BLOCKED,
+    });
+    expect(env.queries.slice(from).filter((text) => DECISION_WRITE.test(text))).toEqual([]);
+    expect(await store.readDecisions("camp")).toEqual(stored0);
   });
 
   test("a refused report with no decisions file writes the pool and names no decision row", async () => {
