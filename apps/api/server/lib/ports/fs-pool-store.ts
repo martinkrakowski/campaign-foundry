@@ -91,9 +91,22 @@ export class FsPoolStore implements PoolStorePort {
    * revision, so a read→merge→write whose read has gone stale cannot silently
    * overwrite someone else's edit.
    */
-  async writePool(pool: CopyPool, options?: { expectedRevision?: string }): Promise<StoredPool> {
+  async writePool(
+    pool: CopyPool,
+    options?: { expectedRevision?: string | null },
+  ): Promise<StoredPool> {
     const dest = this.poolPath(pool.briefId);
-    if (options?.expectedRevision !== undefined) {
+    if (options?.expectedRevision === null) {
+      // Only while nothing is stored. Compared, then written: not one step on a
+      // filesystem (D79), as in `FsReportStore`; `PgPoolStore`'s insert is.
+      const present = await this.revisionAt(dest);
+      if (present !== undefined) {
+        throw Object.assign(new Error("Headline pool was modified by another user."), {
+          code: "ECONFLICT",
+          revision: present,
+        });
+      }
+    } else if (options?.expectedRevision !== undefined) {
       const current = await this.revisionAt(dest);
       if (current !== options.expectedRevision) {
         const conflictErr = new Error("Headline pool was modified by another user.");

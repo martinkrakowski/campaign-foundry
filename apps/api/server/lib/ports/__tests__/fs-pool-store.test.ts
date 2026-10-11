@@ -254,6 +254,22 @@ describe("FsPoolStore", () => {
     });
   });
 
+  test("an expectedRevision of null writes only while nothing is stored", async () => {
+    const first = await store.writePool(pool(), { expectedRevision: null });
+    const file = join(dir, "camp", "pools.json");
+    const before = readFileSync(file, "utf8");
+    expect(first.revision).toBe(createHash("sha256").update(before).digest("hex"));
+    await expect(
+      store.writePool(pool({ entries: [] }), { expectedRevision: null }),
+    ).rejects.toMatchObject({
+      message: "Headline pool was modified by another user.",
+      code: "ECONFLICT",
+      revision: first.revision,
+    });
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(readdirSync(join(dir, "camp"))).toEqual(["pools.json"]);
+  });
+
   test("a conditional write rethrows a revision read that fails for another reason", async () => {
     mkdirSync(join(dir, "camp", "pools.json"), { recursive: true });
     await expect(store.writePool(pool(), { expectedRevision: "stale" })).rejects.toThrow(/EISDIR/);
