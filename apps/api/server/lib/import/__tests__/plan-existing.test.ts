@@ -29,10 +29,15 @@ type Section = {
     state: string;
     refs?: { ref: string; kind: string }[];
     reason?: string;
+    drafts?: number;
+    files?: { ref: string; sha256: string }[];
   }[];
   normalise: number;
   refs: number;
   refused: number;
+  withDraft?: number;
+  counts?: unknown;
+  digest?: string;
 };
 type Planned = {
   code: number;
@@ -40,6 +45,8 @@ type Planned = {
   lines: number;
   digest: string;
   existing: Section | null;
+  /** The whole section as the plan JSON holds it. */
+  section: Section | null;
   probesSkipped: string | null;
   writes: string[];
 };
@@ -47,6 +54,23 @@ type Planned = {
 /** Any statement that changes a row. */
 const WRITE = /\b(insert\s+into|update\s+\S+\s+set|delete\s+from)\b/i;
 const EMPTY: Section = { campaigns: [], normalise: 0, refs: 0, refused: 0 };
+
+/** The first lane's view of the section: its four keys and each campaign's first fields. */
+function core(section: Section | null): Section | null {
+  if (!section) return section;
+  return {
+    campaigns: section.campaigns.map(({ slug, revision, state, refs, reason }) => ({
+      slug,
+      revision,
+      state,
+      refs,
+      reason,
+    })),
+    normalise: section.normalise,
+    refs: section.refs,
+    refused: section.refused,
+  };
+}
 
 /** An empty legacy tree: `briefs/` with no brief, and the two root-level files the refs name. */
 function tree(): { root: string; output: string } {
@@ -89,7 +113,8 @@ async function plan(env: Env, root: string, output: string): Promise<Planned> {
     err,
     lines: out.length,
     digest: json.digest,
-    existing: json.existingCampaigns,
+    existing: core(json.existingCampaigns),
+    section: json.existingCampaigns,
     probesSkipped: json.probesSkipped,
     writes: env.queries.slice(from).filter((text) => WRITE.test(text)),
   };
@@ -289,6 +314,94 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)(
       expect(got.code).toBe(0);
       expect(got.probesSkipped).toBe("needs STORE_BACKEND=postgres and OBJECT_STORE=s3");
       expect(got.existing).toBeNull();
+    });
+    test("the section carries the org's row counts of campaign, brief_version, report and asset, tombstoned rows included", async () => {
+      const t = tree();
+      root = t.root;
+      await briefs().createBrief(
+        briefBody({ id: "one", products: [product("assets/inputs/a.png")] }),
+      );
+      await briefs().rewriteBrief(
+        briefBody({ id: "one", products: [product("assets/inputs/b.png")] }),
+      );
+      await briefs().createCampaign("two");
+      await getAssetStore(importTenant("local")).writeAsset("two", "logo.png", PNG);
+      await briefs().createBrief(
+        briefBody({ id: "gone", products: [product("assets/inputs/a.png")] }),
+      );
+      await env.db.query(
+        "update campaign set deleted_at = now() where org_id = 'local' and slug = 'gone'",
+      );
+      await env.db.query(
+        "insert into report (org_id, campaign_id, body, revision) values ('local', 'one', '{}', 'r1')",
+      );
+      const got = await plan(env, t.root, t.output);
+      expect(got.err).toEqual([]);
+      expect(got.code).toBe(0);
+      expect(got.lines).toBe(5);
+      expect(got.section?.counts).toEqual({
+        campaigns: 3,
+        briefVersions: 3,
+        reports: 1,
+        assets: 1,
+      });
+      expect(got.writes).toEqual([]);
+    });
+    test("a tombstoned campaign is not selected and not listed", async () => {
+      const t = tree();
+      root = t.root;
+      const live = await briefs().createBrief(
+        briefBody({ id: "live", products: [product("assets/inputs/a.png")] }),
+      );
+      await briefs().createBrief(
+        briefBody({ id: "gone", products: [product("assets/inputs/a.png")] }),
+      );
+      await env.db.query(
+        "update campaign set deleted_at = now() where org_id = 'local' and slug = 'gone'",
+      );
+      const got = await plan(env, t.root, t.output);
+      expect(got.err).toEqual([]);
+      expect(got.existing).toEqual({
+        campaigns: [
+          {
+            slug: "live",
+            revision: live.revision,
+            state: "normalise",
+            refs: [{ ref: "assets/inputs/a.png", kind: "root-level" }],
+          },
+        ],
+        normalise: 1,
+        refs: 1,
+        refused: 0,
+      });
+      expect(got.writes).toEqual([]);
+    });
+    test("a class-(P) campaign that has a draft is listed with its number of drafts", async () => {
+      const t = tree();
+      root = t.root;
+      const drafted = await briefs().createBrief(
+        briefBody({ id: "drafted", products: [product("assets/inputs/a.png")] }),
+      );
+      await briefs().createBrief(
+        briefBody({ id: "plain", products: [product("assets/inputs/a.png")] }),
+      );
+      for (const user of ["user-1", "user-2"]) {
+        await env.db.query(
+          "insert into draft (campaign_id, user_id, org_id, state, base_revision) " +
+            "select id, $2::text, 'local', '{}'::jsonb, $3::text from campaign " +
+            "where org_id = 'local' and slug = $1",
+          ["drafted", user, drafted.revision],
+        );
+      }
+      const got = await plan(env, t.root, t.output);
+      expect(got.err).toEqual([]);
+      expect(got.section?.campaigns.map((c) => [c.slug, c.state, c.drafts])).toEqual([
+        ["drafted", "normalise", 2],
+        ["plain", "normalise", 0],
+      ]);
+      expect(got.section?.withDraft).toBe(1);
+      expect(got.existing?.normalise).toBe(2);
+      expect(got.writes).toEqual([]);
     });
   },
 );

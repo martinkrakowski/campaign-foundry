@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "lane": "PT-8e-counts",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/existing-campaigns.ts",
+      "before": "        where c.org_id = $1 and c.deleted_at is null",
+      "after": "        where c.org_id = $1",
+      "because": "Grok PT-8e 4: tombstoned campaigns are not selected and not listed; rewriteBrief refuses one, so listing it promises a normalise that cannot happen.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/plan-existing.test.ts", "-t", "a tombstoned campaign is not selected and not listed"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/existing-campaigns.ts",
+      "before": "      const draftCount = drafts.get(found.campaignId) ?? 0;",
+      "after": "      const draftCount = 0;",
+      "because": "Grok PT-8e 8: plan lists a class-(P) campaign that has a draft; a new version makes the draft stale and the resume route deletes it.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/plan-existing.test.ts", "-t", "a class-\\(P\\) campaign that has a draft is listed with its number of drafts"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/existing-campaigns.ts",
+      "before": "       (select count(*)::int from campaign where org_id = $1) as campaigns,",
+      "after": "       (select count(*)::int from campaign where org_id = $1 and deleted_at is null) as campaigns,",
+      "because": "Grok PT-8e 7 (Q0): the counts are row counts of the org; a filter makes the staging measurement smaller than the tables.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/plan-existing.test.ts", "-t", "the section carries the org's row counts of campaign, brief_version, report and asset, tombstoned rows included"],
+      "verdict": "caught"
+    }
+  ]
+}
