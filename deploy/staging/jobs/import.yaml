@@ -6,8 +6,10 @@
 #
 # Three upper-case placeholders are replaced with sed when it is applied (the
 # README has the line): the image tag, the subcommand with its flags, and the
-# value of --switched-at. None has a default. Applied as it stands, the command
-# is given a subcommand it does not know, prints its usage and exits 1. With
+# value of --switched-at. None has a default. Applied as it stands, the image tag
+# does not exist and the pod never starts. With only the subcommand placeholder
+# left in, the command is given a subcommand it does not know, prints its usage
+# and exits 1. With
 # only the --switched-at placeholder left in, the command refuses it ("is not a
 # valid date") before it reads the tree or the database. Either way an unedited
 # apply imports nothing.

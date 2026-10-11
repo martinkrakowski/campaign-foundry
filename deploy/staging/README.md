@@ -347,10 +347,10 @@ one: its tag is the short commit that `yarn deploy:staging` built.
 - The Job is not applied while `verify` is still unimplemented. As of this commit
   `apps/api/bin/import.ts` answers `verify: not yet implemented` and exits 1.
 
-**`--switched-at`.** Every subcommand takes the same `--switched-at`: the instant staging first
-rolled out with `OBJECT_STORE=s3` (PT-4j, #677, commit `cf68396e`), as an ISO instant with its
-offset (`Z` or `+02:00`). This repository has no deploy log: the owner fills the value in from
-his own record of that deploy. There is no default. Left as it is below, the command refuses
+**`--switched-at`.** Every subcommand takes the same `--switched-at`, from the owner's own
+record of the PT-4j deploy. This repository has no deploy log. The value is the instant staging
+first rolled out with `OBJECT_STORE=s3` (PT-4j, #677, commit `cf68396e`), as an ISO instant
+with its offset (`Z` or `+02:00`); the owner fills it in. There is no default. Left as it is below, the command refuses
 the run (`--switched-at <iso> is not a valid date`), and an `apply` with another value than
 the plan's is refused by `--expect`, because the digest covers it. Set it once, in the shell
 you use for all six steps:
@@ -374,11 +374,13 @@ ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging get pod
 ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging delete job cf-import'
 ```
 
-The Job never retries (`backoffLimit: 0`) and nothing removes it but the fifth line (no
-`ttlSecondsAfterFinished`). A retry is a new pod with an empty `/tmp`: the first run's result
-file would be gone, and `apply` would run a second time unattended. Applied with a placeholder
-left in, the command prints its usage or refuses `--switched-at`, and exits 1: nothing is
-imported.
+The manifest sets `backoffLimit: 0` and sets no `ttlSecondsAfterFinished`. A retry is a new
+pod with an empty `/tmp`, so the exists-check (`apply` refuses a result file that already
+exists) would not see the first result, and `apply` would run a second time unattended.
+Nothing removes the Job but the fifth line. Applied with the image tag placeholder left in,
+the image does not exist and the pod never starts (delete the Job). With another placeholder
+left in, the command prints its usage or refuses `--switched-at`, and exits 1. Either way
+nothing is imported.
 
 **1. `plan`.** Read-only; the app may stay up.
 
@@ -401,7 +403,9 @@ grep -o '"digest":"[0-9a-f]*"' cf-import-plan.log
 **2. Back up the database (D229).** No backup of staging's Postgres is configured, and a
 rollback of the import is this dump restored. `cf-pg-1` is the cluster's one instance
 (`kubectl -n campaign-foundry-staging get pods -l cnpg.io/cluster=cf-pg` names it if that
-changed). The file must not be empty; keep it with the plan log.
+changed). The file must not be empty; keep it with the plan log. The app is still up here:
+nothing written to staging between this dump and step 3 survives a rollback (to lose nothing,
+do step 3 first).
 
 ```sh
 ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging exec cf-pg-1 -c postgres -- pg_dump -Fc campaign_foundry' > cf-pg-before-import.dump
@@ -442,7 +446,7 @@ refused a campaign. `3`: it wrote nothing, and at least one campaign was refused
 write. On `1` or `3`, read the log before step 6. Keep `cf-import-result.jsonl` and
 `cf-import-apply.log` with the dump: a rollback is the dump restored and then exactly the keys
 this run minted deleted from the bucket (D229). Stdout prints every minted asset key and every
-minted render key, so the log names them too if the copy was lost. As of this commit it prints
+minted render key. So the log names them too if the copy was lost. As of this commit it prints
 the asset keys only (`asset <id> <name> <key>`); the render keys come with PT-8d4, which is
 one reason `apply` waits for it.
 
