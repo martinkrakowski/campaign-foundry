@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "lane": "PT-8c-notes-2",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "      const probe = await importDecisions(compareOnly(stores.decisions), ctx, slug);",
+      "after": "      const probe = await importDecisions(stores.decisions, ctx, slug);",
+      "because": "Owner, 2026-10-11: decisions are not written while the report is refused. Through the real store the absent case would write them.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply-rows.test.ts",
+        "-t",
+        "a refused report makes the line partial and exit 1; the pool is still written and the decisions are not"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "      if (probe?.status === \"skipped\") rows.push(probe);",
+      "after": "      if (probe?.status !== \"skipped\") rows.push(probe);",
+      "because": "Stored, equal decisions are skipped while the report is refused, as in every other row; the inverted test records them refused.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply-rows.test.ts",
+        "-t",
+        "a refused report with the same decisions already stored records them skipped and writes nothing; the line stays partial and exit 1"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "      if (probe?.status === \"skipped\") rows.push(probe);",
+      "after": "      if (probe !== undefined) rows.push(probe);",
+      "because": "Different decisions keep today's refused row and its text; the probe's own refusal names another reason.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply-rows.test.ts",
+        "-t",
+        "a refused report with different decisions already stored records them refused and leaves the stored decisions as they were"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "    if (error.revision === revision) return { kind: \"decisions\", status: \"skipped\", revision };",
+      "after": "    if (error.revision === revision) return { kind: \"decisions\", status: \"skipped\", revision: await decisions.writeDecisions(slug, map) };",
+      "because": "A skipped decisions row must not rewrite the decisions: the strengthened test compares the rows' versions (or the statements sent).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply-rows.test.ts",
+        "-t",
+        "an imported campaign's report, pool and decisions are written and recorded on its line; a second apply writes none of them"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/rows-step.ts",
+      "before": "    if (stored.revision !== revision) {",
+      "after": "    if (stored.revision === revision) {",
+      "because": "Since the insert-only pool write, only this comparison refuses a different stored pool at the read, and plan's prediction depends on it.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/plan-rows.test.ts",
+        "-t",
+        "a different stored pool is predicted pool:refuse, nothing written"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
