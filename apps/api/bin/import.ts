@@ -25,6 +25,10 @@ import { scanBriefs } from "../server/lib/import/scan.js";
 import { assemblePlan, unreferencedInputsPlan } from "../server/lib/import/plan.js";
 import { assembleCensus } from "../server/lib/import/census.js";
 import { digestSourceFiles, planDigest } from "../server/lib/import/digest.js";
+import {
+  planExistingCampaigns,
+  type ExistingCampaignsPlan,
+} from "../server/lib/import/existing-campaigns.js";
 
 /**
  * The PT-8 data-migration CLI (D217, D225).
@@ -198,8 +202,11 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
     }
     let probes: readonly PlanProbe[] | null = null;
     let probesSkipped: string | null = null;
+    // Class (P), D228: read from the target like the probes, so outside the digest.
+    let existingCampaigns: ExistingCampaignsPlan | null = null;
     if (backend === "postgres" && objectStore() === "s3") {
       probes = await planProbes(ctx, result.campaigns, expectedHashes);
+      existingCampaigns = await planExistingCampaigns(database(), ctx);
     } else {
       probesSkipped = "needs STORE_BACKEND=postgres and OBJECT_STORE=s3";
     }
@@ -219,6 +226,7 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
       digest,
       probes,
       probesSkipped,
+      existingCampaigns,
     });
     // The `--out` write happens BEFORE anything is printed: a failed write
     // throws into the catch below — exit 1, nothing printed, no partial file —
