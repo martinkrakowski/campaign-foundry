@@ -53,6 +53,58 @@ export async function latestBodies(db: SqlQuery, orgId: string): Promise<LatestB
   }));
 }
 
+/** The org's row counts (Q0, PT-8e 7): a staging `plan` run is the measurement. */
+export interface ExistingCounts {
+  readonly campaigns: number;
+  readonly briefVersions: number;
+  readonly reports: number;
+  readonly assets: number;
+}
+
+/**
+ * How many rows the org has in `campaign`, `brief_version`, `report` and `asset`. These
+ * are ROW counts: a tombstoned campaign and its versions are counted. One `select`.
+ */
+export async function existingCounts(db: SqlQuery, orgId: string): Promise<ExistingCounts> {
+  const { rows } = await db.query<{
+    campaigns: number;
+    brief_versions: number;
+    reports: number;
+    assets: number;
+  }>(
+    `select
+       (select count(*)::int from campaign where org_id = $1) as campaigns,
+       (select count(*)::int from brief_version bv
+          join campaign c on c.id = bv.campaign_id where c.org_id = $1) as brief_versions,
+       (select count(*)::int from report where org_id = $1) as reports,
+       (select count(*)::int from asset where org_id = $1) as assets`,
+    [orgId],
+  );
+  const row = rows[0]!;
+  return {
+    campaigns: row.campaigns,
+    briefVersions: row.brief_versions,
+    reports: row.reports,
+    assets: row.assets,
+  };
+}
+
+/**
+ * The number of unsaved drafts per campaign of the org, by campaign uuid (PT-8e 8). A
+ * campaign with no draft is not in the map. A new brief version makes a draft's
+ * `base_revision` stale, and the resume route then deletes that draft.
+ */
+export async function draftCounts(
+  db: SqlQuery,
+  orgId: string,
+): Promise<ReadonlyMap<string, number>> {
+  const { rows } = await db.query<{ campaign_id: string; drafts: number }>(
+    `select campaign_id, count(*)::int as drafts from draft where org_id = $1 group by campaign_id`,
+    [orgId],
+  );
+  return new Map(rows.map((row) => [row.campaign_id, row.drafts]));
+}
+
 /** One existing campaign the normalise would rewrite, or cannot. */
 export type ExistingCampaign =
   | {
@@ -120,6 +172,8 @@ export type ExistingCampaignPlan =
       readonly revision: string;
       readonly state: "normalise";
       readonly refs: readonly RefClassification[];
+      /** The campaign's unsaved drafts (PT-8e 8); `apply` skips a campaign that has one. */
+      readonly drafts: number;
     }
   | {
       readonly slug: string;
@@ -134,6 +188,9 @@ export interface ExistingCampaignsPlan {
   readonly normalise: number;
   readonly refs: number;
   readonly refused: number;
+  /** How many `normalise` campaigns have at least one draft. */
+  readonly withDraft: number;
+  readonly counts: ExistingCounts;
 }
 
 /**
@@ -147,6 +204,8 @@ export async function planExistingCampaigns(
   const campaigns: ExistingCampaignPlan[] = [];
   let normalise = 0;
   let refs = 0;
+  let withDraft = 0;
+  const drafts = await draftCounts(db, ctx.orgId);
   for (const row of await latestBodies(db, ctx.orgId)) {
     const found = classifyExisting(ctx, row);
     if (found === undefined) continue;
@@ -154,10 +213,26 @@ export async function planExistingCampaigns(
     if (found.state === "normalise") {
       normalise++;
       refs += found.refs.length;
-      campaigns.push({ slug, revision, state: "normalise", refs: found.refs });
+      const draftCount = drafts.get(found.campaignId) ?? 0;
+      if (draftCount > 0) withDraft++;
+      campaigns.push({
+        slug,
+        revision,
+        state: "normalise",
+        refs: found.refs,
+        drafts: draftCount,
+      });
     } else {
       campaigns.push({ slug, revision, state: "refused", reason: found.reason });
     }
   }
-  return { campaigns, normalise, refs, refused: campaigns.length - normalise };
+  const counts = await existingCounts(db, ctx.orgId);
+  return {
+    campaigns,
+    normalise,
+    refs,
+    refused: campaigns.length - normalise,
+    withDraft,
+    counts,
+  };
 }
