@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { hashBytes } from "../../brief-files.js";
 import { PgReportStore } from "../../ports/pg-report-store.js";
 import type { ReportStorePort } from "../../ports/report-store.port.js";
-import { importReportRow } from "../rows-step.js";
+import { importReport, importReportRow, readReviewed } from "../rows-step.js";
 import {
   ON_A_REAL_TEST_SERVER,
   restoreApplyEnvironment,
   useApplyEnvironment,
 } from "./fixtures/apply-harness.js";
+import { dropRoot, linkAt, makeRoot, writeAt } from "./fixtures/tree.js";
 
 /** A report as a hand might leave it: valid JSON, but not the bytes `JSON.stringify` writes. */
 const LOOSE = Buffer.from('{\n  "assets":  [ ],\n\t"outputPath": "camp/a.png"  }\n', "utf8");
@@ -82,5 +83,81 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("rows-step: importReportRow", () => {
       },
     } as unknown as ReportStorePort;
     await expect(importReportRow(failing, "camp", LOOSE)).rejects.toThrow("the database went away");
+  });
+});
+
+describe("rows-step: readReviewed", () => {
+  let root: string;
+  const REL = "reports/camp.json";
+  const digest = (): Map<string, string> => new Map([[REL, hashBytes(LOOSE)]]);
+  beforeEach(() => {
+    root = makeRoot();
+  });
+  afterEach(() => {
+    dropRoot(root);
+  });
+
+  test("a file that is not there and was not reviewed is absent", async () => {
+    expect(await readReviewed(root, REL, new Map())).toEqual({ state: "absent" });
+  });
+
+  test("a file the digest named and that is gone is refused as changed", async () => {
+    expect(await readReviewed(root, REL, digest())).toEqual({
+      state: "refused",
+      reason: "reports/camp.json changed since the digest",
+    });
+  });
+
+  test("a file where the reports directory should be is refused, not absent", async () => {
+    writeAt(root, "reports", "not a directory");
+    const got = await readReviewed(root, REL, digest());
+    expect(got.state).toBe("refused");
+    expect((got as { reason: string }).reason).toMatch(/ENOTDIR/);
+  });
+
+  test("a symlinked parent directory is refused", async () => {
+    const elsewhere = makeRoot();
+    try {
+      writeAt(elsewhere, "camp.json", LOOSE);
+      linkAt(root, "reports", elsewhere);
+      const got = await readReviewed(root, REL, digest());
+      expect(got).toEqual({
+        state: "refused",
+        reason: "reports is a symlinked directory; the importer never follows one",
+      });
+    } finally {
+      dropRoot(elsewhere);
+    }
+  });
+
+  test("a symlinked file is refused", async () => {
+    const target = writeAt(root, "elsewhere/camp.json", LOOSE);
+    linkAt(root, REL, target);
+    const got = await readReviewed(root, REL, digest());
+    expect(got.state).toBe("refused");
+    expect((got as { reason: string }).reason).toMatch(/is a symlink; the importer never follows one$/);
+  });
+
+  test("a file the digest does not name is refused", async () => {
+    writeAt(root, REL, LOOSE);
+    expect(await readReviewed(root, REL, new Map())).toEqual({
+      state: "refused",
+      reason: "reports/camp.json is not in the reviewed digest",
+    });
+  });
+
+  test("bytes that differ from the reviewed ones are refused", async () => {
+    writeAt(root, REL, '{"assets":["edited after the review"]}');
+    expect(await readReviewed(root, REL, digest())).toEqual({
+      state: "refused",
+      reason: "reports/camp.json changed since the digest",
+    });
+  });
+
+  test("the reviewed bytes are returned", async () => {
+    writeAt(root, REL, LOOSE);
+    const got = await readReviewed(root, REL, digest());
+    expect(got.state).toBe("ok");
+    expect((got as { bytes: Buffer }).bytes.equals(LOOSE)).toBe(true);
   });
 });

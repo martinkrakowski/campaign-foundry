@@ -1,15 +1,65 @@
-import { hashBytes } from "../brief-files.js";
+import { lstat } from "node:fs/promises";
+import { join } from "node:path";
+import { errorMessage } from "@campaignfoundry/shared";
+import { hashBytes, isErrno } from "../brief-files.js";
 import { ReportConflictError, type ReportStorePort } from "../ports/report-store.port.js";
+import { parentsAreReal, readBounded } from "./census.js";
 
 /** What one row write did: stored now, already stored with these bytes, or left alone. */
 export type RowStatus = "written" | "skipped" | "refused";
 
-/** One imported row's result (PT-8c). `revision` is the SHA-256 of the SOURCE bytes. */
+/**
+ * One imported row's result (PT-8c). `revision` is the revision the source has
+ * in the form the store keeps it: the stored revision when the row was written
+ * or skipped. It is absent when the file could not be read or parsed.
+ */
 export interface RowResult {
-  readonly kind: "report";
+  readonly kind: "report" | "pool" | "decisions";
   readonly status: RowStatus;
-  readonly revision: string;
+  readonly revision?: string;
   readonly reason?: string;
+  /** Pools only: the stored bytes are the canonical form, not the file's own (F6). */
+  readonly recanonicalised?: boolean;
+}
+
+/** A source file as the import may use it: not there, the reviewed bytes, or refused. */
+export type Reviewed =
+  | { readonly state: "absent" }
+  | { readonly state: "ok"; readonly bytes: Buffer }
+  | { readonly state: "refused"; readonly reason: string };
+
+/**
+ * Read `<root>/<rel>` only if it is still the file the plan's digest covered
+ * (D221, D225): never through a symlink (the file or a parent directory), never
+ * past the size cap, and only when its SHA-256 is the reviewed one. A file that
+ * is not there is `absent` unless the digest named it: then it was removed after
+ * the review, which is a change. The wordings are `preflight`'s.
+ */
+export async function readReviewed(
+  root: string,
+  rel: string,
+  expected: ReadonlyMap<string, string>,
+): Promise<Reviewed> {
+  const path = join(root, rel);
+  try {
+    await lstat(path);
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) return { state: "refused", reason: errorMessage(error) };
+    if (!expected.has(rel)) return { state: "absent" };
+    return { state: "refused", reason: `${rel} changed since the digest` };
+  }
+  const parents = await parentsAreReal(root, rel);
+  if (parents !== undefined) return { state: "refused", reason: parents };
+  const read = await readBounded(path);
+  if (!read.ok) return { state: "refused", reason: read.reason };
+  const reviewed = expected.get(rel);
+  if (reviewed === undefined) {
+    return { state: "refused", reason: `${rel} is not in the reviewed digest` };
+  }
+  if (reviewed !== hashBytes(read.bytes)) {
+    return { state: "refused", reason: `${rel} changed since the digest` };
+  }
+  return { state: "ok", bytes: read.bytes };
 }
 
 /**
