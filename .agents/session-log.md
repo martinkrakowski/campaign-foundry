@@ -7130,3 +7130,21 @@ and counts against exit 3; a refused or failed row forces its line partial by it
 `e28d4e17` (code + tests), `4fb95785` (manifest). Both mutations bite; pt-8c-merge and
 pt-8c-exit verify cleanly; pt-8b2-import-apply's mutation on the removed BIN exit-3
 line no longer matches — the orchestrator moves it.
+
+---
+
+## 2026-10-12 — VT1: motion sequence editor (video creatives)
+
+- **Mode:** Implementer
+- **Changes:**
+  - New `SequenceTimeline.tsx`: the video creative's track surface, mounted for creative type `video` when the look has motion (VT-D1) — on the rail (`BriefEditor.railSlot`, in place of `TimelineTape`) and on the narrow host (`TimelineSection.sectionTimeline`).
+  - Text clips drag (`moveBeat`) and resize (`shiftBeatBoundary`, internal joins only) on pointerup only; video rows (disabled ones included) and the audio path are full-duration, non-resizable; diamonds stay, committed via `setTrackStop`; add-track is video (`addLayer` kind video) and text (disabled once an animated-text layer exists); hide is `setLayerEnabled` and a disabled row stays visible. No play button. No seconds in the brief.
+  - `TimelineTape.tsx`: additive exports of the shared pieces (ruler, sliders, playhead, geometry) so the commit-once rules cannot drift between the two surfaces.
+  - `layer-stack-props.ts`: `sequenceVideoRows` / `sequenceCanAddText`, derived from the same derivations the stack reads. `messages.ts`: the sequence vocabulary.
+  - `BriefEditor.tsx`: `PlayheadPublisher` threads `railProps.motion` into the published playhead; rail branch splits on `creativeType`; `columnPanels` gained the missing `sectionPlayhead` dependency (a stale-form bug the motion gate exposed).
+  - Tests: `SequenceTimeline.test.tsx` (component), `brief-editor.sequence-timeline.test.tsx` (editor-level §8), `TimelineSection.test.tsx` gate tests; messages scanner sample for `sequenceBeatClip`.
+- **Decisions:**
+  - The section host gates on the published motion and so mounts nothing for a still draft — a behaviour change §8 requires; image-text motion keeps the tape.
+  - Add-text is present-but-disabled with the reason named (VT-D4), unlike the stack's absent-when-blocked offer.
+- **Left open:**
+  - VT2 spans, VT3 audio list, VT4 playback (all per §5). The §8 variant-motion row is covered by the composition of `preview-props.test.ts` (variant.motion override) and the new host gates rather than an editor-level selected-creative test.

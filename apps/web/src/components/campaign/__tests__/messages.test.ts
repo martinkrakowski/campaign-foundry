@@ -81,6 +81,9 @@ const SAMPLE_ARGS = {
   timelineBeatUnderFloor: [1, 1.8, 2, 6],
   timelineDwell: [1.8],
   timelineDwellUnderFloor: [1.8, 2],
+  // VT1 — the text clip's label carries its resolved window in seconds, so the
+  // generic string args cannot be .toFixed()-ed.
+  sequenceBeatClip: [1, 1.8, 4.2],
 } as const satisfies Partial<Record<keyof typeof messages, readonly unknown[]>>;
 
 /** A string, a number, a string array, a boolean — enough for most formatters. */

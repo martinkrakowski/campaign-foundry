@@ -99,3 +99,58 @@ export function layerStackKey(state: EditorState): string {
     state.occlusionNotice,
   ]);
 }
+
+/* ── The sequence timeline's rows (VT1) ────────────────────────────────────── */
+
+/**
+ * One video row of the sequence timeline (`2026-10-12_motion-sequence-editor.md`
+ * §4.1): each video layer, disabled ones included, drawn as one clip spanning
+ * the whole duration.
+ *
+ * Every offer is answered here rather than in the component, for the same
+ * reason `LayerStackRow`'s are: `toggleableLayerIds` and `layerMoveDirections`
+ * read the same `CREATIVE_TYPE_RULES` the boundary validates against, so the
+ * timeline cannot offer what Save would refuse. `canToggle` is false for the
+ * last enabled video row (video is required), which is the disabled hide button
+ * VT-D7 asks for rather than a click the reducer silently refuses.
+ */
+export interface SequenceVideoRow {
+  readonly id: string;
+  /**
+   * The layer's position in the template's layer list — the index the move
+   * callbacks take, the same index `LayerStack`'s own move buttons use.
+   */
+  readonly index: number;
+  readonly off: boolean;
+  readonly canToggle: boolean;
+  readonly canMoveUp: boolean;
+  readonly canMoveDown: boolean;
+}
+
+export function sequenceVideoRows(state: EditorState): readonly SequenceVideoRow[] {
+  const rows = layerStackProps(state).rows;
+  return state.template.layers
+    .map((layer, index) => ({ layer, index }))
+    .filter(({ layer }) => layer.kind === "video")
+    .map(({ layer, index }) => {
+      const row = rows.find((candidate) => candidate.id === layer.id);
+      return {
+        id: layer.id,
+        index,
+        off: layer.enabled === false,
+        canToggle: row?.toggleable ?? false,
+        canMoveUp: row?.mayMoveUp ?? false,
+        canMoveDown: row?.mayMoveDown ?? false,
+      };
+    });
+}
+
+/**
+ * Whether "Add a text track" may act (VT-D4): enabled only while the type has
+ * no animated-text layer yet, counting disabled layers — the shared budget the
+ * boundary enforces counts them, so a control that offered a second track
+ * because the first was switched off would succeed in the UI and fail at save.
+ */
+export function sequenceCanAddText(state: EditorState): boolean {
+  return !state.template.layers.some((layer) => layer.kind === "animated-text");
+}

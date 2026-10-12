@@ -4,6 +4,12 @@ import { useId, useMemo, useState, type Dispatch } from "react";
 import { Button, Input, Stepper } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { TimelineTape, beatUnderFloor } from "@/components/campaign/TimelineTape";
+import { SequenceTimeline } from "@/components/campaign/SequenceTimeline";
+import {
+  sequenceCanAddText,
+  sequenceVideoRows,
+} from "@/components/campaign/layer-stack-props";
+import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { useViewportMinWidth, RAIL_VIEWPORT_MIN_PX } from "@/lib/use-viewport-min-width";
 import * as messages from "@/components/campaign/messages";
 import { describeAssetRef } from "@/lib/asset-refs";
@@ -73,6 +79,14 @@ export function TimelineSection({
     durationSec: number;
     committedSec: number;
     commit: (sec: number) => void;
+    /**
+     * VT-D1 — the mounted look's own motion, threaded from the rail's
+     * `railProps` through the published playhead. The narrow host gates its
+     * timeline on the same fact the rail does: a look with no motion mounts
+     * neither timeline here either. Optional because the publisher is the only
+     * writer and a host wired by hand (a test) may not carry it.
+     */
+    motion?: MotionKind;
   } | null;
   /**
    * The campaign's asset listing (D203), threaded from `BriefEditor` through
@@ -123,28 +137,82 @@ export function TimelineSection({
       })),
     [state.timeline, tapeDuration, shortestSec],
   );
-  const sectionTape =
-    railShown || sectionPlayhead == null || beats.length === 0 ? null : (
-      <TimelineTape
-        durationSec={tapeDuration}
-        beats={tapeBeats}
-        shortestDurationSec={shortestSec}
-        // Both seconds are the committed one: with no live scrub in this host
-        // the diamond sits where the frame is, which is the whole of option A.
-        scrubSec={sectionPlayhead.committedSec}
-        committedSec={sectionPlayhead.committedSec}
-        selectedBeatIndex={selectedBeatIndex}
-        /* TL4 — display only, so BOTH hosts show it. The section leaves
-           diamonds and boundary handles unwired because it cannot commit
-           them; a caption commits nothing, so withholding it here would
-           hide a fact rather than withhold an affordance. */
-        audioPath={state.audio?.path}
-        onScrubLive={sectionPlayhead.commit}
-        onScrubCommit={sectionPlayhead.commit}
-        onSelectBeat={setSelectedBeatIndex}
-        host="section"
-      />
-    );
+  /**
+   * TS2/VT1 — the narrow host. The rail owns the timeline wherever the rail is
+   * shown; below its viewport gate there is no rail, so the sequence the
+   * operator is authoring would otherwise have no playhead at all. Exactly one
+   * timeline is mounted either way, which is the lane's acceptance.
+   *
+   * VT-D1 adds two gates this host never had to ask before:
+   *
+   * **Motion.** The published playhead now carries the look's own motion, and a
+   * look with none mounts NOTHING here — a still draft has no seconds to draw,
+   * and the previous rule (playhead + beats) would mount a timeline over a
+   * creative that cannot move. The rail already gated on exactly this fact.
+   *
+   * **Creative type.** A `video` creative mounts the sequence timeline (VT1);
+   * every other motion look keeps the tape, so a narrow ken-burns draft does not
+   * lose its beat diamonds to a video-track surface its type would refuse.
+   */
+  const sectionTimeline =
+    railShown ||
+    sectionPlayhead == null ||
+    sectionPlayhead.motion === undefined ||
+    beats.length === 0
+      ? null
+      : state.template.creativeType === "video" ? (
+          <SequenceTimeline
+            durationSec={tapeDuration}
+            beats={tapeBeats}
+            shortestDurationSec={shortestSec}
+            // Both seconds are the committed one: with no live scrub in this host
+            // the playhead sits where the frame is, which is the whole of option A.
+            scrubSec={sectionPlayhead.committedSec}
+            committedSec={sectionPlayhead.committedSec}
+            selectedBeatIndex={selectedBeatIndex}
+            onScrubLive={sectionPlayhead.commit}
+            onScrubCommit={sectionPlayhead.commit}
+            onSelectBeat={setSelectedBeatIndex}
+            /* VT1 — this host owns the reducer, so the sequence edits it could
+               not offer on the tape (boundary, reorder) commit from here too. */
+            onMoveBeat={(from, to) => dispatch({ type: "moveBeat", from, to })}
+            onBoundaryCommit={(boundary, delta) =>
+              dispatch({ type: "shiftBeatBoundary", boundary, delta })
+            }
+            videoRows={sequenceVideoRows(state)}
+            /* No layer pick and no diamonds here, the same policy the tape has:
+               the picked layer lives in the rail (CC3) and this host cannot
+               commit a `setTrackStop` it has no pick for. */
+            onSetLayerEnabled={(id, enabled) => dispatch({ type: "setLayerEnabled", id, enabled })}
+            onMoveLayer={(from, to) => dispatch({ type: "moveLayer", from, to })}
+            onAddVideo={() => dispatch({ type: "addLayer", kind: "video" })}
+            canAddText={sequenceCanAddText(state)}
+            onAddText={() => dispatch({ type: "addLayer", kind: "animated-text" })}
+            /* TL4 — display only, so BOTH hosts show it. */
+            audioPath={state.audio?.path}
+            host="section"
+          />
+        ) : (
+          <TimelineTape
+            durationSec={tapeDuration}
+            beats={tapeBeats}
+            shortestDurationSec={shortestSec}
+            // Both seconds are the committed one: with no live scrub in this host
+            // the diamond sits where the frame is, which is the whole of option A.
+            scrubSec={sectionPlayhead.committedSec}
+            committedSec={sectionPlayhead.committedSec}
+            selectedBeatIndex={selectedBeatIndex}
+            /* TL4 — display only, so BOTH hosts show it. The section leaves
+               diamonds and boundary handles unwired because it cannot commit
+               them; a caption commits nothing, so withholding it here would
+               hide a fact rather than withhold an affordance. */
+            audioPath={state.audio?.path}
+            onScrubLive={sectionPlayhead.commit}
+            onScrubCommit={sectionPlayhead.commit}
+            onSelectBeat={setSelectedBeatIndex}
+            host="section"
+          />
+        );
 
   return (
     <fieldset className="mt-4 space-y-2 border-t border-border pt-3">
@@ -167,17 +235,13 @@ export function TimelineSection({
         </p>
       ) : null}
 
-      {/* TS2 — D146's section host. The rail owns the tape wherever the rail is
-          shown; below its viewport gate there is no rail, so the sequence the
-          operator is authoring would otherwise have no playhead at all. Exactly
-          one tape is mounted either way, which is the lane's acceptance.
-
+      {/* TS2 — D146's section host (see `sectionTimeline` above for the gates).
           It follows the COMMITTED second, never the live one: a drag must not
           re-render the step form (`brief-editor.playhead.test.tsx`), and this
           panel is inside it. Scrubbing here commits straight away — the gesture
           is a click on the ruler rather than a drag, which is the owner's
           option A. */}
-      {sectionTape}
+      {sectionTimeline}
 
       {beats.length > 0 ? (
         <ol className="space-y-2">

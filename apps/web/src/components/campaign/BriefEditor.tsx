@@ -111,11 +111,18 @@ import {
 } from "./PreviewDock";
 import { previewDockProps, previewRailKey } from "./preview-props";
 import { LayerStack } from "./LayerStack";
-import { layerStackKey, layerStackProps } from "./layer-stack-props";
+import {
+  layerStackKey,
+  layerStackProps,
+  sequenceCanAddText,
+  sequenceVideoRows,
+} from "./layer-stack-props";
 import { useViewportMinWidth, RAIL_VIEWPORT_MIN_PX } from "@/lib/use-viewport-min-width";
 import { DEFAULT_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
 import { resolveTimeline } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
+import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { TimelineTape, beatUnderFloor } from "@/components/campaign/TimelineTape";
+import { SequenceTimeline } from "@/components/campaign/SequenceTimeline";
 import * as messages from "./messages";
 import type { CampaignMode, EditorState } from "@/components/campaign/editor-state";
 
@@ -380,19 +387,27 @@ const COLUMN_VIEW_GLYPH: Record<ColumnView, ReactNode> = {
  */
 function PlayheadPublisher({
   playhead,
+  motion,
   onPublish,
 }: {
   readonly playhead: PlayheadState;
+  /**
+   * VT-D1 — the mounted look's own motion, threaded from `railProps`: the narrow
+   * host gates its timeline on the SAME fact the rail does, including a selected
+   * variant's own motion, which `previewLook` has already folded into the look.
+   */
+  readonly motion: MotionKind | undefined;
   readonly onPublish: (value: {
     durationSec: number;
     committedSec: number;
     commit: (sec: number) => void;
+    motion: MotionKind | undefined;
   }) => void;
 }): ReactNode {
   const { durationSec, committedSec, onScrubCommit } = playhead;
   useEffect(() => {
-    onPublish({ durationSec, committedSec, commit: onScrubCommit });
-  }, [durationSec, committedSec, onScrubCommit, onPublish]);
+    onPublish({ durationSec, committedSec, commit: onScrubCommit, motion });
+  }, [durationSec, committedSec, onScrubCommit, motion, onPublish]);
   return null;
 }
 
@@ -780,12 +795,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   /**
    * TS2 — the committed second, published out of `PlayheadHost` by
    * `PlayheadPublisher`. Only the committed one: see that component for why the
-   * live second stays in the rail.
+   * live second stays in the rail. VT1 adds the look's own `motion` beside it,
+   * so the narrow host can gate its timeline on the same fact the rail does.
    */
   const [sectionPlayhead, setSectionPlayhead] = useState<{
     durationSec: number;
     committedSec: number;
     commit: (sec: number) => void;
+    motion: MotionKind | undefined;
   } | null>(null);
   /**
    * SG8 — what the run is about to produce. Derived, never counted here:
@@ -1678,6 +1695,24 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const layerStackFingerprint = layerStackKey(state);
   const layerStack = useMemo(() => rawLayerStackProps, [layerStackFingerprint]);
   /**
+   * VT1 — the sequence timeline's video rows, memoised on the SAME fingerprint
+   * the stack is: `sequenceVideoRows` reads exactly the layer facts that key
+   * carries (each layer's id, kind and enabled flag, in order), so a fresh array
+   * here per render would defeat the `memo`-wrapped `SequenceTimeline` the way a
+   * fresh `layerStack` would defeat the stack (CC1/CC2).
+   */
+  const sequenceRows = useMemo(
+    // The stack's own precedent: `state` is read through the fingerprint only,
+    // the same way `layerStack` memoises a fresh `layerStackProps` result.
+    () => sequenceVideoRows(state),
+    [layerStackFingerprint],
+  );
+  /**
+   * VT-D4 — whether "Add a text track" may act. Keyed the same way: the fact is
+   * a function of the layer list alone, so it moves exactly when the rows do.
+   */
+  const canAddText = useMemo(() => sequenceCanAddText(state), [layerStackFingerprint]);
+  /**
    * D139 — which layer the operator has picked out. Ephemeral: local component
    * state, the same bucket as the scrub position (VE-D5), the tape's beat and
    * the timeline zoom (D147). Never a field of `EditorState`, never in the
@@ -2173,7 +2208,13 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const railSlot = useCallback(
     (playhead: PlayheadState): ReactNode => (
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
-        <PlayheadPublisher playhead={playhead} onPublish={setSectionPlayhead} />
+        {/* VT-D1 — the look's own motion rides the published playhead so the
+            narrow host gates on the same fact this rail does. */}
+        <PlayheadPublisher
+          playhead={playhead}
+          motion={railProps?.motion}
+          onPublish={setSectionPlayhead}
+        />
         {/* SG4 — the rail is PREVIEW-ONLY. Its segmented switcher (D61, an eye
           and a `</>`) and the YAML `<pre>` it revealed are both gone: SG-D4 puts
           the one switch over the middle column, the wireframe draws exactly one,
@@ -2201,20 +2242,84 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
               selectedLayerId={pickedLayerId}
               onSelectLayer={pickLayer}
             />
-            {/* TS1 — the time surface, under the creative it belongs to. It
-              mounts ONLY for a moving draft: a still brief has no seconds to
-              draw, and a tape over a static creative would invite a scrub
-              that means nothing. `hasMotion` is the rail's own look, so the
-              tape and the dock's range appear and disappear together. */}
+            {/* TS1/VT1 — the time surface, under the creative it belongs to. It
+              mounts ONLY for a moving draft, and which surface a moving draft
+              gets is VT-D1's split: creative type `video` mounts the sequence
+              timeline, every other motion look keeps the tape — so an
+              `image-text` ken-burns creative keeps its beat diamonds, boundary
+              drag and audio row rather than losing them to a video-track
+              surface its type would refuse at the boundary. */}
             {/* TS2 — `isRailWideEnough` as well as the motion look. The rail is
                 CSS-hidden below its gate (`hidden lg:flex`), not unmounted, so
-                without this the rail's tape stays in the DOM and the section
-                host makes a SECOND one: two playhead sliders over one second.
-                The lane's acceptance is exactly one tape at either width, and
-                it caught this. Same JS mirror the rail already uses to withhold
-                `brief` from the dock (CC2). */}
+                without this the rail's timeline stays in the DOM and the
+                section host makes a SECOND one: two playhead sliders over one
+                second. The lane's acceptance is exactly one timeline at either
+                width, and it caught this. Same JS mirror the rail already uses
+                to withhold `brief` from the dock (CC2). */}
             {railProps.motion !== undefined && isRailWideEnough ? (
-              <TimelineTape
+              state.template.creativeType === "video" ? (
+                <SequenceTimeline
+                  durationSec={playhead.durationSec}
+                  beats={tapeBeats}
+                  shortestDurationSec={shortestDurationSec}
+                  scrubSec={playhead.scrubSec}
+                  committedSec={playhead.committedSec}
+                  selectedBeatIndex={selectedBeatIndex}
+                  onScrubLive={playhead.onScrubLive}
+                  onScrubCommit={playhead.onScrubCommit}
+                  onSelectBeat={setSelectedBeatIndex}
+                  /* VT1 — a reorder is one `moveBeat` on release. The selection
+                     retires with the edit through the effect above, the same
+                     way a typed edit already retires it. */
+                  onMoveBeat={(from, to) => dispatch({ type: "moveBeat", from, to })}
+                  /* TL3 — neighbour transfer, same seam as the diamond commit:
+                     one call on release, through the reducer. The timeline
+                     cannot name the action. */
+                  onBoundaryCommit={(boundary, delta) =>
+                    dispatch({ type: "shiftBeatBoundary", boundary, delta })
+                  }
+                  /* VT-D7 — every video layer is a row, disabled ones included,
+                     so the row that hides is also the row that can come back.
+                     The last enabled one has no hide control at all: the offer
+                     is `toggleableLayerIds`'s, not a click the reducer refuses. */
+                  videoRows={sequenceRows}
+                  selectedLayerId={pickedLayerId}
+                  onSelectLayer={pickLayer}
+                  onSetLayerEnabled={(id, enabled) =>
+                    dispatch({ type: "setLayerEnabled", id, enabled })
+                  }
+                  onMoveLayer={(from, to) => dispatch({ type: "moveLayer", from, to })}
+                  /* Add-track: video is uncapped for this type; text is the
+                     shared budget's, disabled with its reason once the one
+                     layer exists (VT-D4). */
+                  onAddVideo={() => dispatch({ type: "addLayer", kind: "video" })}
+                  canAddText={canAddText}
+                  onAddText={() => dispatch({ type: "addLayer", kind: "animated-text" })}
+                  /* TL4 — the brief's music bed, when it carries one. */
+                  audioPath={state.audio?.path}
+                  /* TL6 / VT-D8 — the picked layer diamonds, the SAME pick the
+                     sheet reads (CC3), committed through the SAME action the
+                     inspector number box uses. */
+                  diamonds={trackDiamonds(
+                    state.template.layers.find((l) => l.id === pickedLayerId),
+                    playhead.durationSec,
+                  )}
+                  onDiamondCommit={
+                    pickedLayerId === null
+                      ? undefined
+                      : (trackIndex, stopIndex, sec) =>
+                          dispatch({
+                            type: "setTrackStop",
+                            layerId: pickedLayerId,
+                            trackIndex,
+                            stopIndex,
+                            patch: { t: tAtSecond(sec, playhead.durationSec) },
+                          })
+                  }
+                  host="rail"
+                />
+              ) : (
+                <TimelineTape
                 durationSec={playhead.durationSec}
                 beats={tapeBeats}
                 shortestDurationSec={shortestDurationSec}
@@ -2260,8 +2365,10 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                   dispatch({ type: "shiftBeatBoundary", boundary, delta })
                 }
                 host="rail"
-              />
-            ) : null}
+                />
+              )
+            )
+            : null}
           </>
         ) : (
           // D142 — the empty state before the first product has an id: names
@@ -2298,6 +2405,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       tapeBeats,
       shortestDurationSec,
       selectedBeatIndex,
+      // VT1 — the sequence timeline: its rows and the add-text gate, both
+      // memoised on the layer fingerprint, and the creative-type split that
+      // decides which timeline a motion look mounts (VT-D1).
+      sequenceRows,
+      canAddText,
+      state.template.creativeType,
       // The layer stack (CC3): props memoised on their own fingerprint.
       layerStack,
       dispatch,
@@ -3188,6 +3301,14 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       validationStands,
       campaignAssets,
       assetsRefetching,
+      // TS2/VT1 — the published playhead, which `CopySection` threads to the
+      // narrow timeline host. It was read here before VT1 without being named:
+      // harmless while the host drew only what a `state` change happened to
+      // repaint, and a STALE section the moment the host had to gate on a fact
+      // only the publisher carries (VT-D1's motion). The publish fires on a
+      // COMMIT, once per gesture, so this entry costs the form one render on a
+      // scrub release — never one per pointermove, which is CC1/CC2's line.
+      sectionPlayhead,
       reveal,
       handleValidate,
     ],
