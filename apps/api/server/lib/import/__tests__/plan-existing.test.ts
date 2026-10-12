@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { main } from "../../../../bin/import.js";
 import { getAssetStore, getBriefStore } from "../../ports/index.js";
+import { existingDigest } from "../existing-campaigns.js";
 import { importTenant } from "../import-tenant.js";
 import {
   ON_A_REAL_TEST_SERVER,
@@ -54,6 +56,11 @@ type Planned = {
 /** Any statement that changes a row. */
 const WRITE = /\b(insert\s+into|update\s+\S+\s+set|delete\s+from)\b/i;
 const EMPTY: Section = { campaigns: [], normalise: 0, refs: 0, refused: 0 };
+
+/** sha256 in lower-case hex, computed here so the tests do not lean on the code's own hashing. */
+const sha = (bytes: Buffer | string): string => createHash("sha256").update(bytes).digest("hex");
+/** Another valid PNG: the same magic bytes, one more byte. */
+const PNG_2 = Buffer.concat([PNG, Buffer.from([0])]);
 
 /** The first lane's view of the section: its four keys and each campaign's first fields. */
 function core(section: Section | null): Section | null {
@@ -401,7 +408,65 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)(
       ]);
       expect(got.section?.withDraft).toBe(1);
       expect(got.existing?.normalise).toBe(2);
-      expect(got.writes).toEqual([]);
+    });
+    test("the second digest covers each normalise campaign's slug, revision and ref-target hashes, and moves when a target's bytes or the revision move", async () => {
+      const t = tree();
+      root = t.root;
+      writeAt(t.root, "assets/inputs/old/logo.png", PNG);
+      const products = [product("assets/inputs/old/logo.png", "assets/inputs/a.png")];
+      const stored = await briefs().createBrief(briefBody({ id: "old", products }));
+      await briefs().createBrief(
+        briefBody({ id: "gone", products: [product("assets/inputs/gone/logo.png")] }),
+      );
+      const first = await plan(env, t.root, t.output);
+      expect(first.err).toEqual([]);
+      const files = [
+        { ref: "assets/inputs/old/logo.png", sha256: sha(PNG) },
+        { ref: "assets/inputs/a.png", sha256: sha(PNG) },
+      ];
+      expect(first.section?.campaigns.map((c) => [c.slug, c.state, c.files])).toEqual([
+        ["gone", "refused", undefined],
+        ["old", "normalise", files],
+      ]);
+      const pairs = files.map((file) => [file.ref, file.sha256]);
+      expect(first.section?.digest).toBe(sha(JSON.stringify([["old", stored.revision, pairs]])));
+      writeAt(t.root, "assets/inputs/a.png", PNG_2);
+      const second = await plan(env, t.root, t.output);
+      expect(second.section?.digest).toHaveLength(64);
+      expect(second.section?.digest).not.toBe(first.section?.digest);
+      expect(second.digest).toBe(first.digest);
+      await briefs().rewriteBrief(briefBody({ id: "old", campaignMessage: "Changed", products }));
+      const third = await plan(env, t.root, t.output);
+      expect(third.section?.digest).toHaveLength(64);
+      expect(third.section?.digest).not.toBe(second.section?.digest);
+      expect([first.writes, second.writes, third.writes]).toEqual([[], [], []]);
+      expect(third.lines).toBe(5);
+    });
+    test("existingDigest is the sha256 of one JSON array, campaigns by slug, files in the order given", () => {
+      const a = {
+        slug: "a",
+        revision: "r1",
+        files: [
+          { ref: "assets/inputs/x.png", sha256: "h1" },
+          { ref: "assets/inputs/a/y.png", sha256: "h2" },
+        ],
+      };
+      const b = { slug: "b", revision: "r2", files: [] };
+      const canonical =
+        '[["a","r1",[["assets/inputs/x.png","h1"],["assets/inputs/a/y.png","h2"]]],["b","r2",[]]]';
+      expect(existingDigest([b, a])).toBe(sha(canonical));
+      expect(existingDigest([a, b])).toBe(sha(canonical));
+      expect(existingDigest([])).toBe(sha("[]"));
+      const swapped = { ...a, files: [a.files[1]!, a.files[0]!] };
+      expect(existingDigest([swapped])).not.toBe(existingDigest([a]));
+    });
+
+    test("with no class-(P) campaign the second digest is the digest of the empty list", async () => {
+      const t = tree();
+      root = t.root;
+      const got = await plan(env, t.root, t.output);
+      expect(got.section?.digest).toBe(sha("[]"));
+      expect(got.existing).toEqual(EMPTY);
     });
   },
 );
