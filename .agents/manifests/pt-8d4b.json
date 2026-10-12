@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "lane": "PT-8d4b",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "              await onMinted?.(campaign.slug, object);",
+      "after": "              void onMinted?.(campaign.slug, object);",
+      "because": "Grok PT-8d 6 (owner, 2026-10-11): one result line per minted render is appended and synced BEFORE the next put. A record that is not awaited lets the step write its next object first.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply-step-line.test.ts", "-t", "an object a step records goes to the recorder at once"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "  return [...recorded, ...answered.filter((object) => !keys.has(object.key))];",
+      "after": "  return [...recorded, ...answered];",
+      "because": "D229: the result file lists every object the run minted, each once; a rollback deletes by that list and the summary counts it.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply-step-line.test.ts", "-t", "an object both recorded and answered at the step's end is listed and counted once"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "          if (recorded.length > 0) {",
+      "after": "          if (recorded.length > 1) {",
+      "because": "An object a step recorded was created. When the step then throws, the campaign's line must still list it.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply-step-line.test.ts", "-t", "what a step recorded stays on the line and in the count when the step then throws"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "      if (recordError !== undefined) throw recordError;",
+      "after": "      if (recordError !== undefined) break;",
+      "because": "A record that could not be kept ends the run: with the result file broken, a later campaign's objects would be listed nowhere.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply-step-line.test.ts", "-t", "a recorder that fails ends the run"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "          if (recordErrors.length > 0) break;",
+      "after": "          if (recordErrors.length > 1) break;",
+      "because": "A step that swallows the recorder's failure must not let a later step write.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply-step-line.test.ts", "-t", "a step that swallows the recorder's failure cannot hide it"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "const UNCLEAN_RENDER = new Set<RenderEntry[\"status\"]>([\"missing\", \"refused\", \"failed\"]);",
+      "after": "const UNCLEAN_RENDER = new Set<RenderEntry[\"status\"]>([\"refused\", \"failed\"]);",
+      "because": "Grok PT-8d 5 (owner, 2026-10-11): missing, refused and failed make the line partial and the run exit 1.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply-step-line.test.ts", "-t", "a render that is missing, refused or failed makes the line partial"],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "    await this.#append({ kind: \"object\", key: minted.key, path: minted.path });",
+      "after": "    await this.#append({ kind: \"object\", path: minted.path });",
+      "because": "Grok PT-8d 6: rollback deletes exactly the recorded keys, so the object's line must carry the key.",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply-step-line.test.ts", "-t", "each created object has its own line"],
+      "verdict": "caught"
+    }
+  ]
+}
