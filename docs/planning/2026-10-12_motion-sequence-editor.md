@@ -1,6 +1,6 @@
 # Motion sequence editor — preview and timeline
 
-**Status:** proposal. No lane is dispatchable until the decisions in §6 are stamped.
+**Status:** r2 — two plan reviews folded (2026-10-12). No lane is dispatchable until the decisions in §6 are stamped. The reviews' blockers are corrected in §2, §4, §5 and §8; they are listed in §11.
 **Date:** 2026-10-12.
 **Inspiration (local, not in the repo):** `/Users/martin/Desktop/video-editor-timeline.html` (ReelCut studio mock: program monitor, transport, resizable pane, multi-track timeline).
 **Related, already on main:** `2026-08-27_motion-copy-timeline.md` (beats are weights, not timestamps), `2026-09-13_video-editing-features.md` (VE-D5 scrub is local and never autoplays; VE-D11 refuses footage import), `2026-09-16_rail-timeline-surface.md` (TimelineTape), `2026-09-16_studio-editor.md`, `2026-09-10_keyframing.md` (property tracks, not clips), `DESIGN.md` §3 (rail anatomy).
@@ -28,15 +28,18 @@ The ReelCut file is the visual reference: dark program monitor, timecode, play/p
 
 ### 2.1 Where a creative is edited
 
-`BriefEditor` publishes the right rail. For a look that has a product id, the rail mounts, in order:
+`BriefEditor` publishes the right rail. `PreviewDock` mounts whenever `railProps !== null` (`railSlot`), which is whenever the draft has a product with an id. It is not gated on motion. Under it, when the rail is wide enough:
 
-1. `PreviewDock` — the one composed frame (D43). It receives `playhead`.
-2. `TimelineTape` — only when `railProps.motion !== undefined` **and** the rail is wide enough (`BriefEditor.tsx`, the `railSlot` callback).
-3. `LayerStack` — add / reorder / enable layers. Adding a layer dispatches `addLayer` with a kind the creative type accepts.
+1. `TimelineTape` — only when `railProps.motion !== undefined` **and** the rail is wide enough (`BriefEditor.tsx`, the `railSlot` callback).
+2. `LayerStack` — add / reorder / enable layers. Adding a layer dispatches `addLayer`. Reorder is `moveLayer`. Hide is `setLayerEnabled`.
 
-`previewLook` (`preview-props.ts`) sets `motion` only when `state.mode === "variation"` and `state.formats` includes `"motion"`, taking `state.motion[0]`. A classic brief, and a variation brief that did not ask for motion, do not mount the tape. The comment in that file is explicit: the plan carries `motion` only for a brief that asked for video, so a static draft must not become a moving one.
+`previewLook` (`preview-props.ts`) derives the **default** `motion` only when `state.mode === "variation"`, `state.formats` includes `"motion"`, and `state.motion` is non-empty, taking `state.motion[0]`. The selected creative then overrides that default unconditionally: `motion: (variant?.motion as MotionKind | undefined) ?? motion`. `BriefEditor` passes `selectedCreative` into `previewDockProps`. A classic brief normally mounts neither timeline. A supplied or retained `variant.motion` can still mount the tape on a draft whose own mode and formats would not.
 
-So "the motion creative editor" today is the **rail of a variation brief whose formats include motion**, not a separate route and not "creative type is `video`".
+Below the rail breakpoint, `TimelineSection` (`sectionTape`) mounts a second `TimelineTape` when the rail is hidden, a playhead exists, and the draft has beats. That host wires scrub and beat selection only. It does not wire diamond or boundary commits. Replacing the rail tape and leaving `sectionTape` alone leaves a video creative on a narrow viewport on the old tape.
+
+`canSerializeTimeline` is stricter than "the tape is mounted": the beats reach `toBrief` only when mode is variation, formats include motion, **and** the headline-pool axis is off. Edited beats that fail that gate must keep `TimelineSection`'s existing dropped-timeline notice. The sequence panel does not get its own copy of the rule.
+
+So "the motion creative editor" today is not a separate route and not "creative type is `video`".
 
 ### 2.2 Three clocks that must stay three clocks
 
@@ -65,7 +68,9 @@ The rail-timeline plan also refuses, in writing: a `requestAnimationFrame` play 
 
 ### 2.4 Audio
 
-`CampaignBrief.audio` is **one** music bed: `path` plus a rights record. It is not a list of clips and not a layer. The encoder can mux one bed (`VideoCompositorPort.audio?: Uint8Array`; VE3b). The entity comment in `CampaignBrief.ts` still says a run that declares `audio` is refused until VE3b; that sentence is older than the VE3b briefs and should not be treated as the live rule without re-reading `GenerateCampaignUseCase`. Rights validation in `load-brief.ts` is live.
+`CampaignBrief.audio` is **one** music bed: `path` plus a rights record (`validateAudio` in `load-brief.ts`). It is not a list of clips and not a layer. The encoder muxes that bed: `GenerateCampaignUseCase` resolves it (`resolveBriefAudio`) and passes the bytes into `compositeVideo`. The sentence in `CampaignBrief.ts` that still says a run declaring `audio` is refused until VE3b is stale. VE3b2 retired that interim refusal. It did not retire the footage-import or video-decode refusal (VE-D11).
+
+The web editor does not author audio. `BriefEditor.collectUnresolvedAssetRefs` says `audio.path` has no control that reads or writes it. `EditorAction` has no audio setter; the general patch path does not write `audio`. `EditorState.audio` is kept verbatim across load and save when it satisfies `isAudio`. There is no music-bed field and no rights form to open.
 
 There is no second audio stem, no per-clip gain, and no mute stored on a track.
 
@@ -101,20 +106,27 @@ Host this in the rail, in place of `TimelineTape`, only for creative type `video
 
 | Track the operator sees | Source already in the draft | Drag | Resize |
 | --- | --- | --- | --- |
-| Text | `copy.timeline` beats, projected by `resolveTimeline` onto `playhead.durationSec` | Reorder beats (existing reducer). Refuse a drop that would imply a second text layer. | `shiftBeatBoundary` on pointerup, one history entry. Same floor the tape already uses (`beatUnderFloor`). |
-| Video | Each **enabled** layer with `kind === "video"`, one clip spanning the whole duration | Reorder is layer order (`LayerStack`'s existing action), not a time shift. A video layer has no in/out in the brief. | Refuse. There is no in/out to write. |
-| Audio | `state.audio?.path`, one clip from 0 to `durationSec` if present | Refuse time shifts. | Refuse. The bed is the whole clip. |
+| Text | `copy.timeline` beats, projected by `resolveTimeline` onto `playhead.durationSec` | `moveBeat({ from, to })` on pointerup. One text layer, so a drop never creates a second track. | `shiftBeatBoundary({ boundary, delta })` on pointerup, and only at an **internal** join. The outer edges of the sequence, and a one-beat sequence, have no boundary (`TimelineTape`'s `BeatBoundary`). Weights stay integers in `[1, MAX_WEIGHT]`. A dwell-floor breach is committed and flagged (`beatUnderFloor`), not refused. |
+| Video | Each video layer, **including disabled ones**, one clip spanning the whole duration | `moveLayer` (stack order), not a time shift. `CreativeTemplateLayer` has no media ref and no span. `LAYER_PROPS.video` accepts no props. `LAYER_DRAWERS.video` paints the shared background. | Refuse. There is no in/out to write. |
+| Audio | `state.audio?.path`, one clip from 0 to `durationSec` if present. Display only. | Refuse. | Refuse. |
 | Shade, logo | Not timeline clips. They stay in `LayerStack`. | — | — |
+| Diamonds | The picked layer's property tracks, the same `trackDiamonds` / `onDiamondCommit` → `setTrackStop` pair the rail tape has today | — | The diamond commit stays on this component in VT1. `LayerPropsSheet` and `LayerStack` do not draw diamonds. Dropping them here removes TL6 for video creatives. `TrackForm` remains the numeric editor. |
+
+`moveBeat` keeps the persisted `keyBeat` on the same text. `BriefEditor` clears the ephemeral beat selection after sequence edits. A reorder test has to assert the saved `keyBeat`, not the selection highlight.
 
 Preview stays `PreviewDock`. The sequence panel does not draw its own canvas of the creative. Scrub still calls `onScrubLive` / `onScrubCommit`. Selection of a text beat is `selectedBeatIndex`. Selection of a video row is the same `pickedLayerId` the layer stack and the inspector use.
 
 Add-track:
 
-- **Video** dispatches `addLayer` with kind `video` (legal; uncapped). The new row appears as a full-duration clip with no media until the layer has an asset. Empty is an honest empty state, not a coloured fake filmstrip.
-- **Text** is enabled only while the type has no animated-text layer yet. After that the control is disabled and the message names the one-text rule. It does not open a second track.
-- **Audio** opens the existing music-bed field (path + rights). It does not create a layer kind. If a bed already exists, the control is disabled.
+- **Video** dispatches `addLayer` with kind `video` (legal; uncapped). The new row is another full-duration layer that paints the shared background. It is not an empty footage slot.
+- **Text** is enabled only while the type has no animated-text layer yet, counting disabled layers (the shared budget counts them). After that the control is disabled and the message names the one-text rule.
+- **Audio** is display-only in VT1, the same fact `TimelineTape` shows as `audioPath`. There is no field to open. A writable bed is a later lane: a path-and-rights control plus an `EditorAction`. Do not add a layer kind.
 
-Hide and lock, in this slice, are view state in the component (not the brief), or they map onto `enabled` for a video layer only. Do not invent `hidden` / `locked` keys on the brief in this slice. Mute maps onto nothing: there is one bed and no mute field. Omit mute, or make it a local preview mute that is not saved. Say which in the PR.
+Copy-section actions that already exist and that VT1 does not move onto the timeline: `setBeatText`, `setKeyBeat`, `setBeatBackground`, `setTransition`, `addBeat`, `removeBeat`. They stay in `TimelineSection`. The timeline's text track is order and weight only.
+
+Hide on a video row dispatches `setLayerEnabled`. `setLayerEnabled` refuses to disable the last enabled layer of a required kind, and video is required, so the last enabled video row cannot be hidden. A successful disable must **leave the row visible** and offer enable again. Filtering the timeline to `enabled !== false` hides the only control that can turn the layer back on. Lock is omitted in VT1 (no stored lock). Mute is omitted (no stored mute, and no local preview mute in this slice).
+
+`LayerStack` stays mounted under the timeline, so add, reorder, and enable also exist there. VT1's track header repeats those offers for video rows. That repetition is accepted so the timeline can be used without scrolling to the stack. It is not a second source of truth: both call the same actions. Weight steppers in `TimelineSection` likewise stay; the boundary drag is the same `shiftBeatBoundary`.
 
 Zoom, snap-to-beat-boundary, and the playhead are view state, as timeline zoom already is (D147: not a property of the campaign).
 
@@ -135,7 +147,7 @@ These are product decisions. They are not implied by "wire it into existing func
 ### 4.3 What not to reuse
 
 - Do not store the ReelCut `tracks[]` beside the brief. A second sequence document will drift from `copy.timeline` and from `template.layers`.
-- Do not draw property-track diamonds and NLE clips as the same rectangles. Diamonds stay on the picked layer (TL6) or move back to the inspector. Mixing them makes a keyframe look like a clip.
+- Do not draw property-track diamonds as if they were clips. In VT1 they stay on `SequenceTimeline`, committed with `setTrackStop`, because no other surface draws them. A later lane may move them to the inspector only after that surface commits `setTrackStop`.
 - Do not put duration-axis beads on this timeline (finding C4).
 - Do not mount this editor for `image-text`.
 
@@ -143,7 +155,9 @@ These are product decisions. They are not implied by "wire it into existing func
 
 ## 5. Recommended shape
 
-**VT1 — view and text edits (first pull request).** A `SequenceTimeline` under `PreviewDock` for creative type `video` only. Text clips drag to reorder and resize to shift weight. Video layers and the music bed are full-duration, non-resizable rows. Add-track is the three-way control with the disables in §4.1. Scrub unchanged. No play button. No seconds in `toBrief`. `TimelineTape` remains for other motion looks. `BriefEditor` is the only owner of the new callbacks, so this lane owns that file and nothing else may touch it in the same wave.
+**VT1 — view and text edits (first pull request).** A `SequenceTimeline` under `PreviewDock` when the creative type is `video` **and** the mounted look has motion (including a selected variant's own `motion`). Text clips drag via `moveBeat` and resize via `shiftBeatBoundary` at internal joins. Video layers, disabled ones included, and the music bed are full-duration, non-resizable rows. Audio is display-only. Diamonds stay, wired as they are on the rail tape today. Add-track is video (another background-painting layer) or text (only while the budget allows). Scrub unchanged. No play button. No seconds in `toBrief`. `TimelineTape` remains for other motion looks.
+
+The lane owns `BriefEditor.tsx` and `TimelineSection.tsx`. The narrow host (`sectionTape`, D146, under 56rem) must mount `SequenceTimeline` for a video creative and `TimelineTape` otherwise, or a narrow video draft keeps the old tape. Nothing else may touch those two files in the same wave. The new component does not import the reducer and does not contain the word `dispatch`.
 
 **VT2 — video spans, only after a stamped value object.** `startT`/`endT` on video layers, compositor honours them, resize and horizontal drag write those fields, overlap rule is explicit (see §6).
 
@@ -159,13 +173,14 @@ The pane divider is part of VT1 if it is local state with the same bounds idea a
 
 | Id | Question | Recommendation |
 | --- | --- | --- |
-| **VT-D1** | Who sees the sequence editor? | Creative type `video` and a motion look. `image-text` motion keeps `TimelineTape`. |
+| **VT-D1** | Who sees the sequence editor? | Creative type `video` and a motion look, on both hosts (rail and the narrow Copy-section tape). The look's motion includes a selected variant's `motion`, which can override the variation-and-format default. `image-text` motion keeps `TimelineTape`. A classic video brief whose look has no motion still mounts neither timeline; that matches `previewLook` today. Giving that brief a timeline means restamping the variation gate, not slipping it into VT1. |
 | **VT-D2** | Are clip times stored? | Not in VT1. Text stays weights. Video and audio are the whole duration. Later spans store normalised `t`, never seconds. |
 | **VT-D3** | May video clips overlap on one layer? | No in any slice that adds spans. Overlap is a composite rule the renderer does not have. A second video **layer** is the overlap, and paint order is layer order. |
 | **VT-D4** | Does "add text" ever make a second text track? | No, until the shared budget and the compositor change. The control disables. |
-| **VT-D5** | Does "add audio" create a layer? | No. It binds the one music bed. |
+| **VT-D5** | Does "add audio" create a layer or open a form? | No. VT1 shows `state.audio?.path` and does not write it. A path-and-rights control plus an editor action is a later lane. |
 | **VT-D6** | Play in the monitor? | No in VT1. Restamp VE-D5 before any play control. |
-| **VT-D7** | Hide / lock / mute persisted? | No in VT1. Video hide may reuse `enabled`. Mute is omitted. |
+| **VT-D7** | Hide / lock / mute? | Video hide dispatches `setLayerEnabled` and the row stays on the timeline when disabled, so it can be enabled again. The last enabled required video layer cannot be disabled. Lock and mute are omitted. No new brief keys. |
+| **VT-D8** | Where do property-track diamonds go in VT1? | They stay on `SequenceTimeline`, same callbacks as today's rail tape. They are not dropped and not redrawn as clips. |
 
 ---
 
@@ -177,7 +192,7 @@ Checked against the tree, not against earlier planning prose.
 
 **"Add a text track" is refused by the type the feature claims to edit.** `CREATIVE_TYPE_RULES.video.sharedBudgets` allows one animated-text. An enabled "Text" item that dispatches `addLayer` anyway fails in the reducer or, worse, succeeds in the UI and fails at save. The plan's disable is the fix. A review that accepts a second track "because the HTML has two video lanes" has not read the rule table.
 
-**"Add audio" can be implemented as a layer kind that no renderer reads.** That is how a feature looks done in the rail and produces a silent file. Audio stays `CampaignBrief.audio`. Rights are mandatory in `load-brief.ts`. A control that sets `path` and omits `rights` cannot save. The add-audio flow has to collect the rights record the API already requires, or it is a dead button.
+**"Add audio" cannot open a form that is not in the tree.** `EditorAction` has no audio setter. VT1 shows the path and writes nothing. A control that set `path` and omitted `rights` would still fail `validateAudio`. Authoring the bed is a later lane, not a button in VT1.
 
 **Multiple video layers are legal and untimed.** The type does not set `maxOf.video`. Drawing each as a full-width bar is honest. Letting the operator drag one bar to `t = 0.4` without a span field is not. VT1 must reject that pointerup with no brief change. A test that fires `pointerup` and expects a new `start` has nothing to expect.
 
@@ -201,13 +216,18 @@ Checked against the tree, not against earlier planning prose.
 
 ## 8. Tests that must be able to fail
 
-- A video creative shows `SequenceTimeline` and does not show `TimelineTape`. An `image-text` motion creative shows `TimelineTape` and does not show `SequenceTimeline`.
-- Add text while an animated-text layer exists does not dispatch `addLayer`.
-- Add video dispatches `addLayer` with kind `video` and the new row is a full-duration clip.
-- Add audio with a bed already set does not write a second `audio` key.
-- Resizing a beat calls the boundary commit once on pointerup and never on pointermove, and the saved timeline still has integer weights only.
-- Dragging a video clip horizontally leaves the brief unchanged.
-- A still brief mounts neither timeline.
+- Wide rail, variation, motion format, creative type `video`, a product id, and a motion look: `SequenceTimeline` is mounted and `TimelineTape` is not. The same draft below the rail breakpoint: the Copy section mounts `SequenceTimeline`, not `TimelineTape`.
+- An `image-text` motion look on either host shows `TimelineTape` and does not show `SequenceTimeline`.
+- A classic brief with no variant motion, and a still brief, mount neither timeline on either host.
+- A selected variant that carries `motion` mounts the timeline even when the draft's own mode would not. The video-type branch of that case mounts `SequenceTimeline`.
+- Add text while an animated-text layer exists (enabled or disabled) does not dispatch `addLayer`.
+- Add video dispatches `addLayer` with kind `video`. The new row spans the whole duration. The saved layer has no media field.
+- The audio row reads `state.audio?.path`. No action writes `audio`.
+- Resizing an internal beat join calls `shiftBeatBoundary` once on pointerup and never on pointermove. A one-beat sequence and the outer edges have no handle. Saved weights are integers in `[1, MAX_WEIGHT]`.
+- Reorder calls `moveBeat` once on pointerup. The persisted `keyBeat` still names the same beat text.
+- Dragging a video clip horizontally leaves the brief unchanged. Hiding a video row calls `setLayerEnabled`. Hiding the last enabled video layer leaves the draft unchanged. A disabled video row is still in the timeline and can be enabled.
+- When `canSerializeTimeline` is false and beats exist, the Copy section still shows the dropped-timeline notice.
+- Diamonds for the picked layer still commit `setTrackStop` on release.
 - No preview-frame request on clip pointermove.
 
 A test that renders the ReelCut HTML, or that asserts a play button toggles a timer, does not belong in VT1.
@@ -229,4 +249,23 @@ A test that renders the ReelCut HTML, or that asserts a play button toggles a ti
 
 1. Confirm VT-D1: sequence editor for creative type `video` only, tape remains for other motion.
 2. Confirm that VT1 ships with video and audio clips that cannot be resized, and says so in the UI, rather than waiting for spans.
-3. Whether add-audio in the timeline may open the existing rights form, or whether audio stays only in the form section for VT1 (the track would then be display-only).
+3. Whether a later lane should add the missing path-and-rights control. VT1 does not: there is no form section to leave the audio in. The row is display-only.
+
+---
+
+## 11. Plan review, 2026-10-12
+
+Two read-only reviews. Both treated a false claim about shipped code as blocking. Folded above. What each blocker was, and where it went:
+
+| Review | Blocker | Correction |
+| --- | --- | --- |
+| 1 | `previewLook` lets `variant.motion` override the variation-and-format default. | §2.1, VT-D1. |
+| 1 and 2 | No music-bed field, no rights form, no `EditorAction` for audio. | §2.4, §4.1, VT-D5. Question 3 withdrawn. |
+| 1 | A video layer has no footage slot; the drawer paints the shared background. | §4.1 add-video. |
+| 1 and 2 | `TimelineSection.sectionTape` still mounts `TimelineTape` under the breakpoint. | §2.1, §5, §8. VT1 owns that file too. |
+| 2 | Dropping diamonds removes TL6; the inspector does not draw them. | §4.1, §4.3, VT-D8. Diamonds stay on the new component. |
+| 2 | A non-variation video brief has no motion look, so VT-D1 mounts nothing. | Kept, and named in VT-D1. `outputFamilies: ["motion"]` does not by itself set `previewLook.motion`. Changing that is a restamp, not VT1. |
+
+Also folded from the fix lists, not only the blockers: `moveBeat` / `moveLayer` / `setLayerEnabled` by name; internal joins only; dwell floor is flagged after commit; the interim audio refusal is stale because `resolveBriefAudio` already feeds `compositeVideo`; disabled rows stay visible; `canSerializeTimeline` includes the headline-pool axis; `keyBeat` survives `moveBeat`.
+
+Notes kept as notes: one video layer is not capped; a second animated-text layer is refused even when disabled; no stored clip span (`ResolvedBeat.startT` / `endT` are derived); VE-D5, VE-D11, and the rail-timeline play-clock refusal are still live; `LayerStack` and the Copy form's beat controls stay mounted beside the timeline.
