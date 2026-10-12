@@ -33,6 +33,14 @@
       "because": "The files listed in the section are the files the digest covers.",
       "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/plan-existing.test.ts", "-t", "the second digest covers each normalise campaign's slug, revision and ref-target hashes, and moves when a target's bytes or the revision move"],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/existing-campaigns.ts",
+      "before": "       (select count(*)::int from report where org_id = $1) as reports,",
+      "after": "       (select count(*)::int from report) as reports,",
+      "because": "The org's row counts must not count another org's rows (review of #810).",
+      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/plan-existing.test.ts", "-t", "the section carries the org's row counts of campaign, brief_version, report and asset, tombstoned rows included"],
+      "verdict": "caught"
     }
   ]
 }

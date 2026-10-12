@@ -12,8 +12,8 @@ import type { StepContext } from "./steps.js";
 
 /**
  * Class (P) of PT-8, D228: campaigns that already exist in the target org and whose
- * LATEST brief version still names a file by path. Everything here is read-only: one
- * `select`, and the `lstat`/read `classifyRefs` does on the source tree.
+ * LATEST brief version still names a file by path. Everything here is read-only: three
+ * `select`s, and the `lstat`/read `classifyRefs` does on the source tree.
  */
 
 /** One live campaign's latest version, as stored. */

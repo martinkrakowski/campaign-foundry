@@ -62,21 +62,24 @@ const sha = (bytes: Buffer | string): string => createHash("sha256").update(byte
 /** Another valid PNG: the same magic bytes, one more byte. */
 const PNG_2 = Buffer.concat([PNG, Buffer.from([0])]);
 
-/** The first lane's view of the section: its four keys and each campaign's first fields. */
+/** The keys the later lanes added: to the section, and to each campaign of it. */
+const ADDED = {
+  section: ["withDraft", "counts", "digest"],
+  campaign: ["drafts", "files"],
+} as const;
+
+/**
+ * The first lane's view of the section: the section and each of its campaigns with only
+ * the keys the later lanes added removed, so a leaked key is still seen by the assertions.
+ */
 function core(section: Section | null): Section | null {
   if (!section) return section;
+  const keep = (x: object, dropped: readonly string[]) =>
+    Object.fromEntries(Object.entries(x).filter(([key]) => !dropped.includes(key)));
   return {
-    campaigns: section.campaigns.map(({ slug, revision, state, refs, reason }) => ({
-      slug,
-      revision,
-      state,
-      refs,
-      reason,
-    })),
-    normalise: section.normalise,
-    refs: section.refs,
-    refused: section.refused,
-  };
+    ...keep(section, ADDED.section),
+    campaigns: section.campaigns.map((c) => keep(c, ADDED.campaign)),
+  } as Section;
 }
 
 /** An empty legacy tree: `briefs/` with no brief, and the two root-level files the refs name. */
@@ -301,6 +304,10 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)(
       expect(empty.code).toBe(0);
       expect(empty.digest).toHaveLength(64);
       expect(empty.existing).toEqual(EMPTY);
+      expect(empty.section).toMatchObject({
+        withDraft: 0,
+        counts: { campaigns: 0, briefVersions: 0, reports: 0, assets: 0 },
+      });
       await briefs().createBrief(
         briefBody({ id: "old", products: [product("assets/inputs/a.png")] }),
       );
@@ -341,6 +348,19 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)(
       );
       await env.db.query(
         "insert into report (org_id, campaign_id, body, revision) values ('local', 'one', '{}', 'r1')",
+      );
+      await env.db.query("insert into org (id, name) values ('other', 'Other')");
+      await env.db.query("insert into campaign (org_id, slug) values ('other', 'second')");
+      await env.db.query(
+        "insert into brief_version (campaign_id, version, body, revision, actor) " +
+          "select id, 1, '{}', 'r1', 'test' from campaign where org_id = 'other'",
+      );
+      await env.db.query(
+        "insert into report (org_id, campaign_id, body, revision) values ('other', 'second', '{}', 'r1')",
+      );
+      await env.db.query(
+        "insert into asset (org_id, campaign_id, name, size, sha256, content_type) " +
+          "select 'other', id, 'logo.png', 4, 'x', 'image/png' from campaign where org_id = 'other'",
       );
       const got = await plan(env, t.root, t.output);
       expect(got.err).toEqual([]);
