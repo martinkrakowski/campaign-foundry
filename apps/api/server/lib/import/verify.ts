@@ -220,12 +220,15 @@ export interface VerifyRenderCampaign {
 
 /**
  * One render path of the reviewed report against its object. `expected` when the
- * import does not write it: the plan refused the path (an old-shape
- * `<productId>/…` path, a file that is not there, an extension with no content
- * type), no key can be built for it, or the file is over the render cap.
- * Otherwise the object is read WHOLE and its bytes are hashed against the source
- * file's (PT-8f 7's rule for assets: the check is the hash of the bytes read,
- * never a size). A source file that is not the reviewed one is a mismatch.
+ * import does not write it and the plan agrees: the plan refused the path (an
+ * old-shape `<productId>/…` path, a file that is not there, an extension with no
+ * content type — the plan's refusal list holds it), or no source file is there
+ * (a render made after the switch). A path the plan marked `ok` that the import
+ * still does not write is a disagreement with the plan, and a mismatch: no key
+ * can be built for it, or the file is over the render cap. Otherwise the object
+ * is read WHOLE and its bytes are hashed against the source file's (PT-8f 7's
+ * rule for assets: the check is the hash of the bytes read, never a size). A
+ * source file that is not the reviewed one is a mismatch.
  */
 async function verifyRender(
   objects: VerifyStores["objects"],
@@ -248,14 +251,18 @@ async function verifyRender(
     const prefix = renderPrefix(ctx.orgId, campaign.campaignId);
     key = renderObjectKey(prefix, campaign.slug, field.path);
   } catch (error) {
-    return render("expected", `not written: ${errorMessage(error)}`);
+    // The plan marked this path `ok` (a refused one left above), so its refusal
+    // list does not hold it: the import refusing it anyway is a mismatch.
+    return render("mismatch", `not written: ${errorMessage(error)}`);
   }
   const everySize = { maxBytes: Number.MAX_SAFE_INTEGER };
   const file = await statReviewedRender(ctx.outputRoot, field.path, fingerprints, everySize);
   if (file.state === "absent") return render("expected", "not written: no source file");
   if (file.state === "refused") return render("mismatch", file.reason);
   if (file.size > maxBytes) {
-    return render("expected", `not written: ${file.size} bytes is over the render cap`);
+    // The plan never refuses a path for its size, so its refusal list cannot
+    // hold this one: an over-cap render the plan marked `ok` is a mismatch.
+    return render("mismatch", `not written: ${file.size} bytes is over the render cap`);
   }
   const bytes = await readFile(file.file);
   const stored = await objects.get(key);
@@ -329,10 +336,24 @@ export async function verifyImport(
     const rows = await verifyRows(stores, source, slug, plan.assembled.refusals);
     checks.push(...rows);
     if (!rows.some((row) => row.entity === "report" && row.status === "match")) continue;
-    const campaignId = (await stores.briefs.campaignMeta(slug))!.campaignId;
-    const fields = plan.assembled.reports.find((report) => report.slug === slug)!.fields;
-    const campaign = { campaignId, slug };
-    checks.push(...(await verifyRenders(stores.objects, ctx, campaign, fields, fingerprints)));
+    const meta = await stores.briefs.campaignMeta(slug);
+    const report = plan.assembled.reports.find((found) => found.slug === slug);
+    if (meta === undefined || report === undefined) {
+      // A mismatch is a result, never a throw: metadata that cannot be read is
+      // this campaign's renders unchecked, reported as the mismatch it is.
+      checks.push({
+        entity: "render",
+        slug,
+        status: "mismatch",
+        reason:
+          meta === undefined
+            ? "the campaign row cannot be read, so its renders cannot be checked"
+            : "the plan holds no report for this campaign, so its renders cannot be checked",
+      });
+      continue;
+    }
+    const campaign = { campaignId: meta.campaignId, slug };
+    checks.push(...(await verifyRenders(stores.objects, ctx, campaign, report.fields, fingerprints)));
   }
   return summarise(checks);
 }

@@ -526,7 +526,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("verify: renders and expected refusals", 
     expect(sent).toEqual(READ_ONLY);
   });
 
-  test("a render the import does not write is expected: over the cap, no source file, no key; a file that is not the reviewed one is a mismatch", async () => {
+  test("a render the plan refused is expected even over the cap; one the plan marked ok is a mismatch when it is over the cap, has no source file, cannot have a key built, or is not the reviewed file", async () => {
     const t = renderTree({ report: REPORT_R });
     root = t.root;
     const ctx = ctxWith(t.root, t.output);
@@ -539,16 +539,25 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("verify: renders and expected refusals", 
       status: "ok",
       resolved: join(t.output, path),
     });
+    const refused = (path: string): ReportFieldPlan => ({
+      field: "outputPath",
+      path,
+      status: "refused",
+      resolved: join(t.output, path),
+      reason: "listed in the plan's refusal list",
+    });
     const { got, sent } = await watched(env, async () => [
+      ...(await verifyRenders(env.objects, ctx, campaign, [refused(RENDER)], reviewed, 10)),
       ...(await verifyRenders(env.objects, ctx, campaign, [ok(RENDER)], reviewed, 10)),
       ...(await verifyRenders(env.objects, ctx, campaign, [ok("camp/p1/gone.png")], new Map())),
       ...(await verifyRenders(env.objects, ctx, campaign, [ok("camp/p1/../p1/1x1.png")], reviewed)),
       ...(await verifyRenders(env.objects, ctx, campaign, [ok(RENDER)], new Map())),
     ]);
     expect(got.map((check) => [check.status, check.reason])).toEqual([
-      ["expected", `not written: ${PNG.length} bytes is over the render cap`],
+      ["expected", "not written: listed in the plan's refusal list"],
+      ["mismatch", `not written: ${PNG.length} bytes is over the render cap`],
       ["expected", "not written: no source file"],
-      ["expected", expect.stringMatching(/^not written: Refusing an object key/)],
+      ["mismatch", expect.stringMatching(/^not written: Refusing an object key/)],
       ["mismatch", `${RENDER} is not in the reviewed digest`],
     ]);
     expect(sent).toEqual(READ_ONLY);
@@ -656,6 +665,67 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("verify: renders and expected refusals", 
       "decisions:mismatch",
     ]);
     expect(got.checks[3]!.reason).toMatch(/^not written: the report for camp was refused/);
+    expect(sent).toEqual(READ_ONLY);
+  });
+
+  test("metadata that cannot be read, and a campaign the plan holds no report for, are render mismatches, never a throw", async () => {
+    const t = renderTree({ report: REPORT_R });
+    root = t.root;
+    await apply(env, t.root, t.output, "r10");
+    const ctx = ctxWith(t.root, t.output);
+    const planned = await replan(ctx);
+    const real = stores();
+    // `campaignMeta` is read twice: once by `verifyCampaign`, once before the
+    // renders. The second read answers undefined, as a store that cannot read it.
+    let metaCalls = 0;
+    const briefs: VerifyStores["briefs"] = {
+      campaignMeta: async (ref) => {
+        metaCalls += 1;
+        return metaCalls === 1 ? real.briefs.campaignMeta(ref) : undefined;
+      },
+      findBriefById: (ref) => real.briefs.findBriefById(ref),
+    };
+    const noReport = {
+      ...planned,
+      assembled: {
+        ...planned.assembled,
+        reports: planned.assembled.reports.filter((report) => report.slug !== "camp"),
+      },
+    };
+    const withoutMeta = await watched(env, () => verifyImport({ ...real, briefs }, ctx, planned));
+    expect(statuses(withoutMeta.got.checks)).toEqual([
+      "campaign:match",
+      "asset:match",
+      "report:match",
+      "render:mismatch",
+    ]);
+    expect(withoutMeta.got.checks[3]!.reason).toBe(
+      "the campaign row cannot be read, so its renders cannot be checked",
+    );
+    const withoutPlan = await watched(env, () => verifyImport(real, ctx, noReport));
+    expect(statuses(withoutPlan.got.checks)).toEqual([
+      "campaign:match",
+      "asset:match",
+      "report:match",
+      "render:mismatch",
+    ]);
+    expect(withoutPlan.got.checks[3]!.reason).toBe(
+      "the plan holds no report for this campaign, so its renders cannot be checked",
+    );
+    expect(withoutMeta.got.ok).toBe(false);
+    expect(withoutPlan.got.ok).toBe(false);
+    expect(withoutMeta.sent).toEqual(READ_ONLY);
+    expect(withoutPlan.sent).toEqual(READ_ONLY);
+  });
+
+  test("a report row the plan refuses is expected, and its renders are skipped and not reported", async () => {
+    const t = renderTree({ report: Buffer.from("[1]") });
+    root = t.root;
+    await apply(env, t.root, t.output, "r11");
+    const { got, sent } = await verify(env, t.root, t.output);
+    expect(statuses(got.checks)).toEqual(["campaign:match", "asset:match", "report:expected"]);
+    expect(got.counts.render).toEqual({ checked: 0, matched: 0 });
+    expect(got.ok).toBe(true);
     expect(sent).toEqual(READ_ONLY);
   });
 
