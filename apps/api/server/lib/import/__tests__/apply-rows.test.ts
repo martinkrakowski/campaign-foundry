@@ -518,7 +518,11 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply: report, pool and decision rows", 
 describe("apply: importRowsStep", () => {
   test("a context without the reviewed hashes is an error, never a silent import", async () => {
     await expect(
-      importRowsStep(ctxWith("/nowhere", "/nowhere"), { slug: "camp", sourcePath: "x" }),
+      importRowsStep(
+        ctxWith("/nowhere", "/nowhere"),
+        { slug: "camp", sourcePath: "x" },
+        { rows: [], recordMinted: async () => {} },
+      ),
     ).rejects.toThrow("no reviewed source hashes in the step context");
   });
 });

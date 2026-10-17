@@ -3,7 +3,9 @@ import { contentTypeFor, renderObjectKey } from "@campaignfoundry/Distribution";
 import { errorMessage } from "@campaignfoundry/shared";
 import { hashBytes } from "../brief-files.js";
 import { renderPrefix } from "../object-store/object-keys.js";
+import { reportRenderPaths } from "./report-paths.js";
 import type { Reviewed } from "./rows-step.js";
+import type { MintedObject, RowEntry } from "./steps.js";
 
 /** The object-store calls a render import makes: all a store has to offer it. */
 export type RenderObjects = Pick<ObjectStorePort, "put" | "get" | "head">;
@@ -104,18 +106,34 @@ export async function importRender(
 /**
  * Import one campaign's renders: each DISTINCT path once (one proof is named by
  * many rows of a report), in first-seen order. It stops at the first `failed`
- * render, as `importRows` stops at a failed row, and never throws.
+ * render, as `importRows` stops at a failed row. `record` is told each object
+ * this call CREATED and is awaited BEFORE the next render is tried (Grok PT-8d
+ * 6): a crash between two writes leaves no created object without a record.
+ * The import itself never throws. A `record` that throws is NOT caught: a
+ * record that cannot be kept must stop the run before the next write. The
+ * error names the object that was created and not recorded.
  */
 export async function importRenders(
   objects: RenderObjects,
   campaign: RenderCampaign,
   paths: readonly string[],
   read: RenderReader,
+  record?: MintRecord,
 ): Promise<RenderResult[]> {
   const results: RenderResult[] = [];
   for (const path of new Set(paths)) {
     const result = await importRender(objects, campaign, path, read);
     results.push(result);
+    if (result.status === "written") {
+      try {
+        await record?.({ key: result.key, path: result.path });
+      } catch (error) {
+        throw new Error(
+          `created ${result.key} (${result.path}) but could not record it: ${errorMessage(error)}`,
+          { cause: error },
+        );
+      }
+    }
     if (result.status === "failed") break;
   }
   return results;
@@ -132,4 +150,99 @@ export function mintedRenders(
   return results.flatMap((result) =>
     result.status === "written" ? [{ key: result.key, path: result.path }] : [],
   );
+}
+
+/**
+ * Keeps the record of ONE object this run created (D229; Grok PT-8d 6). It
+ * resolves only when the record is durable. A rollback deletes exactly the
+ * recorded keys.
+ */
+export type MintRecord = (object: MintedObject) => Promise<void>;
+
+function isJson(bytes: Buffer): boolean {
+  try {
+    JSON.parse(bytes.toString("utf8"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The render paths a report file names, from its reviewed bytes: the one walk
+ * `plan` uses (`reportRenderPaths`), each distinct path once, in first-seen
+ * order. Bytes that are not JSON name none (the rows step refuses such a file).
+ */
+export function reportPaths(bytes: Buffer): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    return [];
+  }
+  return [...new Set(reportRenderPaths(parsed).map((found) => found.path))];
+}
+
+/**
+ * The renders of a campaign whose report row this run neither wrote nor
+ * skipped (Grok PT-8d 4): none is written, and each distinct path is listed
+ * `refused` with a reason that starts "not written:". `plan` lists the same
+ * paths with the same reason in the future tense (lane PT-8d3b).
+ */
+export function notWrittenRenders(slug: string, paths: readonly string[]): RenderResult[] {
+  const reason = `not written: this run neither wrote nor skipped the report for ${slug}`;
+  return [...new Set(paths)].map((path): RenderResult => ({ path, status: "refused", reason }));
+}
+
+/** What the render import needs to know of one campaign and of its report. */
+export interface CampaignRenders {
+  readonly orgId: string;
+  readonly slug: string;
+  /** What THIS run did with the campaign's report row. */
+  readonly reportStatus: RowEntry["status"];
+  /** The campaign's report file, read as the reviewed one (`readReviewed`). */
+  readonly reportFile: Reviewed;
+  /** The campaign's uuid in the target; `undefined` when the target does not hold the campaign. */
+  readonly campaignId: () => Promise<string | undefined>;
+}
+
+/**
+ * Import the renders one campaign's report names (PT-8d4; Grok PT-8d 4 and 6).
+ * Renders are written ONLY when this run wrote or skipped the report row: the
+ * stored report is then the reviewed file, and the paths are that file's. With
+ * a refused or failed row every path is listed as not written.
+ *
+ * It throws only BEFORE the first write (the report file is no longer the
+ * reviewed one although its row was kept; the report file is not JSON although
+ * its row was kept; the target does not hold the campaign; the lookup failed)
+ * or when `record` throws. After a write, a failure is a `failed` render in the
+ * answer, never a throw.
+ */
+export async function importCampaignRenders(
+  objects: RenderObjects,
+  input: CampaignRenders,
+  read: RenderReader,
+  record: MintRecord,
+): Promise<RenderResult[]> {
+  const { slug } = input;
+  const kept = input.reportStatus === "written" || input.reportStatus === "skipped";
+  if (input.reportFile.state !== "ok") {
+    if (!kept) return [];
+    throw new Error(
+      `reports/${slug}.json is no longer the reviewed file; none of its renders was written`,
+    );
+  }
+  if (kept && !isJson(input.reportFile.bytes)) {
+    throw new Error(
+      `reports/${slug}.json is not JSON although its row was kept; none of its renders was written`,
+    );
+  }
+  const paths = reportPaths(input.reportFile.bytes);
+  if (!kept) return notWrittenRenders(slug, paths);
+  if (paths.length === 0) return [];
+  const campaignId = await input.campaignId();
+  if (campaignId === undefined) {
+    throw new Error(`the target holds no campaign ${slug}; none of its renders was written`);
+  }
+  return importRenders(objects, { orgId: input.orgId, campaignId, slug }, paths, read, record);
 }

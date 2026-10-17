@@ -20,6 +20,7 @@ import {
   type PlanProbe,
 } from "../server/lib/import/apply.js";
 import { IMPORT_STEPS } from "../server/lib/import/steps.js";
+import { planRenderProbes } from "../server/lib/import/renders-plan.js";
 import type { HashedContext } from "../server/lib/import/campaign-step.js";
 import { scanBriefs } from "../server/lib/import/scan.js";
 import { assemblePlan, unreferencedInputsPlan } from "../server/lib/import/plan.js";
@@ -205,7 +206,14 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
     // Class (P), D228: read from the target like the probes, so outside the digest.
     let existingCampaigns: ExistingCampaignsPlan | null = null;
     if (backend === "postgres" && objectStore() === "s3") {
-      probes = await planProbes(ctx, result.campaigns, expectedHashes);
+      // What `apply` would do with each render a report names (PT-8d): read from
+      // the target after the digest was computed, so never part of it.
+      probes = await planRenderProbes(
+        ctx,
+        await planProbes(ctx, result.campaigns, expectedHashes),
+        assembled.reports,
+        files,
+      );
       existingCampaigns = await planExistingCampaigns(database(), ctx);
     } else {
       probesSkipped = "needs STORE_BACKEND=postgres and OBJECT_STORE=s3";
