@@ -353,7 +353,9 @@ export async function verifyImport(
       continue;
     }
     const campaign = { campaignId: meta.campaignId, slug };
-    checks.push(...(await verifyRenders(stores.objects, ctx, campaign, report.fields, fingerprints)));
+    checks.push(
+      ...(await verifyRenders(stores.objects, ctx, campaign, report.fields, fingerprints)),
+    );
   }
   return summarise(checks);
 }
