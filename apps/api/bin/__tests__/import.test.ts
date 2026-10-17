@@ -339,10 +339,10 @@ describe("import CLI (PT-8a)", () => {
     const text = out.join("\n");
     expect(text).toContain("0  nothing was refused and nothing is partial");
     expect(text).toContain(
-      "1  at least one campaign is partial (a write of it failed, or one of its report, pool or decision rows was refused), or the run itself failed, or the run wrote something and refused at least one campaign",
+      "1  at least one campaign is partial (a write of it failed, or one of its report, pool or decision rows was refused, or one of its renders is missing, was refused or failed), or the run itself failed, or the run wrote something and refused at least one campaign",
     );
     expect(text).toContain(
-      "3  the run wrote nothing: at least one campaign was refused before any write, none was created or completed, no row was written, nothing is partial",
+      "3  the run wrote nothing: at least one campaign was refused before any write, none was created or completed, no row was written, no render was created, nothing is partial",
     );
   });
 

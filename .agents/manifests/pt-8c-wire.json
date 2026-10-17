@@ -7,15 +7,33 @@
       "before": "    if (report?.status === \"refused\") {",
       "after": "    if (report?.status === \"refused\" && slug === \"\") {",
       "because": "Owner, 2026-10-11: a decision's run is the report revision the reviewer saw, so decisions are not written while the report is refused.",
-      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply-rows.test.ts", "-t", "a refused report makes the line partial and exit 1; the pool is still written and the decisions are not"],
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply-rows.test.ts",
+        "-t",
+        "a refused report makes the line partial and exit 1; the pool is still written and the decisions are not"
+      ],
       "verdict": "caught"
     },
     {
       "file": "apps/api/server/lib/import/steps.ts",
-      "before": "export const IMPORT_STEPS: ImportSteps = [importCampaignStep, importRowsStep];",
-      "after": "export const IMPORT_STEPS: ImportSteps = [importCampaignStep];",
+      "before": "export const IMPORT_STEPS: ImportSteps = [importCampaignStep, importRowsStep, importRendersStep];",
+      "after": "export const IMPORT_STEPS: ImportSteps = [importCampaignStep, importRendersStep];",
       "because": "PT-8c: the rows step is registered after the campaign step; without it apply imports no report, pool or decisions.",
-      "command": ["yarn", "vitest", "run", "--project", "api", "apps/api/server/lib/import/__tests__/apply-rows.test.ts", "-t", "a campaign with no report file still gets its decisions"],
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/apply-rows.test.ts",
+        "-t",
+        "a campaign with no report file still gets its decisions"
+      ],
       "verdict": "caught"
     }
   ]
