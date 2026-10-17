@@ -317,9 +317,8 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)(
       await briefs().createBrief(
         briefBody({ id: "gone", products: [product("assets/inputs/gone/logo.png")] }),
       );
-      const real = (
-        await vi.importActual<typeof import("../asset-step.js")>("../asset-step.js")
-      ).resolveRefTargets;
+      const real = (await vi.importActual<typeof import("../asset-step.js")>("../asset-step.js"))
+        .resolveRefTargets;
       vi.mocked(resolveRefTargets).mockImplementationOnce((...args) => {
         rmSync(join(t.root, "assets/inputs/gone/logo.png"), { force: true });
         return real(...args);
