@@ -122,8 +122,7 @@ const routes = (brief: Record<string, unknown>): Saved[] => {
 const atWidth = (px: number) => {
   const original = window.innerWidth;
   Object.defineProperty(window, "innerWidth", { value: px, configurable: true });
-  return () =>
-    Object.defineProperty(window, "innerWidth", { value: original, configurable: true });
+  return () => Object.defineProperty(window, "innerWidth", { value: original, configurable: true });
 };
 
 /** Mounts the editor at the brief's own route and waits for the brief to land. */
@@ -140,14 +139,12 @@ const open = async (brief: Record<string, unknown>) => {
 const save = async (user: ReturnType<typeof userEvent.setup>) =>
   user.click(screen.getByRole("button", { name: /^Save$/ }));
 
-const timelines = () => Array.from(document.querySelectorAll("[data-tape-host], [data-sequence-host]"));
+const timelines = () =>
+  Array.from(document.querySelectorAll("[data-tape-host], [data-sequence-host]"));
 
 const savedTimeline = (brief: Saved | undefined) =>
-  (
-    brief?.copy as
-      | { timeline?: { beats?: { text: string }[]; keyBeat?: number } }
-      | undefined
-  )?.timeline;
+  (brief?.copy as { timeline?: { beats?: { text: string }[]; keyBeat?: number } } | undefined)
+    ?.timeline;
 
 describe("VT1 — the sequence editor's mount gates and wired gestures", () => {
   beforeEach(() => {
@@ -353,9 +350,7 @@ describe("VT1 — the sequence editor's mount gates and wired gestures", () => {
           layer.kind === "video"
             ? {
                 ...layer,
-                tracks: [
-                  { property: "opacity", stops: [{ t: 0.5, value: 1, clock: "pose" }] },
-                ],
+                tracks: [{ property: "opacity", stops: [{ t: 0.5, value: 1, clock: "pose" }] }],
               }
             : layer,
         ),
@@ -370,9 +365,7 @@ describe("VT1 — the sequence editor's mount gates and wired gestures", () => {
 
         // The pick the diamonds ride on (CC3): the video row itself is the
         // pick control on the sequence host.
-        await user.click(
-          screen.getByRole("button", { name: messages.sequenceVideoClip(1, 6) }),
-        );
+        await user.click(screen.getByRole("button", { name: messages.sequenceVideoClip(1, 6) }));
         const key = await screen.findByRole("slider", {
           name: messages.tapeDiamondName(messages.TRACK_PROPERTY_LABEL.opacity, 0),
         });
@@ -402,7 +395,9 @@ describe("VT1 — the sequence editor's mount gates and wired gestures", () => {
         const saved = await open(videoBrief);
 
         // One video layer is the last enabled required one: no hide control.
-        expect(screen.queryByRole("button", { name: messages.sequenceHideVideoTrack(1) })).toBeNull();
+        expect(
+          screen.queryByRole("button", { name: messages.sequenceHideVideoTrack(1) }),
+        ).toBeNull();
 
         await user.click(screen.getByRole("button", { name: messages.sequenceAddVideoTrack }));
         await waitFor(() =>

@@ -693,7 +693,11 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
     const restore = atNarrowWidth();
     try {
       render(
-        <TimelineSection state={videoState()} dispatch={vi.fn()} sectionPlayhead={movingPlayhead} />,
+        <TimelineSection
+          state={videoState()}
+          dispatch={vi.fn()}
+          sectionPlayhead={movingPlayhead}
+        />,
       );
       expect(document.querySelector('[data-sequence-host="section"]')).toBeTruthy();
       expect(document.querySelector("[data-tape-host]")).toBeNull();
@@ -775,7 +779,11 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
     try {
       const dispatch = vi.fn();
       render(
-        <TimelineSection state={videoState()} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
+        <TimelineSection
+          state={videoState()}
+          dispatch={dispatch}
+          sectionPlayhead={movingPlayhead}
+        />,
       );
       // The same gesture the editor test pins at brief-editor.sequence-timeline
       // .test.tsx: down paints nothing, the move picks the slot, the release
