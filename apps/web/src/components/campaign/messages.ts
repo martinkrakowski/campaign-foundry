@@ -1748,6 +1748,65 @@ export function tapeTick(seconds: number): string {
   return `${seconds}s`;
 }
 
+/* ── The sequence timeline (VT1, 2026-10-12_motion-sequence-editor.md) ────── */
+
+/**
+ * The sequence panel's own heading — not the tape's "Timeline", because the two
+ * surfaces are different documents about the same draft (§3: the tape is a view
+ * of the copy ruler plus one video span; this one is the video creative's tracks).
+ */
+export const sequenceLegend = "Sequence";
+/** The add-track group's name. A track, not a layer: the operator's word for the row. */
+export const sequenceAddTrackLabel = "Add a track";
+/** The two add offers. Video is uncapped; text is the one the shared budget rules. */
+export const sequenceAddVideoTrack = "Add a video track";
+export const sequenceAddTextTrack = "Add a text track";
+/**
+ * Why "Add a text track" is disabled (VT-D4): the control stays visible and
+ * disabled rather than disappearing, because the text TRACK still exists — it is
+ * the one animated-text layer's beats — and a vanishing control would read as
+ * "this creative has no text" rather than "it already has its one".
+ */
+export const sequenceAddTextBlocked =
+  "This creative allows one animated-text layer, and it already has one — its beats are the text track.";
+/** A video row's name: kind and position, never the layer id (which is a slug). */
+export function sequenceVideoTrack(position: number): string {
+  return `Video track ${position}`;
+}
+/**
+ * A video clip's accessible name (§7): kind, index and timing in seconds — the
+ * one place the plan asks for seconds IN a label, and display-only (VT-D2: the
+ * clip itself has no stored span; it runs the whole duration).
+ */
+export function sequenceVideoClip(position: number, durationSec: number): string {
+  return `Video clip ${position}, 0.00 to ${durationSec.toFixed(2)} seconds`;
+}
+/** A text clip's accessible name, with its resolved window in seconds (§7). */
+export function sequenceBeatClip(position: number, startSec: number, endSec: number): string {
+  return `Text clip ${position}, ${startSec.toFixed(2)} to ${endSec.toFixed(2)} seconds`;
+}
+/** The video row's enable/hide offers. Present-but-disabled is the point (VT-D7). */
+export function sequenceHideVideoTrack(position: number): string {
+  return `Hide video track ${position}`;
+}
+export function sequenceShowVideoTrack(position: number): string {
+  return `Show video track ${position}`;
+}
+/** The video row's reorder offers — the same `moveLayer` the layer stack offers. */
+export function sequenceMoveVideoTrackUp(position: number): string {
+  return `Move video track ${position} up`;
+}
+export function sequenceMoveVideoTrackDown(position: number): string {
+  return `Move video track ${position} down`;
+}
+/**
+ * The panel's own statement of what it will not pretend (§10 question 2): video
+ * and music-bed clips have no in/out to write, and the surface says so rather
+ * than offering a trim that would be a lie.
+ */
+export const sequenceFullSpanNote =
+  "Video and music-bed clips run the whole clip. They cannot be trimmed here yet.";
+
 export const timelineBeatSceneLabel = (n: number) => `Beat ${n} scene`;
 export const timelineBeatSceneClearLabel = (n: number) => `Clear beat ${n} scene`;
 export const timelineBeatSceneNone = "Creative ground";

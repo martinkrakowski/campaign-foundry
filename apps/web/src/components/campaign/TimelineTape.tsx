@@ -122,7 +122,7 @@ export function formatTapeClock(seconds: number): string {
  * themselves still ship on the root, where the lane grid's own
  * `grid-cols-[var(--tt-label)_1fr]` reads them.
  */
-function xFor(seconds: number, pxPerSec: number): string {
+export function xFor(seconds: number, pxPerSec: number): string {
   return `calc(${TAPE_LABEL_PX}px + ${seconds} * ${pxPerSec}px)`;
 }
 
@@ -131,12 +131,12 @@ function xFor(seconds: number, pxPerSec: number): string {
  * whole cutoff fix. Without it the playhead at `t = durationSec` sits on the
  * well's border-radius and loses its knob, which is what the HTML sketch did.
  */
-function canvasWidth(durationSec: number, pxPerSec: number): string {
+export function canvasWidth(durationSec: number, pxPerSec: number): string {
   return `calc(${TAPE_LABEL_PX}px + ${durationSec} * ${pxPerSec}px + ${TAPE_END_PAD_PX}px)`;
 }
 
 /** A lane's own canvas: the clip length plus the same end pad, minus the label. */
-function laneWidth(durationSec: number, pxPerSec: number): string {
+export function laneWidth(durationSec: number, pxPerSec: number): string {
   return `calc(${durationSec} * ${pxPerSec}px + ${TAPE_END_PAD_PX}px)`;
 }
 
@@ -224,11 +224,19 @@ export interface TimelineTapeProps {
 
 /* ── Pieces ───────────────────────────────────────────────────────────────── */
 
+/*
+ * The pieces below this marker are exported for `SequenceTimeline` too (VT1):
+ * the ruler, the playhead pair, the commit-once sliders and the geometry
+ * helpers are the same surface vocabulary on both timelines, and a second copy
+ * of any of them would be a second place for the once-on-release commit rule to
+ * drift from. Nothing exported here changes behaviour; the export is additive.
+ */
+
 /**
  * The ruler, inside the one scrollport — that is the whole point. A tick per
  * whole second, including the last one, which is the tick the sketch cropped.
  */
-function Ruler({ durationSec, pxPerSec }: { durationSec: number; pxPerSec: number }): ReactNode {
+export function Ruler({ durationSec, pxPerSec }: { durationSec: number; pxPerSec: number }): ReactNode {
   const ticks = [];
   for (let second = 0; second <= Math.floor(durationSec); second += 1) ticks.push(second);
   return (
@@ -264,7 +272,7 @@ function Ruler({ durationSec, pxPerSec }: { durationSec: number; pxPerSec: numbe
  * readability rule, and a keyframe has none — `layerTracksProblem` is the only
  * refusal, and it cannot fire on a `t` a range input clamps into range.
  */
-function Diamond({
+export function Diamond({
   diamond,
   durationSec,
   pxPerSec,
@@ -320,7 +328,7 @@ function Diamond({
  * seconds (§9.3.2). A dwell-floor breach is hearable on this handle (§9.3.4,
  * D138): committed and flagged, never snapped back.
  */
-function BeatBoundary({
+export function BeatBoundary({
   boundary,
   left,
   right,
@@ -506,7 +514,7 @@ function Clip(props: {
  * cell IS the compositor frame (D52/VE-D6), and a second picture of the creative
  * beside it would be a second renderer's opinion of the same second.
  */
-function FilmPerforations(): ReactNode {
+export function FilmPerforations(): ReactNode {
   const perforation =
     "linear-gradient(180deg, color-mix(in srgb, var(--color-scrim) 18%, transparent) 0 3px," +
     " transparent 3px calc(100% - 3px)," +
@@ -530,7 +538,7 @@ function FilmPerforations(): ReactNode {
  * the same fact twice (DESIGN.md §4 — the lesson the header's
  * own theme control already taught).
  */
-function Playhead({
+export function Playhead({
   seconds,
   durationSec,
   pxPerSec,
@@ -571,7 +579,7 @@ function Playhead({
  * user never fires a pointer event and a pointer-only commit would leave them
  * able to move the thumb and unable to move the frame.
  */
-function PlayheadSlider({
+export function PlayheadSlider({
   durationSec,
   scrubSec,
   onLive,
@@ -600,7 +608,7 @@ function PlayheadSlider({
 }
 
 /** A ±1 s nudge. A button that does a thing once — never a hold-to-repeat clock. */
-function Nudge({
+export function Nudge({
   name,
   onClick,
   children,

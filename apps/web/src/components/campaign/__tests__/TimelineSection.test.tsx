@@ -1,10 +1,11 @@
 import { describe, test, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   resolveTimeline,
   timelineProblem,
 } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
+import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { TimelineSection } from "../TimelineSection";
 import * as messages from "../messages";
 import {
@@ -501,7 +502,14 @@ describe("TimelineSection — the proportion bar (E5.3)", () => {
 });
 
 describe("TimelineSection — TL4's bed reaches the section tape too", () => {
-  const playhead = { durationSec: 6, committedSec: 0, commit: vi.fn() };
+  const playhead = {
+    durationSec: 6,
+    committedSec: 0,
+    commit: vi.fn(),
+    // VT-D1 — the narrow host gates on the look's motion, the same fact the
+    // rail does; the fixture carries one so the tape mounts at all.
+    motion: "ken-burns-in",
+  } as const;
   const bed = {
     path: "assets/audio/bed-01.mp3",
     rights: { licenceId: "LIC-42", source: "Acme Library", expiresOn: "2027-01-01" },
@@ -643,5 +651,183 @@ describe("TimelineSection — the beat scene chip", () => {
       />,
     );
     expect(screen.getByText("summer-pool.png")).toBeTruthy();
+  });
+});
+
+/**
+ * VT1 — the narrow host's gate (`2026-10-12_motion-sequence-editor.md` §8).
+ *
+ * Which timeline a moving draft gets is VT-D1's split: creative type `video`
+ * mounts `SequenceTimeline`, every other motion look keeps `TimelineTape`, and
+ * a look with no motion mounts neither — the last one is a behaviour change
+ * this lane owns, because the old rule (playhead + beats) mounted a timeline
+ * over a creative that cannot move.
+ */
+describe("TimelineSection — the narrow host's VT-D1 gate", () => {
+  const atNarrowWidth = () => {
+    const original = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { value: 900, configurable: true });
+    return () =>
+      Object.defineProperty(window, "innerWidth", { value: original, configurable: true });
+  };
+
+  const movingPlayhead = {
+    durationSec: 6,
+    committedSec: 0,
+    commit: vi.fn(),
+    motion: "ken-burns-in",
+  } as const;
+
+  const videoState = () =>
+    withBeats(
+      [
+        { text: "One", weight: 1 },
+        { text: "Two", weight: 1 },
+      ],
+      {
+        template: templateFromCanonical("short-video"),
+      },
+    );
+
+  test("a video creative mounts the sequence timeline, not the tape", () => {
+    const restore = atNarrowWidth();
+    try {
+      render(
+        <TimelineSection
+          state={videoState()}
+          dispatch={vi.fn()}
+          sectionPlayhead={movingPlayhead}
+        />,
+      );
+      expect(document.querySelector('[data-sequence-host="section"]')).toBeTruthy();
+      expect(document.querySelector("[data-tape-host]")).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  test("an image-text motion look keeps the tape and does not show the sequence", () => {
+    const restore = atNarrowWidth();
+    try {
+      render(
+        <TimelineSection
+          state={withBeats([{ text: "One", weight: 1 }])}
+          dispatch={vi.fn()}
+          sectionPlayhead={movingPlayhead}
+        />,
+      );
+      expect(document.querySelector("[data-tape-host]")).toBeTruthy();
+      expect(document.querySelector("[data-sequence-host]")).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  test("a look with no motion mounts neither timeline", () => {
+    const restore = atNarrowWidth();
+    try {
+      render(
+        <TimelineSection
+          state={withBeats([{ text: "One", weight: 1 }])}
+          dispatch={vi.fn()}
+          sectionPlayhead={{ durationSec: 6, committedSec: 0, commit: vi.fn() }}
+        />,
+      );
+      expect(document.querySelector("[data-tape-host]")).toBeNull();
+      expect(document.querySelector("[data-sequence-host]")).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  test("the sequence host wires the beats' own actions, which this panel owns", async () => {
+    const user = userEvent.setup();
+    const restore = atNarrowWidth();
+    let state = videoState();
+    try {
+      const dispatch = vi.fn((action: Parameters<typeof editorReducer>[1]) => {
+        state = editorReducer(state, action);
+        rerender(
+          <TimelineSection state={state} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
+        );
+      });
+      const { rerender } = render(
+        <TimelineSection state={state} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
+      );
+
+      // Add-track: video is uncapped and commits; text is the budget's and the
+      // canonical video template already carries its one animated-text layer.
+      await user.click(screen.getByRole("button", { name: messages.sequenceAddVideoTrack }));
+      expect(state.template.layers.filter((l) => l.kind === "video")).toHaveLength(2);
+      const addText = screen.getByRole("button", {
+        name: messages.sequenceAddTextTrack,
+      }) as HTMLButtonElement;
+      expect(addText.disabled).toBe(true);
+      expect(screen.getAllByText(messages.sequenceAddTextBlocked).length).toBeGreaterThan(0);
+
+      // Reorder via the form's own arrows is the same action the timeline's
+      // drag commits — the two surfaces share one writer.
+      await user.click(screen.getByLabelText(messages.timelineMoveBeatDown(1)));
+      expect(dispatch).toHaveBeenCalledWith({ type: "moveBeat", from: 0, to: 1 });
+    } finally {
+      restore();
+    }
+  });
+
+  test("dragging a text clip to the neighbouring slot commits one moveBeat on release", () => {
+    const restore = atNarrowWidth();
+    try {
+      const dispatch = vi.fn();
+      render(
+        <TimelineSection
+          state={videoState()}
+          dispatch={dispatch}
+          sectionPlayhead={movingPlayhead}
+        />,
+      );
+      // The same gesture the editor test pins at brief-editor.sequence-timeline
+      // .test.tsx: down paints nothing, the move picks the slot, the release
+      // writes once. The fit floor in happy-dom is 28 px/s over the 6 s pair,
+      // so 84 px is the second half — beat 2's window.
+      const clip = screen.getByRole("button", { name: messages.sequenceBeatClip(1, 0, 3) });
+      fireEvent.pointerDown(clip, { clientX: 28 });
+      fireEvent.pointerMove(clip, { clientX: 84 });
+      fireEvent.pointerUp(clip);
+      expect(dispatch).toHaveBeenCalledWith({ type: "moveBeat", from: 0, to: 1 });
+    } finally {
+      restore();
+    }
+  });
+
+  test("releasing a boundary handle shifts the weight through the reducer", () => {
+    const restore = atNarrowWidth();
+    try {
+      // Weights of 1 leave the handle no room: the pair's transfer range is
+      // [1, pair-1], so this case needs a join with slack on both sides.
+      let state = withBeats(
+        [
+          { text: "One", weight: 2 },
+          { text: "Two", weight: 4 },
+        ],
+        { template: templateFromCanonical("short-video") },
+      );
+      const dispatch = vi.fn((action: Parameters<typeof editorReducer>[1]) => {
+        state = editorReducer(state, action);
+        rerender(
+          <TimelineSection state={state} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
+        );
+      });
+      const { rerender } = render(
+        <TimelineSection state={state} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
+      );
+
+      const boundary = screen.getByRole("slider", { name: messages.tapeBeatBoundaryName(1) });
+      fireEvent.change(boundary, { target: { value: "4" } });
+      fireEvent.pointerUp(boundary);
+      expect(dispatch).toHaveBeenCalledWith({ type: "shiftBeatBoundary", boundary: 0, delta: 2 });
+      expect(state.timeline.beats.map((beat) => beat.weight)).toEqual([4, 2]);
+    } finally {
+      restore();
+    }
   });
 });
