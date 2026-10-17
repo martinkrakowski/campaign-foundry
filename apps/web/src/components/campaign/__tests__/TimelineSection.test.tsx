@@ -1,5 +1,5 @@
 import { describe, test, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   resolveTimeline,
@@ -765,6 +765,59 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
       // drag commits — the two surfaces share one writer.
       await user.click(screen.getByLabelText(messages.timelineMoveBeatDown(1)));
       expect(dispatch).toHaveBeenCalledWith({ type: "moveBeat", from: 0, to: 1 });
+    } finally {
+      restore();
+    }
+  });
+
+  test("dragging a text clip to the neighbouring slot commits one moveBeat on release", () => {
+    const restore = atNarrowWidth();
+    try {
+      const dispatch = vi.fn();
+      render(
+        <TimelineSection state={videoState()} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
+      );
+      // The same gesture the editor test pins at brief-editor.sequence-timeline
+      // .test.tsx: down paints nothing, the move picks the slot, the release
+      // writes once. The fit floor in happy-dom is 28 px/s over the 6 s pair,
+      // so 84 px is the second half — beat 2's window.
+      const clip = screen.getByRole("button", { name: messages.sequenceBeatClip(1, 0, 3) });
+      fireEvent.pointerDown(clip, { clientX: 28 });
+      fireEvent.pointerMove(clip, { clientX: 84 });
+      fireEvent.pointerUp(clip);
+      expect(dispatch).toHaveBeenCalledWith({ type: "moveBeat", from: 0, to: 1 });
+    } finally {
+      restore();
+    }
+  });
+
+  test("releasing a boundary handle shifts the weight through the reducer", () => {
+    const restore = atNarrowWidth();
+    try {
+      // Weights of 1 leave the handle no room: the pair's transfer range is
+      // [1, pair-1], so this case needs a join with slack on both sides.
+      let state = withBeats(
+        [
+          { text: "One", weight: 2 },
+          { text: "Two", weight: 4 },
+        ],
+        { template: templateFromCanonical("short-video") },
+      );
+      const dispatch = vi.fn((action: Parameters<typeof editorReducer>[1]) => {
+        state = editorReducer(state, action);
+        rerender(
+          <TimelineSection state={state} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
+        );
+      });
+      const { rerender } = render(
+        <TimelineSection state={state} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
+      );
+
+      const boundary = screen.getByRole("slider", { name: messages.tapeBeatBoundaryName(1) });
+      fireEvent.change(boundary, { target: { value: "4" } });
+      fireEvent.pointerUp(boundary);
+      expect(dispatch).toHaveBeenCalledWith({ type: "shiftBeatBoundary", boundary: 0, delta: 2 });
+      expect(state.timeline.beats.map((beat) => beat.weight)).toEqual([4, 2]);
     } finally {
       restore();
     }

@@ -298,6 +298,102 @@ describe("VT1 — the sequence editor's mount gates and wired gestures", () => {
     });
   });
 
+  describe("TL3 — the boundary's drag, against the saved brief", () => {
+    test("releasing a boundary handle writes two integer weights, the sum intact", async () => {
+      const user = userEvent.setup();
+      const restore = atWidth(1440);
+      try {
+        // Weights of 1 leave the handle no room: the pair's own transfer range
+        // is [1, pair-1], so this drag needs a join with slack on both sides.
+        const saved = await open({
+          ...videoBrief,
+          copy: {
+            timeline: {
+              beats: [
+                { text: "Stay wild", weight: 2 },
+                { text: "Stay hydrated", weight: 4 },
+              ],
+              transition: "cut",
+              keyBeat: 1,
+            },
+          },
+        });
+
+        // The same gesture the tape test commits: the change paints, the
+        // release writes. 4 s of the 6 s pair is weight 4 left, 2 right.
+        const boundary = screen.getByRole("slider", {
+          name: messages.tapeBeatBoundaryName(1),
+        });
+        fireEvent.change(boundary, { target: { value: "4" } });
+        fireEvent.pointerUp(boundary);
+
+        await save(user);
+        await waitFor(() => expect(saved).toHaveLength(1));
+        const beats = savedTimeline(saved[0])?.beats as
+          | { text: string; weight: number }[]
+          | undefined;
+        expect(beats?.map((b) => b.weight)).toEqual([4, 2]);
+        // The domain stores weights, not seconds: a neighbour transfer moves
+        // whole units, so both stay integers and the pair keeps its sum.
+        for (const beat of beats ?? []) expect(Number.isInteger(beat.weight)).toBe(true);
+        expect((beats ?? []).reduce((sum, beat) => sum + beat.weight, 0)).toBe(6);
+      } finally {
+        restore();
+      }
+    });
+  });
+
+  describe("TL6 / VT-D8 — the picked layer's diamond, against the saved brief", () => {
+    /** The canonical video template, with one pose-clock key on the video layer. */
+    const trackedTemplate = () => {
+      const base = templateFromCanonical("short-video");
+      return {
+        ...base,
+        layers: base.layers.map((layer) =>
+          layer.kind === "video"
+            ? {
+                ...layer,
+                tracks: [
+                  { property: "opacity", stops: [{ t: 0.5, value: 1, clock: "pose" }] },
+                ],
+              }
+            : layer,
+        ),
+      };
+    };
+
+    test("dragging a key on the picked video layer writes the stop's t", async () => {
+      const user = userEvent.setup();
+      const restore = atWidth(1440);
+      try {
+        const saved = await open({ ...videoBrief, template: trackedTemplate() });
+
+        // The pick the diamonds ride on (CC3): the video row itself is the
+        // pick control on the sequence host.
+        await user.click(
+          screen.getByRole("button", { name: messages.sequenceVideoClip(1, 6) }),
+        );
+        const key = await screen.findByRole("slider", {
+          name: messages.tapeDiamondName(messages.TRACK_PROPERTY_LABEL.opacity, 0),
+        });
+        // The slider's value is seconds: 1.5 s of the 6 s clock is t 0.25.
+        fireEvent.change(key, { target: { value: "1.5" } });
+        fireEvent.pointerUp(key);
+
+        await save(user);
+        await waitFor(() => expect(saved).toHaveLength(1));
+        const layers = (
+          saved[0]?.template as {
+            layers: { id: string; tracks?: { stops: { t: number }[] }[] }[];
+          }
+        ).layers;
+        expect(layers.find((l) => l.id === "video")?.tracks?.[0]?.stops?.[0]?.t).toBe(0.25);
+      } finally {
+        restore();
+      }
+    });
+  });
+
   describe("VT-D7 — hide, against the saved brief", () => {
     test("hiding a video row writes enabled:false, stays on the timeline, and comes back", async () => {
       const user = userEvent.setup();
