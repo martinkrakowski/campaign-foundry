@@ -1,15 +1,19 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
 import { dumpBrief, errorMessage } from "@campaignfoundry/shared";
 import type { SqlQuery } from "../db/sql-client.js";
 import { parseBriefText } from "../load-brief.js";
 import { isAssetId } from "../ports/asset-store.port.js";
+import { hashBytes } from "../brief-files.js";
+import { resolveRefTargets } from "./asset-step.js";
 import { blocksImport, classifyRefs, type RefClassification } from "./classify.js";
 import type { StepContext } from "./steps.js";
 
 /**
  * Class (P) of PT-8, D228: campaigns that already exist in the target org and whose
- * LATEST brief version still names a file by path. Everything here is read-only: one
- * `select`, and the `lstat`/read `classifyRefs` does on the source tree.
+ * LATEST brief version still names a file by path. Everything here is read-only: three
+ * `select`s, and the `lstat`/read `classifyRefs` does on the source tree.
  */
 
 /** One live campaign's latest version, as stored. */
@@ -165,6 +169,59 @@ export function classifyExisting(ctx: StepContext, row: LatestBody): ExistingCam
   return { campaignId, slug, revision, state: "normalise", brief, refs };
 }
 
+/** One ref target as the second digest saw it: the ref the body names, and its file's sha256. */
+export interface ExistingFile {
+  readonly ref: string;
+  readonly sha256: string;
+}
+
+/** What the second digest covers of one `normalise` campaign. */
+export interface DigestedCampaign {
+  readonly slug: string;
+  readonly revision: string;
+  readonly files: readonly ExistingFile[];
+}
+
+/**
+ * The sha256 of each file a `normalise` campaign's path refs name, in the body's own
+ * ref order. Each file is read once, here. Every ref is clean (`classifyExisting`), so
+ * each resolves under `assets/` to a regular file. A file that vanished since then
+ * throws, and `plan` ends with that error: nothing is hashed by guessing.
+ */
+export function refTargetHashes(
+  ctx: StepContext,
+  found: Extract<ExistingCampaign, { readonly state: "normalise" }>,
+): ExistingFile[] {
+  const targets = resolveRefTargets(ctx, {
+    slug: found.slug,
+    sourcePath: "",
+    name: null,
+    type: null,
+    brief: found.brief,
+    refs: found.refs,
+    sample: false,
+  });
+  return targets.map((target) => ({
+    ref: target.ref,
+    sha256: hashBytes(readFileSync(target.path)),
+  }));
+}
+
+/**
+ * The second digest (PT-8e 1): what the owner reviewed of class (P), which `apply`
+ * recomputes and refuses on before the first normalise write. The sha256, in hex, of
+ * the UTF-8 bytes of `JSON.stringify` of `[slug, revision, [[ref, sha256], …]]` per
+ * campaign: campaigns by slug (code-unit order; a slug is unique in an org), each
+ * campaign's files in the order given (the body's ref order). No campaign is `[]`.
+ */
+export function existingDigest(campaigns: readonly DigestedCampaign[]): string {
+  const sorted = [...campaigns].sort((a, b) => (a.slug < b.slug ? -1 : 1));
+  const canonical = JSON.stringify(
+    sorted.map((c) => [c.slug, c.revision, c.files.map((file) => [file.ref, file.sha256])]),
+  );
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
 /** One campaign of the plan's `existingCampaigns` section. */
 export type ExistingCampaignPlan =
   | {
@@ -174,6 +231,8 @@ export type ExistingCampaignPlan =
       readonly refs: readonly RefClassification[];
       /** The campaign's unsaved drafts (PT-8e 8); `apply` skips a campaign that has one. */
       readonly drafts: number;
+      /** Each path ref with its file's sha256, as the section's `digest` covers them. */
+      readonly files: readonly ExistingFile[];
     }
   | {
       readonly slug: string;
@@ -191,6 +250,8 @@ export interface ExistingCampaignsPlan {
   /** How many `normalise` campaigns have at least one draft. */
   readonly withDraft: number;
   readonly counts: ExistingCounts;
+  /** The second digest (PT-8e 1): see {@link existingDigest}. */
+  readonly digest: string;
 }
 
 /**
@@ -205,6 +266,7 @@ export async function planExistingCampaigns(
   let normalise = 0;
   let refs = 0;
   let withDraft = 0;
+  const digested: DigestedCampaign[] = [];
   const drafts = await draftCounts(db, ctx.orgId);
   for (const row of await latestBodies(db, ctx.orgId)) {
     const found = classifyExisting(ctx, row);
@@ -215,12 +277,15 @@ export async function planExistingCampaigns(
       refs += found.refs.length;
       const draftCount = drafts.get(found.campaignId) ?? 0;
       if (draftCount > 0) withDraft++;
+      const files = refTargetHashes(ctx, found);
+      digested.push({ slug, revision, files });
       campaigns.push({
         slug,
         revision,
         state: "normalise",
         refs: found.refs,
         drafts: draftCount,
+        files,
       });
     } else {
       campaigns.push({ slug, revision, state: "refused", reason: found.reason });
@@ -234,5 +299,6 @@ export async function planExistingCampaigns(
     refused: campaigns.length - normalise,
     withDraft,
     counts,
+    digest: existingDigest(digested),
   };
 }

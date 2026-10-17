@@ -2,10 +2,15 @@ import { ObjectExistsError, type ObjectStorePort } from "@campaignfoundry/Campai
 import { contentTypeFor, renderObjectKey } from "@campaignfoundry/Distribution";
 import { errorMessage } from "@campaignfoundry/shared";
 import { hashBytes } from "../brief-files.js";
+import { objectStoreClient } from "../object-store/index.js";
 import { renderPrefix } from "../object-store/object-keys.js";
+import { getBriefStore } from "../ports/index.js";
+import { hasExpectedHashes, type HashedContext } from "./campaign-step.js";
+import { importTenant } from "./import-tenant.js";
+import { readReviewedRender } from "./render-file.js";
 import { reportRenderPaths } from "./report-paths.js";
-import type { Reviewed } from "./rows-step.js";
-import type { MintedObject, RowEntry } from "./steps.js";
+import { readReviewed, type Reviewed } from "./rows-step.js";
+import type { FollowUpStep, MintedObject, RowEntry, StepContext } from "./steps.js";
 
 /** The object-store calls a render import makes: all a store has to offer it. */
 export type RenderObjects = Pick<ObjectStorePort, "put" | "get" | "head">;
@@ -246,3 +251,47 @@ export async function importCampaignRenders(
   }
   return importRenders(objects, { orgId: input.orgId, campaignId, slug }, paths, read, record);
 }
+
+/** The step context `apply` builds: the reviewed hashes, and the reviewed stamp of every planned render. */
+export type RenderContext = HashedContext & {
+  readonly renderFingerprints: ReadonlyMap<string, string>;
+};
+
+/** True only when the step context carried the reviewed hashes AND the reviewed render stamps. */
+export function hasRenderFingerprints(ctx: StepContext): ctx is RenderContext {
+  return hasExpectedHashes(ctx) && "renderFingerprints" in ctx;
+}
+
+/**
+ * The follow-up step for PT-8d4, set (a): the renders of one imported campaign
+ * (Grok PT-8d 4, 6 and 8). It runs after the rows step and reads the report
+ * row's status from the line; a campaign with no report row names no render.
+ * The report file and every render file are read only as the reviewed ones.
+ * Each created object goes to `line.recordMinted` before the next write. It
+ * answers no row and no `minted`: the recorder already has every object.
+ * It throws only before the first write, or when the recorder throws.
+ */
+export const importRendersStep: FollowUpStep = async (ctx, campaign, line) => {
+  const report = line.rows.find((row) => row.kind === "report");
+  // No report row: the campaign has no report file, so no render is named.
+  if (report === undefined) return { rows: [] };
+  if (!hasRenderFingerprints(ctx)) {
+    throw new Error("no reviewed render fingerprints in the step context");
+  }
+  const { slug } = campaign;
+  const briefs = getBriefStore(importTenant(ctx.orgId));
+  const reportFile = await readReviewed(ctx.outputRoot, `reports/${slug}.json`, ctx.expectedHashes);
+  const renders = await importCampaignRenders(
+    objectStoreClient(),
+    {
+      orgId: ctx.orgId,
+      slug,
+      reportStatus: report.status,
+      reportFile,
+      campaignId: async () => (await briefs.campaignMeta(slug))?.campaignId,
+    },
+    (path) => readReviewedRender(ctx.outputRoot, path, ctx.renderFingerprints),
+    line.recordMinted,
+  );
+  return { rows: [], renders };
+};
