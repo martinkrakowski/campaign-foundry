@@ -21,7 +21,8 @@ import {
 } from "../server/lib/import/apply.js";
 import { IMPORT_STEPS } from "../server/lib/import/steps.js";
 import { planRenderProbes } from "../server/lib/import/renders-plan.js";
-import type { HashedContext } from "../server/lib/import/campaign-step.js";
+import { renderFingerprints } from "../server/lib/import/render-file.js";
+import type { RenderContext } from "../server/lib/import/renders-step.js";
 import { scanBriefs } from "../server/lib/import/scan.js";
 import { assemblePlan, unreferencedInputsPlan } from "../server/lib/import/plan.js";
 import { assembleCensus } from "../server/lib/import/census.js";
@@ -63,8 +64,8 @@ export const APPLY_USAGE =
   " --org <id> --expect <digest> --result <path> [--include-samples]" +
   "\nexit codes:\n" +
   "  0  nothing was refused and nothing is partial\n" +
-  "  1  at least one campaign is partial (a write of it failed, or one of its report, pool or decision rows was refused), or the run itself failed, or the run wrote something and refused at least one campaign\n" +
-  "  3  the run wrote nothing: at least one campaign was refused before any write, none was created or completed, no row was written, nothing is partial";
+  "  1  at least one campaign is partial (a write of it failed, or one of its report, pool or decision rows was refused, or one of its renders is missing, was refused or failed), or the run itself failed, or the run wrote something and refused at least one campaign\n" +
+  "  3  the run wrote nothing: at least one campaign was refused before any write, none was created or completed, no row was written, no render was created, nothing is partial";
 
 /**
  * The error `apply` stops with when a line of the result file cannot be written:
@@ -342,7 +343,13 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
     }
     handle = await openResult(flags.result!);
     const writer = new ResultWriter(handle, switchedAtIso, ctx.orgId, replanned.digest);
-    const hashedCtx: HashedContext = { ...ctx, expectedHashes: replanned.expectedHashes };
+    // The reviewed hashes for rows and assets, and the reviewed stamp of every
+    // planned render (PT-8d): a render file is read only if it still has its stamp.
+    const hashedCtx: RenderContext = {
+      ...ctx,
+      expectedHashes: replanned.expectedHashes,
+      renderFingerprints: renderFingerprints(replanned.files),
+    };
     const resultPath = flags.result;
     await writer.header();
     for (const refusal of replanned.result.refusals) {
@@ -377,6 +384,16 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
         for (const note of entryNotes(entry)) io.stdout(note);
         try {
           await writer.add(entry);
+        } catch (error) {
+          throw resultWriteError(resultPath, error);
+        }
+      },
+      // Grok PT-8d 6 and PT-8g G1: each created render is printed, then put on
+      // the result file and synced, BEFORE the step writes the next one.
+      async (slug, object) => {
+        io.stdout(`${slug}: minted render ${object.path} ${object.key}`);
+        try {
+          await writer.object(object);
         } catch (error) {
           throw resultWriteError(resultPath, error);
         }

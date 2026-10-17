@@ -458,9 +458,13 @@ refused a campaign. `3`: it wrote nothing, and at least one campaign was refused
 write. On `1` or `3`, read the log before step 6. Keep `cf-import-result.jsonl` and
 `cf-import-apply.log` with the dump: a rollback is the dump restored and then exactly the keys
 this run minted deleted from the bucket (D229). Stdout prints every minted asset key and every
-minted render key. So the log names them too if the copy was lost. As of this commit it prints
-the asset keys only (`asset <id> <name> <key>`); the render keys come with PT-8d4, which is
-one reason `apply` waits for it.
+minted render key. So the log names them too if the copy was lost. An asset key is on a line
+`asset <id> <name> <key>`. A render key is on a line
+`<slug>: minted render <path> <key>`, printed when the object is created. In the result
+file each created render also has its own line `{"kind":"object","key":…,"path":…}`,
+written before the next render, and its campaign's line lists it again under
+`minted.objects`: delete each key once. These are the renders of the campaigns this
+run imported (set (a)); the renders of a normalised campaign come with PT-8e3.
 
 **5. `verify`** (PT-8f). Read-only; it exits non-zero on any mismatch. As of this commit it is
 not built: the command answers `verify: not yet implemented` and exits 1. PT-8f3 fixes its
