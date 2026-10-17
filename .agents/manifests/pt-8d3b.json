@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "PT-8d3b",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/renders-plan.ts",
+      "before": "    if (stored.size === source.size) return { path, predicted: \"already-there\", ...shown };",
+      "after": "    if (stored.size !== source.size) return { path, predicted: \"already-there\", ...shown };",
+      "because": "Grok PT-8d 7 (owner, 2026-10-11): already-there when the stored size matches the reviewed file's, would-refuse when it differs.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/renders-plan.test.ts",
+        "-t",
+        "a reviewed file is a write with no object at its key, already there with one of its size, refused with one of another size"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/renders-plan.ts",
+      "before": "      return { path, predicted: stored === undefined ? \"missing\" : \"present\", ...shown };",
+      "after": "      return { path, predicted: stored === undefined ? \"present\" : \"missing\", ...shown };",
+      "because": "Grok PT-8d 7: with no source file, an object at the key is present and none is missing.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/renders-plan.test.ts",
+        "-t",
+        "with no source file an object at the key is present and no object is missing"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/renders-plan.ts",
+      "before": "    if (result.predicted === \"failed\") break;",
+      "after": "    if (result.predicted === \"path-refused\") break;",
+      "because": "A failed read stops the campaign's predictions (nothing is claimed after it); a refused path must not stop the others.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/renders-plan.test.ts",
+        "-t",
+        "a failed prediction stops the campaign's renders, and a refused one does not"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/renders-plan.ts",
+      "before": "    const reportKept = report === \"write\" || report === \"skip\";",
+      "after": "    const reportKept = true;",
+      "because": "Grok PT-8d 4 (owner, 2026-10-11): renders are written only when this run wrote or skipped the report row; when the row was refused each path is listed as not written. The plan must not predict a write the rule forbids.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/plan-renders.test.ts",
+        "-t",
+        "when a different report is stored every render is listed as not written"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

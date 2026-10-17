@@ -13,6 +13,8 @@ import type {
   PlannedCampaign,
   RowEntry,
   MintedObject,
+  RenderEntry,
+  StepLine,
 } from "./steps.js";
 import { IMPORT_STEPS } from "./steps.js";
 import { objectStore, storeBackend } from "../config.js";
@@ -209,6 +211,8 @@ export interface CampaignEntry {
   readonly unreferencedInputs: UnreferencedInputs;
   /** Rows the later steps wrote, skipped or refused (PT-8c); absent when no later step ran. */
   readonly rows?: readonly RowEntry[];
+  /** The renders the later steps wrote, found or left (PT-8d); absent when no step answered any. */
+  readonly renders?: readonly RenderEntry[];
   /** A later step's thrown error. The outcome and the minted ids above are still true. */
   readonly stepError?: string;
 }
@@ -239,6 +243,25 @@ function toEntry(slug: string, result: CampaignResult): CampaignEntry {
 }
 
 /**
+ * Keeps the record of ONE object a step created, as it is created (D229; Grok
+ * PT-8d 6): `apply` appends a line to the result file and syncs it. The step
+ * waits for it before its next write.
+ */
+export type MintRecorder = (slug: string, object: MintedObject) => Promise<void>;
+
+/** The render statuses that make a campaign's line partial (Grok PT-8d 5). */
+const UNCLEAN_RENDER = new Set<RenderEntry["status"]>(["missing", "refused", "failed"]);
+
+/** What one step minted: what it recorded as it went, then what it only answered at its end; each key once. */
+function mintedBy(
+  recorded: readonly MintedObject[],
+  answered: readonly MintedObject[],
+): MintedObject[] {
+  const keys = new Set(recorded.map((object) => object.key));
+  return [...recorded, ...answered.filter((object) => !keys.has(object.key))];
+}
+
+/**
  * Run each campaign through `steps` in plan order, feeding each a `HashedContext`
  * (the reviewed hashes ride the context, D221). The FIRST step is the campaign
  * step: its answer is the campaign's line. Every later step only ADDS to that
@@ -247,12 +270,18 @@ function toEntry(slug: string, result: CampaignResult): CampaignEntry {
  * refused campaign gets no later step (PT-8-3, F3). `onResult` receives each
  * campaign's entry as the result file must record it (D229).
  * The objects a later step says it minted join the line's minted.objects, in step order.
+ * A step is handed the rows already on the line and a recorder (`StepLine`): each
+ * object it records goes to `onMinted` at once (the result file's `object` line,
+ * Grok PT-8d 6) and joins minted.objects, also when the step throws afterwards.
+ * An `onMinted` that throws ends the RUN: nothing more may be written. A render
+ * that is `missing`, `refused` or `failed` makes the line partial (Grok PT-8d 5).
  */
 export async function applyCampaigns(
   ctx: HashedContext,
   campaigns: readonly PlannedCampaign[],
   steps: ImportSteps = IMPORT_STEPS,
   onResult: (entry: CampaignEntry) => Promise<void>,
+  onMinted?: MintRecorder,
 ): Promise<ApplyCounts> {
   const tally: Record<CampaignOutcome, number> = {
     created: 0,
@@ -263,6 +292,7 @@ export async function applyCampaigns(
   let partial = false;
   let rowsWritten = 0;
   let objectsMinted = 0;
+  const recordErrors: Error[] = [];
   const [campaignStep, ...laterSteps] = steps;
   for (const campaign of campaigns) {
     let entry: CampaignEntry;
@@ -283,31 +313,61 @@ export async function applyCampaigns(
     }
     if (entry.outcome !== "refused") {
       for (const step of laterSteps) {
+        // What this step records as it goes (Grok PT-8d 6): each object is on the
+        // result file before the step's next write, and on the line whatever follows.
+        const recorded: MintedObject[] = [];
+        const line: StepLine = {
+          rows: entry.rows ?? [],
+          recordMinted: async (object) => {
+            try {
+              await onMinted?.(campaign.slug, object);
+            } catch (error) {
+              const failure = new Error(errorMessage(error));
+              recordErrors.push(failure);
+              throw failure;
+            }
+            recorded.push(object);
+          },
+        };
         try {
-          const added = await step(ctx, campaign);
+          const added = await step(ctx, campaign, line);
           // Owner, 2026-10-11: a refused row makes the line partial. Read it from the
           // rows, so a step that forgets to say `partial` cannot make a line look clean.
           const unclean =
             entry.partial === true ||
             added.partial === true ||
+            (added.renders ?? []).some((render) => UNCLEAN_RENDER.has(render.status)) ||
             added.rows.some((row) => row.status === "refused" || row.status === "failed");
           rowsWritten += added.rows.filter((row) => row.status === "written").length;
-          const mintedNow = added.minted?.objects ?? [];
+          const mintedNow = mintedBy(recorded, added.minted?.objects ?? []);
           objectsMinted += mintedNow.length;
           const objects = [...(entry.minted.objects ?? []), ...mintedNow];
           entry = {
             ...entry,
             ...(unclean ? { partial: true } : {}),
             ...(mintedNow.length > 0 ? { minted: { ...entry.minted, objects } } : {}),
+            ...(added.renders ? { renders: [...(entry.renders ?? []), ...added.renders] } : {}),
             rows: [...(entry.rows ?? []), ...added.rows],
           };
+          // The record of an object could not be kept: no later step may write.
+          if (recordErrors.length > 0) break;
         } catch (error) {
           // The campaign row and its minted ids exist: the line keeps them and
-          // says what failed. Partial, so the run exits 1 and never 3.
+          // says what failed. Partial, so the run exits 1 and never 3. What the
+          // step recorded before it threw was created, and stays on the line.
+          objectsMinted += recorded.length;
+          if (recorded.length > 0) {
+            const kept = [...(entry.minted.objects ?? []), ...recorded];
+            entry = { ...entry, minted: { ...entry.minted, objects: kept } };
+          }
           entry = { ...entry, partial: true, stepError: errorMessage(error) };
           break;
         }
       }
+      // A record that could not be kept ends the RUN: the result file no longer
+      // lists what was created, so nothing more may be written (Grok PT-8d 6).
+      const [recordError] = recordErrors;
+      if (recordError !== undefined) throw recordError;
     }
     if (entry.partial) partial = true;
     tally[entry.outcome]++;
@@ -349,6 +409,10 @@ export function entryNotes(entry: CampaignEntry): string[] {
       (row.recanonicalised ? " (re-canonicalised)" : "") +
       (row.reason ? `: ${row.reason}` : ""),
   );
+  for (const render of entry.renders ?? []) {
+    const why = render.reason ? `: ${render.reason}` : "";
+    notes.push(`  render ${render.path}: ${render.status}${why}`);
+  }
   if (entry.stepError) notes.push(`  a later step failed: ${entry.stepError}`);
   return notes;
 }
@@ -359,6 +423,8 @@ export function entryNotes(entry: CampaignEntry): string[] {
  * loop moves on. The file is JSON Lines:
  *   - line 1: `{ "kind": "header", switchedAt, orgId, digest }`
  *   - one `{ "kind": "campaign", ... }` per campaign, written as each finishes
+ *   - one `{ "kind": "object", key, path }` per object a later step CREATED, written
+ *     as it is created, so BEFORE its campaign's line (which lists it again)
  *   - the LAST line, written only when the loop ends: `{ "kind": "summary", ... }`
  * No seek, no truncate, no rewrite: a file with no summary line is, by definition,
  * the record of an interrupted run. Every line EXCEPT possibly the last is complete
@@ -391,6 +457,15 @@ export class ResultWriter {
   /** Append one campaign line and fsync it before the next campaign starts. */
   async add(entry: CampaignEntry): Promise<void> {
     await this.#append({ kind: "campaign", ...entry });
+  }
+
+  /**
+   * Append one created object's line and fsync it (D229; Grok PT-8d 6). It is
+   * written as the object is created, before the step's next write, so a run
+   * that dies in the middle of a campaign has listed every object it created.
+   */
+  async object(minted: MintedObject): Promise<void> {
+    await this.#append({ kind: "object", key: minted.key, path: minted.path });
   }
 
   /** Write the summary line (the last line, written only when the loop ends). */

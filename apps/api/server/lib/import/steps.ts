@@ -43,6 +43,35 @@ export interface MintedObject {
   readonly path: string;
 }
 
+/** One render a later step wrote, found or left, as the campaign's result line records it (PT-8d). */
+export interface RenderEntry {
+  /** The render's path, as the report names it. */
+  readonly path: string;
+  /**
+   * `written`: this run created the object. `skipped`: the same bytes were already
+   * stored. `present`: no source file, an object is at the key. `missing`: no source
+   * file and no object. `refused`: not written, and `reason` says why. `failed`: the
+   * store or the reader threw, so whether an object was written is not known.
+   */
+  readonly status: "written" | "skipped" | "present" | "missing" | "refused" | "failed";
+  /** The object key; absent when none could be built. */
+  readonly key?: string;
+  readonly reason?: string;
+}
+
+/**
+ * What `applyCampaigns` hands a follow-up step about the line it adds to (PT-8d4).
+ * `rows`: the rows the steps BEFORE it put on this campaign's line, so a step can
+ * act on what an earlier step did (renders follow the report row, Grok PT-8d 4).
+ * `recordMinted`: the step calls it for each object it CREATED and awaits it
+ * BEFORE its next write (Grok PT-8d 6); it resolves when the record is durable.
+ * If it throws, the record could not be kept: the step must write nothing more.
+ */
+export interface StepLine {
+  readonly rows: readonly RowEntry[];
+  readonly recordMinted: (object: MintedObject) => Promise<void>;
+}
+
 /**
  * What a step AFTER the campaign step answers. It has no `outcome`: a later
  * step adds to the campaign's line and can never replace what the campaign
@@ -53,15 +82,26 @@ export interface StepAddition {
   readonly rows: readonly RowEntry[];
   readonly partial?: boolean;
   /**
+   * The renders this step wrote, found or left (PT-8d). A render that is `missing`,
+   * `refused` or `failed` makes the line partial by itself (Grok PT-8d 5).
+   */
+  readonly renders?: readonly RenderEntry[];
+  /**
    * What this step CREATED in this run (D229); absent when it created nothing.
    * Never an object that was already there, and never one whose write failed.
    * A step that writes objects must not throw once it has written one: it
    * catches its own failure and answers what it minted, with `partial: true`.
+   * An object the step already gave to `StepLine.recordMinted` need not be
+   * answered here again: each key is listed and counted once.
    */
   readonly minted?: { readonly objects: readonly MintedObject[] };
 }
 
-export type FollowUpStep = (ctx: StepContext, campaign: PlannedCampaign) => Promise<StepAddition>;
+export type FollowUpStep = (
+  ctx: StepContext,
+  campaign: PlannedCampaign,
+  line: StepLine,
+) => Promise<StepAddition>;
 
 /** The campaign step first, then the steps that add to its line, in order. */
 export type ImportSteps = readonly [ImportStep, ...FollowUpStep[]];
