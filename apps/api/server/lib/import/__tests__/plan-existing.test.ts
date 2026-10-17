@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { main } from "../../../../bin/import.js";
 import { getAssetStore, getBriefStore } from "../../ports/index.js";
+import { resolveRefTargets } from "../asset-step.js";
 import { existingDigest } from "../existing-campaigns.js";
 import { importTenant } from "../import-tenant.js";
 import {
@@ -19,6 +20,18 @@ import {
   makeRoot,
   writeAt,
 } from "./fixtures/tree.js";
+
+/**
+ * `resolveRefTargets` is wrapped so one test can drop a ref target in the
+ * synchronous window between the classification's read and the hashing read
+ * (`refTargetHashes`'s `readFileSync`) — a window nothing outside the module
+ * can reach. The wrapper delegates to the real function on every other call,
+ * so every other test runs unchanged.
+ */
+vi.mock("../asset-step.js", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../asset-step.js")>();
+  return { ...real, resolveRefTargets: vi.fn(real.resolveRefTargets) };
+});
 
 const SWITCHED_AT = "2026-10-01T00:00:00Z";
 type Env = Awaited<ReturnType<typeof useApplyEnvironment>>;
@@ -297,6 +310,29 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)(
       });
       expect(got.writes).toEqual([]);
     });
+    test("a ref target that vanishes after the classification and before the hashing read ends the plan with that error", async () => {
+      const t = tree();
+      root = t.root;
+      writeAt(t.root, "assets/inputs/gone/logo.png", PNG);
+      await briefs().createBrief(
+        briefBody({ id: "gone", products: [product("assets/inputs/gone/logo.png")] }),
+      );
+      const real = (
+        await vi.importActual<typeof import("../asset-step.js")>("../asset-step.js")
+      ).resolveRefTargets;
+      vi.mocked(resolveRefTargets).mockImplementationOnce((...args) => {
+        rmSync(join(t.root, "assets/inputs/gone/logo.png"), { force: true });
+        return real(...args);
+      });
+      const got = await plan(env, t.root, t.output);
+      expect(got.code).toBe(1);
+      expect(got.err).toEqual([
+        expect.stringMatching(
+          /ENOENT: no such file or directory, open '.*\/assets\/inputs\/gone\/logo\.png'/,
+        ),
+      ]);
+      expect(got.writes).toEqual([]);
+    });
     test("the section follows the target and the plan digest does not move with it", async () => {
       const t = tree();
       root = t.root;
@@ -428,6 +464,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)(
       ]);
       expect(got.section?.withDraft).toBe(1);
       expect(got.existing?.normalise).toBe(2);
+      expect(got.writes).toEqual([]);
     });
     test("the second digest covers each normalise campaign's slug, revision and ref-target hashes, and moves when a target's bytes or the revision move", async () => {
       const t = tree();
@@ -461,6 +498,37 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)(
       expect(third.section?.digest).not.toBe(second.section?.digest);
       expect([first.writes, second.writes, third.writes]).toEqual([[], [], []]);
       expect(third.lines).toBe(5);
+    });
+    test("a second org's class-(P) campaign leaves the first org's digest byte-identical", async () => {
+      const t = tree();
+      root = t.root;
+      const stored = await briefs().createBrief(
+        briefBody({ id: "old", products: [product("assets/inputs/a.png")] }),
+      );
+      const without = await plan(env, t.root, t.output);
+      expect(without.err).toEqual([]);
+      expect(without.section?.campaigns).toEqual([
+        {
+          slug: "old",
+          revision: stored.revision,
+          state: "normalise",
+          refs: [{ ref: "assets/inputs/a.png", kind: "root-level" }],
+          drafts: 0,
+          files: [{ ref: "assets/inputs/a.png", sha256: sha(PNG) }],
+        },
+      ]);
+      await env.db.query("insert into org (id, name) values ('other', 'Other')");
+      await env.db.query("insert into campaign (org_id, slug) values ('other', 'old')");
+      await env.db.query(
+        "insert into brief_version (campaign_id, version, body, revision, actor) " +
+          "select id, 1, $1, 'r1', 'test' from campaign where org_id = 'other'",
+        [JSON.stringify(briefBody({ id: "old", products: [product("assets/inputs/b.png")] }))],
+      );
+      const withOther = await plan(env, t.root, t.output);
+      expect(withOther.err).toEqual([]);
+      expect(withOther.section?.campaigns.map((c) => c.slug)).toEqual(["old"]);
+      expect(withOther.section?.digest).toBe(without.section?.digest);
+      expect(withOther.writes).toEqual([]);
     });
     test("existingDigest is the sha256 of one JSON array, campaigns by slug, files in the order given", () => {
       const a = {
