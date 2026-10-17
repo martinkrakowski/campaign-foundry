@@ -422,13 +422,17 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("apply: report, pool and decision rows", 
     const t = tree({ report: bad });
     root = t.root;
     const got = await apply(env, t.root, t.output, "r5");
-    expect(got.code).toBe(0);
+    // PT-8d4: the render the report names has no source file and no object,
+    // so the line is partial and the run exits 1; the report row is still
+    // stored and the campaign is not refused.
+    expect(got.code).toBe(1);
     expect(got.lines).toHaveLength(1);
     expect(got.lines[0]!.outcome).toBe("created");
     expect(got.lines[0]!.rows).toEqual([
       { kind: "report", status: "written", revision: hashBytes(bad) },
     ]);
-    expect(got.summary).toMatchObject({ created: 1, refused: 0, partial: false });
+    expect(got.summary).toMatchObject({ created: 1, refused: 0 });
+    expect(got.lines[0]!.partial).toBe(true);
   });
 
   test("a store that throws is that row failed: the rows before it stay recorded, the campaign keeps its ids, exit 1", async () => {

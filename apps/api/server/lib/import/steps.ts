@@ -1,4 +1,5 @@
 import { importCampaignStep } from "./campaign-step.js";
+import { importRendersStep } from "./renders-step.js";
 import { importRowsStep } from "./rows-step.js";
 
 export type StepContext = {
@@ -106,4 +107,4 @@ export type FollowUpStep = (
 /** The campaign step first, then the steps that add to its line, in order. */
 export type ImportSteps = readonly [ImportStep, ...FollowUpStep[]];
 
-export const IMPORT_STEPS: ImportSteps = [importCampaignStep, importRowsStep];
+export const IMPORT_STEPS: ImportSteps = [importCampaignStep, importRowsStep, importRendersStep];
