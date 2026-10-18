@@ -75,7 +75,10 @@ test.runIf(process.env.PREPARE_FONTS_SUBPROCESS !== "1")(
       encoding: "utf8",
       timeout: 60_000,
     });
-    expect(run.status).toBe(0);
-    expect(run.stdout).toMatch(/1 passed/);
+    // The child's own output carries the diagnosis (the system-Inter guard, or the
+    // fonts module's "No bundled fonts found" warning), so it is the failure message.
+    const childOutput = `${run.stdout}${run.stderr ?? ""}`;
+    expect(run.status, childOutput).toBe(0);
+    expect(run.stdout, childOutput).toMatch(/\b1 passed/);
   },
 );
