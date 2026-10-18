@@ -79,6 +79,6 @@ test.runIf(process.env.PREPARE_FONTS_SUBPROCESS !== "1")(
     // fonts module's "No bundled fonts found" warning), so it is the failure message.
     const childOutput = `${run.stdout}${run.stderr ?? ""}`;
     expect(run.status, childOutput).toBe(0);
-    expect(run.stdout, childOutput).toMatch(/\b1 passed/);
+    expect(run.stdout, childOutput).toMatch(/(?<!\d)1 passed/);
   },
 );
