@@ -7,6 +7,7 @@ import {
   readdirSync,
   rmSync,
   chmodSync,
+  statSync,
   utimesSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,6 +34,20 @@ const payload = (over: Partial<JobResult> = {}): JobResult => ({
   log: new PipelineExecutionLog("camp", () => new Date("2026-01-01T00:00:00.000Z")),
   ...over,
 });
+
+/**
+ * Rewrite a job file the store has ALREADY read or written, so the store can
+ * tell the new content from its cache: FsJobStore keys that cache by the file's
+ * mtimeMs, and Linux stamps file times from a coarse clock — a test rewrite that
+ * lands in the same timestamp tick as the store's own write keeps the same mtime,
+ * the cache is never invalidated, and the stale entry is what comes back.
+ * Nudging the mtime forward makes the outcome independent of host speed.
+ */
+function rewriteSeen(path: string, content: string): void {
+  const next = statSync(path).mtimeMs + 1000;
+  writeFileSync(path, content);
+  utimesSync(path, new Date(next), new Date(next));
+}
 
 describe("FsJobStore", () => {
   let dir: string;
@@ -200,7 +215,7 @@ describe("FsJobStore", () => {
     const filePath = store.jobPath(id);
     const raw = JSON.parse(readFileSync(filePath, "utf8"));
     raw.settledAt = Date.now() - (JOB_TTL_MS + 5_000);
-    writeFileSync(filePath, JSON.stringify(raw));
+    rewriteSeen(filePath, JSON.stringify(raw));
 
     expect(await store.getJob(id)).toBeUndefined();
   });

@@ -208,7 +208,9 @@ describe("CanvasFfmpegVideoCompositor byte golden (VG2)", () => {
       // adapter's own default is `ffmpeg-static`'s path; dropping the
       // constructor argument silently falls back to it, and a recorded
       // command of the default path can never equal this alias.
-      const dir = mkdtempSync(join(tmpdir(), "cf-x31-ffmpeg-path-"));
+      // A hard link cannot cross filesystems (EXDEV), and node_modules and
+      // tmpdir() may sit on different ones, so stage the alias beside the binary.
+      const dir = mkdtempSync(join(dirname(ffmpegPath), ".cf-x31-"));
       try {
         const alias = join(dir, "ffmpeg-resolved");
         linkSync(ffmpegPath, alias);
