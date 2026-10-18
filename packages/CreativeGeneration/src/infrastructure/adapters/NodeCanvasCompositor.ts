@@ -489,6 +489,9 @@ export class NodeCanvasCompositor implements CompositorPort {
     fontFamily: string,
     inputs: InputAssetPort,
   ): Promise<PreparedCreative> {
+    // prepare() is the entry every render path shares, so registering the
+    // bundled family here keeps the font independent of compositor construction.
+    registerBundledFonts();
     const canvas = request.canvas;
     const resolved = resolveCanvas(canvas);
     const width = request.pixelSize?.width ?? resolved.width;
