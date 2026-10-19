@@ -18,8 +18,10 @@ import { fileURLToPath } from "node:url";
  * database. `opencode` and `ssh` are stubbed on PATH: each call appends its
  * name and argv to calls.log (fields end in US, records in RS, because the
  * SQL argument spans lines), prints out.<n> for the n-th call if that file
- * exists, and exits with exit.<n> (default 0). No test here reads a real
- * database or reaches a host.
+ * exists, and exits with exit.<n> (default 0). --host always stays stubbed.
+ * The one exception is the v2 real run below: it runs the script's REAL
+ * python3 program against a temp SQLite database the test creates itself
+ * (never a real opencode one).
  */
 
 const script = fileURLToPath(new URL("../../../scripts/lane-usage.sh", import.meta.url));
@@ -78,11 +80,14 @@ const HEADER = "directory\tsessions\tagents";
 
 describe("lane-usage.sh", () => {
   test("queries the local database for the exact directory, as TSV", () => {
-    stubCall(1, `${HEADER}\n/w/cf-a\t1\tlane\n`);
+    stubCall(1, "1.18.34");
+    stubCall(2, `${HEADER}\n/w/cf-a\t1\tlane\n`);
     const r = run(["/w/cf-a"]);
     expect(r.status).toBe(0);
     expect(r.stdout).toBe(`${HEADER}\n/w/cf-a\t1\tlane\n`);
-    const [call] = calls();
+    // The first call is the version check: 1.18.34 keeps the v1 path.
+    expect(calls()[0]).toEqual(["opencode", "--version"]);
+    const [call] = calls().slice(1);
     expect(call?.[0]).toBe("opencode");
     expect(call?.[1]).toBe("db");
     expect(call?.[2]).toContain("FROM session WHERE directory = '/w/cf-a' GROUP BY directory");
@@ -90,9 +95,10 @@ describe("lane-usage.sh", () => {
   });
 
   test("selects every column the report documents", () => {
-    stubCall(1, `${HEADER}\n`);
+    stubCall(1, "1.18.34");
+    stubCall(2, `${HEADER}\n`);
     run(["/w/cf-a"]);
-    const sql = calls()[0]?.[2] ?? "";
+    const sql = calls()[1]?.[2] ?? "";
     for (const column of [
       "directory",
       "AS sessions",
@@ -111,17 +117,19 @@ describe("lane-usage.sh", () => {
   });
 
   test("strips trailing slashes, which opencode never stores", () => {
-    stubCall(1, `${HEADER}\n`);
+    stubCall(1, "1.18.34");
+    stubCall(2, `${HEADER}\n`);
     run(["/w/cf-a//"]);
-    expect(calls()[0]?.[2]).toContain("directory = '/w/cf-a' GROUP");
+    expect(calls()[1]?.[2]).toContain("directory = '/w/cf-a' GROUP");
   });
 
   test("--json asks opencode for JSON", () => {
-    stubCall(1, '[{"directory":"/w/cf-a"}]');
+    stubCall(1, "1.18.34");
+    stubCall(2, '[{"directory":"/w/cf-a"}]');
     const r = run(["--json", "/w/cf-a"]);
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('[{"directory":"/w/cf-a"}]\n');
-    expect(calls()[0]?.slice(-2)).toEqual(["--format", "json"]);
+    expect(calls()[1]?.slice(-2)).toEqual(["--format", "json"]);
   });
 
   test("an empty TSV result is exit 1, naming the directory", () => {
@@ -132,23 +140,27 @@ describe("lane-usage.sh", () => {
   });
 
   test("an empty JSON result is exit 1", () => {
-    stubCall(1, "[]");
+    stubCall(1, "1.18.34");
+    stubCall(2, "[]");
     const r = run(["--json", "/w/none"]);
     expect(r.status).toBe(1);
     expect(r.stdout).toBe("");
   });
 
   test("a failed query is 'unknown', exit 3 — never a guess", () => {
-    stubCall(1, "", 1);
+    stubCall(1, "1.18.34");
+    stubCall(2, "", 1);
     const r = run(["/w/cf-a", "/w/cf-b"]);
     expect(r.status).toBe(3);
     expect(r.stderr).toContain("unknown — opencode db exited 1 for '/w/cf-a'");
-    expect(calls()).toHaveLength(1);
+    // The version check plus the one failed query: '/w/cf-b' is never tried.
+    expect(calls()).toHaveLength(2);
   });
 
   test("several directories share one TSV header, and a missing one still reports the rest", () => {
-    stubCall(1, `${HEADER}\n/w/cf-a\t1\tlane`);
-    stubCall(3, `${HEADER}\n/w/cf-c\t2\tlane`);
+    stubCall(1, "1.18.34");
+    stubCall(2, `${HEADER}\n/w/cf-a\t1\tlane`);
+    stubCall(4, `${HEADER}\n/w/cf-c\t2\tlane`);
     const r = run(["/w/cf-a", "/w/cf-b", "/w/cf-c"]);
     expect(r.status).toBe(1);
     expect(r.stdout).toBe(`${HEADER}\n/w/cf-a\t1\tlane\n/w/cf-c\t2\tlane\n`);
@@ -156,7 +168,8 @@ describe("lane-usage.sh", () => {
   });
 
   test("the header survives a FIRST directory with no rows", () => {
-    stubCall(2, `${HEADER}\n/w/cf-a\t1\tlane`);
+    stubCall(1, "1.18.34");
+    stubCall(3, `${HEADER}\n/w/cf-a\t1\tlane`);
     const r = run(["/w/none", "/w/cf-a"]);
     expect(r.status).toBe(1);
     expect(r.stdout).toBe(`${HEADER}\n/w/cf-a\t1\tlane\n`);
@@ -169,7 +182,9 @@ describe("lane-usage.sh", () => {
       expect(r.status).toBe(0);
       const [call] = calls();
       expect(call?.slice(0, 5)).toEqual(["ssh", "-n", "-o", "BatchMode=yes", "m"]);
-      expect(call?.[5]).toMatch(/^PATH=\$HOME\/\.opencode\/bin:\$PATH opencode db "SELECT /);
+      // The version check runs in the REMOTE shell, ahead of the query.
+      expect(call?.[5]).toContain("opencode --version");
+      expect(call?.[5]).toContain('PATH=$HOME/.opencode/bin:$PATH opencode db "SELECT ');
       expect(call?.[5]).toContain("directory = '/w/cf-a' GROUP BY directory\" --format tsv");
       expect(call).toHaveLength(6);
     });
@@ -183,11 +198,13 @@ describe("lane-usage.sh", () => {
         join(binDir, "ssh"),
         ["#!/bin/sh", 'eval "last=\\${$#}"', 'exec sh -c "$last"', ""].join("\n"),
       );
-      stubCall(1, `${HEADER}\n/w/cf-a\t1\tlane`);
+      stubCall(1, "1.18.34");
+      stubCall(2, `${HEADER}\n/w/cf-a\t1\tlane`);
       const r = run(["--host", "m", "/w/cf-a"], { LANE_USAGE_REMOTE_PATH: binDir });
       expect(r.status).toBe(0);
       expect(r.stdout).toBe(`${HEADER}\n/w/cf-a\t1\tlane\n`);
-      const [call] = calls();
+      // The remote command makes two opencode calls: --version, then db.
+      const [call] = calls().slice(1);
       expect(call).toHaveLength(5);
       expect(call?.slice(0, 2)).toEqual(["opencode", "db"]);
       expect(call?.[2]).toContain("json_extract(model, '$.id')");
@@ -203,7 +220,7 @@ describe("lane-usage.sh", () => {
     test("LANE_USAGE_REMOTE_PATH replaces the remote bin dir", () => {
       stubCall(1, `${HEADER}\n`);
       run(["--host", "m", "/w/cf-a"], { LANE_USAGE_REMOTE_PATH: "$HOME/bin:/opt/oc" });
-      expect(calls()[0]?.[5]).toMatch(/^PATH=\$HOME\/bin:\/opt\/oc:\$PATH opencode db /);
+      expect(calls()[0]?.[5]).toContain('PATH=$HOME/bin:/opt/oc:$PATH opencode db "SELECT ');
     });
 
     test.each([["$(id)"], ["a b"], ["`id`"], ["a;id"], ["${HOME}"], ["'x'"]])(
@@ -221,6 +238,91 @@ describe("lane-usage.sh", () => {
       expect(r.status).toBe(2);
       expect(r.stderr).toContain("refusing host");
       expect(calls()).toEqual([]);
+    });
+  });
+
+  describe("opencode v2 (major >= 2: the python path)", () => {
+    test("version 2 sends the query to python3 — directory as an argv item", () => {
+      writeFileSync(join(binDir, "python3"), STUB);
+      chmodSync(join(binDir, "python3"), 0o755);
+      stubCall(1, "opencode v2.0.32");
+      const r = run(["/w/cf-a"]);
+      // The python3 stub prints nothing and exits 0: an empty report.
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("no opencode session for '/w/cf-a'");
+      expect(calls()[0]).toEqual(["opencode", "--version"]);
+      expect(calls()[1]).toEqual(["python3", "-", "/w/cf-a", "tsv"]);
+      expect(calls()).toHaveLength(2);
+    });
+
+    test("a real v2 database reports the same TSV and JSON as opencode db", () => {
+      const dataHome = join(root, "xdg");
+      mkdirSync(join(dataHome, "opencode"), { recursive: true });
+      // session_v2 with the same columns the v1 query uses; two rows for
+      // one directory. Built by real python3 — the module under test.
+      const makeDb = spawnSync(
+        "python3",
+        [
+          "-c",
+          [
+            "import sqlite3",
+            `con = sqlite3.connect(${JSON.stringify(join(dataHome, "opencode", "opencode.db"))})`,
+            `con.execute("CREATE TABLE session_v2 (directory TEXT, agent TEXT, model TEXT, time_created INTEGER, time_updated INTEGER, tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER, tokens_cache_read INTEGER, tokens_cache_write INTEGER, cost REAL)")`,
+            `con.executemany("INSERT INTO session_v2 VALUES (?,?,?,?,?,?,?,?,?,?,?)", ${JSON.stringify(
+              [
+                ["/w/cf-a", "lane", '{"id":"m-1"}', 1000, 3000, 100, 10, 1, 1000, 50, 0.00005],
+                ["/w/cf-a", "lane", '{"id":"m-1"}', 2000, 6000, 200, 20, 2, 2000, 60, 0.00007],
+              ],
+            )})`,
+            "con.commit()",
+            "con.close()",
+          ].join("\n"),
+        ],
+        { encoding: "utf8" },
+      );
+      expect(makeDb.status).toBe(0);
+      // Stub the version for every call the run makes (both runs below
+      // share the stub counter); python3 itself stays REAL.
+      stubCall(1, "opencode v2.0.32");
+      stubCall(2, "opencode v2.0.32");
+
+      const tsv = run(["/w/cf-a"], { XDG_DATA_HOME: dataHome });
+      expect(tsv.status).toBe(0);
+      expect(calls()[0]).toEqual(["opencode", "--version"]);
+      expect(tsv.stdout).toBe(
+        "directory\tsessions\tagents\tmodels\tsecs\ttokens_in\ttokens_out\ttokens_reasoning\tcache_read\tcache_write\tcost\n" +
+          "/w/cf-a\t2\tlane\tm-1\t5\t300\t30\t3\t3000\t110\t0.0001\n",
+      );
+
+      const json = run(["--json", "/w/cf-a"], { XDG_DATA_HOME: dataHome });
+      expect(json.status).toBe(0);
+      expect(json.stdout).toBe(
+        '[{"directory":"/w/cf-a","sessions":2,"agents":"lane","models":"m-1","secs":5,"tokens_in":300,"tokens_out":30,"tokens_reasoning":3,"cache_read":3000,"cache_write":110,"cost":0.0001}]\n',
+      );
+    });
+
+    test("the v2 program opens the database read-only", () => {
+      const src = readFileSync(script, "utf8");
+      expect(src).toContain('sqlite3.connect("file:%s?mode=ro"');
+    });
+
+    test("--host on v2 sends one ssh call that runs the python program remotely", () => {
+      stubCall(1, `${HEADER}\n/w/cf-a\t2\n`);
+      const r = run(["--host", "m", "/w/cf-a"]);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe(`${HEADER}\n/w/cf-a\t2\n`);
+      const [call] = calls();
+      expect(call?.slice(0, 5)).toEqual(["ssh", "-n", "-o", "BatchMode=yes", "m"]);
+      const cmd = call?.[5] ?? "";
+      // The remote command decides by itself: it checks the version…
+      expect(cmd).toContain("opencode --version");
+      // …then runs the same python program, directory and format as argv…
+      expect(cmd).toContain('python3 - "/w/cf-a" "tsv"');
+      // …against the database, opened read-only…
+      expect(cmd).toContain("mode=ro");
+      // …and keeps the v1 `opencode db` fallback for a v1 host.
+      expect(cmd).toContain('opencode db "SELECT ');
+      expect(call).toHaveLength(6);
     });
   });
 
@@ -258,10 +360,11 @@ describe("lane-usage.sh", () => {
     });
 
     test("-- ends the flags", () => {
-      stubCall(1, `${HEADER}\n`);
+      stubCall(1, "1.18.34");
+      stubCall(2, `${HEADER}\n`);
       const r = run(["--", "/w/cf-a"]);
       expect(r.status).toBe(0);
-      expect(calls()).toHaveLength(1);
+      expect(calls()).toHaveLength(2);
     });
   });
 });
