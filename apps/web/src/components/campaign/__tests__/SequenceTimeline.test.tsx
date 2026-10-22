@@ -98,11 +98,7 @@ const source = readFileSync(resolve(process.cwd(), SOURCE_PATH), "utf8");
 const beatClip = (position: number) => {
   const beat = beats[position - 1]!;
   return screen.getByRole("button", {
-    name: messages.sequenceBeatClip(
-      position,
-      beat.startT * DURATION,
-      beat.endT * DURATION,
-    ),
+    name: messages.sequenceBeatClip(position, beat.startT * DURATION, beat.endT * DURATION),
   });
 };
 const videoClip = (position: number) =>
@@ -203,8 +199,7 @@ describe("the text clip's drag-to-reorder (§4.1, §8)", () => {
 });
 
 describe("the boundary handles (TL3, restated for this surface)", () => {
-  const handle = () =>
-    screen.getByRole("slider", { name: messages.tapeBeatBoundaryName(1) });
+  const handle = () => screen.getByRole("slider", { name: messages.tapeBeatBoundaryName(1) });
 
   test("a drag commits exactly once, on release, as a neighbour-transfer delta", () => {
     const onBoundaryCommit = vi.fn();
@@ -270,7 +265,16 @@ describe("the video rows (VT-D2, VT-D7)", () => {
 
   test("the last enabled video row offers no hide at all, not a refused one", () => {
     renderTimeline({
-      videoRows: [{ id: "video", index: 0, off: false, canToggle: false, canMoveUp: false, canMoveDown: false }],
+      videoRows: [
+        {
+          id: "video",
+          index: 0,
+          off: false,
+          canToggle: false,
+          canMoveUp: false,
+          canMoveDown: false,
+        },
+      ],
     });
     expect(screen.queryByRole("button", { name: messages.sequenceHideVideoTrack(1) })).toBeNull();
   });
@@ -336,9 +340,7 @@ describe("the music bed (VT-D5) and the note (§10 question 2)", () => {
     renderTimeline({ audioPath: "assets/audio/bed-01.mp3", onScrubCommit });
     expect(screen.getByText(messages.tapeLaneAudio)).toBeTruthy();
     expect(
-      screen.getByText(
-        messages.tapeAudioSpan(DURATION, encodedDurationSec(DURATION, MOTION_FPS)),
-      ),
+      screen.getByText(messages.tapeAudioSpan(DURATION, encodedDurationSec(DURATION, MOTION_FPS))),
     ).toBeTruthy();
     // The note that says the clip cannot be trimmed.
     expect(screen.getByText(messages.sequenceFullSpanNote)).toBeTruthy();

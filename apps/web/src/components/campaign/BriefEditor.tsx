@@ -2320,55 +2320,54 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                 />
               ) : (
                 <TimelineTape
-                durationSec={playhead.durationSec}
-                beats={tapeBeats}
-                shortestDurationSec={shortestDurationSec}
-                scrubSec={playhead.scrubSec}
-                committedSec={playhead.committedSec}
-                selectedBeatIndex={selectedBeatIndex}
-                /* TL4 — the brief's music bed, when it carries one. */
-                audioPath={state.audio?.path}
-                onScrubLive={playhead.onScrubLive}
-                onScrubCommit={playhead.onScrubCommit}
-                onSelectBeat={setSelectedBeatIndex}
-                /* TL6 — the picked layer diamonds. The SAME pick the sheet
+                  durationSec={playhead.durationSec}
+                  beats={tapeBeats}
+                  shortestDurationSec={shortestDurationSec}
+                  scrubSec={playhead.scrubSec}
+                  committedSec={playhead.committedSec}
+                  selectedBeatIndex={selectedBeatIndex}
+                  /* TL4 — the brief's music bed, when it carries one. */
+                  audioPath={state.audio?.path}
+                  onScrubLive={playhead.onScrubLive}
+                  onScrubCommit={playhead.onScrubCommit}
+                  onSelectBeat={setSelectedBeatIndex}
+                  /* TL6 — the picked layer diamonds. The SAME pick the sheet
                    reads (CC3), never a second selection, so the ruler and the
                    inspector are always describing one layer. */
-                diamonds={trackDiamonds(
-                  state.template.layers.find((l) => l.id === pickedLayerId),
-                  playhead.durationSec,
-                )}
-                /* Passed only when a layer is picked. A guard inside could never
+                  diamonds={trackDiamonds(
+                    state.template.layers.find((l) => l.id === pickedLayerId),
+                    playhead.durationSec,
+                  )}
+                  /* Passed only when a layer is picked. A guard inside could never
                    fire - `diamonds` is derived from the same pick, so with none
                    there are no keys to drag - and a branch no input can take is
                    what the coverage gate exists to surface. The prop being
                    optional carries the meaning instead. */
-                onDiamondCommit={
-                  pickedLayerId === null
-                    ? undefined
-                    : (trackIndex, stopIndex, sec) =>
-                        /* One call, on release, through the SAME action the
+                  onDiamondCommit={
+                    pickedLayerId === null
+                      ? undefined
+                      : (trackIndex, stopIndex, sec) =>
+                          /* One call, on release, through the SAME action the
                            inspector number box uses - so a dragged key and a
                            typed one are one edit with one refusal path. */
-                        dispatch({
-                          type: "setTrackStop",
-                          layerId: pickedLayerId,
-                          trackIndex,
-                          stopIndex,
-                          patch: { t: tAtSecond(sec, playhead.durationSec) },
-                        })
-                }
-                /* TL3 — neighbour transfer, same seam as the diamond commit:
+                          dispatch({
+                            type: "setTrackStop",
+                            layerId: pickedLayerId,
+                            trackIndex,
+                            stopIndex,
+                            patch: { t: tAtSecond(sec, playhead.durationSec) },
+                          })
+                  }
+                  /* TL3 — neighbour transfer, same seam as the diamond commit:
                    one call on release, through the reducer. The tape cannot
                    name the action (the word itself is forbidden there). */
-                onBoundaryCommit={(boundary, delta) =>
-                  dispatch({ type: "shiftBeatBoundary", boundary, delta })
-                }
-                host="rail"
+                  onBoundaryCommit={(boundary, delta) =>
+                    dispatch({ type: "shiftBeatBoundary", boundary, delta })
+                  }
+                  host="rail"
                 />
               )
-            )
-            : null}
+            ) : null}
           </>
         ) : (
           // D142 — the empty state before the first product has an id: names

@@ -5,10 +5,7 @@ import { Button, Input, Stepper } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { TimelineTape, beatUnderFloor } from "@/components/campaign/TimelineTape";
 import { SequenceTimeline } from "@/components/campaign/SequenceTimeline";
-import {
-  sequenceCanAddText,
-  sequenceVideoRows,
-} from "@/components/campaign/layer-stack-props";
+import { sequenceCanAddText, sequenceVideoRows } from "@/components/campaign/layer-stack-props";
 import type { MotionKind } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { useViewportMinWidth, RAIL_VIEWPORT_MIN_PX } from "@/lib/use-viewport-min-width";
 import * as messages from "@/components/campaign/messages";
@@ -158,61 +155,59 @@ export function TimelineSection({
     railShown ||
     sectionPlayhead == null ||
     sectionPlayhead.motion === undefined ||
-    beats.length === 0
-      ? null
-      : state.template.creativeType === "video" ? (
-          <SequenceTimeline
-            durationSec={tapeDuration}
-            beats={tapeBeats}
-            shortestDurationSec={shortestSec}
-            // Both seconds are the committed one: with no live scrub in this host
-            // the playhead sits where the frame is, which is the whole of option A.
-            scrubSec={sectionPlayhead.committedSec}
-            committedSec={sectionPlayhead.committedSec}
-            selectedBeatIndex={selectedBeatIndex}
-            onScrubLive={sectionPlayhead.commit}
-            onScrubCommit={sectionPlayhead.commit}
-            onSelectBeat={setSelectedBeatIndex}
-            /* VT1 — this host owns the reducer, so the sequence edits it could
+    beats.length === 0 ? null : state.template.creativeType === "video" ? (
+      <SequenceTimeline
+        durationSec={tapeDuration}
+        beats={tapeBeats}
+        shortestDurationSec={shortestSec}
+        // Both seconds are the committed one: with no live scrub in this host
+        // the playhead sits where the frame is, which is the whole of option A.
+        scrubSec={sectionPlayhead.committedSec}
+        committedSec={sectionPlayhead.committedSec}
+        selectedBeatIndex={selectedBeatIndex}
+        onScrubLive={sectionPlayhead.commit}
+        onScrubCommit={sectionPlayhead.commit}
+        onSelectBeat={setSelectedBeatIndex}
+        /* VT1 — this host owns the reducer, so the sequence edits it could
                not offer on the tape (boundary, reorder) commit from here too. */
-            onMoveBeat={(from, to) => dispatch({ type: "moveBeat", from, to })}
-            onBoundaryCommit={(boundary, delta) =>
-              dispatch({ type: "shiftBeatBoundary", boundary, delta })
-            }
-            videoRows={sequenceVideoRows(state)}
-            /* No layer pick and no diamonds here, the same policy the tape has:
+        onMoveBeat={(from, to) => dispatch({ type: "moveBeat", from, to })}
+        onBoundaryCommit={(boundary, delta) =>
+          dispatch({ type: "shiftBeatBoundary", boundary, delta })
+        }
+        videoRows={sequenceVideoRows(state)}
+        /* No layer pick and no diamonds here, the same policy the tape has:
                the picked layer lives in the rail (CC3) and this host cannot
                commit a `setTrackStop` it has no pick for. */
-            onSetLayerEnabled={(id, enabled) => dispatch({ type: "setLayerEnabled", id, enabled })}
-            onMoveLayer={(from, to) => dispatch({ type: "moveLayer", from, to })}
-            onAddVideo={() => dispatch({ type: "addLayer", kind: "video" })}
-            canAddText={sequenceCanAddText(state)}
-            onAddText={() => dispatch({ type: "addLayer", kind: "animated-text" })}
-            /* TL4 — display only, so BOTH hosts show it. */
-            audioPath={state.audio?.path}
-            host="section"
-          />
-        ) : (
-          <TimelineTape
-            durationSec={tapeDuration}
-            beats={tapeBeats}
-            shortestDurationSec={shortestSec}
-            // Both seconds are the committed one: with no live scrub in this host
-            // the diamond sits where the frame is, which is the whole of option A.
-            scrubSec={sectionPlayhead.committedSec}
-            committedSec={sectionPlayhead.committedSec}
-            selectedBeatIndex={selectedBeatIndex}
-            /* TL4 — display only, so BOTH hosts show it. The section leaves
+        onSetLayerEnabled={(id, enabled) => dispatch({ type: "setLayerEnabled", id, enabled })}
+        onMoveLayer={(from, to) => dispatch({ type: "moveLayer", from, to })}
+        onAddVideo={() => dispatch({ type: "addLayer", kind: "video" })}
+        canAddText={sequenceCanAddText(state)}
+        onAddText={() => dispatch({ type: "addLayer", kind: "animated-text" })}
+        /* TL4 — display only, so BOTH hosts show it. */
+        audioPath={state.audio?.path}
+        host="section"
+      />
+    ) : (
+      <TimelineTape
+        durationSec={tapeDuration}
+        beats={tapeBeats}
+        shortestDurationSec={shortestSec}
+        // Both seconds are the committed one: with no live scrub in this host
+        // the diamond sits where the frame is, which is the whole of option A.
+        scrubSec={sectionPlayhead.committedSec}
+        committedSec={sectionPlayhead.committedSec}
+        selectedBeatIndex={selectedBeatIndex}
+        /* TL4 — display only, so BOTH hosts show it. The section leaves
                diamonds and boundary handles unwired because it cannot commit
                them; a caption commits nothing, so withholding it here would
                hide a fact rather than withhold an affordance. */
-            audioPath={state.audio?.path}
-            onScrubLive={sectionPlayhead.commit}
-            onScrubCommit={sectionPlayhead.commit}
-            onSelectBeat={setSelectedBeatIndex}
-            host="section"
-          />
-        );
+        audioPath={state.audio?.path}
+        onScrubLive={sectionPlayhead.commit}
+        onScrubCommit={sectionPlayhead.commit}
+        onSelectBeat={setSelectedBeatIndex}
+        host="section"
+      />
+    );
 
   return (
     <fieldset className="mt-4 space-y-2 border-t border-border pt-3">

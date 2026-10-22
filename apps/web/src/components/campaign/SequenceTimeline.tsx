@@ -172,7 +172,11 @@ function Lane({
       <div className="sticky left-0 z-10 flex h-full flex-col items-center justify-center gap-0.5 border-r border-border bg-background font-mono text-[9px] uppercase tracking-eyebrow text-text-muted">
         {header}
       </div>
-      <div ref={canvasRef} className="relative h-full" style={{ width: laneWidth(durationSec, pxPerSec) }}>
+      <div
+        ref={canvasRef}
+        className="relative h-full"
+        style={{ width: laneWidth(durationSec, pxPerSec) }}
+      >
         {children}
       </div>
     </div>

@@ -236,7 +236,13 @@ export interface TimelineTapeProps {
  * The ruler, inside the one scrollport — that is the whole point. A tick per
  * whole second, including the last one, which is the tick the sketch cropped.
  */
-export function Ruler({ durationSec, pxPerSec }: { durationSec: number; pxPerSec: number }): ReactNode {
+export function Ruler({
+  durationSec,
+  pxPerSec,
+}: {
+  durationSec: number;
+  pxPerSec: number;
+}): ReactNode {
   const ticks = [];
   for (let second = 0; second <= Math.floor(durationSec); second += 1) ticks.push(second);
   return (
