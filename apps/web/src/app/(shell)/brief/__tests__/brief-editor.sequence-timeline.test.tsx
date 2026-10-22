@@ -1,13 +1,13 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
 import { screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithRun as renderWithShell, json } from "@/__tests__/helpers";
-import { API } from "@/lib/run-context";
+import { renderWithRun as renderWithShell } from "@/__tests__/helpers";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
 import { CreateCampaignDialog } from "@/components/shell/CreateCampaignDialog";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import * as messages from "@/components/campaign/messages";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
+import { BEATS, makeBrief, routes, type Saved } from "./timeline-briefs";
 
 /**
  * VT1's host tests (`2026-10-12_motion-sequence-editor.md` §8): the mount gates
@@ -37,41 +37,15 @@ const renderWithRun = (ui: React.ReactElement) =>
     </CreateCampaignProvider>,
   );
 
-const BEATS = ["Stay wild", "Stay hydrated"] as const;
-
 /**
  * A Randomized `short-video` brief: creative type `video`, motion-only output,
  * a motion look and two beats — the draft VT-D1 says mounts the sequence
  * timeline on both hosts.
  */
-const videoBrief = {
-  schemaVersion: 1,
+const videoBrief = makeBrief({
   template: templateFromCanonical("short-video"),
-  id: "clip",
-  mode: "variation",
-  targetRegion: "DE",
-  targetAudience: "a",
-  campaignMessage: "Hi",
-  products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
-  copy: {
-    timeline: {
-      beats: BEATS.map((text) => ({ text, weight: 1 })),
-      transition: "cut",
-      keyBeat: 1,
-    },
-  },
-  variation: {
-    count: 4,
-    axes: {
-      layout: ["headline-bottom"],
-      tone: ["bold"],
-      background: { source: ["procedural"] },
-      motion: ["ken-burns-in"],
-      duration: [6],
-    },
-  },
   output: { formats: ["motion"], platforms: ["tiktok"] },
-};
+});
 
 /** The same brief with a static-only look — the "still brief" of §8. */
 const stillBrief = (() => {
@@ -100,41 +74,6 @@ const textlessVideoBrief = () => {
       layers: template.layers.filter((layer) => layer.kind !== "animated-text"),
     },
   };
-};
-
-type Saved = Record<string, unknown>;
-
-const DEFAULT_ASSETS: Record<string, unknown>[] = [
-  { name: "dusk.png", size: 2048, type: "image/png" },
-];
-
-/** Routes the editor's calls and records every brief a save wrote. */
-const routes = (brief: Record<string, unknown>): Saved[] => {
-  const saved: Saved[] = [];
-  let revision = 1;
-  vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
-    const u = String(url);
-    const method = (init?.method ?? "GET").toUpperCase();
-    if (method === "GET" && u === `${API}/campaigns/capabilities`) {
-      return Promise.resolve(json({ motion: true }));
-    }
-    if (u.includes("/campaigns/assets")) {
-      return Promise.resolve(json({ assets: DEFAULT_ASSETS }));
-    }
-    if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
-      return Promise.resolve(
-        json({ briefs: [{ file: "clip.yaml", revision: `r${revision}`, brief }] }),
-      );
-    }
-    if (method === "PUT" && u.includes("/campaigns/briefs/")) {
-      const body = JSON.parse(String(init?.body)) as Saved;
-      saved.push(body);
-      revision += 1;
-      return Promise.resolve(json({ file: "clip.yaml", revision: `r${revision}`, brief: body }));
-    }
-    return Promise.resolve(json({}, 200));
-  });
-  return saved;
 };
 
 const atWidth = (px: number) => {

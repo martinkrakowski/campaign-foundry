@@ -712,62 +712,49 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
     );
   };
 
-  test("a video creative mounts the sequence timeline, not the tape", () => {
+  /**
+   * Render the section at the narrow width and run the assertions, then put the
+   * viewport back. The mount-gate tests share this scaffold — the try/finally
+   * pair existed only to restore the width.
+   */
+  function atNarrowWidthRender(
+    state: EditorState,
+    assertions: () => void,
+    sectionPlayhead: {
+      durationSec: number;
+      committedSec: number;
+      commit: (sec: number) => void;
+    } | null = movingPlayhead,
+  ) {
     const restore = atNarrowWidth();
     try {
       render(
-        <TimelineSection
-          state={videoState()}
-          dispatch={vi.fn()}
-          sectionPlayhead={movingPlayhead}
-        />,
+        <TimelineSection state={state} dispatch={vi.fn()} sectionPlayhead={sectionPlayhead} />,
       );
-      expect(document.querySelector('[data-sequence-host="section"]')).toBeTruthy();
-      expect(document.querySelector("[data-tape-host]")).toBeNull();
+      assertions();
     } finally {
       restore();
     }
-  });
+  }
 
-  test("an image-text motion look keeps the tape and does not show the sequence", () => {
+  /**
+   * Render the section with a live reducer at the narrow width: the dispatch spy
+   * folds every action into the real reducer and re-renders, so the assertions
+   * run against real state, and the width is restored when the body settles. The
+   * wired-gesture tests share this scaffold — the try/finally pair existed only
+   * to restore the width.
+   */
+  async function runLiveAtNarrowWidth(
+    initial: EditorState,
+    body: (ctx: {
+      user: ReturnType<typeof userEvent.setup>;
+      dispatch: ReturnType<typeof vi.fn>;
+      state: () => EditorState;
+    }) => Promise<void>,
+  ) {
     const restore = atNarrowWidth();
     try {
-      render(
-        <TimelineSection
-          state={withBeats([{ text: "One", weight: 1 }])}
-          dispatch={vi.fn()}
-          sectionPlayhead={movingPlayhead}
-        />,
-      );
-      expect(document.querySelector("[data-tape-host]")).toBeTruthy();
-      expect(document.querySelector("[data-sequence-host]")).toBeNull();
-    } finally {
-      restore();
-    }
-  });
-
-  test("a look with no motion mounts neither timeline", () => {
-    const restore = atNarrowWidth();
-    try {
-      render(
-        <TimelineSection
-          state={withBeats([{ text: "One", weight: 1 }])}
-          dispatch={vi.fn()}
-          sectionPlayhead={{ durationSec: 6, committedSec: 0, commit: vi.fn() }}
-        />,
-      );
-      expect(document.querySelector("[data-tape-host]")).toBeNull();
-      expect(document.querySelector("[data-sequence-host]")).toBeNull();
-    } finally {
-      restore();
-    }
-  });
-
-  test("the sequence host wires the beats' own actions, which this panel owns", async () => {
-    const user = userEvent.setup();
-    const restore = atNarrowWidth();
-    let state = videoState();
-    try {
+      let state = initial;
       const dispatch = vi.fn((action: Parameters<typeof editorReducer>[1]) => {
         state = editorReducer(state, action);
         rerender(
@@ -777,11 +764,43 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
       const { rerender } = render(
         <TimelineSection state={state} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
       );
+      await body({ user: userEvent.setup(), dispatch, state: () => state });
+    } finally {
+      restore();
+    }
+  }
 
+  test("a video creative mounts the sequence timeline, not the tape", () => {
+    atNarrowWidthRender(videoState(), () => {
+      expect(document.querySelector('[data-sequence-host="section"]')).toBeTruthy();
+      expect(document.querySelector("[data-tape-host]")).toBeNull();
+    });
+  });
+
+  test("an image-text motion look keeps the tape and does not show the sequence", () => {
+    atNarrowWidthRender(withBeats([{ text: "One", weight: 1 }]), () => {
+      expect(document.querySelector("[data-tape-host]")).toBeTruthy();
+      expect(document.querySelector("[data-sequence-host]")).toBeNull();
+    });
+  });
+
+  test("a look with no motion mounts neither timeline", () => {
+    atNarrowWidthRender(
+      withBeats([{ text: "One", weight: 1 }]),
+      () => {
+        expect(document.querySelector("[data-tape-host]")).toBeNull();
+        expect(document.querySelector("[data-sequence-host]")).toBeNull();
+      },
+      { durationSec: 6, committedSec: 0, commit: vi.fn() },
+    );
+  });
+
+  test("the sequence host wires the beats' own actions, which this panel owns", async () => {
+    await runLiveAtNarrowWidth(videoState(), async ({ user, dispatch, state }) => {
       // Add-track: video is uncapped and commits; text is the budget's and the
       // canonical video template already carries its one animated-text layer.
       await user.click(screen.getByRole("button", { name: messages.sequenceAddVideoTrack }));
-      expect(state.template.layers.filter((l) => l.kind === "video")).toHaveLength(2);
+      expect(state().template.layers.filter((l) => l.kind === "video")).toHaveLength(2);
       const addText = screen.getByRole("button", {
         name: messages.sequenceAddTextTrack,
       }) as HTMLButtonElement;
@@ -792,26 +811,11 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
       // drag commits — the two surfaces share one writer.
       await user.click(screen.getByLabelText(messages.timelineMoveBeatDown(1)));
       expect(dispatch).toHaveBeenCalledWith({ type: "moveBeat", from: 0, to: 1 });
-    } finally {
-      restore();
-    }
+    });
   });
 
   test("the sequence host wires add-text while the budget allows it, which this panel owns too", async () => {
-    const user = userEvent.setup();
-    const restore = atNarrowWidth();
-    let state = textlessVideoState();
-    try {
-      const dispatch = vi.fn((action: Parameters<typeof editorReducer>[1]) => {
-        state = editorReducer(state, action);
-        rerender(
-          <TimelineSection state={state} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
-        );
-      });
-      const { rerender } = render(
-        <TimelineSection state={state} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
-      );
-
+    await runLiveAtNarrowWidth(textlessVideoState(), async ({ user, dispatch, state }) => {
       // The enabled half the test above pins from the other side of the same
       // budget: with no animated-text layer the offer is live, not inert.
       const addText = screen.getByRole("button", {
@@ -825,36 +829,21 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
       // offers commit, and the layer it writes spends the budget — so the
       // control that offered the track now refuses a second one.
       expect(dispatch).toHaveBeenCalledWith({ type: "addLayer", kind: "animated-text" });
-      expect(state.template.layers.filter((l) => l.kind === "animated-text")).toEqual([
+      expect(state().template.layers.filter((l) => l.kind === "animated-text")).toEqual([
         { id: "animated-text", kind: "animated-text" },
       ]);
       expect(
         (screen.getByRole("button", { name: messages.sequenceAddTextTrack }) as HTMLButtonElement)
           .disabled,
       ).toBe(true);
-    } finally {
-      restore();
-    }
+    });
   });
 
   test("the sequence host wires the video rows' own offers, which this panel owns too", async () => {
-    const user = userEvent.setup();
-    const restore = atNarrowWidth();
-    let state = videoState();
-    try {
-      const dispatch = vi.fn((action: Parameters<typeof editorReducer>[1]) => {
-        state = editorReducer(state, action);
-        rerender(
-          <TimelineSection state={state} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
-        );
-      });
-      const { rerender } = render(
-        <TimelineSection state={state} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
-      );
-
+    await runLiveAtNarrowWidth(videoState(), async ({ user, dispatch, state }) => {
       // A second video row first: the last enabled required row offers no hide.
       await user.click(screen.getByRole("button", { name: messages.sequenceAddVideoTrack }));
-      expect(state.template.layers.filter((l) => l.kind === "video")).toHaveLength(2);
+      expect(state().template.layers.filter((l) => l.kind === "video")).toHaveLength(2);
 
       // Hide, from the row's own header — the same setLayerEnabled the stack
       // offers, wired through the host this panel owns (VT-D7).
@@ -864,10 +853,10 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
         id: "video",
         enabled: false,
       });
-      expect(state.template.layers.find((l) => l.id === "video")?.enabled).toBe(false);
+      expect(state().template.layers.find((l) => l.id === "video")?.enabled).toBe(false);
       // The off row stays on the timeline and offers its way back.
       await user.click(screen.getByRole("button", { name: messages.sequenceShowVideoTrack(1) }));
-      expect(state.template.layers.find((l) => l.id === "video")?.enabled).toBeUndefined();
+      expect(state().template.layers.find((l) => l.id === "video")?.enabled).toBeUndefined();
 
       // Reorder, from the row's own header — stack order via the row's layer
       // index (video-2 lands topmost for this type, so its one offer is down).
@@ -875,16 +864,14 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
         screen.getByRole("button", { name: messages.sequenceMoveVideoTrackDown(2) }),
       );
       expect(dispatch).toHaveBeenCalledWith({ type: "moveLayer", from: 4, to: 3 });
-      expect(state.template.layers.map((l) => l.id)).toEqual([
+      expect(state().template.layers.map((l) => l.id)).toEqual([
         "video",
         "shade",
         "animated-text",
         "video-2",
         "logo",
       ]);
-    } finally {
-      restore();
-    }
+    });
   });
 
   test("dragging a text clip to the neighbouring slot commits one moveBeat on release", () => {

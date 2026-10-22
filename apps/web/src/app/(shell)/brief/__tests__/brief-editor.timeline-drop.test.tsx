@@ -1,8 +1,7 @@
 import { describe, test, expect, beforeEach, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithRun as renderWithShell, json } from "@/__tests__/helpers";
-import { API } from "@/lib/run-context";
+import { renderWithRun as renderWithShell } from "@/__tests__/helpers";
 import { CreateCampaignProvider } from "@/lib/create-campaign-context";
 import { CreateCampaignDialog } from "@/components/shell/CreateCampaignDialog";
 import { templateFromCanonical } from "@campaignfoundry/CampaignOrchestration/brief-template";
@@ -10,6 +9,7 @@ import { DEFAULT_CAMPAIGN_TYPE } from "@campaignfoundry/CampaignOrchestration/ca
 import { HEADLINE_POOL_REF } from "@/components/campaign/editor-state";
 import * as messages from "@/components/campaign/messages";
 import { BriefEditor } from "@/components/campaign/BriefEditor";
+import { BEATS, makeBrief, routes, type Saved } from "./timeline-briefs";
 
 /**
  * SG6′ — the copy sequence the projection will not write, said out loud
@@ -55,8 +55,6 @@ const renderWithRun = (ui: React.ReactElement) =>
     </CreateCampaignProvider>,
   );
 
-const BEATS = ["Stay wild", "Stay hydrated"] as const;
-
 /**
  * A Randomized brief that saves its sequence: Video on, no headline pool, two
  * beats. Every route below starts here, because the interesting transitions are
@@ -81,86 +79,16 @@ const BEATS = ["Stay wild", "Stay hydrated"] as const;
  * reach §3.1's state — `formats: ["static"]`, with the panel still on screen — is
  * to take the clip platform away and let `togglePlatform` re-derive the formats.
  */
-const sequencedBrief = {
-  schemaVersion: 1,
+const sequencedBrief = makeBrief({
   template: templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
-  id: "clip",
-  mode: "variation",
-  targetRegion: "DE",
-  targetAudience: "a",
-  campaignMessage: "Hi",
-  products: [{ id: "alpha", name: "A", primaryColor: "#1473E6", logoPath: "a.png" }],
-  copy: {
-    timeline: {
-      beats: BEATS.map((text) => ({ text, weight: 1 })),
-      transition: "cut",
-      keyBeat: 1,
-    },
-  },
-  variation: {
-    count: 4,
-    axes: {
-      layout: ["headline-bottom"],
-      tone: ["bold"],
-      background: { source: ["procedural"] },
-      motion: ["ken-burns-in"],
-      duration: [6],
-    },
-  },
   output: { formats: ["static", "motion"], platforms: ["linkedin", "tiktok"] },
-};
+});
 
 /** A brief with the same shape and no sequence at all — the `beats.length` conjunct. */
 const unsequencedBrief = (() => {
   const { copy: _copy, ...rest } = sequencedBrief;
   return rest;
 })();
-
-type Saved = Record<string, unknown>;
-
-/**
- * The bin's listing as the filesystem backend answers it: an entry with NO `id` key
- * (`FsAssetStore` never sets one). Every test here that has no reason to think about
- * ids gets this, so the default is the shape a filesystem brief really has.
- */
-const DEFAULT_ASSETS: Record<string, unknown>[] = [
-  { name: "dusk.png", size: 2048, type: "image/png" },
-];
-
-/**
- * Routes the editor's calls and records every brief a save wrote.
- *
- * The PUT handler echoes the body back as the stored entry, which is what the real
- * route does — so the editor adopts exactly what it sent and a second save in the
- * same test starts from the state the first one left.
- */
-const routes = (brief: Record<string, unknown>, assets?: Record<string, unknown>[]): Saved[] => {
-  const saved: Saved[] = [];
-  let revision = 1;
-  vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
-    const u = String(url);
-    const method = (init?.method ?? "GET").toUpperCase();
-    if (method === "GET" && u === `${API}/campaigns/capabilities`) {
-      return Promise.resolve(json({ motion: true }));
-    }
-    if (u.includes("/campaigns/assets")) {
-      return Promise.resolve(json({ assets: assets ?? DEFAULT_ASSETS }));
-    }
-    if (method === "GET" && u.startsWith(`${API}/campaigns/briefs`)) {
-      return Promise.resolve(
-        json({ briefs: [{ file: "clip.yaml", revision: `r${revision}`, brief }] }),
-      );
-    }
-    if (method === "PUT" && u.includes("/campaigns/briefs/")) {
-      const body = JSON.parse(String(init?.body)) as Saved;
-      saved.push(body);
-      revision += 1;
-      return Promise.resolve(json({ file: "clip.yaml", revision: `r${revision}`, brief: body }));
-    }
-    return Promise.resolve(json({}, 200));
-  });
-  return saved;
-};
 
 /** The Video card in Output. `AxisCard` names itself by the axis value it toggles. */
 const videoCard = () => screen.getByRole("button", { name: "motion" }) as HTMLButtonElement;
