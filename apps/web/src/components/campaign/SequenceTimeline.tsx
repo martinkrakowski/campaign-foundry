@@ -430,14 +430,16 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
                     // The keyboard reorder: one snap step, the same size as the
                     // Copy form's own arrows, and the same one release-sized call.
                     // Auto-repeat is not a run of those calls — one held key is
-                    // one gesture, the way one drag is.
+                    // one gesture, the way one drag is. A repeat that is ignored
+                    // rather than prevented would still scroll the scrollport, so
+                    // every arrow is prevented before the repeat check.
+                    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+                    e.preventDefault();
                     if (e.repeat) return;
                     if (e.key === "ArrowLeft" && index > 0) {
-                      e.preventDefault();
                       keyboardMoveRef.current = { target: index - 1, text: beat.text };
                       props.onMoveBeat(index, index - 1);
                     } else if (e.key === "ArrowRight" && index < beats.length - 1) {
-                      e.preventDefault();
                       keyboardMoveRef.current = { target: index + 1, text: beat.text };
                       props.onMoveBeat(index, index + 1);
                     }

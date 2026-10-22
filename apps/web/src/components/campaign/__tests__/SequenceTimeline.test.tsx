@@ -354,6 +354,26 @@ describe("the text clip's drag-to-reorder (§4.1, §8)", () => {
     expect(onMoveBeat).not.toHaveBeenCalled();
   });
 
+  test("a held arrow's repeat is prevented, so the scrollport never scrolls (§7)", () => {
+    const onMoveBeat = vi.fn();
+    renderTimeline({ beats: keyboardBeats, onMoveBeat });
+    // `fireEvent` returns false when the keydown's default was prevented — which
+    // is the whole point: before this fix a repeated arrow was ignored but never
+    // prevented, so the held key scrolled the timeline's scrollport.
+    expect(
+      fireEvent.keyDown(clipNamed(keyboardBeats, 1), { key: "ArrowRight", repeat: true }),
+    ).toBe(false);
+    expect(onMoveBeat).not.toHaveBeenCalled();
+  });
+
+  test("a non-arrow keydown on a clip is left alone", () => {
+    const onMoveBeat = vi.fn();
+    renderTimeline({ beats: keyboardBeats, onMoveBeat });
+    // Not an arrow: not prevented (the event still propagates) and no move.
+    expect(fireEvent.keyDown(clipNamed(keyboardBeats, 1), { key: "Enter" })).toBe(true);
+    expect(onMoveBeat).not.toHaveBeenCalled();
+  });
+
   test("a drag past the end drops on the last beat, never past it", () => {
     const onMoveBeat = vi.fn();
     renderTimeline({ onMoveBeat });
