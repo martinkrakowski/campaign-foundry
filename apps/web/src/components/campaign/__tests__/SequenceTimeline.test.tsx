@@ -306,6 +306,47 @@ describe("the text clip's drag-to-reorder (§4.1, §8)", () => {
     expect(onMoveBeat).toHaveBeenLastCalledWith(1, 2);
   });
 
+  test("a refused keyboard move never steers focus on a later, unrelated beats change", () => {
+    const props = {
+      ...baseProps,
+      beats: keyboardBeats,
+      onMoveBeat: vi.fn(),
+    } as SequenceTimelineProps;
+    const view = render(<SequenceTimeline {...props} />);
+    const pressed = clipNamed(keyboardBeats, 1);
+    pressed.focus();
+    // The parent refuses the move: nothing re-renders (the component is memoised).
+    fireEvent.keyDown(pressed, { key: "ArrowRight" });
+
+    // Later an unrelated edit delivers a new beats array in the SAME order. An
+    // armed target would pull focus to the neighbour at index 1.
+    view.rerender(<SequenceTimeline {...props} beats={[...keyboardBeats]} />);
+    expect(document.activeElement).toBe(pressed);
+
+    // The press was disarmed by that change: a later reorder does not revive it.
+    const swapped = [keyboardBeats[1]!, keyboardBeats[0]!, keyboardBeats[2]!];
+    view.rerender(<SequenceTimeline {...props} beats={swapped} />);
+    expect(document.activeElement).toBe(clipNamed(swapped, 1));
+  });
+
+  test("a refused keyboard move followed by a shorter list focuses nothing and throws nothing", () => {
+    const props = {
+      ...baseProps,
+      beats: keyboardBeats,
+      onMoveBeat: vi.fn(),
+    } as SequenceTimelineProps;
+    const view = render(<SequenceTimeline {...props} />);
+    const pressed = clipNamed(keyboardBeats, 2);
+    pressed.focus();
+    fireEvent.keyDown(pressed, { key: "ArrowRight" });
+    // A delete lands instead: two beats, so the armed target (index 2) is past
+    // the end of the list.
+    const shorter = [keyboardBeats[0]!, keyboardBeats[1]!];
+    expect(() => view.rerender(<SequenceTimeline {...props} beats={shorter} />)).not.toThrow();
+    // Focus stays on the slot the operator pressed (clips are keyed by index).
+    expect(document.activeElement).toBe(clipNamed(shorter, 2));
+  });
+
   test("auto-repeat is not a run of moves: a held key's repeats call nothing", () => {
     const onMoveBeat = vi.fn();
     renderTimeline({ beats: keyboardBeats, onMoveBeat });

@@ -289,14 +289,22 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
    * Where a keyboard move's focus goes. The clips are keyed by INDEX, so a
    * reorder reuses the DOM slot the operator pressed and focus would stay on
    * the neighbour now living there — the next arrow would move the wrong
-   * beat. The press records the beat's destination, and the effect moves
-   * focus there once the parent lands the moved `beats`.
+   * beat. The press records the beat's destination and its words, and the
+   * effect moves focus there once the parent lands the moved `beats`.
+   *
+   * The next `beats` change always disarms the press, and focus moves only when
+   * the pressed beat is really at its destination: a move the parent refused
+   * renders nothing (this component is memoised), so the first `beats` change
+   * after it may be an unrelated edit, and that must not pull focus to a stale
+   * index (or past the end of a shorter list).
    */
-  const keyboardMoveTargetRef = useRef<number | null>(null);
+  const keyboardMoveRef = useRef<{ readonly target: number; readonly text: string } | null>(null);
   useEffect(() => {
-    const target = keyboardMoveTargetRef.current;
-    if (target === null) return;
-    keyboardMoveTargetRef.current = null;
+    const armed = keyboardMoveRef.current;
+    if (armed === null) return;
+    keyboardMoveRef.current = null;
+    if (beats[armed.target]?.text !== armed.text) return;
+    const target = armed.target;
     // The same no-null-arm argument as `beatIndexAt` below: the ref is armed
     // only by a clip's own keydown, the clips are this canvas's children, and
     // the arming press already bounds the target inside the sequence — so
@@ -460,11 +468,11 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
                     if (e.repeat) return;
                     if (e.key === "ArrowLeft" && index > 0) {
                       e.preventDefault();
-                      keyboardMoveTargetRef.current = index - 1;
+                      keyboardMoveRef.current = { target: index - 1, text: beat.text };
                       props.onMoveBeat(index, index - 1);
                     } else if (e.key === "ArrowRight" && index < beats.length - 1) {
                       e.preventDefault();
-                      keyboardMoveTargetRef.current = index + 1;
+                      keyboardMoveRef.current = { target: index + 1, text: beat.text };
                       props.onMoveBeat(index, index + 1);
                     }
                   }}
