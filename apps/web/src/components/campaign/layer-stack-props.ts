@@ -148,11 +148,12 @@ export function sequenceVideoRows(state: EditorState): readonly SequenceVideoRow
 }
 
 /**
- * Whether "Add a text track" may act (VT-D4): enabled only while the type has
- * no animated-text layer yet, counting disabled layers — the shared budget the
- * boundary enforces counts them, so a control that offered a second track
- * because the first was switched off would succeed in the UI and fail at save.
+ * Whether "Add a text track" may act (VT-D4): `addableKinds`'s own answer,
+ * read — never re-decided (D124), so the offer has the one source the layer
+ * stack's add row already offers from. A second walk of the layers would be
+ * the copy of the budget those derivations exist to prevent: it could admit
+ * a track the boundary would refuse at save, or refuse one it would take.
  */
 export function sequenceCanAddText(state: EditorState): boolean {
-  return !state.template.layers.some((layer) => layer.kind === "animated-text");
+  return addableKinds(state).includes("animated-text");
 }
