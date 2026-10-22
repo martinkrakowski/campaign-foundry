@@ -397,6 +397,48 @@ export function BeatBoundary({
 }
 
 /**
+ * The internal joins, shared by both timelines: one handle per join, only when
+ * this host can commit a neighbour transfer — an inert slider would be an
+ * affordance the surface does not have. The outer edges are not boundaries,
+ * and a one-beat sequence has no join at all.
+ */
+export function BeatBoundaries({
+  beats,
+  durationSec,
+  pxPerSec,
+  dwellTextFor,
+  onBoundaryCommit,
+}: {
+  beats: readonly TimelineTapeBeat[];
+  durationSec: number;
+  pxPerSec: number;
+  dwellTextFor: (beat: TimelineTapeBeat) => string | undefined;
+  onBoundaryCommit?: (boundary: number, delta: number) => void;
+}): ReactNode {
+  if (onBoundaryCommit === undefined || beats.length <= 1) return null;
+  return beats.slice(0, -1).map((left, index) => {
+    const right = beats[index + 1]!;
+    const underFloorText = left.underFloor
+      ? dwellTextFor(left)
+      : right.underFloor
+        ? dwellTextFor(right)
+        : undefined;
+    return (
+      <BeatBoundary
+        key={`boundary-${index}`}
+        boundary={index}
+        left={left}
+        right={right}
+        durationSec={durationSec}
+        pxPerSec={pxPerSec}
+        underFloorText={underFloorText}
+        onCommit={(delta) => onBoundaryCommit(index, delta)}
+      />
+    );
+  });
+}
+
+/**
  * A lane: a sticky name column and a canvas the clips are absolutely placed on.
  * The label is `sticky left-0` so a sideways scroll does not take the names with
  * it — the one lesson worth keeping from the HTML sketch.
@@ -636,9 +678,59 @@ export function Nudge({
   );
 }
 
+/**
+ * The transport row, shared by both timelines: the nudges, the accessible
+ * playhead slider and the zoom range. Nothing plays (VT-D6), so there is no
+ * play button at all — not a disabled one — on either surface.
+ */
+export function TapeTransport({
+  durationSec,
+  committedSec,
+  scrubSec,
+  pxPerSec,
+  onLive,
+  onCommit,
+  onZoom,
+}: {
+  durationSec: number;
+  committedSec: number;
+  scrubSec: number;
+  pxPerSec: number;
+  onLive: (sec: number) => void;
+  onCommit: (sec: number) => void;
+  onZoom: (px: number) => void;
+}): ReactNode {
+  return (
+    <div className="flex items-center gap-2 px-3 py-3">
+      <Nudge name={messages.tapeNudgeBack} onClick={() => onCommit(committedSec - 1)}>
+        {messages.tapeNudgeBackGlyph}
+      </Nudge>
+      <PlayheadSlider
+        durationSec={durationSec}
+        scrubSec={scrubSec}
+        onLive={onLive}
+        onCommit={onCommit}
+      />
+      <Nudge name={messages.tapeNudgeForward} onClick={() => onCommit(committedSec + 1)}>
+        {messages.tapeNudgeForwardGlyph}
+      </Nudge>
+      <input
+        type="range"
+        min={TAPE_PX_MIN}
+        max={TAPE_PX_MAX}
+        step={1}
+        value={pxPerSec}
+        aria-label={messages.tapeZoomName}
+        className="h-10 w-20 shrink-0 cursor-pointer accent-brand-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        onChange={(e) => onZoom(Number(e.target.value))}
+      />
+    </div>
+  );
+}
+
 /* ── One transport, shared with the sequence timeline (VT1) ──────────────── */
 
-export interface TapeTransport {
+export interface TapeTransportReturn {
   readonly scrollRef: RefObject<HTMLDivElement | null>;
   readonly pxPerSec: number;
   /** D147's zoom write: remember the operator's px/s and mark it user-chosen. */
@@ -696,7 +788,7 @@ export function useTapeTransport({
   durationSec: number;
   committedSec: number;
   onScrubCommit: (sec: number) => void;
-}): TapeTransport {
+}): TapeTransportReturn {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const portWidth = useInlineWidth(scrollRef);
   const [zoomPx, setZoomPx] = useState(TAPE_PX_MIN);
@@ -841,28 +933,13 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
             {/* TL3 — one handle per join, only when this host can commit a
                 neighbour transfer. An inert slider on the section tape would
                 be an affordance the surface does not have. */}
-            {onBoundaryCommit !== undefined
-              ? beats.slice(0, -1).map((left, index) => {
-                  const right = beats[index + 1]!;
-                  const underFloorText = left.underFloor
-                    ? dwellTextFor(left)
-                    : right.underFloor
-                      ? dwellTextFor(right)
-                      : undefined;
-                  return (
-                    <BeatBoundary
-                      key={`boundary-${index}`}
-                      boundary={index}
-                      left={left}
-                      right={right}
-                      durationSec={durationSec}
-                      pxPerSec={pxPerSec}
-                      underFloorText={underFloorText}
-                      onCommit={(delta) => onBoundaryCommit(index, delta)}
-                    />
-                  );
-                })
-              : null}
+            <BeatBoundaries
+              beats={beats}
+              durationSec={durationSec}
+              pxPerSec={pxPerSec}
+              dwellTextFor={dwellTextFor}
+              onBoundaryCommit={onBoundaryCommit}
+            />
           </Lane>
 
           <Lane name={messages.tapeLaneVideo} durationSec={durationSec} pxPerSec={pxPerSec}>
@@ -936,30 +1013,15 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 px-3 py-3">
-        <Nudge name={messages.tapeNudgeBack} onClick={() => commit(committedSec - 1)}>
-          {messages.tapeNudgeBackGlyph}
-        </Nudge>
-        <PlayheadSlider
-          durationSec={durationSec}
-          scrubSec={scrubSec}
-          onLive={props.onScrubLive}
-          onCommit={commit}
-        />
-        <Nudge name={messages.tapeNudgeForward} onClick={() => commit(committedSec + 1)}>
-          {messages.tapeNudgeForwardGlyph}
-        </Nudge>
-        <input
-          type="range"
-          min={TAPE_PX_MIN}
-          max={TAPE_PX_MAX}
-          step={1}
-          value={pxPerSec}
-          aria-label={messages.tapeZoomName}
-          className="h-10 w-20 shrink-0 cursor-pointer accent-brand-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          onChange={(e) => onZoom(Number(e.target.value))}
-        />
-      </div>
+      <TapeTransport
+        durationSec={durationSec}
+        committedSec={committedSec}
+        scrubSec={scrubSec}
+        pxPerSec={pxPerSec}
+        onLive={props.onScrubLive}
+        onCommit={commit}
+        onZoom={onZoom}
+      />
 
       <p id={statusId} role="status" className="px-3 pb-3 text-[11px] text-text-muted">
         {statusSentence}

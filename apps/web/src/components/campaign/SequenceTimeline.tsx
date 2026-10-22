@@ -20,17 +20,14 @@ import * as messages from "@/components/campaign/messages";
 import type { TrackDiamond, UnplaceableTracks } from "@/components/campaign/track-diamonds";
 import type { SequenceVideoRow } from "@/components/campaign/layer-stack-props";
 import {
-  BeatBoundary,
+  BeatBoundaries,
   Diamond,
   FilmPerforations,
-  Nudge,
   Playhead,
-  PlayheadSlider,
   Ruler,
   TAPE_END_PAD_PX,
   TAPE_LABEL_PX,
-  TAPE_PX_MAX,
-  TAPE_PX_MIN,
+  TapeTransport,
   TimelineTapeBeat,
   canvasWidth,
   formatTapeClock,
@@ -468,28 +465,13 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
             })}
             {/* One handle per INTERNAL join. The outer edges are not
                 boundaries, and a one-beat sequence has no join at all. */}
-            {beats.length > 1
-              ? beats.slice(0, -1).map((left, index) => {
-                  const right = beats[index + 1]!;
-                  const underFloorText = left.underFloor
-                    ? dwellTextFor(left)
-                    : right.underFloor
-                      ? dwellTextFor(right)
-                      : undefined;
-                  return (
-                    <BeatBoundary
-                      key={`boundary-${index}`}
-                      boundary={index}
-                      left={left}
-                      right={right}
-                      durationSec={durationSec}
-                      pxPerSec={pxPerSec}
-                      underFloorText={underFloorText}
-                      onCommit={(delta) => onBoundaryCommit(index, delta)}
-                    />
-                  );
-                })
-              : null}
+            <BeatBoundaries
+              beats={beats}
+              durationSec={durationSec}
+              pxPerSec={pxPerSec}
+              dwellTextFor={dwellTextFor}
+              onBoundaryCommit={onBoundaryCommit}
+            />
           </Lane>
 
           {/* The video tracks: every video layer, disabled ones included, one
@@ -637,30 +619,15 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
       {/* The transport: nudges, the playhead, the zoom. No play button — not a
           disabled one (VT-D6): a shipped-but-inert play control would teach the
           wrong tool while waiting on a restamp. */}
-      <div className="flex items-center gap-2 px-3 py-3">
-        <Nudge name={messages.tapeNudgeBack} onClick={() => commit(committedSec - 1)}>
-          {messages.tapeNudgeBackGlyph}
-        </Nudge>
-        <PlayheadSlider
-          durationSec={durationSec}
-          scrubSec={scrubSec}
-          onLive={props.onScrubLive}
-          onCommit={commit}
-        />
-        <Nudge name={messages.tapeNudgeForward} onClick={() => commit(committedSec + 1)}>
-          {messages.tapeNudgeForwardGlyph}
-        </Nudge>
-        <input
-          type="range"
-          min={TAPE_PX_MIN}
-          max={TAPE_PX_MAX}
-          step={1}
-          value={pxPerSec}
-          aria-label={messages.tapeZoomName}
-          className="h-10 w-20 shrink-0 cursor-pointer accent-brand-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          onChange={(e) => onZoom(Number(e.target.value))}
-        />
-      </div>
+      <TapeTransport
+        durationSec={durationSec}
+        committedSec={committedSec}
+        scrubSec={scrubSec}
+        pxPerSec={pxPerSec}
+        onLive={props.onScrubLive}
+        onCommit={commit}
+        onZoom={onZoom}
+      />
 
       {/* Add-track: video is always legal (the type does not cap it); text is
           the shared budget's, so the control stays visible and disabled with
