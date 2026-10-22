@@ -128,21 +128,23 @@ export interface SequenceVideoRow {
 }
 
 export function sequenceVideoRows(state: EditorState): readonly SequenceVideoRow[] {
-  const rows = layerStackProps(state).rows;
-  return state.template.layers
-    .map((layer, index) => ({ layer, index }))
-    .filter(({ layer }) => layer.kind === "video")
-    .map(({ layer, index }) => {
-      const row = rows.find((candidate) => candidate.id === layer.id);
-      return {
-        id: layer.id,
-        index,
-        off: layer.enabled === false,
-        canToggle: row?.toggleable ?? false,
-        canMoveUp: row?.mayMoveUp ?? false,
-        canMoveDown: row?.mayMoveDown ?? false,
-      };
-    });
+  // `layerStackProps` builds its rows from the very `state.template.layers`
+  // array this pipeline used to re-walk — one row per layer, template order,
+  // the layer's own id and kind — so a row's index IS its layer's index, and
+  // filtering the rows by kind visits the same video layers the template list
+  // would, each answered by its own row. Every layer has one: there is no
+  // find to miss and no `?? false` arm to take.
+  return layerStackProps(state)
+    .rows.map((row, index) => ({ row, index }))
+    .filter(({ row }) => row.kind === "video")
+    .map(({ row, index }) => ({
+      id: row.id,
+      index,
+      off: row.off,
+      canToggle: row.toggleable,
+      canMoveUp: row.mayMoveUp,
+      canMoveDown: row.mayMoveDown,
+    }));
 }
 
 /**

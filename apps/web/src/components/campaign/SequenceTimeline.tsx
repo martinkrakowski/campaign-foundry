@@ -253,14 +253,17 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
     commit((e.clientX - rect.left + port.scrollLeft - TAPE_LABEL_PX) / pxPerSec);
   };
 
-  /** One beat's dwell where the floor binds — its own number, not a neighbour's. */
-  const dwellTextFor = (beat: SequenceBeat): string | undefined =>
-    beat.underFloor
-      ? messages.timelineDwellUnderFloor(
-          (beat.endT - beat.startT) * shortestDurationSec,
-          MIN_DWELL_SEC,
-        )
-      : undefined;
+  /**
+   * One beat's dwell where the floor binds — its own number, not a
+   * neighbour's. Every caller has already checked `underFloor` (the status's
+   * `find`, the clip's sr-only span, the boundary's two sides), so there is
+   * no arm for a beat outside the floor: no such call exists.
+   */
+  const dwellTextFor = (beat: SequenceBeat): string =>
+    messages.timelineDwellUnderFloor(
+      (beat.endT - beat.startT) * shortestDurationSec,
+      MIN_DWELL_SEC,
+    );
 
   /* ── The text clip drag: one commit, on release (§7's preview-cost rule) ── */
 
@@ -284,8 +287,11 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
 
   /** Which beat the pointer's x falls in, clamped to the sequence's ends. */
   const beatIndexAt = (clientX: number): number => {
-    const canvas = textCanvasRef.current;
-    const left = canvas?.getBoundingClientRect().left ?? 0;
+    // The only caller is a beat button's pointermove, and those buttons are
+    // children of the canvas div this ref names — so the pointer pair cannot
+    // fire while the canvas is unmounted and the ref unset. There is no null
+    // canvas to read a zero left from, and no arm here for one.
+    const left = textCanvasRef.current!.getBoundingClientRect().left;
     const sec = (clientX - left) / pxPerSec;
     for (let index = 0; index < beats.length; index += 1) {
       if (sec < beats[index]!.endT * durationSec) return index;
@@ -327,7 +333,7 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
   const breached = beats.find((beat) => beat.underFloor);
   const statusSentence =
     breached !== undefined
-      ? (dwellTextFor(breached) as string)
+      ? dwellTextFor(breached)
       : committed
         ? messages.tapeCommittedStatus(formatTapeClock(committedSec))
         : messages.tapeIdleStatus;
