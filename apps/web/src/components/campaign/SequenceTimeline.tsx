@@ -7,11 +7,9 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type MouseEvent,
   type ReactNode,
 } from "react";
 import { cn } from "@/lib/cn";
-import { useInlineWidth } from "@/lib/use-min-inline-size";
 import {
   MOTION_FPS,
   encodedDurationSec,
@@ -35,9 +33,9 @@ import {
   TAPE_PX_MIN,
   TimelineTapeBeat,
   canvasWidth,
-  fitPx,
   formatTapeClock,
   laneWidth,
+  useTapeTransport,
 } from "@/components/campaign/TimelineTape";
 
 /**
@@ -214,44 +212,15 @@ function TrackButton({
 function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
   const { durationSec, beats, shortestDurationSec, scrubSec, committedSec, host } = props;
 
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const portWidth = useInlineWidth(scrollRef);
-  /** D147 — zoom is ephemeral, the same bucket as selection and scrub. */
-  const [zoomPx, setZoomPx] = useState(TAPE_PX_MIN);
-  const [zoomedByUser, setZoomedByUser] = useState(false);
-  useEffect(() => {
-    setZoomedByUser(false);
-  }, [durationSec]);
-  const pxPerSec = zoomedByUser ? zoomPx : fitPx(portWidth, durationSec);
-
-  /** Whether a commit has landed yet, so the status can say what happened. */
-  const [committed, setCommitted] = useState(false);
-  const lastCommittedSec = useRef(committedSec);
-  useEffect(() => {
-    if (lastCommittedSec.current === committedSec) return;
-    lastCommittedSec.current = committedSec;
-    setCommitted(true);
-  }, [committedSec]);
+  const { scrollRef, pxPerSec, onZoom, committed, commit, commitFromCanvas } = useTapeTransport({
+    durationSec,
+    committedSec,
+    onScrubCommit: props.onScrubCommit,
+  });
   const statusId = "sequence-timeline-status";
   /** Per-instance ids: nothing here may assume it is mounted once per document. */
   const uid = useId();
   const addTextDescId = `${uid}-add-text-blocked`;
-
-  const clamp = (sec: number) => Math.min(Math.max(0, sec), Math.max(0, durationSec));
-  const commit = (sec: number) => {
-    setCommitted(true);
-    props.onScrubCommit(clamp(sec));
-  };
-
-  /** A click on the canvas commits the second under the pointer (see the tape). */
-  const commitFromCanvas = (e: MouseEvent<HTMLDivElement>) => {
-    if ((e.target as HTMLElement).closest("button, input, select, textarea, a[href]") !== null) {
-      return;
-    }
-    const port = e.currentTarget;
-    const rect = port.getBoundingClientRect();
-    commit((e.clientX - rect.left + port.scrollLeft - TAPE_LABEL_PX) / pxPerSec);
-  };
 
   /**
    * One beat's dwell where the floor binds — its own number, not a
@@ -689,10 +658,7 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
           value={pxPerSec}
           aria-label={messages.tapeZoomName}
           className="h-10 w-20 shrink-0 cursor-pointer accent-brand-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          onChange={(e) => {
-            setZoomPx(Number(e.target.value));
-            setZoomedByUser(true);
-          }}
+          onChange={(e) => onZoom(Number(e.target.value))}
         />
       </div>
 
