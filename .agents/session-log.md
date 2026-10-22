@@ -7130,3 +7130,55 @@ and counts against exit 3; a refused or failed row forces its line partial by it
 `e28d4e17` (code + tests), `4fb95785` (manifest). Both mutations bite; pt-8c-merge and
 pt-8c-exit verify cleanly; pt-8b2-import-apply's mutation on the removed BIN exit-3
 line no longer matches — the orchestrator moves it.
+
+---
+
+## 2026-10-12 — VT1: motion sequence editor (video creatives)
+
+- **Mode:** Implementer
+- **Changes:**
+  - New `SequenceTimeline.tsx`: the video creative's track surface, mounted for creative type `video` when the look has motion (VT-D1) — on the rail (`BriefEditor.railSlot`, in place of `TimelineTape`) and on the narrow host (`TimelineSection.sectionTimeline`).
+  - Text clips drag (`moveBeat`) and resize (`shiftBeatBoundary`, internal joins only) on pointerup only; video rows (disabled ones included) and the audio path are full-duration, non-resizable; diamonds stay, committed via `setTrackStop`; add-track is video (`addLayer` kind video) and text (disabled once an animated-text layer exists); hide is `setLayerEnabled` and a disabled row stays visible. No play button. No seconds in the brief.
+  - `TimelineTape.tsx`: additive exports of the shared pieces (ruler, sliders, playhead, geometry) so the commit-once rules cannot drift between the two surfaces.
+  - `layer-stack-props.ts`: `sequenceVideoRows` / `sequenceCanAddText`, derived from the same derivations the stack reads. `messages.ts`: the sequence vocabulary.
+  - `BriefEditor.tsx`: `PlayheadPublisher` threads `railProps.motion` into the published playhead; rail branch splits on `creativeType`; `columnPanels` gained the missing `sectionPlayhead` dependency (a stale-form bug the motion gate exposed).
+  - Tests: `SequenceTimeline.test.tsx` (component), `brief-editor.sequence-timeline.test.tsx` (editor-level §8), `TimelineSection.test.tsx` gate tests; messages scanner sample for `sequenceBeatClip`.
+- **Decisions:**
+  - The section host gates on the published motion and so mounts nothing for a still draft — a behaviour change §8 requires; image-text motion keeps the tape.
+  - Add-text is present-but-disabled with the reason named (VT-D4), unlike the stack's absent-when-blocked offer.
+- **Left open:**
+  - VT2 spans, VT3 audio list, VT4 playback (all per §5). The §8 variant-motion row is covered by the composition of `preview-props.test.ts` (variant.motion override) and the new host gates rather than an editor-level selected-creative test.
+
+---
+
+## 2026-10-22 — VT1 fix lane: coverage to 100% (tester, GLM-5.3)
+
+- **Mode:** Tester — test-only, per the lane; the four unreachable reads below are a Reviewer's findings, reported rather than fixed.
+- **Changes:**
+  - `SequenceTimeline.test.tsx`: the transport (the nudge commits and their clamp, a canvas click committing the second under the pointer while a control's click is not a scrub, the operator's zoom), the committed-second effect and its status sentence, the dwell floor (the status's first breach, the per-clip description, both boundary sides, the error paint beside the selection ring), the keyboard reorder's left half, a drop past the end, a stray pointermove, and the keys lane's unplaceable count.
+  - `brief-editor.sequence-timeline.test.tsx`: the rail's video-row reorder, against the saved brief. `TimelineSection.test.tsx`: the section host's hide/show and reorder offers through the live reducer. `messages.test.ts`: `startFromRowMeta`'s and `discardGuardDetail`'s other arms, as direct formatter tests.
+- **Findings — genuinely unreachable, reported in the commit per the lane's rule:** `layer-stack-props.ts`'s `row?.x ?? false` trio (rows derives from the very layers array the pipeline filters, so find-by-id cannot miss); `SequenceTimeline.tsx:288`'s `?? 0` (the pointermove cannot outrun the canvas ref it reads — the tape's "no null to invent a branch for"); `SequenceTimeline.tsx:258-263`'s `: undefined` arm (every dwellTextFor call site is underFloor-guarded, where the tape computes its Clip's text unconditionally); and the two `onAddText` wirings (a video creative always carries its one required animated-text layer — the boundary refuses without it and the reducer refuses to remove it — so add-text can never be enabled at either host).
+- **Left open:** the coverage command still exits 1 on exactly that documented set, plus `derive.ts:89` / `display-names.ts:282` (not this PR's files; covered in CI's merged run by the shell/grid tests outside the command's filters). Folding the tape/sequence transport-and-status near-copies into shared pieces is a source refactor the lane kept out of scope; SonarCloud's duplication figure will not move until an owner decides it.
+
+---
+
+## 2026-10-22 — VT1 fix round 2: the last uncovered lines (implementer, GLM-5.3)
+
+- **Mode:** Implementer — `.lane/fix-2.md`, two commits, no push.
+- **Changes:**
+  - `test(timeline): cover the add-text callbacks in both hosts` (391317c1): BriefEditor.tsx:2297 and TimelineSection.tsx:185 covered by clicking the enabled add-text control on a `short-video` template with its one animated-text layer stripped, asserting the bare `{ id, kind }` layer lands, the budget is spent, and — at the editor — the saved brief carries it.
+  - `refactor(timeline): drop unreachable fallbacks` (f91349ca): removed the three arms no input can reach, per the lane's item-4 rule, with the proving line in the commit message — `layer-stack-props.ts`'s `row?.x ?? false` trio (rows are `layerStackProps`'s own map over the same layers array, so the find-by-id cannot miss; `sequenceVideoRows` now walks the rows positionally), `SequenceTimeline.tsx`'s `dwellTextFor` `: undefined` arm (all call sites underFloor-guarded; the return is now `string`, retiring the `as string` cast), and `beatIndexAt`'s `?. / ?? 0` (the beat buttons live inside the canvas div the ref names; asserted with the file's own `!` idiom).
+- **Decision / correction of the previous entry:** the earlier "genuinely unreachable" report held the two onAddText wirings unreachable because a video template without animated-text is boundary-refused. That conflates the boundary's verdict with the editor's draft: `fromBrief`/`canonicalBrief` never validate the layer list, so a LOADED brief holds the refused template and `sequenceCanAddText` reads the layer list, not the verdict — the control is reachable-enabled. The previous entry's other three findings stood and are now removed rather than reported.
+- **Verification:** the lane's coverage command exits 0 — 100% statements (815/815), branches (496/496), functions (224/224), lines (726/726) over the four files; prettier, typecheck, lint all pass; 130 files / 3027 tests green.
+
+---
+
+## 2026-10-22 — VT1 fix round 3: the reviewers' gesture and keyboard defects (implementer, GLM-5.3)
+
+- **Mode:** Implementer — `.lane/fix-3.md`, three commits, no push. Behaviour changes only where the lane allowed them (items 1-4 and 7), each with a test proved to fail without its fix; the rest are test repairs.
+- **Changes:**
+  - `fix(timeline): clip gestures survive cancel and wobble; keyboard reorder keeps focus` (0c096d97): `touch-none` on the draggable text clips (a touch drag no longer surrenders to the scrollport's horizontal scroll, which ends the pointer pair in `pointercancel`, not `pointerup`); `onPointerCancel` clears the in-flight drag, its paint and its moved mark without the one write; a pointermove marks the gesture moved only once the pointer reaches a different beat — a 1 px wobble never left the clip's own window and was swallowing the trailing click, losing both the selection and the reorder; the arrow reorder ignores auto-repeat and records its target, and a `useEffect` on `beats` refocuses the clip the beat moved to — the clips are keyed by index, so focus used to stay on the old slot, now the neighbour, and the next press moved the wrong beat.
+  - `refactor(timeline): the add-text offer reads addableKinds (D124)` (a5ecdb95): `sequenceCanAddText` reads `addableKinds(state).includes("animated-text")` instead of re-walking the layers — the offer has the one source the stack's add row offers from; identical for every video state the tests hold.
+  - `test(timeline): positive waits, a mid-drag check that can fail, one setup helper` (db2cf78e): the still-brief test waits for the rail preview first (the rail is CSS-hidden at 500 px but mounted, and the preview renders in the commit that publishes the playhead to the section host) before asserting no timeline — the old check ran before the host could have heard anything; the drag's mid-flight check reads the clip names' DOM order, because `saved[0]` is always undefined before Save and could not fail; the twelve repeated width/user/try-finally scaffolds fold into one local `openAtWidth` helper — item 8's answer to SonarCloud's 39-duplicated-lines finding. No assertion weakened.
+- **Proofs the tests can fail:** with the component reverted, each of the five new component tests fails on its own item; breaking the section's motion gate mounts a timeline the still test now catches late (expected 0, got 1); a wrong dispatch-per-move mid-drag reorders the clip names the new editor check reads (`['Stay hydrated', 'Stay wild']` while the button is down).
+- **Verification:** the lane's coverage command exits 0 — both included files 100% in all four columns (statements 141/141, branches 90/90, functions 43/43, lines 131/131); prettier on every touched file, root typecheck and lint all pass; 130 files / 3032 tests green.

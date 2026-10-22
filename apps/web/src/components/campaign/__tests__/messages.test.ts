@@ -81,6 +81,9 @@ const SAMPLE_ARGS = {
   timelineBeatUnderFloor: [1, 1.8, 2, 6],
   timelineDwell: [1.8],
   timelineDwellUnderFloor: [1.8, 2],
+  // VT1 — the text clip's label carries its resolved window in seconds, so the
+  // generic string args cannot be .toFixed()-ed.
+  sequenceBeatClip: [1, 1.8, 4.2],
 } as const satisfies Partial<Record<keyof typeof messages, readonly unknown[]>>;
 
 /** A string, a number, a string array, a boolean — enough for most formatters. */
@@ -232,6 +235,20 @@ describe("startFromRatioCaption", () => {
   test("is a count with both plural arms, never the raw ratio ids", () => {
     expect(messages.startFromRatioCaption(["16:9"])).toBe("1 ratio");
     expect(messages.startFromRatioCaption(["1:1", "9:16", "16:9"])).toBe("3 ratios");
+  });
+});
+
+describe("startFromRowMeta (M3)", () => {
+  test("agrees each plural with its own count, independently", () => {
+    expect(messages.startFromRowMeta(1, 2, "DE")).toBe("1 product · 2 treatments · DE");
+    expect(messages.startFromRowMeta(2, 1, "DE")).toBe("2 products · 1 treatment · DE");
+  });
+});
+
+describe("discardGuardDetail (W2(a))", () => {
+  test("names the answers worth keeping, and admits when there are none", () => {
+    expect(messages.discardGuardDetail(true)).toContain(messages.discardGuardPartName);
+    expect(messages.discardGuardDetail(false)).not.toContain(messages.discardGuardPartName);
   });
 });
 

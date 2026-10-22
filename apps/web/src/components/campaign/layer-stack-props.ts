@@ -99,3 +99,61 @@ export function layerStackKey(state: EditorState): string {
     state.occlusionNotice,
   ]);
 }
+
+/* ── The sequence timeline's rows (VT1) ────────────────────────────────────── */
+
+/**
+ * One video row of the sequence timeline (`2026-10-12_motion-sequence-editor.md`
+ * §4.1): each video layer, disabled ones included, drawn as one clip spanning
+ * the whole duration.
+ *
+ * Every offer is answered here rather than in the component, for the same
+ * reason `LayerStackRow`'s are: `toggleableLayerIds` and `layerMoveDirections`
+ * read the same `CREATIVE_TYPE_RULES` the boundary validates against, so the
+ * timeline cannot offer what Save would refuse. `canToggle` is false for the
+ * last enabled video row (video is required), which is the disabled hide button
+ * VT-D7 asks for rather than a click the reducer silently refuses.
+ */
+export interface SequenceVideoRow {
+  readonly id: string;
+  /**
+   * The layer's position in the template's layer list — the index the move
+   * callbacks take, the same index `LayerStack`'s own move buttons use.
+   */
+  readonly index: number;
+  readonly off: boolean;
+  readonly canToggle: boolean;
+  readonly canMoveUp: boolean;
+  readonly canMoveDown: boolean;
+}
+
+export function sequenceVideoRows(state: EditorState): readonly SequenceVideoRow[] {
+  // `layerStackProps` builds its rows from the very `state.template.layers`
+  // array this pipeline used to re-walk — one row per layer, template order,
+  // the layer's own id and kind — so a row's index IS its layer's index, and
+  // filtering the rows by kind visits the same video layers the template list
+  // would, each answered by its own row. Every layer has one: there is no
+  // find to miss and no `?? false` arm to take.
+  return layerStackProps(state)
+    .rows.map((row, index) => ({ row, index }))
+    .filter(({ row }) => row.kind === "video")
+    .map(({ row, index }) => ({
+      id: row.id,
+      index,
+      off: row.off,
+      canToggle: row.toggleable,
+      canMoveUp: row.mayMoveUp,
+      canMoveDown: row.mayMoveDown,
+    }));
+}
+
+/**
+ * Whether "Add a text track" may act (VT-D4): `addableKinds`'s own answer,
+ * read — never re-decided (D124), so the offer has the one source the layer
+ * stack's add row already offers from. A second walk of the layers would be
+ * the copy of the budget those derivations exist to prevent: it could admit
+ * a track the boundary would refuse at save, or refuse one it would take.
+ */
+export function sequenceCanAddText(state: EditorState): boolean {
+  return addableKinds(state).includes("animated-text");
+}

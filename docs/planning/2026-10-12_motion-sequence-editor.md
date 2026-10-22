@@ -1,6 +1,6 @@
 # Motion sequence editor — preview and timeline
 
-**Status:** r2 — two plan reviews folded (2026-10-12). No lane is dispatchable until the decisions in §6 are stamped. The reviews' blockers are corrected in §2, §4, §5 and §8; they are listed in §11.
+**Status:** r2 — two plan reviews folded (2026-10-12). **§6 VT-D1..D8 stamped by the owner as written, 2026-10-22** ("Stamp all 8 as written"); VT1 (#820) may merge when green. The reviews' blockers are corrected in §2, §4, §5 and §8; they are listed in §11.
 **Date:** 2026-10-12.
 **Inspiration (local, not in the repo):** `/Users/martin/Desktop/video-editor-timeline.html` (ReelCut studio mock: program monitor, transport, resizable pane, multi-track timeline).
 **Related, already on main:** `2026-08-27_motion-copy-timeline.md` (beats are weights, not timestamps), `2026-09-13_video-editing-features.md` (VE-D5 scrub is local and never autoplays; VE-D11 refuses footage import), `2026-09-16_rail-timeline-surface.md` (TimelineTape), `2026-09-16_studio-editor.md`, `2026-09-10_keyframing.md` (property tracks, not clips), `DESIGN.md` §3 (rail anatomy).
@@ -170,6 +170,8 @@ The pane divider is part of VT1 if it is local state with the same bounds idea a
 ---
 
 ## 6. Decisions that need a stamp before code
+
+**Stamped 2026-10-22 by the owner: VT-D1 to VT-D8, all as written below.**
 
 | Id | Question | Recommendation |
 | --- | --- | --- |

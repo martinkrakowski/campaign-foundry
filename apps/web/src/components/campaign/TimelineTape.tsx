@@ -9,6 +9,7 @@ import {
   type CSSProperties,
   type MouseEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { cn } from "@/lib/cn";
 import { useInlineWidth } from "@/lib/use-min-inline-size";
@@ -122,7 +123,7 @@ export function formatTapeClock(seconds: number): string {
  * themselves still ship on the root, where the lane grid's own
  * `grid-cols-[var(--tt-label)_1fr]` reads them.
  */
-function xFor(seconds: number, pxPerSec: number): string {
+export function xFor(seconds: number, pxPerSec: number): string {
   return `calc(${TAPE_LABEL_PX}px + ${seconds} * ${pxPerSec}px)`;
 }
 
@@ -131,12 +132,12 @@ function xFor(seconds: number, pxPerSec: number): string {
  * whole cutoff fix. Without it the playhead at `t = durationSec` sits on the
  * well's border-radius and loses its knob, which is what the HTML sketch did.
  */
-function canvasWidth(durationSec: number, pxPerSec: number): string {
+export function canvasWidth(durationSec: number, pxPerSec: number): string {
   return `calc(${TAPE_LABEL_PX}px + ${durationSec} * ${pxPerSec}px + ${TAPE_END_PAD_PX}px)`;
 }
 
 /** A lane's own canvas: the clip length plus the same end pad, minus the label. */
-function laneWidth(durationSec: number, pxPerSec: number): string {
+export function laneWidth(durationSec: number, pxPerSec: number): string {
   return `calc(${durationSec} * ${pxPerSec}px + ${TAPE_END_PAD_PX}px)`;
 }
 
@@ -224,11 +225,25 @@ export interface TimelineTapeProps {
 
 /* ── Pieces ───────────────────────────────────────────────────────────────── */
 
+/*
+ * The pieces below this marker are exported for `SequenceTimeline` too (VT1):
+ * the ruler, the playhead pair, the commit-once sliders and the geometry
+ * helpers are the same surface vocabulary on both timelines, and a second copy
+ * of any of them would be a second place for the once-on-release commit rule to
+ * drift from. Nothing exported here changes behaviour; the export is additive.
+ */
+
 /**
  * The ruler, inside the one scrollport — that is the whole point. A tick per
  * whole second, including the last one, which is the tick the sketch cropped.
  */
-function Ruler({ durationSec, pxPerSec }: { durationSec: number; pxPerSec: number }): ReactNode {
+export function Ruler({
+  durationSec,
+  pxPerSec,
+}: {
+  durationSec: number;
+  pxPerSec: number;
+}): ReactNode {
   const ticks = [];
   for (let second = 0; second <= Math.floor(durationSec); second += 1) ticks.push(second);
   return (
@@ -264,7 +279,7 @@ function Ruler({ durationSec, pxPerSec }: { durationSec: number; pxPerSec: numbe
  * readability rule, and a keyframe has none — `layerTracksProblem` is the only
  * refusal, and it cannot fire on a `t` a range input clamps into range.
  */
-function Diamond({
+export function Diamond({
   diamond,
   durationSec,
   pxPerSec,
@@ -320,7 +335,7 @@ function Diamond({
  * seconds (§9.3.2). A dwell-floor breach is hearable on this handle (§9.3.4,
  * D138): committed and flagged, never snapped back.
  */
-function BeatBoundary({
+export function BeatBoundary({
   boundary,
   left,
   right,
@@ -379,6 +394,48 @@ function BeatBoundary({
       />
     </>
   );
+}
+
+/**
+ * The internal joins, shared by both timelines: one handle per join, only when
+ * this host can commit a neighbour transfer — an inert slider would be an
+ * affordance the surface does not have. The outer edges are not boundaries,
+ * and a one-beat sequence has no join at all.
+ */
+export function BeatBoundaries({
+  beats,
+  durationSec,
+  pxPerSec,
+  dwellTextFor,
+  onBoundaryCommit,
+}: {
+  beats: readonly TimelineTapeBeat[];
+  durationSec: number;
+  pxPerSec: number;
+  dwellTextFor: (beat: TimelineTapeBeat) => string | undefined;
+  onBoundaryCommit?: (boundary: number, delta: number) => void;
+}): ReactNode {
+  if (onBoundaryCommit === undefined || beats.length <= 1) return null;
+  return beats.slice(0, -1).map((left, index) => {
+    const right = beats[index + 1]!;
+    const underFloorText = left.underFloor
+      ? dwellTextFor(left)
+      : right.underFloor
+        ? dwellTextFor(right)
+        : undefined;
+    return (
+      <BeatBoundary
+        key={`boundary-${index}`}
+        boundary={index}
+        left={left}
+        right={right}
+        durationSec={durationSec}
+        pxPerSec={pxPerSec}
+        underFloorText={underFloorText}
+        onCommit={(delta) => onBoundaryCommit(index, delta)}
+      />
+    );
+  });
 }
 
 /**
@@ -506,7 +563,7 @@ function Clip(props: {
  * cell IS the compositor frame (D52/VE-D6), and a second picture of the creative
  * beside it would be a second renderer's opinion of the same second.
  */
-function FilmPerforations(): ReactNode {
+export function FilmPerforations(): ReactNode {
   const perforation =
     "linear-gradient(180deg, color-mix(in srgb, var(--color-scrim) 18%, transparent) 0 3px," +
     " transparent 3px calc(100% - 3px)," +
@@ -530,7 +587,7 @@ function FilmPerforations(): ReactNode {
  * the same fact twice (DESIGN.md §4 — the lesson the header's
  * own theme control already taught).
  */
-function Playhead({
+export function Playhead({
   seconds,
   durationSec,
   pxPerSec,
@@ -571,7 +628,7 @@ function Playhead({
  * user never fires a pointer event and a pointer-only commit would leave them
  * able to move the thumb and unable to move the frame.
  */
-function PlayheadSlider({
+export function PlayheadSlider({
   durationSec,
   scrubSec,
   onLive,
@@ -600,7 +657,7 @@ function PlayheadSlider({
 }
 
 /** A ±1 s nudge. A button that does a thing once — never a hold-to-repeat clock. */
-function Nudge({
+export function Nudge({
   name,
   onClick,
   children,
@@ -621,47 +678,127 @@ function Nudge({
   );
 }
 
-/* ── The tape ─────────────────────────────────────────────────────────────── */
+/**
+ * The transport row, shared by both timelines: the nudges, the accessible
+ * playhead slider and the zoom range. Nothing plays (VT-D6), so there is no
+ * play button at all — not a disabled one — on either surface.
+ */
+export function TapeTransport({
+  durationSec,
+  committedSec,
+  scrubSec,
+  pxPerSec,
+  onLive,
+  onCommit,
+  onZoom,
+}: {
+  durationSec: number;
+  committedSec: number;
+  scrubSec: number;
+  pxPerSec: number;
+  onLive: (sec: number) => void;
+  onCommit: (sec: number) => void;
+  onZoom: (px: number) => void;
+}): ReactNode {
+  return (
+    <div className="flex items-center gap-2 px-3 py-3">
+      <Nudge name={messages.tapeNudgeBack} onClick={() => onCommit(committedSec - 1)}>
+        {messages.tapeNudgeBackGlyph}
+      </Nudge>
+      <PlayheadSlider
+        durationSec={durationSec}
+        scrubSec={scrubSec}
+        onLive={onLive}
+        onCommit={onCommit}
+      />
+      <Nudge name={messages.tapeNudgeForward} onClick={() => onCommit(committedSec + 1)}>
+        {messages.tapeNudgeForwardGlyph}
+      </Nudge>
+      <input
+        type="range"
+        min={TAPE_PX_MIN}
+        max={TAPE_PX_MAX}
+        step={1}
+        value={pxPerSec}
+        aria-label={messages.tapeZoomName}
+        className="h-10 w-20 shrink-0 cursor-pointer accent-brand-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        onChange={(e) => onZoom(Number(e.target.value))}
+      />
+    </div>
+  );
+}
 
-function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
-  const { durationSec, beats, shortestDurationSec, scrubSec, committedSec, host } = props;
+/* ── One transport, shared with the sequence timeline (VT1) ──────────────── */
 
+export interface TapeTransportReturn {
+  readonly scrollRef: RefObject<HTMLDivElement | null>;
+  readonly pxPerSec: number;
+  /** D147's zoom write: remember the operator's px/s and mark it user-chosen. */
+  readonly onZoom: (px: number) => void;
+  readonly committed: boolean;
+  readonly commit: (sec: number) => void;
+  readonly commitFromCanvas: (e: MouseEvent<HTMLDivElement>) => void;
+}
+
+/**
+ * The transport every timeline shares: the scrollport ref, the fit/zoom
+ * arithmetic, the committed-tracking effect and the canvas-click commit. The
+ * tape and the sequence timeline each carried a copy of this block; it lives
+ * here because the two surfaces speak the same vocabulary (TS1's "one
+ * surface") and a second copy would be a second place for the once-on-release
+ * rule and the D147 zoom-bucket rule to drift from.
+ *
+ * D147 — zoom is ephemeral, the same bucket as selection and scrub. It is not a
+ * property of the campaign, and persisting it would surprise a second operator
+ * on the same brief. Default is fit; the operator may zoom in; a reload resets.
+ *
+ * A changed duration axis retires the operator's zoom: a 6 s → 15 s change at a
+ * 6 s zoom leaves nine seconds off the right-hand edge, which is the cutoff
+ * this plan exists to close, arriving by a different door.
+ *
+ * Whether a commit has landed yet, so the status can say what happened. It
+ * follows the committed second itself, not only this component's own commit
+ * path: every surface that can commit writes the SAME lifted second (that is
+ * what CC5 is for) — the dock's own scrub under the `section` host today. A
+ * flag set only by one surface's own buttons would leave the sentence saying
+ * "drag the playhead to scrub" while the readout under the diamond already
+ * showed the frame somebody else's commit had landed — two surfaces disagreeing
+ * about the same draft, which is the class of defect this lane keeps closing.
+ * The local set stays for the case the effect cannot see: a nudge that clamps
+ * to a second already committed (−1 s at 0) moves nothing, and is still the
+ * operator asking for that frame.
+ *
+ * The canvas-click commit: a click on the canvas — the ruler, a lane's empty
+ * space — commits the second under the pointer. It is a COMMIT and not a live
+ * move because it is equivalent to dragging the thumb there and letting go.
+ * The handler sits on the scrollport rather than on the ruler for two reasons:
+ * the element it must measure from is then the event's own `currentTarget`
+ * (there is no ref to find and no null to invent a branch for), and the port is
+ * the one element whose `scrollLeft` the arithmetic needs — which is what keeps
+ * a click correct at any scroll position, the term the HTML sketch got wrong.
+ * A click that landed on a CLIP is that clip's selection, not a scrub: the
+ * clips are real buttons, and swallowing their click here would make a beat
+ * unselectable by mouse.
+ */
+export function useTapeTransport({
+  durationSec,
+  committedSec,
+  onScrubCommit,
+}: {
+  durationSec: number;
+  committedSec: number;
+  onScrubCommit: (sec: number) => void;
+}): TapeTransportReturn {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const portWidth = useInlineWidth(scrollRef);
-  /**
-   * D147 — zoom is ephemeral, the same bucket as selection and scrub. It is not a
-   * property of the campaign, and persisting it would surprise a second operator
-   * on the same brief. Default is fit; the operator may zoom in; a reload resets.
-   */
   const [zoomPx, setZoomPx] = useState(TAPE_PX_MIN);
   const [zoomedByUser, setZoomedByUser] = useState(false);
-  /**
-   * A changed duration axis retires the operator's zoom: a 6 s → 15 s change at a
-   * 6 s zoom leaves nine seconds off the right-hand edge, which is the cutoff
-   * this plan exists to close, arriving by a different door.
-   */
   useEffect(() => {
     setZoomedByUser(false);
   }, [durationSec]);
 
   const pxPerSec = zoomedByUser ? zoomPx : fitPx(portWidth, durationSec);
 
-  /**
-   * Whether a commit has landed yet, so the status can say what happened.
-   *
-   * It follows the committed second itself, not only this component's own commit
-   * path: every surface that can commit writes the SAME lifted second (that is
-   * what CC5 is for) — the dock's own scrub under the `section` host today. A
-   * flag set only by the tape's own
-   * buttons would leave the sentence saying "drag the playhead to scrub" while
-   * the readout under the diamond already showed the frame somebody else's
-   * commit had landed — two surfaces disagreeing about the same draft, which is
-   * the class of defect this lane keeps closing.
-   *
-   * The local set stays for the case the effect cannot see: a nudge that clamps
-   * to a second already committed (−1 s at 0) moves nothing, and is still the
-   * operator asking for that frame.
-   */
   const [committed, setCommitted] = useState(false);
   const lastCommittedSec = useRef(committedSec);
   useEffect(() => {
@@ -669,29 +806,13 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
     lastCommittedSec.current = committedSec;
     setCommitted(true);
   }, [committedSec]);
-  const statusId = "timeline-tape-status";
 
   const clamp = (sec: number) => Math.min(Math.max(0, sec), Math.max(0, durationSec));
   const commit = (sec: number) => {
     setCommitted(true);
-    props.onScrubCommit(clamp(sec));
+    onScrubCommit(clamp(sec));
   };
 
-  /**
-   * A click on the canvas — the ruler, a lane's empty space — commits the second
-   * under the pointer. It is a COMMIT and not a live move because it is
-   * equivalent to dragging the thumb there and letting go.
-   *
-   * The handler sits on the scrollport rather than on the ruler for two reasons:
-   * the element it must measure from is then the event's own `currentTarget`
-   * (there is no ref to find and no null to invent a branch for), and the port is
-   * the one element whose `scrollLeft` the arithmetic needs — which is what keeps
-   * a click correct at any scroll position, the term the HTML sketch got wrong.
-   *
-   * A click that landed on a CLIP is that clip's selection, not a scrub: the
-   * clips are real buttons, and swallowing their click here would make a beat
-   * unselectable by mouse.
-   */
   const commitFromCanvas = (e: MouseEvent<HTMLDivElement>) => {
     // Any interactive control inside the scrollport owns its own pointer, not
     // just a button: TL6 put range inputs on the canvas, and with only the
@@ -705,6 +826,31 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
     const rect = port.getBoundingClientRect();
     commit((e.clientX - rect.left + port.scrollLeft - TAPE_LABEL_PX) / pxPerSec);
   };
+
+  return {
+    scrollRef,
+    pxPerSec,
+    onZoom: (px: number) => {
+      setZoomPx(px);
+      setZoomedByUser(true);
+    },
+    committed,
+    commit,
+    commitFromCanvas,
+  };
+}
+
+/* ── The tape ─────────────────────────────────────────────────────────────── */
+
+function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
+  const { durationSec, beats, shortestDurationSec, scrubSec, committedSec, host } = props;
+
+  const { scrollRef, pxPerSec, onZoom, committed, commit, commitFromCanvas } = useTapeTransport({
+    durationSec,
+    committedSec,
+    onScrubCommit: props.onScrubCommit,
+  });
+  const statusId = "timeline-tape-status";
 
   /**
    * The first beat under the floor, evaluated where the floor actually binds —
@@ -787,28 +933,13 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
             {/* TL3 — one handle per join, only when this host can commit a
                 neighbour transfer. An inert slider on the section tape would
                 be an affordance the surface does not have. */}
-            {onBoundaryCommit !== undefined
-              ? beats.slice(0, -1).map((left, index) => {
-                  const right = beats[index + 1]!;
-                  const underFloorText = left.underFloor
-                    ? dwellTextFor(left)
-                    : right.underFloor
-                      ? dwellTextFor(right)
-                      : undefined;
-                  return (
-                    <BeatBoundary
-                      key={`boundary-${index}`}
-                      boundary={index}
-                      left={left}
-                      right={right}
-                      durationSec={durationSec}
-                      pxPerSec={pxPerSec}
-                      underFloorText={underFloorText}
-                      onCommit={(delta) => onBoundaryCommit(index, delta)}
-                    />
-                  );
-                })
-              : null}
+            <BeatBoundaries
+              beats={beats}
+              durationSec={durationSec}
+              pxPerSec={pxPerSec}
+              dwellTextFor={dwellTextFor}
+              onBoundaryCommit={onBoundaryCommit}
+            />
           </Lane>
 
           <Lane name={messages.tapeLaneVideo} durationSec={durationSec} pxPerSec={pxPerSec}>
@@ -882,33 +1013,15 @@ function TimelineTapeImpl(props: TimelineTapeProps): ReactNode {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 px-3 py-3">
-        <Nudge name={messages.tapeNudgeBack} onClick={() => commit(committedSec - 1)}>
-          {messages.tapeNudgeBackGlyph}
-        </Nudge>
-        <PlayheadSlider
-          durationSec={durationSec}
-          scrubSec={scrubSec}
-          onLive={props.onScrubLive}
-          onCommit={commit}
-        />
-        <Nudge name={messages.tapeNudgeForward} onClick={() => commit(committedSec + 1)}>
-          {messages.tapeNudgeForwardGlyph}
-        </Nudge>
-        <input
-          type="range"
-          min={TAPE_PX_MIN}
-          max={TAPE_PX_MAX}
-          step={1}
-          value={pxPerSec}
-          aria-label={messages.tapeZoomName}
-          className="h-10 w-20 shrink-0 cursor-pointer accent-brand-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          onChange={(e) => {
-            setZoomPx(Number(e.target.value));
-            setZoomedByUser(true);
-          }}
-        />
-      </div>
+      <TapeTransport
+        durationSec={durationSec}
+        committedSec={committedSec}
+        scrubSec={scrubSec}
+        pxPerSec={pxPerSec}
+        onLive={props.onScrubLive}
+        onCommit={commit}
+        onZoom={onZoom}
+      />
 
       <p id={statusId} role="status" className="px-3 pb-3 text-[11px] text-text-muted">
         {statusSentence}
