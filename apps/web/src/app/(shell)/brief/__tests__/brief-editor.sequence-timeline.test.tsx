@@ -84,6 +84,24 @@ const stillBrief = (() => {
   return brief;
 })();
 
+/**
+ * The video brief with its one animated-text layer stripped — the draft whose
+ * text track the shared budget can still admit (VT-D4's enabled half). The
+ * boundary would refuse to save the stripped template (`animated-text` is a
+ * required kind for `video`), but the editor holds drafts the boundary
+ * refuses; the click this fixture exists for is what restores the layer.
+ */
+const textlessVideoBrief = () => {
+  const template = templateFromCanonical("short-video");
+  return {
+    ...videoBrief,
+    template: {
+      ...template,
+      layers: template.layers.filter((layer) => layer.kind !== "animated-text"),
+    },
+  };
+};
+
 type Saved = Record<string, unknown>;
 
 const DEFAULT_ASSETS: Record<string, unknown>[] = [
@@ -258,6 +276,43 @@ describe("VT1 — the sequence editor's mount gates and wired gestures", () => {
         await waitFor(() => expect(saved).toHaveLength(1));
         const layers = (saved[0]?.template as { layers: { kind: string }[] }).layers;
         expect(layers.filter((l) => l.kind === "animated-text")).toHaveLength(1);
+      } finally {
+        restore();
+      }
+    });
+
+    test("add text commits the one animated-text layer while the budget allows it", async () => {
+      const user = userEvent.setup();
+      const restore = atWidth(1440);
+      try {
+        const saved = await open(textlessVideoBrief());
+
+        // The enabled half the disabled test above leaves unpinned: with no
+        // animated-text layer the same control is a live offer, not an inert one.
+        const control = screen.getByRole("button", {
+          name: messages.sequenceAddTextTrack,
+        }) as HTMLButtonElement;
+        expect(control.disabled).toBe(false);
+
+        await user.click(control);
+
+        // The track landed, so the budget that admitted it is spent: the
+        // control now carries the reason the test above pinned from the
+        // other side of the same budget.
+        const after = screen.getByRole("button", {
+          name: messages.sequenceAddTextTrack,
+        }) as HTMLButtonElement;
+        expect(after.disabled).toBe(true);
+        expect(screen.getAllByText(messages.sequenceAddTextBlocked).length).toBeGreaterThan(0);
+
+        // And the brief says so too: the stripped fixture's missing layer,
+        // added back bare (L5), with the id the kind spells while it is free.
+        await save(user);
+        await waitFor(() => expect(saved).toHaveLength(1));
+        const layers = (saved[0]?.template as { layers: Record<string, unknown>[] }).layers;
+        expect(layers.filter((l) => l.kind === "animated-text")).toEqual([
+          { id: "animated-text", kind: "animated-text" },
+        ]);
       } finally {
         restore();
       }

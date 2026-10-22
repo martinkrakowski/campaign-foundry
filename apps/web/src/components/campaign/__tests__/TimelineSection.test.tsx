@@ -689,6 +689,29 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
       },
     );
 
+  /**
+   * The video template with its one animated-text layer stripped — the draft
+   * whose text track the shared budget can still admit (VT-D4's enabled
+   * half). `animated-text` is a required kind for `video`, so the boundary
+   * would refuse to save the stripped template, but this panel holds drafts
+   * the boundary refuses; the click this fixture exists for restores it.
+   */
+  const textlessVideoState = () => {
+    const template = templateFromCanonical("short-video");
+    return withBeats(
+      [
+        { text: "One", weight: 1 },
+        { text: "Two", weight: 1 },
+      ],
+      {
+        template: {
+          ...template,
+          layers: template.layers.filter((layer) => layer.kind !== "animated-text"),
+        },
+      },
+    );
+  };
+
   test("a video creative mounts the sequence timeline, not the tape", () => {
     const restore = atNarrowWidth();
     try {
@@ -769,6 +792,46 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
       // drag commits — the two surfaces share one writer.
       await user.click(screen.getByLabelText(messages.timelineMoveBeatDown(1)));
       expect(dispatch).toHaveBeenCalledWith({ type: "moveBeat", from: 0, to: 1 });
+    } finally {
+      restore();
+    }
+  });
+
+  test("the sequence host wires add-text while the budget allows it, which this panel owns too", async () => {
+    const user = userEvent.setup();
+    const restore = atNarrowWidth();
+    let state = textlessVideoState();
+    try {
+      const dispatch = vi.fn((action: Parameters<typeof editorReducer>[1]) => {
+        state = editorReducer(state, action);
+        rerender(
+          <TimelineSection state={state} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
+        );
+      });
+      const { rerender } = render(
+        <TimelineSection state={state} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
+      );
+
+      // The enabled half the test above pins from the other side of the same
+      // budget: with no animated-text layer the offer is live, not inert.
+      const addText = screen.getByRole("button", {
+        name: messages.sequenceAddTextTrack,
+      }) as HTMLButtonElement;
+      expect(addText.disabled).toBe(false);
+
+      await user.click(addText);
+
+      // The section host's own onAddText: the same addLayer the stack's add
+      // offers commit, and the layer it writes spends the budget — so the
+      // control that offered the track now refuses a second one.
+      expect(dispatch).toHaveBeenCalledWith({ type: "addLayer", kind: "animated-text" });
+      expect(state.template.layers.filter((l) => l.kind === "animated-text")).toEqual([
+        { id: "animated-text", kind: "animated-text" },
+      ]);
+      expect(
+        (screen.getByRole("button", { name: messages.sequenceAddTextTrack }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true);
     } finally {
       restore();
     }
