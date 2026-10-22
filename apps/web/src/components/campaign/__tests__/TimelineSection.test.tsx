@@ -774,6 +774,56 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
     }
   });
 
+  test("the sequence host wires the video rows' own offers, which this panel owns too", async () => {
+    const user = userEvent.setup();
+    const restore = atNarrowWidth();
+    let state = videoState();
+    try {
+      const dispatch = vi.fn((action: Parameters<typeof editorReducer>[1]) => {
+        state = editorReducer(state, action);
+        rerender(
+          <TimelineSection state={state} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
+        );
+      });
+      const { rerender } = render(
+        <TimelineSection state={state} dispatch={dispatch} sectionPlayhead={movingPlayhead} />,
+      );
+
+      // A second video row first: the last enabled required row offers no hide.
+      await user.click(screen.getByRole("button", { name: messages.sequenceAddVideoTrack }));
+      expect(state.template.layers.filter((l) => l.kind === "video")).toHaveLength(2);
+
+      // Hide, from the row's own header — the same setLayerEnabled the stack
+      // offers, wired through the host this panel owns (VT-D7).
+      await user.click(screen.getByRole("button", { name: messages.sequenceHideVideoTrack(1) }));
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "setLayerEnabled",
+        id: "video",
+        enabled: false,
+      });
+      expect(state.template.layers.find((l) => l.id === "video")?.enabled).toBe(false);
+      // The off row stays on the timeline and offers its way back.
+      await user.click(screen.getByRole("button", { name: messages.sequenceShowVideoTrack(1) }));
+      expect(state.template.layers.find((l) => l.id === "video")?.enabled).toBeUndefined();
+
+      // Reorder, from the row's own header — stack order via the row's layer
+      // index (video-2 lands topmost for this type, so its one offer is down).
+      await user.click(
+        screen.getByRole("button", { name: messages.sequenceMoveVideoTrackDown(2) }),
+      );
+      expect(dispatch).toHaveBeenCalledWith({ type: "moveLayer", from: 4, to: 3 });
+      expect(state.template.layers.map((l) => l.id)).toEqual([
+        "video",
+        "shade",
+        "animated-text",
+        "video-2",
+        "logo",
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
   test("dragging a text clip to the neighbouring slot commits one moveBeat on release", () => {
     const restore = atNarrowWidth();
     try {

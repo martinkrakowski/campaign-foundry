@@ -238,6 +238,20 @@ describe("startFromRatioCaption", () => {
   });
 });
 
+describe("startFromRowMeta (M3)", () => {
+  test("agrees each plural with its own count, independently", () => {
+    expect(messages.startFromRowMeta(1, 2, "DE")).toBe("1 product · 2 treatments · DE");
+    expect(messages.startFromRowMeta(2, 1, "DE")).toBe("2 products · 1 treatment · DE");
+  });
+});
+
+describe("discardGuardDetail (W2(a))", () => {
+  test("names the answers worth keeping, and admits when there are none", () => {
+    expect(messages.discardGuardDetail(true)).toContain(messages.discardGuardPartName);
+    expect(messages.discardGuardDetail(false)).not.toContain(messages.discardGuardPartName);
+  });
+});
+
 describe("template messages (L5)", () => {
   test("templateRequiredNote agrees its verb with the count", () => {
     expect(messages.templateRequiredNote(["Solo"])).toBe(

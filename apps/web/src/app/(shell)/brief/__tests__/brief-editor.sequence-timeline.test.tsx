@@ -426,4 +426,39 @@ describe("VT1 — the sequence editor's mount gates and wired gestures", () => {
       }
     });
   });
+
+  describe("the video rows' own offers, against the saved brief (§4.1)", () => {
+    test("reordering a video row writes the stack order the row's header named", async () => {
+      const user = userEvent.setup();
+      const restore = atWidth(1440);
+      try {
+        const saved = await open(videoBrief);
+        await user.click(screen.getByRole("button", { name: messages.sequenceAddVideoTrack }));
+        await waitFor(() =>
+          expect(document.querySelectorAll('[data-sequence-clip="video"]')).toHaveLength(2),
+        );
+
+        // video-2 lands topmost (the video type carries no order constraints),
+        // so the one offer its row has is DOWN: one place, above the logo.
+        await user.click(
+          screen.getByRole("button", { name: messages.sequenceMoveVideoTrackDown(2) }),
+        );
+
+        await save(user);
+        await waitFor(() => expect(saved).toHaveLength(1));
+        const layers = (saved[0]?.template as { layers: { id: string }[] }).layers;
+        // Stack order, never a time shift: the row moved one z-position and
+        // every other layer kept its place (D128).
+        expect(layers.map((l) => l.id)).toEqual([
+          "video",
+          "shade",
+          "animated-text",
+          "video-2",
+          "logo",
+        ]);
+      } finally {
+        restore();
+      }
+    });
+  });
 });

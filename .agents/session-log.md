@@ -7148,3 +7148,14 @@ line no longer matches — the orchestrator moves it.
   - Add-text is present-but-disabled with the reason named (VT-D4), unlike the stack's absent-when-blocked offer.
 - **Left open:**
   - VT2 spans, VT3 audio list, VT4 playback (all per §5). The §8 variant-motion row is covered by the composition of `preview-props.test.ts` (variant.motion override) and the new host gates rather than an editor-level selected-creative test.
+
+---
+
+## 2026-10-22 — VT1 fix lane: coverage to 100% (tester, GLM-5.3)
+
+- **Mode:** Tester — test-only, per the lane; the four unreachable reads below are a Reviewer's findings, reported rather than fixed.
+- **Changes:**
+  - `SequenceTimeline.test.tsx`: the transport (the nudge commits and their clamp, a canvas click committing the second under the pointer while a control's click is not a scrub, the operator's zoom), the committed-second effect and its status sentence, the dwell floor (the status's first breach, the per-clip description, both boundary sides, the error paint beside the selection ring), the keyboard reorder's left half, a drop past the end, a stray pointermove, and the keys lane's unplaceable count.
+  - `brief-editor.sequence-timeline.test.tsx`: the rail's video-row reorder, against the saved brief. `TimelineSection.test.tsx`: the section host's hide/show and reorder offers through the live reducer. `messages.test.ts`: `startFromRowMeta`'s and `discardGuardDetail`'s other arms, as direct formatter tests.
+- **Findings — genuinely unreachable, reported in the commit per the lane's rule:** `layer-stack-props.ts`'s `row?.x ?? false` trio (rows derives from the very layers array the pipeline filters, so find-by-id cannot miss); `SequenceTimeline.tsx:288`'s `?? 0` (the pointermove cannot outrun the canvas ref it reads — the tape's "no null to invent a branch for"); `SequenceTimeline.tsx:258-263`'s `: undefined` arm (every dwellTextFor call site is underFloor-guarded, where the tape computes its Clip's text unconditionally); and the two `onAddText` wirings (a video creative always carries its one required animated-text layer — the boundary refuses without it and the reducer refuses to remove it — so add-text can never be enabled at either host).
+- **Left open:** the coverage command still exits 1 on exactly that documented set, plus `derive.ts:89` / `display-names.ts:282` (not this PR's files; covered in CI's merged run by the shell/grid tests outside the command's filters). Folding the tape/sequence transport-and-status near-copies into shared pieces is a source refactor the lane kept out of scope; SonarCloud's duplication figure will not move until an owner decides it.

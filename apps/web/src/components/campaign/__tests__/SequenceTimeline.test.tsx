@@ -2,12 +2,16 @@ import { describe, test, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { resolveTimeline } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
+import {
+  MIN_DWELL_SEC,
+  resolveTimeline,
+} from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import {
   MOTION_FPS,
   encodedDurationSec,
 } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import * as messages from "../messages";
+import { TAPE_LABEL_PX, formatTapeClock } from "../TimelineTape";
 import type { TrackDiamond } from "../track-diamonds";
 import { SequenceTimeline, type SequenceTimelineProps } from "../SequenceTimeline";
 
@@ -195,6 +199,35 @@ describe("the text clip's drag-to-reorder (§4.1, §8)", () => {
     onMoveBeat.mockClear();
     fireEvent.keyDown(beatClip(2), { key: "ArrowRight" });
     expect(onMoveBeat).not.toHaveBeenCalled();
+    // The same single call, one step the other way — and the ends again.
+    onMoveBeat.mockClear();
+    fireEvent.keyDown(beatClip(2), { key: "ArrowLeft" });
+    expect(onMoveBeat).toHaveBeenCalledWith(1, 0);
+    onMoveBeat.mockClear();
+    fireEvent.keyDown(beatClip(1), { key: "ArrowLeft" });
+    expect(onMoveBeat).not.toHaveBeenCalled();
+  });
+
+  test("a drag past the end drops on the last beat, never past it", () => {
+    const onMoveBeat = vi.fn();
+    renderTimeline({ onMoveBeat });
+    const clip = beatClip(1);
+    fireEvent.pointerDown(clip, { clientX: 28 });
+    // 200 px is 7.1 s on the fit floor — beyond the 6 s canvas, so the drop
+    // clamps to the last beat rather than naming an index that is not there.
+    fireEvent.pointerMove(clip, { clientX: 200 });
+    fireEvent.pointerUp(clip);
+    expect(onMoveBeat).toHaveBeenCalledTimes(1);
+    expect(onMoveBeat).toHaveBeenCalledWith(0, 1);
+  });
+
+  test("a pointermove with no drag in flight commits nothing", () => {
+    const onMoveBeat = vi.fn();
+    renderTimeline({ onMoveBeat });
+    // A stray move (no pointerdown on a clip first) is not a gesture: the
+    // in-flight ref is the authority, not the pointer's mere presence.
+    fireEvent.pointerMove(beatClip(1), { clientX: 84 });
+    expect(onMoveBeat).not.toHaveBeenCalled();
   });
 });
 
@@ -222,6 +255,153 @@ describe("the boundary handles (TL3, restated for this surface)", () => {
       onBoundaryCommit,
     });
     expect(screen.queryByRole("slider", { name: messages.tapeBeatBoundaryName(1) })).toBeNull();
+  });
+});
+
+describe("the transport: the scrub's commits and the zoom (TS1's rules, this surface)", () => {
+  test("the nudges commit one clamped second each, and the status names the frame", () => {
+    const onScrubCommit = vi.fn();
+    renderTimeline({ onScrubCommit });
+
+    fireEvent.click(screen.getByRole("button", { name: messages.tapeNudgeBack }));
+    // −1 s at 0 clamps to 0: still the operator asking for that frame.
+    expect(onScrubCommit).toHaveBeenCalledTimes(1);
+    expect(onScrubCommit).toHaveBeenCalledWith(0);
+    fireEvent.click(screen.getByRole("button", { name: messages.tapeNudgeForward }));
+    expect(onScrubCommit).toHaveBeenLastCalledWith(1);
+
+    // The local commit flag: the status says a frame landed, not the idle
+    // sentence — the second it names is still the committed prop's.
+    expect(screen.getByText(messages.tapeCommittedStatus(formatTapeClock(0)))).toBeTruthy();
+    expect(screen.queryByText(messages.tapeIdleStatus)).toBeNull();
+  });
+
+  test("a click on the canvas commits the second under the pointer; a control's click is not a scrub", () => {
+    const onScrubCommit = vi.fn();
+    renderTimeline({ onScrubCommit });
+    const port = document.querySelector("[data-sequence-scrollport]");
+    expect(port).toBeTruthy();
+    // happy-dom lays nothing out: the port's rect and scrollLeft read 0 and the
+    // fit floor is 28 px/s, so clientX is the only live term in the arithmetic.
+    fireEvent.click(port!, { clientX: TAPE_LABEL_PX + 2 * 28 });
+    expect(onScrubCommit).toHaveBeenLastCalledWith(2);
+    // Left of the label column clamps to the start of the clip.
+    fireEvent.click(port!, { clientX: 0 });
+    expect(onScrubCommit).toHaveBeenLastCalledWith(0);
+    // Past the end clamps to the end.
+    fireEvent.click(port!, { clientX: TAPE_LABEL_PX + 7 * 28 });
+    expect(onScrubCommit).toHaveBeenLastCalledWith(6);
+
+    // The guard: a click that landed on a control belongs to the control — a
+    // clip's click selects, it never also scrubs.
+    fireEvent.click(beatClip(1));
+    expect(onScrubCommit).toHaveBeenCalledTimes(3);
+  });
+
+  test("the zoom slider takes the scale from the operator, and every lane follows", () => {
+    renderTimeline();
+    // The fit floor before any zoom.
+    expect(screen.getByText(messages.tapePxPerSecond(28))).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(messages.tapeZoomName), {
+      target: { value: "60" },
+    });
+    expect(screen.getByText(messages.tapePxPerSecond(60))).toBeTruthy();
+    // The clips re-scale with it: a full-duration row is 6 s at the new scale.
+    expect(videoClip(1).style.width).toBe("360px");
+  });
+
+  test("a committed second from the parent moves the status off the idle sentence", () => {
+    const onScrubLive = vi.fn();
+    const onScrubCommit = vi.fn();
+    // The rerender needs one props object across both commits, so this test
+    // renders directly rather than through the fresh-spy helper.
+    const props = { ...baseProps, onScrubLive, onScrubCommit } as SequenceTimelineProps;
+    const view = render(<SequenceTimeline {...props} committedSec={0} />);
+    expect(screen.getByText(messages.tapeIdleStatus)).toBeTruthy();
+
+    // The parent landed a new committed second (the owner's half of the
+    // live/commit split): the status follows it, and nothing was written here.
+    view.rerender(<SequenceTimeline {...props} committedSec={2.5} />);
+    expect(screen.getByText(messages.tapeCommittedStatus(formatTapeClock(2.5)))).toBeTruthy();
+    expect(onScrubCommit).not.toHaveBeenCalled();
+    expect(onScrubLive).not.toHaveBeenCalled();
+  });
+});
+
+describe("the dwell floor, painted and said (D3, on this surface)", () => {
+  /**
+   * Weights 1:4 on the 6 s clip: beat 1 dwells 1.2 s — under the floor — and
+   * beat 2 dwells 4.8 s. The parent computes `underFloor`; this surface trusts
+   * it, the same trust the tape's beats carry.
+   */
+  const FLOOR_SOURCE = [
+    { text: "Stay wild", weight: 1 },
+    { text: "Stay hydrated", weight: 4 },
+  ] as const;
+  const floorResolved = resolveTimeline(
+    {
+      beats: [...FLOOR_SOURCE],
+      transition: "cut",
+      keyBeat: 1,
+    },
+    DURATION,
+  );
+  const floorBeats = (underFirst: boolean) =>
+    floorResolved.map((beat, index) => ({
+      text: beat.text,
+      startT: beat.startT,
+      endT: beat.endT,
+      weight: FLOOR_SOURCE[index]!.weight,
+      underFloor: index === (underFirst ? 0 : 1),
+    }));
+  const floorDwell = (position: number): string => {
+    const beat = floorResolved[position - 1]!;
+    return messages.timelineDwellUnderFloor((beat.endT - beat.startT) * DURATION, MIN_DWELL_SEC);
+  };
+  const floorClip = (position: number) => {
+    const beat = floorResolved[position - 1]!;
+    return screen.getByRole("button", {
+      name: messages.sequenceBeatClip(position, beat.startT * DURATION, beat.endT * DURATION),
+    });
+  };
+  const describedByText = (el: Element): string =>
+    document.getElementById(el.getAttribute("aria-describedby") ?? "")?.textContent ?? "";
+
+  test("the first breach owns the status, and the breaching clip carries its own dwell", () => {
+    renderTimeline({ beats: floorBeats(true), selectedBeatIndex: 0 });
+
+    // The status names the FIRST breach (D3), never the idle sentence.
+    expect(document.getElementById("sequence-timeline-status")?.textContent).toBe(floorDwell(1));
+    expect(screen.queryByText(messages.tapeIdleStatus)).toBeNull();
+
+    const clip = floorClip(1);
+    expect(clip.getAttribute("aria-invalid")).toBe("true");
+    expect(describedByText(clip)).toBe(floorDwell(1));
+    // Painted, not only said — and the selection ring coexists with the
+    // breach: the error tone owns the border, the ring stays the pick's.
+    expect(clip.className).toContain("bg-error/20");
+    expect(clip.className).toContain("shadow-brand-primary/30");
+
+    // The clean beat says and paints none of it.
+    const clean = floorClip(2);
+    expect(clean.getAttribute("aria-invalid")).toBeNull();
+    expect(clean.className).not.toContain("bg-error/20");
+  });
+
+  test("a boundary handle carries the LEFT beat's dwell when that is the side under the floor", () => {
+    renderTimeline({ beats: floorBeats(true) });
+    const handle = screen.getByRole("slider", { name: messages.tapeBeatBoundaryName(1) });
+    expect(handle.getAttribute("aria-invalid")).toBe("true");
+    expect(describedByText(handle)).toBe(floorDwell(1));
+  });
+
+  test("a boundary handle carries the RIGHT beat's dwell when that is the side under the floor", () => {
+    renderTimeline({ beats: floorBeats(false) });
+    const handle = screen.getByRole("slider", { name: messages.tapeBeatBoundaryName(1) });
+    expect(handle.getAttribute("aria-invalid")).toBe("true");
+    // The left beat is clean, so the sentence the handle carries is the one a
+    // drag would create on the right — the neighbour it would put under.
+    expect(describedByText(handle)).toBe(floorDwell(2));
   });
 });
 
@@ -381,5 +561,16 @@ describe("the diamonds stay (VT-D8)", () => {
   test("no diamonds prop, no keys lane — never an empty one", () => {
     renderTimeline();
     expect(screen.queryByText(messages.tapeLaneKeyframes)).toBeNull();
+  });
+
+  test("keys that cannot be placed are counted and said, not silently dropped", () => {
+    renderTimeline({
+      selectedLayerId: "video",
+      diamonds: { placed: [], unplaceable: { count: 2 } },
+    });
+    // The lane mounts for keys the ruler cannot place, exactly as it does for
+    // placed ones — an empty waveform would imply the layer has no keys at all.
+    expect(screen.getByText(messages.tapeLaneKeyframes)).toBeTruthy();
+    expect(screen.getByText(messages.tapeKeysNotPlaced(2))).toBeTruthy();
   });
 });
