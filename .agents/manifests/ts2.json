@@ -19,8 +19,8 @@
     },
     {
       "file": "apps/web/src/components/campaign/TimelineSection.tsx",
-      "before": "    railShown || sectionPlayhead == null || beats.length === 0 ? null : (",
-      "after": "    sectionPlayhead == null || beats.length === 0 ? null : (",
+      "before": "    railShown ||\n    sectionPlayhead == null ||\n    sectionPlayhead.motion === undefined ||\n    beats.length === 0 ? null : state.template.creativeType === \"video\" ? (",
+      "after": "    sectionPlayhead == null ||\n    sectionPlayhead.motion === undefined ||\n    beats.length === 0 ? null : state.template.creativeType === \"video\" ? (",
       "because": "The other half of the same invariant, from the other side: drop the section's own width gate and BOTH hosts render wherever the rail is shown. The two conditions are deliberately not one — the rail decides whether it draws a tape, the section decides whether it draws one, and each must answer for itself or a future change to either silently produces the pair. The test that reds is the WIDE one, which asserts the single tape is the rail's.",
       "command": [
         "yarn",
