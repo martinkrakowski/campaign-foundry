@@ -48,6 +48,32 @@ const beats = resolved.map((beat, index) => ({
   underFloor: false,
 }));
 
+/**
+ * Three equal beats, 1:1:1 — the keyboard reorder's own fixture: a second
+ * arrow must still have somewhere to move the same beat to, which the two-beat
+ * fixture above cannot show.
+ */
+const KEYBOARD_SOURCE = [
+  { text: "One", weight: 1 },
+  { text: "Two", weight: 1 },
+  { text: "Three", weight: 1 },
+] as const;
+const keyboardResolved = resolveTimeline(
+  {
+    beats: [...KEYBOARD_SOURCE],
+    transition: "cut",
+    keyBeat: 1,
+  },
+  DURATION,
+);
+const keyboardBeats = keyboardResolved.map((beat, index) => ({
+  text: beat.text,
+  startT: beat.startT,
+  endT: beat.endT,
+  weight: KEYBOARD_SOURCE[index]!.weight,
+  underFloor: false,
+}));
+
 /** One enabled video row and one switched-off one — VT-D7's both-halves fixture. */
 const videoRows: SequenceTimelineProps["videoRows"] = [
   { id: "video", index: 0, off: false, canToggle: true, canMoveUp: false, canMoveDown: false },
@@ -101,6 +127,13 @@ const source = readFileSync(resolve(process.cwd(), SOURCE_PATH), "utf8");
 
 const beatClip = (position: number) => {
   const beat = beats[position - 1]!;
+  return screen.getByRole("button", {
+    name: messages.sequenceBeatClip(position, beat.startT * DURATION, beat.endT * DURATION),
+  });
+};
+/** The clip button a given beats array puts at `position`, by its own name. */
+const clipNamed = (arr: typeof beats, position: number) => {
+  const beat = arr[position - 1]!;
   return screen.getByRole("button", {
     name: messages.sequenceBeatClip(position, beat.startT * DURATION, beat.endT * DURATION),
   });
@@ -173,6 +206,28 @@ describe("the text clip's drag-to-reorder (§4.1, §8)", () => {
     expect(onMoveBeat).not.toHaveBeenCalled();
   });
 
+  test("the clips carry touch-none, so a touch drag is not the scrollport's scroll", () => {
+    renderTimeline();
+    // A scrollport takeover ends the pointer pair in `pointercancel`, not
+    // `pointerup` — the class is what keeps a touch drag the clip's own.
+    expect(beatClip(1).className).toContain("touch-none");
+  });
+
+  test("a pointercancel aborts the drag: no move, and the drag paint clears", () => {
+    const onMoveBeat = vi.fn();
+    renderTimeline({ onMoveBeat });
+    const clip = beatClip(1);
+    fireEvent.pointerDown(clip, { clientX: 28 });
+    fireEvent.pointerMove(clip, { clientX: 28 * 4.5 });
+    // The source clip shows the drag while the gesture is live...
+    expect(clip.className).toContain("opacity-60");
+    // ...and the takeover is the gesture's END: no write — the cancel is not
+    // a release — and nothing painted either.
+    fireEvent.pointerCancel(clip);
+    expect(onMoveBeat).not.toHaveBeenCalled();
+    expect(clip.className).not.toContain("opacity-60");
+  });
+
   test("a click that never moved selects the beat; a drag's trailing click does not", () => {
     const onSelectBeat = vi.fn();
     renderTimeline({ onSelectBeat });
@@ -190,6 +245,21 @@ describe("the text clip's drag-to-reorder (§4.1, §8)", () => {
     expect(onSelectBeat).not.toHaveBeenCalled();
   });
 
+  test("a 1 px wobble is a click: the beat selects, and nothing moves", () => {
+    const onSelectBeat = vi.fn();
+    const onMoveBeat = vi.fn();
+    renderTimeline({ onSelectBeat, onMoveBeat });
+    fireEvent.pointerDown(beatClip(1), { clientX: 28 });
+    // 29 px is still beat 1's window [0, 4) s at the fit floor: the pointer
+    // wobbled, it never reached a different beat — so the gesture is not a
+    // drag, and the trailing click must still be the selection it always was.
+    fireEvent.pointerMove(beatClip(1), { clientX: 29 });
+    fireEvent.pointerUp(beatClip(1));
+    fireEvent.click(beatClip(1));
+    expect(onSelectBeat).toHaveBeenCalledWith(0);
+    expect(onMoveBeat).not.toHaveBeenCalled();
+  });
+
   test("the keyboard moves a beat one step, the same single call (§7)", () => {
     const onMoveBeat = vi.fn();
     renderTimeline({ onMoveBeat });
@@ -205,6 +275,41 @@ describe("the text clip's drag-to-reorder (§4.1, §8)", () => {
     expect(onMoveBeat).toHaveBeenCalledWith(1, 0);
     onMoveBeat.mockClear();
     fireEvent.keyDown(beatClip(1), { key: "ArrowLeft" });
+    expect(onMoveBeat).not.toHaveBeenCalled();
+  });
+
+  test("two ArrowRight presses walk a beat two steps, focus following it (§7)", () => {
+    const onMoveBeat = vi.fn();
+    // The rerender needs one props object across both presses, so this test
+    // renders directly rather than through the fresh-spy helper.
+    const props = { ...baseProps, beats: keyboardBeats, onMoveBeat } as SequenceTimelineProps;
+    const view = render(<SequenceTimeline {...props} />);
+
+    // The operator's own focus, the way the gesture really starts.
+    const first = clipNamed(keyboardBeats, 1);
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowRight" });
+    expect(onMoveBeat).toHaveBeenCalledTimes(1);
+    expect(onMoveBeat).toHaveBeenLastCalledWith(0, 1);
+
+    // The parent lands the move: the beats re-arrive with the beat at 1.
+    const movedOnce = [keyboardBeats[1]!, keyboardBeats[0]!, keyboardBeats[2]!];
+    view.rerender(<SequenceTimeline {...props} beats={movedOnce} />);
+
+    // Focus followed the BEAT, not the slot — the clips are keyed by index,
+    // so the slot that was pressed now carries the neighbour, and a second
+    // press there would move the wrong beat.
+    expect(document.activeElement).toBe(clipNamed(movedOnce, 2));
+
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
+    expect(onMoveBeat).toHaveBeenCalledTimes(2);
+    expect(onMoveBeat).toHaveBeenLastCalledWith(1, 2);
+  });
+
+  test("auto-repeat is not a run of moves: a held key's repeats call nothing", () => {
+    const onMoveBeat = vi.fn();
+    renderTimeline({ beats: keyboardBeats, onMoveBeat });
+    fireEvent.keyDown(clipNamed(keyboardBeats, 1), { key: "ArrowRight", repeat: true });
     expect(onMoveBeat).not.toHaveBeenCalled();
   });
 

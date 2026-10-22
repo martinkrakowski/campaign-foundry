@@ -285,6 +285,29 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
    */
   const dragMovedRef = useRef(false);
 
+  /**
+   * Where a keyboard move's focus goes. The clips are keyed by INDEX, so a
+   * reorder reuses the DOM slot the operator pressed and focus would stay on
+   * the neighbour now living there — the next arrow would move the wrong
+   * beat. The press records the beat's destination, and the effect moves
+   * focus there once the parent lands the moved `beats`.
+   */
+  const keyboardMoveTargetRef = useRef<number | null>(null);
+  useEffect(() => {
+    const target = keyboardMoveTargetRef.current;
+    if (target === null) return;
+    keyboardMoveTargetRef.current = null;
+    // The same no-null-arm argument as `beatIndexAt` below: the ref is armed
+    // only by a clip's own keydown, the clips are this canvas's children, and
+    // the arming press already bounds the target inside the sequence — so
+    // there is no armed run with the canvas unmounted and no missing clip to
+    // fall back for.
+    const clips = textCanvasRef.current!.querySelectorAll<HTMLButtonElement>(
+      '[data-sequence-clip="text"]',
+    );
+    clips[target]!.focus();
+  }, [beats]);
+
   /** Which beat the pointer's x falls in, clamped to the sequence's ends. */
   const beatIndexAt = (clientX: number): number => {
     // The only caller is a beat button's pointermove, and those buttons are
@@ -311,10 +334,14 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
   };
   const onBeatPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (dragRef.current === null) return;
-    dragMovedRef.current = true;
     const next = { from: dragRef.current.from, overIndex: beatIndexAt(e.clientX) };
     dragRef.current = next;
     setDrag(next);
+    // Moved means the pointer reached a DIFFERENT beat, not that it moved at
+    // all: a 1 px wobble never leaves the clip's own window, and a click that
+    // went nowhere is still a selection (see `dragMovedRef` above) — marking
+    // every move as moved is what lost those clicks.
+    if (next.overIndex !== next.from) dragMovedRef.current = true;
   };
   const onBeatPointerUp = () => {
     const current = dragRef.current;
@@ -324,6 +351,17 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
     if (current !== null && current.overIndex !== current.from) {
       props.onMoveBeat(current.from, current.overIndex);
     }
+  };
+  /**
+   * The touch takeover this drag can lose to (see `touch-none` on the clips):
+   * a scrollport that claims the pointer CANCELS it rather than releasing it,
+   * so this is the gesture's end — the one write must not happen, and the
+   * paint and the moved mark clear as though it never began.
+   */
+  const onBeatPointerCancel = () => {
+    dragRef.current = null;
+    setDrag(null);
+    dragMovedRef.current = false;
   };
 
   const onBoundaryCommit = props.onBoundaryCommit;
@@ -399,7 +437,7 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
                   data-sequence-clip="text"
                   className={cn(
                     "absolute bottom-1 top-1 overflow-hidden rounded-md border border-modified/50 bg-modified/20 text-left text-modified transition-colors duration-fast",
-                    "cursor-grab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary",
+                    "cursor-grab touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary",
                     props.selectedBeatIndex === index &&
                       "border-brand-primary shadow-[0_0_0_2px] shadow-brand-primary/30",
                     beat.underFloor === true && "border-error/50 bg-error/20 text-error",
@@ -413,14 +451,20 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
                   onPointerDown={(e) => onBeatPointerDown(index, e)}
                   onPointerMove={onBeatPointerMove}
                   onPointerUp={onBeatPointerUp}
+                  onPointerCancel={onBeatPointerCancel}
                   onKeyDown={(e) => {
                     // The keyboard reorder: one snap step, the same size as the
                     // Copy form's own arrows, and the same one release-sized call.
+                    // Auto-repeat is not a run of those calls — one held key is
+                    // one gesture, the way one drag is.
+                    if (e.repeat) return;
                     if (e.key === "ArrowLeft" && index > 0) {
                       e.preventDefault();
+                      keyboardMoveTargetRef.current = index - 1;
                       props.onMoveBeat(index, index - 1);
                     } else if (e.key === "ArrowRight" && index < beats.length - 1) {
                       e.preventDefault();
+                      keyboardMoveTargetRef.current = index + 1;
                       props.onMoveBeat(index, index + 1);
                     }
                   }}
