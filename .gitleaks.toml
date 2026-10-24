@@ -1,0 +1,56 @@
+# gitleaks configuration: the default rules, plus narrow allowlists for reviewed test fixtures and
+# non-secret look-alikes. Each entry requires the file AND the rule AND the line's shape
+# (condition = "AND"), so any other finding in the same file is still caught. Add an entry only
+# for a reviewed fixture, never for a real value.
+title = "campaign-foundry"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "CI: the throwaway identities of the local CI SeaweedFS (.github/seaweedfs/s3.json)"
+condition = "AND"
+targetRules = ["curl-auth-user"]
+paths = ['''^\.github/workflows/ci\.yml$''']
+regexTarget = "line"
+regexes = ['''--user \S+ -X PUT http://127\.0\.0\.1:8333/''']
+
+[[allowlists]]
+description = "object-store tests: fake S3 credentials and listing fixtures"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/api/server/lib/object-store/__tests__/S3ObjectStore-(listing|secrets)\.test\.ts$''']
+regexTarget = "line"
+regexes = ['''^\s*("[^"]+",|process\.env\.S3_SECRET_ACCESS_KEY = ")''']
+
+[[allowlists]]
+description = "config tests: fake inline, base64 and secret values"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/api/server/lib/__tests__/config\.test\.ts$''']
+regexTarget = "line"
+regexes = ['''^\s*const (inlineKey|b64Key|secret) = "''']
+
+[[allowlists]]
+description = "provider-keys API tests: fake provider key bodies"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/web/src/lib/__tests__/provider-keys-api\.test\.ts$''']
+regexTarget = "line"
+regexes = ['''\{ key: "[^"]+" \}''']
+
+[[allowlists]]
+description = "ObjectStorePort test: a fake object key"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^packages/CampaignOrchestration/src/application/ports/out/__tests__/ObjectStorePort\.test\.ts$''']
+regexTarget = "line"
+regexes = ['''^\s*const key = "''']
+
+[[allowlists]]
+description = "host key sealer test: a fake provider key"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/api/server/lib/keys/__tests__/host-secret-key-sealer\.test\.ts$''']
+regexTarget = "line"
+regexes = ['''"sk-''']
