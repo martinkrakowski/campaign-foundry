@@ -17,7 +17,7 @@
     "better-auth": "^1.7.6",
     "clsx": "^2.1.0",
     "js-yaml": "^5.4.1",
-    "next": "^15.0.0",
+    "next": "^15.5.28",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-resizable-panels": "^2.1.4",
