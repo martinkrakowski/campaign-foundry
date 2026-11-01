@@ -1,7 +1,7 @@
 # How often does the projection actually drop a valid field?
 
 **Date:** 2026-09-18
-**Status:** **MEASUREMENT COMPLETE; TWO TASKS OPEN — stamped 2026-09-21.** This lane ships no product code. SG5 (#488) and SG6′ (#491) are on `main`, and PD3 shipped **as M1** (#501). **Open: PD1** (rewrite the wireframe gap's SG6 row to SG6′ — blocked, because **PD-D1 is still only a recommendation and was never stamped**, yet SG6′ shipped ahead of it anyway), **PD2** (give SG-D1 a lane or record it deferred — until then §3.3's treatments drop is a live silent drop with no owner and `ModePanel` still renders), **PD4 shipped as RW-18** (the comment now names the mode flip as the operator route). **Open: PD1** (still blocked on PD-D1) and **PD2** (RW-21).
+**Status:** **MEASUREMENT COMPLETE; ONE TASK OPEN — stamped 2026-11-01.** **PD-D1 decided 2026-11-01 (owner's delegate): as recommended; ratifies #491.** PD1 is done by that stamp. Open: **PD2** (RW-21) only. _Was (2026-09-21): "MEASUREMENT COMPLETE; TWO TASKS OPEN."_ This lane ships no product code. SG5 (#488) and SG6′ (#491) are on `main`, and PD3 shipped **as M1** (#501). **Open: PD1** (rewrite the wireframe gap's SG6 row to SG6′ — blocked, because **PD-D1 is still only a recommendation and was never stamped**, yet SG6′ shipped ahead of it anyway), **PD2** (give SG-D1 a lane or record it deferred — until then §3.3's treatments drop is a live silent drop with no owner and `ModePanel` still renders), **PD4 shipped as RW-18** (the comment now names the mode flip as the operator route). **Open: PD1** (still blocked on PD-D1) and **PD2** (RW-21).
 **Verified against:** `origin/main` at `43e5fc2e`.
 **Lane:** **SG5**, the first task under **SG-D8** of `2026-09-17_wireframe-gap.md`. SG5 gates **SG6** and nothing else.
 **Related:** `2026-09-17_wireframe-gap.md` §8.4 (why the validation gate is not keyed on the projection), `apps/web/src/components/campaign/__tests__/editor-state.validation-gate.test.ts` (the Video-in-a-classic-draft case SG9 constructed).
@@ -306,7 +306,7 @@ not be re-argued from it.
 
 | ID | Question | Recommendation |
 |---|---|---|
-| **PD-D1** | **Build SG6 as SG-D8(i) specifies, narrow it, or retire it?** | **Narrow it to one notice on one control, and delete the per-field mapping.** |
+| **PD-D1** | **Build SG6 as SG-D8(i) specifies, narrow it, or retire it?** | **Narrow it to one notice on one control, and delete the per-field mapping.** Decided 2026-11-01 (owner's delegate): as recommended; ratifies #491. |
 
 **SG6 as written should not be built.** SG-D8(i) specifies a projection read wired into `validate.ts`
 and *"the field components"*, riding the `aria-describedby` rail. The measurement says that machinery
@@ -350,7 +350,7 @@ own tests: the notice's presence is asserted in the same moment as the saved bri
 | Task | Owns | Depends on | Ships |
 |---|---|---|---|
 | **SG6′** | `TimelineSection.tsx`, `messages.ts` | — | The copy-sequence projection notice. §6. |
-| **PD1** | `2026-09-17_wireframe-gap.md` | PD-D1 stamped | Rewrite the **SG6** row to SG6′, and record that the per-field mapping is retired on this measurement rather than on assumption. |
+| **PD1** | `2026-09-17_wireframe-gap.md` | PD-D1 stamped | **DONE 2026-11-01** — PD-D1 decided 2026-11-01 (owner's delegate): as recommended; ratifies #491. Rewrite the **SG6** row to SG6′, and record that the per-field mapping is retired on this measurement rather than on assumption. |
 | **PD2** | the SG lane table | **M2** | Give **SG-D1** a lane, or record that it is deferred. Until then R3 (§3.3) is a live silent drop with no owner. |
 | **PD3** | `editor-state.ts:2063`, or the size-control lane | **M1** | Either add `sizes` to `isDefaultOutput`, or set `outputExplicit` on a size edit — whichever lane adds `toggleSize` must do one of them. Not urgent; it is a trap, not a defect. |
 | **PD4** | `editor-state.validation-gate.test.ts` | **L2** | **SHIPPED as RW-18.** The comment now names the operator route — the mode flip, not the card — and says why it is written down: a reader who thinks the card is the route concludes the state is unreachable and deletes the test. |
