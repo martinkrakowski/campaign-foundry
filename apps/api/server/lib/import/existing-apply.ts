@@ -102,7 +102,7 @@ async function countCampaignDrafts(
     `select count(*)::int as drafts from draft where org_id = $1 and campaign_id = $2`,
     [orgId, campaignId],
   );
-  return rows[0]?.drafts ?? 0;
+  return rows[0]!.drafts;
 }
 
 async function normaliseOneItem(
