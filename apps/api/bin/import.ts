@@ -53,7 +53,7 @@ import { IMPORT_STEPS } from "../server/lib/import/steps.js";
 import { planRenderProbes } from "../server/lib/import/renders-plan.js";
 import { renderFingerprints } from "../server/lib/import/render-file.js";
 import type { RenderContext } from "../server/lib/import/renders-step.js";
-import { scanBriefs } from "../server/lib/import/scan.js";
+import { scanBriefs, type ScanResult } from "../server/lib/import/scan.js";
 import { assemblePlan, unreferencedInputsPlan } from "../server/lib/import/plan.js";
 import { assembleCensus } from "../server/lib/import/census.js";
 import { digestSourceFiles, planDigest } from "../server/lib/import/digest.js";
@@ -276,7 +276,8 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
         assembled.reports,
         files,
       );
-      existingCampaigns = await planExistingCampaigns(database(), ctx);
+      const sourceSlugs = sourceCampaignSlugs(result);
+      existingCampaigns = await planExistingCampaigns(database(), ctx, sourceSlugs);
     } else {
       probesSkipped = "needs STORE_BACKEND=postgres and OBJECT_STORE=s3";
     }
@@ -479,10 +480,11 @@ async function runApplyBody(
 }
 
 /** Slugs discovered in the import source tree (campaigns and scan refusals alike). */
-function sourceCampaignSlugs(replanned: ReplanResult): ReadonlySet<string> {
+function sourceCampaignSlugs(source: ScanResult | ReplanResult): ReadonlySet<string> {
+  const result = "result" in source ? source.result : source;
   const slugs = new Set<string>();
-  for (const campaign of replanned.result.campaigns) slugs.add(campaign.slug);
-  for (const refusal of replanned.result.refusals) {
+  for (const campaign of result.campaigns) slugs.add(campaign.slug);
+  for (const refusal of result.refusals) {
     if (refusal.slug) slugs.add(refusal.slug);
   }
   return slugs;

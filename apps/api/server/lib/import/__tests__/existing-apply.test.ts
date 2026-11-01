@@ -711,4 +711,91 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
       rmSync(result, { force: true });
     }
   });
+
+  test("plan and apply hash the same set when a class-(P) campaign is in both the source tree and DB", async () => {
+    const t = tree();
+    root = t.root;
+    writeAt(t.root, "assets/inputs/shared/logo.png", PNG);
+    writeBrief(t.root, "shared.yaml", {
+      id: "shared",
+      products: [product("assets/inputs/shared/logo.png")],
+    });
+    writeAt(t.root, "assets/inputs/outside/logo.png", PNG);
+    await seedClassP("shared", {
+      products: [product("assets/inputs/shared/logo.png")],
+    });
+    await seedClassP("outside", {
+      products: [product("assets/inputs/outside/logo.png")],
+    });
+    const result = freshResult("hash-same-set");
+    try {
+      const plan = await runPlan(env, t.root, t.output);
+      env.reinstall();
+      const err: string[] = [];
+      const code = await main(
+        applyArgv(t.root, t.output, [
+          "--expect",
+          plan.digest,
+          "--expect-existing",
+          plan.existingDigest,
+          "--result",
+          result,
+        ]),
+        { stdout: () => {}, stderr: (line) => err.push(line) },
+      );
+      expect(code).toBe(1);
+      expect(err).toEqual([]);
+      const parsed = parseResult(result);
+      expect(parsed.existing.find((entry) => entry.slug === "outside")?.status).toBe("normalised");
+      expect(parsed.existing.find((entry) => entry.slug === "shared")).toBeUndefined();
+      const latest = await latestRows(env);
+      expect(latest.find((row) => row.slug === "outside")?.version).toBe(2);
+      expect(latest.find((row) => row.slug === "outside")?.actor).toBe("import:pt-8");
+      expect(latest.find((row) => row.slug === "shared")?.version).toBe(1);
+      expect(latest.find((row) => row.slug === "shared")?.actor).not.toBe("import:pt-8");
+    } finally {
+      rmSync(result, { force: true });
+    }
+  });
+
+  test("a scan refusal with a truthy slug matching a stored class-(P) campaign is not normalised", async () => {
+    const t = tree();
+    root = t.root;
+    writeAt(t.root, "assets/inputs/refused/logo.png", PNG);
+    await seedClassP("refused", {
+      products: [product("assets/inputs/refused/logo.png")],
+    });
+    writeBrief(t.root, "refused.yaml", {
+      id: "refused",
+      products: [product("assets/inputs/refused/missing.png")],
+    });
+    const result = freshResult("refused-slug");
+    try {
+      const plan = await runPlan(env, t.root, t.output);
+      env.reinstall();
+      const err: string[] = [];
+      const code = await main(
+        applyArgv(t.root, t.output, [
+          "--expect",
+          plan.digest,
+          "--expect-existing",
+          plan.existingDigest,
+          "--result",
+          result,
+        ]),
+        { stdout: () => {}, stderr: (line) => err.push(line) },
+      );
+      expect(code).toBe(3);
+      expect(err).toEqual([]);
+      const parsed = parseResult(result);
+      expect(
+        parsed.existing.find((entry) => entry.slug === "refused" && entry.status === "normalised"),
+      ).toBeUndefined();
+      const latest = await latestRows(env);
+      expect(latest.find((row) => row.slug === "refused")?.version).toBe(1);
+      expect(latest.find((row) => row.slug === "refused")?.actor).not.toBe("import:pt-8");
+    } finally {
+      rmSync(result, { force: true });
+    }
+  });
 });
