@@ -14,64 +14,56 @@ import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
 import { projectRoot } from "@campaignfoundry/shared";
 import { fsInputs } from "./fs-inputs.js";
 
-const background = (): Uint8Array => {
-  const c = createCanvas(64, 64);
-  const g = c.getContext("2d");
-  g.fillStyle = "#333333";
-  g.fillRect(0, 0, 64, 64);
-  return c.toBuffer("image/png");
-};
-
 type TemplateRequest = CompositeRequest & {
   readonly template?: BriefTemplate;
   readonly creativeType?: CreativeType;
 };
 
-const request = (over: Partial<TemplateRequest> = {}): TemplateRequest => ({
-  background: background(),
+const solidBackground = (color: string, size = 64): Uint8Array => {
+  const canvas = createCanvas(size, size);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, size, size);
+  return canvas.toBuffer("image/png");
+};
+
+const BASE_REQUEST = {
   message: "Stay wild, stay hydrated",
   brandColor: "#1473E6",
   logoPath: "assets/inputs/hydra-logo.png",
-  canvas: { ratio: "1:1" },
-  layout: "headline-bottom",
-  tone: "bold",
+  canvas: { ratio: "1:1" as const },
+  layout: "headline-bottom" as const,
+  tone: "bold" as const,
+};
+
+const request = (over: Partial<TemplateRequest> = {}): TemplateRequest => ({
+  background: solidBackground("#333333"),
+  ...BASE_REQUEST,
   ...over,
 });
 
-/** The kinds this compositor draws. */
-const DRAWABLE_KINDS = [
-  "image",
-  "fill",
-  "video",
-  "shade",
-  "accent",
-  "static-text",
-  "animated-text",
-  "logo",
-] as const;
-
-/**
- * The compositor's dispatch table, reached through the TS-private seam (the
- * same seam `NodeCanvasCompositor.layer-order.test.ts` uses).
- */
-const layerTable = (): Record<(typeof DRAWABLE_KINDS)[number], (c: unknown) => void> =>
+const layerTable = (): Record<LayerKind, (c: unknown) => void> =>
   (
     NodeCanvasCompositor as unknown as {
-      layerDrawers: Record<(typeof DRAWABLE_KINDS)[number], (c: unknown) => void>;
+      layerDrawers: Record<LayerKind, (c: unknown) => void>;
     }
   ).layerDrawers;
 
-/** Swap every drawer for a kind recorder; returns the recorded order. */
-function recordDrawOrder(): LayerKind[] {
-  const order: LayerKind[] = [];
+function spyDrawers<T>(record: (kind: LayerKind, layer: CreativeTemplateLayer) => T): T[] {
+  const recorded: T[] = [];
   const table = layerTable();
-  for (const kind of DRAWABLE_KINDS) {
-    vi.spyOn(table, kind).mockImplementation(() => {
-      order.push(kind);
+  for (const [kind] of Object.entries(table) as [LayerKind, unknown][]) {
+    vi.spyOn(table, kind).mockImplementation((c: unknown) => {
+      recorded.push(record(kind, (c as { layer: CreativeTemplateLayer }).layer));
     });
   }
-  return order;
+  return recorded;
 }
+
+const recordDrawOrder = (): LayerKind[] => spyDrawers((kind) => kind);
+
+const recordDrawnLayers = (): { kind: LayerKind; id: string }[] =>
+  spyDrawers((kind, layer) => ({ kind, id: layer.id }));
 
 /** The canonical video template's layers, in z-order. */
 const VIDEO_LAYERS = CANONICAL_TEMPLATES.video.layers;
@@ -96,70 +88,53 @@ const timelineReq = (
   },
 });
 
-async function drawAt(req: TemplateRequest, t: number): Promise<LayerKind[]> {
+async function prepareCanvas(req: TemplateRequest) {
   const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
   const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
-  const order = recordDrawOrder();
+  return { prepared, ctx };
+}
+
+async function drawWithRecording<T>(req: TemplateRequest, t: number, record: () => T): Promise<T> {
+  const { prepared, ctx } = await prepareCanvas(req);
+  const result = record();
   NodeCanvasCompositor.draw(ctx, prepared, t);
-  return order;
+  return result;
 }
 
-/** Swap every drawer for a layer recorder; returns the recorded layers in paint order. */
-function recordDrawnLayers(): { kind: LayerKind; id: string }[] {
-  const drawn: { kind: LayerKind; id: string }[] = [];
-  const table = layerTable();
-  for (const kind of DRAWABLE_KINDS) {
-    vi.spyOn(table, kind).mockImplementation((c: unknown) => {
-      const layer = (c as { layer: CreativeTemplateLayer }).layer;
-      drawn.push({ kind, id: layer.id });
-    });
-  }
-  return drawn;
-}
+const drawAt = (req: TemplateRequest, t: number): Promise<LayerKind[]> =>
+  drawWithRecording(req, t, recordDrawOrder);
 
-async function drawLayersAt(
+const drawLayersAt = (
   req: TemplateRequest,
   t: number,
-): Promise<{ kind: LayerKind; id: string }[]> {
-  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
-  const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
-  const drawn = recordDrawnLayers();
-  NodeCanvasCompositor.draw(ctx, prepared, t);
-  return drawn;
-}
+): Promise<{ kind: LayerKind; id: string }[]> => drawWithRecording(req, t, recordDrawnLayers);
 
-const SPANNED_LAYERS: readonly CreativeTemplateLayer[] = [
-  { id: "video", kind: "video", span: { startT: 0.25, endT: 0.75 } },
+const TAIL_LAYERS: readonly CreativeTemplateLayer[] = [
   { id: "shade", kind: "shade" },
   { id: "animated-text", kind: "animated-text" },
   { id: "logo", kind: "logo" },
+];
+
+const SPANNED_LAYERS: readonly CreativeTemplateLayer[] = [
+  { id: "video", kind: "video", span: { startT: 0.25, endT: 0.75 } },
+  ...TAIL_LAYERS,
 ];
 
 const TWO_VIDEO_LAYERS: readonly CreativeTemplateLayer[] = [
   { id: "video", kind: "video", span: { startT: 0, endT: 0.5 } },
   { id: "video-2", kind: "video", span: { startT: 0.25, endT: 1 } },
-  { id: "shade", kind: "shade" },
-  { id: "animated-text", kind: "animated-text" },
-  { id: "logo", kind: "logo" },
+  ...TAIL_LAYERS,
 ];
 
 const DISABLED_VIDEO_LAYERS: readonly CreativeTemplateLayer[] = [
   { id: "video", kind: "video", enabled: false, span: { startT: 0.5, endT: 1 } },
-  { id: "shade", kind: "shade" },
-  { id: "animated-text", kind: "animated-text" },
-  { id: "logo", kind: "logo" },
+  ...TAIL_LAYERS,
 ];
 
 const bothPathReqs = (layers: readonly CreativeTemplateLayer[]): TemplateRequest[] => [
   timelineReq(layers),
   request({ template: videoTemplate(layers) }),
 ];
-
-async function prepareCanvas(req: TemplateRequest) {
-  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
-  const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
-  return { prepared, ctx };
-}
 
 async function forBothPaths(
   layers: readonly CreativeTemplateLayer[],
@@ -296,9 +271,7 @@ describe("the video span paint skip (VT2)", () => {
         span: { startT: 0, endT: 0.5 },
         frame: { x: 0.25, y: 0.25, w: 0.5, h: 0.5, anchor: "middle" },
       },
-      { id: "shade", kind: "shade" },
-      { id: "animated-text", kind: "animated-text" },
-      { id: "logo", kind: "logo" },
+      ...TAIL_LAYERS,
     ];
     await forBothPaths(framedSpanned, (ctx, prepared) => {
       // Frame 1: inside span (t = 0), Ken Burns in scales about the rect's centre.

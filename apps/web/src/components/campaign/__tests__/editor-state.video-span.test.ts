@@ -12,21 +12,18 @@ import {
   type EditorState,
 } from "../editor-state";
 
-const CANONICAL = CANONICAL_TEMPLATES["video"];
-
-/** The canonical `video` template: video, shade, animated-text, logo. */
-const template = (layers: readonly CreativeTemplateLayer[] = CANONICAL.layers): BriefTemplate => ({
-  id: "canonical-video",
-  version: CANONICAL.version,
-  creativeType: CANONICAL.creativeType,
-  unit: CANONICAL.unit,
-  layers,
-});
-
-const stateWith = (layers: readonly CreativeTemplateLayer[] = CANONICAL.layers): EditorState => ({
-  ...initialEditorState(),
-  template: template(layers),
-});
+const stateWith = (
+  layers: readonly CreativeTemplateLayer[] = CANONICAL_TEMPLATES.video.layers,
+): EditorState => {
+  const template: BriefTemplate = {
+    id: "canonical-video",
+    version: 1,
+    creativeType: "video",
+    unit: "standard-web",
+    layers,
+  };
+  return { ...initialEditorState(), template };
+};
 
 const layer = (state: EditorState, id: string): CreativeTemplateLayer =>
   state.template.layers.find((candidate) => candidate.id === id)!;
@@ -37,12 +34,7 @@ const setSpan = (state: EditorState, layerId: string, startT: number, endT: numb
 const defaultSpannedState = (): EditorState => setSpan(stateWith(), "video", 0.25, 0.75);
 
 const stateWithVideoSpan = (span: { startT: number; endT: number }): EditorState =>
-  stateWith([
-    { id: "video", kind: "video", span },
-    { id: "shade", kind: "shade" },
-    { id: "animated-text", kind: "animated-text" },
-    { id: "logo", kind: "logo" },
-  ]);
+  stateWith(CANONICAL_TEMPLATES.video.layers.map((l) => (l.id === "video" ? { ...l, span } : l)));
 
 describe("setVideoSpan — locating the layer (the setLayerEnabled shape)", () => {
   test("a partial span writes the span, and toBrief includes it with no seconds key", () => {
