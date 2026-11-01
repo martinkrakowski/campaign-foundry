@@ -19,14 +19,7 @@ import {
   restoreApplyEnvironment,
   useApplyEnvironment,
 } from "./fixtures/apply-harness.js";
-import {
-  NOT_A_PNG,
-  PNG,
-  briefBody,
-  dropRoot,
-  makeRoot,
-  writeAt,
-} from "./fixtures/tree.js";
+import { NOT_A_PNG, PNG, briefBody, dropRoot, makeRoot, writeAt } from "./fixtures/tree.js";
 
 const SWITCHED_AT = "2026-10-01T00:00:00Z";
 type Env = Awaited<ReturnType<typeof useApplyEnvironment>>;
@@ -147,7 +140,10 @@ function parseResult(path: string): {
     .map((line) => JSON.parse(line) as Record<string, unknown>);
   const existing = lines.filter((line) => line.kind === "existing");
   const summaries = lines.filter((line) => line.kind === "summary");
-  return { existing, summary: summaries[0] as { kind: string; refused: number; partial: boolean } | undefined };
+  return {
+    existing,
+    summary: summaries[0] as { kind: string; refused: number; partial: boolean } | undefined,
+  };
 }
 
 async function briefVersionCount(env: Env): Promise<number> {
@@ -212,7 +208,9 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
       );
       expect(code).toBe(1);
       expect(err).toHaveLength(1);
-      expect(err[0]).toMatch(/apply needs --expect-existing <digest> when class-\(P\) campaigns would be normalised/);
+      expect(err[0]).toMatch(
+        /apply needs --expect-existing <digest> when class-\(P\) campaigns would be normalised/,
+      );
       expect(existsSync(result)).toBe(false);
       expect(await briefVersionCount(env)).toBe(1);
       expect(await assetCount(env)).toBe(0);
@@ -380,10 +378,10 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
 
   test("plan refuses --expect-existing as a flag it does not take", async () => {
     const err: string[] = [];
-    const code = await main(
-      ["plan", "--switched-at", SWITCHED_AT, "--expect-existing", "abc"],
-      { stdout: () => {}, stderr: (line) => err.push(line) },
-    );
+    const code = await main(["plan", "--switched-at", SWITCHED_AT, "--expect-existing", "abc"], {
+      stdout: () => {},
+      stderr: (line) => err.push(line),
+    });
     expect(code).toBe(1);
     expect(err).toEqual(["--expect-existing is not a flag this command takes."]);
   });

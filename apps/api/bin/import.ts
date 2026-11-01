@@ -364,9 +364,7 @@ function printNormaliseEntry(io: ImportIO, entry: NormaliseResult): void {
   const why = entry.reason ? `: ${entry.reason}` : "";
   io.stdout(`${entry.slug}: existing ${entry.status}${why}`);
   if (entry.minted.assets.length > 0) {
-    io.stdout(
-      `  minted: campaign ${entry.campaignId}, ${entry.minted.assets.length} asset(s)`,
-    );
+    io.stdout(`  minted: campaign ${entry.campaignId}, ${entry.minted.assets.length} asset(s)`);
     for (const asset of entry.minted.assets) {
       io.stdout(`    asset ${asset.id} ${asset.name} ${asset.key}`);
     }
@@ -423,7 +421,10 @@ async function runApplyBody(
       }),
     );
   }
-  const onMinted = async (slug: string, object: { readonly key: string; readonly path: string }) => {
+  const onMinted = async (
+    slug: string,
+    object: { readonly key: string; readonly path: string },
+  ) => {
     io.stdout(`${slug}: minted render ${object.path} ${object.key}`);
     await writeWithResultGuard(resultPath, () => writer.object(object));
   };
