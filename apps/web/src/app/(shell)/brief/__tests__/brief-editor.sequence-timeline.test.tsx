@@ -197,7 +197,9 @@ describe("VT1 — the sequence editor's mount gates and wired gestures", () => {
   describe("§4.1 — add-track, at the editor", () => {
     test("add video commits a layer with no media field, and the row spans the whole duration", async () => {
       await openAtWidth(videoBrief, 1440, async (user, saved) => {
-        expect(document.querySelectorAll('[data-sequence-clip="video"]')).toHaveLength(1);
+        await waitFor(() =>
+          expect(document.querySelectorAll('[data-sequence-clip="video"]')).toHaveLength(1),
+        );
 
         await user.click(screen.getByRole("button", { name: messages.sequenceAddVideoTrack }));
         await waitFor(() =>
@@ -220,9 +222,9 @@ describe("VT1 — the sequence editor's mount gates and wired gestures", () => {
 
     test("add text stays disabled: the one animated-text layer already exists", async () => {
       await openAtWidth(videoBrief, 1440, async (user, saved) => {
-        const control = screen.getByRole("button", {
+        const control = (await screen.findByRole("button", {
           name: messages.sequenceAddTextTrack,
-        }) as HTMLButtonElement;
+        })) as HTMLButtonElement;
         expect(control.disabled).toBe(true);
         expect(screen.getAllByText(messages.sequenceAddTextBlocked).length).toBeGreaterThan(0);
 
