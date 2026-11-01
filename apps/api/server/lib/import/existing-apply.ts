@@ -42,12 +42,19 @@ export interface ExistingNormaliseCounts {
 
 /**
  * Re-classify live campaigns in `ctx.orgId` and compute the class-(P) second digest
- * before `apply` opens `--result` or writes any row or object.
+ * before `apply` opens `--result` or writes any row or object. Campaigns whose slugs
+ * are in `excludeSlugs` (e.g. source campaigns being imported) are skipped so they
+ * reach the per-campaign step instead of class-(P) normalisation.
  */
-export async function replanExisting(db: SqlQuery, ctx: StepContext): Promise<ExistingReplan> {
+export async function replanExisting(
+  db: SqlQuery,
+  ctx: StepContext,
+  excludeSlugs?: ReadonlySet<string>,
+): Promise<ExistingReplan> {
   const items: ExistingReplanItem[] = [];
   const digested: DigestedCampaign[] = [];
   for (const row of await latestBodies(db, ctx.orgId)) {
+    if (excludeSlugs?.has(row.slug)) continue;
     const found = classifyExisting(ctx, row);
     if (found === undefined) continue;
     if (found.state === "refused") {

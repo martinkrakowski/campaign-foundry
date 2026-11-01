@@ -478,6 +478,16 @@ async function runApplyBody(
   return exitCodeFor(merged, refused);
 }
 
+/** Slugs discovered in the import source tree (campaigns and scan refusals alike). */
+function sourceCampaignSlugs(replanned: ReplanResult): ReadonlySet<string> {
+  const slugs = new Set<string>();
+  for (const campaign of replanned.result.campaigns) slugs.add(campaign.slug);
+  for (const refusal of replanned.result.refusals) {
+    if (refusal.slug) slugs.add(refusal.slug);
+  }
+  return slugs;
+}
+
 /**
  * `apply`: re-plan the source, refuse unless the re-planned digest equals
  * `--expect` (N1/D225), refuse unless the target is the postgres/s3 backend with
@@ -513,7 +523,8 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
       );
       return 1;
     }
-    const existingReplanned = await replanExisting(database(), ctx);
+    const sourceSlugs = sourceCampaignSlugs(replanned);
+    const existingReplanned = await replanExisting(database(), ctx, sourceSlugs);
     const existingProblem = checkExistingDigest(existingReplanned, flags.expectExisting);
     if (existingProblem !== undefined) {
       io.stderr(existingProblem);

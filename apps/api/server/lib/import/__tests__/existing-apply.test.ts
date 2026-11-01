@@ -19,7 +19,15 @@ import {
   restoreApplyEnvironment,
   useApplyEnvironment,
 } from "./fixtures/apply-harness.js";
-import { NOT_A_PNG, PNG, briefBody, dropRoot, makeRoot, writeAt } from "./fixtures/tree.js";
+import {
+  NOT_A_PNG,
+  PNG,
+  briefBody,
+  dropRoot,
+  makeRoot,
+  writeAt,
+  writeBrief,
+} from "./fixtures/tree.js";
 
 const SWITCHED_AT = "2026-10-01T00:00:00Z";
 type Env = Awaited<ReturnType<typeof useApplyEnvironment>>;
@@ -640,5 +648,67 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
       partial: true,
     });
     expect(counts.normalisedSlugs.has("conflict")).toBe(false);
+  });
+
+  test("an existing non-class-P campaign and no --expect-existing gives a refused line in the result file and exit 3", async () => {
+    const t = tree();
+    root = t.root;
+    writeAt(t.root, "assets/inputs/camp/logo.png", PNG);
+    writeBrief(t.root, "camp.yaml", {
+      id: "camp",
+      products: [product("assets/inputs/camp/logo.png")],
+    });
+    // Pre-existing campaign in the DB whose body differs from the import tree:
+    // not class (P) because it is a source campaign taking the import path.
+    env.reinstall();
+    await briefs().createCampaign("camp");
+    await briefs().createBrief(
+      briefBody({
+        id: "camp",
+        products: [
+          {
+            id: "p1",
+            name: "SOMEONE ELSE",
+            primaryColor: "#222222",
+            logoPath: "assets/inputs/camp/logo.png",
+          },
+        ],
+      }),
+    );
+    const result = freshResult("non-class-p");
+    try {
+      const digest = await sourceDigest(t.root);
+      env.reinstall();
+      const err: string[] = [];
+      const code = await main(
+        applyArgv(t.root, t.output, ["--expect", digest, "--result", result]),
+        { stdout: () => {}, stderr: (line) => err.push(line) },
+      );
+      expect(code).toBe(3);
+      expect(err).toEqual([]);
+      const lines = readFileSync(result, "utf8")
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      const campaignLine = lines.find((line) => line.kind === "campaign");
+      expect(campaignLine).toMatchObject({
+        slug: "camp",
+        outcome: "refused",
+      });
+      expect(campaignLine?.["rows"]).toBeUndefined();
+      const summaryLine = lines.find((line) => line.kind === "summary");
+      expect(summaryLine).toMatchObject({
+        refused: 1,
+        created: 0,
+        completed: 0,
+        unchanged: 0,
+        partial: false,
+      });
+      expect(await briefVersionCount(env)).toBe(1);
+      expect(await assetCount(env)).toBe(0);
+      expect(env.objects.putCount).toBe(0);
+    } finally {
+      rmSync(result, { force: true });
+    }
   });
 });
