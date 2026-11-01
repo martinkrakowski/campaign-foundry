@@ -1,6 +1,6 @@
 # Seat Selection — Architecture & Development Plan
 
-**Date:** 2026-09-10 · **Status:** draft, for the owner's approval · **Nothing dispatched.**
+**Date:** 2026-09-10 · **Status:** SUPERSEDED 2026-11-01 (owner's delegate): seat choices live in the fleet rulebook; S-D1 and S-D5 may remain as brief-writing guidance. · **Nothing dispatched.** _Was: "draft, for the owner's approval."_
 **Evidence base:** every lane and fix round of the 2026-09-09/10 session, PRs #284–#304.
 
 ---

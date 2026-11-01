@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-09
 **Author:** orchestrator
-**Status:** **SHIPPED, WITH ONE THING TO SETTLE — stamped 2026-09-20.** V1 (#290), V4 (#366) and V5 (#289) are on `main`, and **V3's decision was made by the owner and executed** (#527: `pr-agent-api.yml` deleted, `pr-agent.yml` reduced to `issue_comment`). V2 was withdrawn on evidence. **The contradiction to settle:** §5 and §8 below still read "V3 stays open" — they predate the decision — and `premise V3` at §7 is still live, because its body asks that every workflow *still* invoking PR-Agent be measured per workflow in a wave record, and `pr-agent-arch`, `pr-agent-react` and `pr-agent` are each unmeasured. The architecture reviewer is "exempt from the DISABLE decision, not from being measured", and `pr-agent-react` is a **fourth** reviewer added after the fence was written. **So: retire the fence and the stale prose, or keep the fence and record the measurement. That is an owner call and is deliberately not made here.** _Was: "draft — for the owner's review. Nothing built."_
+**Status:** **SHIPPED; V3 fence retired (decided and implemented in #527; stamped 2026-11-01, owner's delegate).** Measuring the remaining PR-Agent workflows (`pr-agent-arch`, `pr-agent-react`, `pr-agent`) is a separate question, to be asked only if they are ever made blocking. _Was (2026-09-20): "SHIPPED, WITH ONE THING TO SETTLE."_ V1 (#290), V4 (#366) and V5 (#289) are on `main`, and **V3's decision was made by the owner and executed** (#527: `pr-agent-api.yml` deleted, `pr-agent.yml` reduced to `issue_comment`). V2 was withdrawn on evidence. **The contradiction to settle:** §5 and §8 below still read "V3 stays open" — they predate the decision — and `premise V3` at §7 is still live, because its body asks that every workflow *still* invoking PR-Agent be measured per workflow in a wave record, and `pr-agent-arch`, `pr-agent-react` and `pr-agent` are each unmeasured. The architecture reviewer is "exempt from the DISABLE decision, not from being measured", and `pr-agent-react` is a **fourth** reviewer added after the fence was written. **So: retire the fence and the stale prose, or keep the fence and record the measurement. That is an owner call and is deliberately not made here.** _Was: "draft — for the owner's review. Nothing built."_
 **Verified against:** `main` at `0b1faa0`, and the 79 review threads on PRs #254–#287
 
 ---
@@ -306,7 +306,7 @@ of those only 2 are attributable to a workflow the rule names. Disabling Archite
 the one reviewer the plan exempts because it already passes — is precisely the error the per-workflow
 requirement exists to prevent.
 
-**V3 stays open, and its blocker is a recording gap, not a measurement gap.** The counts must be
+**V3 fence retired (decided and implemented in #527; stamped 2026-11-01).** _Was: "V3 stays open, and its blocker is a recording gap, not a measurement gap."_ The counts must be
 written **at sweep time**, when the sweeper knows which check run produced which thread, rather than
 reconstructed afterwards from artifacts that do not carry the attribution. Until a wave is recorded
 that way, V3 has no arithmetic to run.
@@ -368,7 +368,7 @@ none; API is `apps/api/**`; Architecture is `packages/*/src/**` plus web TS):
   unattributable threads can be pinned on it, and the plan's rule is not to cut a passing reviewer by
   accident.
 
-**V3 stays open.** Its fence stays. What changed is that the case against UI Review is now numerical
+**V3 fence retired (decided and implemented in #527; stamped 2026-11-01).** _Was: "V3 stays open. Its fence stays."_ What changed is that the case against UI Review is now numerical
 rather than anecdotal, and the one question left is sample size.
 
 **V3 recording — shipped in this PR.** `yarn sweep attribute --pr <n>` attributes each
