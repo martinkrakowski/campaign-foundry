@@ -21,8 +21,8 @@
     },
     {
       "file": "packages/CreativeGeneration/src/infrastructure/adapters/NodeCanvasCompositor.ts",
-      "before": "      if (isDisabledLayer(layer)) continue;\n      if (layer.kind === \"static-text\" || layer.kind === \"animated-text\") {\n        // A creative type's shared budget caps text-kind layers at one (D124);\n        // this guard is defensive, not load-bearing — never draws copy twice.\n        if (copyDrawn) continue;\n        copyDrawn = true;\n      }",
-      "after": "      if (layer.kind === \"static-text\" || layer.kind === \"animated-text\") {\n        // A creative type's shared budget caps text-kind layers at one (D124);\n        // this guard is defensive, not load-bearing — never draws copy twice.\n        if (copyDrawn) continue;\n        copyDrawn = true;\n      }\n      if (isDisabledLayer(layer)) continue;",
+      "before": "      if (isDisabledLayer(layer)) continue;\n      // VT2 — a video layer paints only inside its span; an absent span is the\n",
+      "after": "      // VT2 — a video layer paints only inside its span; an absent span is the\n",
       "because": "Ordering is the lane's sharp edge: a skip that runs AFTER the copyDrawn assignment lets a disabled copy layer consume the D124 text budget, so the enabled copy that follows it is silently dropped — the same defect this lane fixes, moved one layer down the list, invisible to any test that only asks whether copy appeared.",
       "command": [
         "yarn",
