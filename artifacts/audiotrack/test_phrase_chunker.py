@@ -14,6 +14,7 @@ from phrase_chunker import (
     ChunkerConfig,
     PhrasePlan,
     Token,
+    _is_opening_quote,
     _punct_pause,
     allocate_phrase,
     plan_to_json,
@@ -23,6 +24,30 @@ from phrase_chunker import (
 )
 
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "audiotrack.schema.json")
+
+
+def _phrase_of(words: list[str]) -> PhrasePlan:
+    toks = [
+        Token(text=w, kind="word", start=idx * 3, end=idx * 3 + len(w))
+        for idx, w in enumerate(words)
+    ]
+    return PhrasePlan(
+        i=0,
+        text=" ".join(w.text for w in toks),
+        tokens=toks,
+        word_tokens=toks,
+        ends_with="",
+        char_start=toks[0].start,
+        char_end=toks[-1].end,
+    )
+
+
+def _allocate_with_warnings(
+    phrase: PhrasePlan, dur: float
+) -> tuple[list, list[dict]]:
+    warnings: list[dict] = []
+    out = allocate_phrase(phrase, dur, warnings_out=warnings)
+    return out, warnings
 
 
 def _load_schema() -> dict:
@@ -156,6 +181,12 @@ class QuoteRepairTests(unittest.TestCase):
         phrases = split_phrases('He said "wait." Next.')
         self.assertEqual([p.text for p in phrases], ['He said "wait."', "Next."])
 
+    def test_opening_quote_at_start_handles_none_prev(self):
+        tok = Token(text='"', kind="punct", start=0, end=1)
+        self.assertTrue(_is_opening_quote(tok, '"Hello"'))
+        tok_negative = Token(text='"', kind="punct", start=-1, end=0)
+        self.assertFalse(_is_opening_quote(tok_negative, '"Hello"'))
+
 
 class SentenceEndAbsorptionTests(unittest.TestCase):
     """Defect #9."""
@@ -168,43 +199,28 @@ class SentenceEndAbsorptionTests(unittest.TestCase):
     def test_ellipsis_run_stays_together(self):
         phrases = split_phrases("Wait... Next.")
         self.assertEqual([p.text for p in phrases], ["Wait...", "Next."])
-        self.assertEqual(phrases[1].text.startswith("Next"), True)
+        self.assertTrue(phrases[1].text.startswith("Next"))
 
 
 class ZeroDurationAllocationTests(unittest.TestCase):
     """Defect #3."""
 
-    @staticmethod
-    def _phrase_of(words):
-        toks = [
-            Token(text=w, kind="word", start=idx * 3, end=idx * 3 + len(w))
-            for idx, w in enumerate(words)
-        ]
-        return PhrasePlan(
-            i=0,
-            text=" ".join(w.text for w in toks),
-            tokens=toks,
-            word_tokens=toks,
-            ends_with="",
-            char_start=toks[0].start,
-            char_end=toks[-1].end,
-        )
+    _phrase_of = staticmethod(_phrase_of)
 
     def test_negative_duration_raises(self):
+        phrase = self._phrase_of(["Stop"])
         with self.assertRaises(ValueError):
-            allocate_phrase(self._phrase_of(["Stop"]), -0.1)
+            allocate_phrase(phrase, -0.1)
 
     def test_zero_duration_one_word_returns_empty_with_warning(self):
-        warnings: list[dict] = []
-        out = allocate_phrase(self._phrase_of(["Stop"]), 0.0, warnings_out=warnings)
+        out, warnings = _allocate_with_warnings(self._phrase_of(["Stop"]), 0.0)
         self.assertEqual(out, [])
         self.assertEqual(warnings[0]["code"], "EMPTY_PHRASE_AUDIO")
         self.assertEqual(warnings[0]["phrase_index"], 0)
 
     def test_zero_duration_three_words_returns_empty_with_warning(self):
-        warnings: list[dict] = []
-        out = allocate_phrase(
-            self._phrase_of(["one", "two", "three"]), 0.0, warnings_out=warnings
+        out, warnings = _allocate_with_warnings(
+            self._phrase_of(["one", "two", "three"]), 0.0
         )
         self.assertEqual(out, [])
         self.assertEqual(warnings[0]["code"], "EMPTY_PHRASE_AUDIO")
@@ -253,21 +269,7 @@ class TimelineOutputTests(unittest.TestCase):
 class WaterfillAllocationTests(unittest.TestCase):
     """Defect #10."""
 
-    @staticmethod
-    def _phrase_of(words):
-        toks = [
-            Token(text=w, kind="word", start=idx * 3, end=idx * 3 + len(w))
-            for idx, w in enumerate(words)
-        ]
-        return PhrasePlan(
-            i=0,
-            text=" ".join(w.text for w in toks),
-            tokens=toks,
-            word_tokens=toks,
-            ends_with="",
-            char_start=toks[0].start,
-            char_end=toks[-1].end,
-        )
+    _phrase_of = staticmethod(_phrase_of)
 
     def test_skewed_weights_waterfill_within_bounds(self):
         # Measured defect-10 case (docs/planning/2026-09-13...): a long word
@@ -289,17 +291,15 @@ class WaterfillAllocationTests(unittest.TestCase):
         self.assertAlmostEqual(out[-1].end_s, 2.0, places=6)
 
     def test_single_word_long_clip_is_rate_clamped(self):
-        warnings: list[dict] = []
-        out = allocate_phrase(
-            self._phrase_of(["Stop"]), 5.0, warnings_out=warnings
+        out, warnings = _allocate_with_warnings(
+            self._phrase_of(["Stop"]), 5.0
         )
         self.assertEqual(out[0].end_s, 0.90)
         self.assertEqual(warnings[0]["code"], "RATE_CLAMPED")
 
     def test_three_words_short_clip_is_rate_clamped(self):
-        warnings: list[dict] = []
-        out = allocate_phrase(
-            self._phrase_of(["one", "two", "three"]), 0.15, warnings_out=warnings
+        out, warnings = _allocate_with_warnings(
+            self._phrase_of(["one", "two", "three"]), 0.15
         )
         self.assertAlmostEqual(out[-1].end_s, 0.15, places=6)
         self.assertTrue(all(w.end_s > w.start_s for w in out))

@@ -156,7 +156,10 @@ def _is_opening_quote(token: Token, spoken_text: str) -> bool:
     if token.text not in STRAIGHT_QUOTES:
         return False
     prev = spoken_text[token.start - 1] if token.start > 0 else None
-    preceded = token.start == 0 or prev.isspace() or prev in "([—–-"
+    if prev is None:
+        preceded = token.start == 0
+    else:
+        preceded = prev.isspace() or prev in "([—–-"
     followed = token.end < len(spoken_text) and not spoken_text[token.end].isspace()
     return preceded and followed
 
@@ -173,7 +176,7 @@ def _is_closing_quote(token: Token, spoken_text: str) -> bool:
     return token.start > 0 and not spoken_text[token.start - 1].isspace()
 
 
-def _closing_punct(tokens: Sequence[Token], spoken_text: str) -> str:
+def _closing_punct(tokens: Sequence[Token]) -> str:
     for token in reversed(tokens):
         if token.kind == "word":
             return ""
@@ -265,17 +268,14 @@ def split_phrases(spoken_text: str, config: ChunkerConfig | None = None) -> list
         buf.append(token)
         words_now = _word_count(buf)
 
-        close = False
-        if _is_sentence_end_punct(token):
-            close = True
-        elif _is_comma_like_close(token, words_now, config):
-            close = True
-        elif _apply_soft_break(token, idx, tokens, buf, phrases, config, spoken_text):
-            pass
-
+        close = _is_sentence_end_punct(token) or _is_comma_like_close(
+            token, words_now, config
+        )
         if close:
             idx = _absorb_closing_run(tokens, idx, buf, spoken_text)
             _flush_buffer(buf, phrases, spoken_text)
+        else:
+            _apply_soft_break(token, idx, tokens, buf, phrases, config, spoken_text)
         idx += 1
 
     _flush_buffer(buf, phrases, spoken_text)
@@ -292,7 +292,7 @@ def _make_phrase(i: int, toks: Sequence[Token], spoken_text: str) -> PhrasePlan:
         text=spoken_text[start:end].strip(),
         tokens=list(toks),
         word_tokens=word_tokens,
-        ends_with=_closing_punct(toks, spoken_text),
+        ends_with=_closing_punct(toks),
         char_start=start,
         char_end=end,
     )
