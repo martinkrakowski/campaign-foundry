@@ -915,6 +915,25 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     expect(onVideoSpanCommit).not.toHaveBeenCalled();
   });
 
+  test("an edge slider dragged and returned to its displayed seconds commits nothing on pointerup", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
+    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
+    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+
+    // Start edge (halfRow: 0.25 * 6 = 1.5s): dragged and came back to displayed seconds
+    fireEvent.change(start, { target: { value: "2" } });
+    fireEvent.change(start, { target: { value: "1.5" } });
+    fireEvent.pointerUp(start);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+
+    // End edge (halfRow: 0.75 * 6 = 4.5s): dragged and came back to displayed seconds
+    fireEvent.change(end, { target: { value: "5" } });
+    fireEvent.change(end, { target: { value: "4.5" } });
+    fireEvent.pointerUp(end);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
   test("edge sliders clamp against each other keeping the one-frame minimum gap, and clamp at timeline ends", () => {
     const onVideoSpanCommit = vi.fn();
     renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
