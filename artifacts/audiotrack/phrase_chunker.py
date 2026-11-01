@@ -171,6 +171,24 @@ def _is_closing_quote(token: Token, spoken_text: str) -> bool:
     return token.start > 0 and not spoken_text[token.start - 1].isspace()
 
 
+def _unmatched_open_quote_index(
+    buf: Sequence[Token],
+    spoken_text: str,
+) -> int | None:
+    """Index of an opening quote in buf that is still unclosed, or None.
+
+    Scanning from the end, an opening quote met before any closing quote is
+    unmatched; a closing quote met first means every earlier opening quote
+    is already closed."""
+    for pos in range(len(buf) - 1, -1, -1):
+        token = buf[pos]
+        if _is_closing_quote(token, spoken_text):
+            return None
+        if _is_opening_quote(token, spoken_text):
+            return pos
+    return None
+
+
 def _closing_punct(tokens: Sequence[Token], spoken_text: str) -> str:
     for token in reversed(tokens):
         if token.kind == "word":
@@ -191,6 +209,8 @@ def split_phrases(spoken_text: str, config: ChunkerConfig | None = None) -> list
     buf: list[Token] = []
 
     def flush() -> None:
+        nonlocal quote_carry
+        quote_carry = False
         if not buf or _word_count(buf) == 0:
             buf.clear()
             return
@@ -200,6 +220,7 @@ def split_phrases(spoken_text: str, config: ChunkerConfig | None = None) -> list
         buf.clear()
 
     idx = 0
+    quote_carry = False
     while idx < len(tokens):
         token = tokens[idx]
         if token.kind == "word" and buf:
@@ -208,7 +229,20 @@ def split_phrases(spoken_text: str, config: ChunkerConfig | None = None) -> list
                 _word_count(prospective) > config.max_words
                 or _char_len(prospective, spoken_text) > config.max_chars
             ):
-                flush()
+                if quote_carry:
+                    # A quotation was carried across the previous forced
+                    # break; never split inside it, keep appending.
+                    pass
+                else:
+                    quote_pos = _unmatched_open_quote_index(buf, spoken_text)
+                    if quote_pos is None:
+                        flush()
+                    else:
+                        carried = buf[quote_pos:]
+                        del buf[quote_pos:]
+                        flush()
+                        buf.extend(carried)
+                        quote_carry = True
 
         buf.append(token)
         words_now = _word_count(buf)
@@ -412,6 +446,7 @@ def allocate_phrase(
     min_total = n * config.min_word_s
     max_total = n * config.max_word_s
 
+    trailing_silence = False
     if speech_duration_s < min_total:
         durs, pauses, clamped = _clamp_below_floor(
             weights, speech_duration_s, len(raw_pauses)
@@ -424,6 +459,9 @@ def allocate_phrase(
         durs, pauses, clamped = _clamp_above_ceiling(
             raw_pauses, speech_duration_s, max_total, pause_sum, config, n
         )
+        # A lone clamped word never stretches past max_word_s; the residual
+        # stays trailing clip silence, so the word ends at its own duration.
+        trailing_silence = n == 1
     if clamped and warnings_out is not None:
         warnings_out.append(
             {
@@ -455,7 +493,7 @@ def allocate_phrase(
         t = end
         if i < len(pauses):
             t += pauses[i]
-    if out:
+    if out and not trailing_silence:
         out[-1].end_s = round(speech_duration_s, 4)
     return out
 
