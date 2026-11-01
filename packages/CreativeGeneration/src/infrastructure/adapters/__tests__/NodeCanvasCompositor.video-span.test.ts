@@ -128,6 +128,52 @@ async function drawLayersAt(
   return drawn;
 }
 
+const SPANNED_LAYERS: readonly CreativeTemplateLayer[] = [
+  { id: "video", kind: "video", span: { startT: 0.25, endT: 0.75 } },
+  { id: "shade", kind: "shade" },
+  { id: "animated-text", kind: "animated-text" },
+  { id: "logo", kind: "logo" },
+];
+
+const TWO_VIDEO_LAYERS: readonly CreativeTemplateLayer[] = [
+  { id: "video", kind: "video", span: { startT: 0, endT: 0.5 } },
+  { id: "video-2", kind: "video", span: { startT: 0.25, endT: 1 } },
+  { id: "shade", kind: "shade" },
+  { id: "animated-text", kind: "animated-text" },
+  { id: "logo", kind: "logo" },
+];
+
+const DISABLED_VIDEO_LAYERS: readonly CreativeTemplateLayer[] = [
+  { id: "video", kind: "video", enabled: false, span: { startT: 0.5, endT: 1 } },
+  { id: "shade", kind: "shade" },
+  { id: "animated-text", kind: "animated-text" },
+  { id: "logo", kind: "logo" },
+];
+
+const bothPathReqs = (layers: readonly CreativeTemplateLayer[]): TemplateRequest[] => [
+  timelineReq(layers),
+  request({ template: videoTemplate(layers) }),
+];
+
+async function prepareCanvas(req: TemplateRequest) {
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
+  const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
+  return { prepared, ctx };
+}
+
+async function forBothPaths(
+  layers: readonly CreativeTemplateLayer[],
+  fn: (
+    ctx: SKRSContext2D,
+    prepared: Awaited<ReturnType<typeof NodeCanvasCompositor.prepare>>,
+  ) => void | Promise<void>,
+): Promise<void> {
+  for (const req of bothPathReqs(layers)) {
+    const { prepared, ctx } = await prepareCanvas(req);
+    await fn(ctx, prepared);
+  }
+}
+
 describe("the video span paint skip (VT2)", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -143,67 +189,31 @@ describe("the video span paint skip (VT2)", () => {
   });
 
   test("a video layer paints only inside its span, on both paths", async () => {
-    const spanned: readonly CreativeTemplateLayer[] = [
-      { id: "video", kind: "video", span: { startT: 0.25, endT: 0.75 } },
-      { id: "shade", kind: "shade" },
-      { id: "animated-text", kind: "animated-text" },
-      { id: "logo", kind: "logo" },
-    ];
-    const makeReqs = [
-      (layers: readonly CreativeTemplateLayer[]) => timelineReq(layers),
-      (layers: readonly CreativeTemplateLayer[]) => request({ template: videoTemplate(layers) }),
-    ];
-    for (const makeReq of makeReqs) {
-      const order0 = await drawAt(makeReq(spanned), 0);
+    for (const req of bothPathReqs(SPANNED_LAYERS)) {
+      const order0 = await drawAt(req, 0);
       expect(order0).not.toContain("video");
       expect(order0).toContain("shade");
       expect(order0).toContain("logo");
 
-      const orderHalf = await drawAt(makeReq(spanned), 0.5);
+      const orderHalf = await drawAt(req, 0.5);
       expect(orderHalf).toContain("video");
 
-      const orderEnd = await drawAt(makeReq(spanned), 1);
+      const orderEnd = await drawAt(req, 1);
       expect(orderEnd).not.toContain("video");
     }
   });
 
   test("two video layers with overlapping spans paint in list order, each inside its own span", async () => {
-    const twoVideo: readonly CreativeTemplateLayer[] = [
-      { id: "video", kind: "video", span: { startT: 0, endT: 0.5 } },
-      { id: "video-2", kind: "video", span: { startT: 0.25, endT: 1 } },
-      { id: "shade", kind: "shade" },
-      { id: "animated-text", kind: "animated-text" },
-      { id: "logo", kind: "logo" },
-    ];
-    const at04 = await drawLayersAt(timelineReq(twoVideo), 0.4);
+    const at04 = await drawLayersAt(timelineReq(TWO_VIDEO_LAYERS), 0.4);
     expect(at04.filter((l) => l.kind === "video").map((l) => l.id)).toEqual(["video", "video-2"]);
-    const at0 = await drawLayersAt(timelineReq(twoVideo), 0);
+    const at0 = await drawLayersAt(timelineReq(TWO_VIDEO_LAYERS), 0);
     expect(at0.filter((l) => l.kind === "video").map((l) => l.id)).toEqual(["video"]);
-    const at09 = await drawLayersAt(timelineReq(twoVideo), 0.9);
+    const at09 = await drawLayersAt(timelineReq(TWO_VIDEO_LAYERS), 0.9);
     expect(at09.filter((l) => l.kind === "video").map((l) => l.id)).toEqual(["video-2"]);
   });
 
   test("two video layers with overlapping spans paint their respective pixels with no erasure or stale frames (both paths)", async () => {
-    const twoVideo: readonly CreativeTemplateLayer[] = [
-      { id: "video", kind: "video", span: { startT: 0, endT: 0.5 } },
-      { id: "video-2", kind: "video", span: { startT: 0.25, endT: 1 } },
-      { id: "shade", kind: "shade" },
-      { id: "animated-text", kind: "animated-text" },
-      { id: "logo", kind: "logo" },
-    ];
-    const makeReqs = [
-      (layers: readonly CreativeTemplateLayer[]) => timelineReq(layers),
-      (layers: readonly CreativeTemplateLayer[]) => request({ template: videoTemplate(layers) }),
-    ];
-    for (const makeReq of makeReqs) {
-      const prepared = await NodeCanvasCompositor.prepare(
-        makeReq(twoVideo),
-        "Inter",
-        fsInputs(projectRoot()),
-      );
-      const canvas = createCanvas(prepared.width, prepared.height);
-      const ctx = canvas.getContext("2d");
-
+    await forBothPaths(TWO_VIDEO_LAYERS, (ctx, prepared) => {
       const table = layerTable();
       vi.spyOn(table, "video").mockImplementation((c: unknown) => {
         const { ctx: drawCtx, layer } = c as {
@@ -234,59 +244,22 @@ describe("the video span paint skip (VT2)", () => {
       expect(pixel075[3]).toBe(255);
 
       vi.restoreAllMocks();
-    }
+    });
   });
 
   test("two video layers with overlapping spans: at t = 0 first video is not erased (both paths)", async () => {
-    const twoVideo: readonly CreativeTemplateLayer[] = [
-      { id: "video", kind: "video", span: { startT: 0, endT: 0.5 } },
-      { id: "video-2", kind: "video", span: { startT: 0.25, endT: 1 } },
-      { id: "shade", kind: "shade" },
-      { id: "animated-text", kind: "animated-text" },
-      { id: "logo", kind: "logo" },
-    ];
-    const makeReqs = [
-      (layers: readonly CreativeTemplateLayer[]) => timelineReq(layers),
-      (layers: readonly CreativeTemplateLayer[]) => request({ template: videoTemplate(layers) }),
-    ];
-    for (const makeReq of makeReqs) {
-      const prepared = await NodeCanvasCompositor.prepare(
-        makeReq(twoVideo),
-        "Inter",
-        fsInputs(projectRoot()),
-      );
-      const canvas = createCanvas(prepared.width, prepared.height);
-      const ctx = canvas.getContext("2d");
-
+    await forBothPaths(TWO_VIDEO_LAYERS, (ctx, prepared) => {
       // Frame 1 at t = 0: first video paints background (#333333).
       // If video-2's clear had run after video-1, pixel would be erased to 0.
       NodeCanvasCompositor.draw(ctx, prepared, 0);
       const pixel0 = ctx.getImageData(0, 0, 1, 1).data;
       expect(pixel0[0]).toBe(51); // #333333
       expect(pixel0[3]).toBe(255);
-    }
+    });
   });
 
   test("disabled video layers are not cleared even when excluded by span (both paths)", async () => {
-    const disabledVideo: readonly CreativeTemplateLayer[] = [
-      { id: "video", kind: "video", enabled: false, span: { startT: 0.5, endT: 1 } },
-      { id: "shade", kind: "shade" },
-      { id: "animated-text", kind: "animated-text" },
-      { id: "logo", kind: "logo" },
-    ];
-    const makeReqs = [
-      (layers: readonly CreativeTemplateLayer[]) => timelineReq(layers),
-      (layers: readonly CreativeTemplateLayer[]) => request({ template: videoTemplate(layers) }),
-    ];
-    for (const makeReq of makeReqs) {
-      const prepared = await NodeCanvasCompositor.prepare(
-        makeReq(disabledVideo),
-        "Inter",
-        fsInputs(projectRoot()),
-      );
-      const canvas = createCanvas(prepared.width, prepared.height);
-      const ctx = canvas.getContext("2d");
-
+    await forBothPaths(DISABLED_VIDEO_LAYERS, (ctx, prepared) => {
       // Pre-fill the canvas to prove disabled layer does not clear it
       ctx.fillStyle = "#444444";
       ctx.fillRect(0, 0, prepared.width, prepared.height);
@@ -295,29 +268,11 @@ describe("the video span paint skip (VT2)", () => {
       const pixel = ctx.getImageData(0, 0, 1, 1).data;
       expect(pixel[0]).toBe(68); // #444444
       expect(pixel[3]).toBe(255);
-    }
+    });
   });
 
   test("a span-excluded video layer clears its rect so the previous frame is gone (both paths)", async () => {
-    const spanned: readonly CreativeTemplateLayer[] = [
-      { id: "video", kind: "video", span: { startT: 0.25, endT: 0.75 } },
-      { id: "shade", kind: "shade" },
-      { id: "animated-text", kind: "animated-text" },
-      { id: "logo", kind: "logo" },
-    ];
-    const makeReqs = [
-      (layers: readonly CreativeTemplateLayer[]) => timelineReq(layers),
-      (layers: readonly CreativeTemplateLayer[]) => request({ template: videoTemplate(layers) }),
-    ];
-    for (const makeReq of makeReqs) {
-      const prepared = await NodeCanvasCompositor.prepare(
-        makeReq(spanned),
-        "Inter",
-        fsInputs(projectRoot()),
-      );
-      const canvas = createCanvas(prepared.width, prepared.height);
-      const ctx = canvas.getContext("2d");
-
+    await forBothPaths(SPANNED_LAYERS, (ctx, prepared) => {
       // Frame 1: inside span (t = 0.5) — video layer paints the background
       NodeCanvasCompositor.draw(ctx, prepared, 0.5);
       const frame1Pixel = ctx.getImageData(0, 0, 1, 1).data;
@@ -330,7 +285,36 @@ describe("the video span paint skip (VT2)", () => {
       // Proves the old frame is gone: pixel was cleared rather than left on canvas
       expect(frame2Pixel[3]).toBe(0);
       expect(frame2Pixel[0]).toBe(0);
-    }
+    });
+  });
+
+  test("a framed Ken Burns video that leaves its span leaves no pixel in the overhang", async () => {
+    const framedSpanned: readonly CreativeTemplateLayer[] = [
+      {
+        id: "video",
+        kind: "video",
+        span: { startT: 0, endT: 0.5 },
+        frame: { x: 0.25, y: 0.25, w: 0.5, h: 0.5, anchor: "middle" },
+      },
+      { id: "shade", kind: "shade" },
+      { id: "animated-text", kind: "animated-text" },
+      { id: "logo", kind: "logo" },
+    ];
+    await forBothPaths(framedSpanned, (ctx, prepared) => {
+      // Frame 1: inside span (t = 0), Ken Burns in scales about the rect's centre.
+      // Zoom at t = 0 is 1.08, which paints outside the unscaled rect
+      // [270, 270, 540, 540] on the 1080px canvas: the scaled footprint starts
+      // at 540 - 270 * 1.08 = 248.4, so overhang pixel (250, 300) is painted.
+      NodeCanvasCompositor.draw(ctx, prepared, 0, "ken-burns-in");
+      const pixelInside = ctx.getImageData(250, 300, 1, 1).data;
+      expect(pixelInside[3]).toBe(255);
+
+      // Frame 2 on the SAME canvas: outside span (t = 0.75), Ken Burns in clearLayer clears the scaled footprint.
+      NodeCanvasCompositor.draw(ctx, prepared, 0.75, "ken-burns-in");
+      const pixelOverhang = ctx.getImageData(250, 300, 1, 1).data;
+      expect(pixelOverhang[3]).toBe(0);
+      expect(pixelOverhang[0]).toBe(0);
+    });
   });
 
   test("an image layer with no span still paints — the skip is kind-specific", async () => {

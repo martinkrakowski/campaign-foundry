@@ -96,11 +96,11 @@ export function layerSpanProblem(kind: LayerKind, span: unknown): VideoSpanProbl
 export function layerTimeFieldProblem(
   layer: Record<string, unknown>,
 ): VideoSpanProblem | undefined {
-  if (Object.prototype.hasOwnProperty.call(layer, "spans")) {
+  if (Object.hasOwn(layer, "spans")) {
     return { path: "spans", must: "be absent; a video layer holds one span", value: layer.spans };
   }
   for (const key of SECONDS_KEYS) {
-    if (Object.prototype.hasOwnProperty.call(layer, key)) {
+    if (Object.hasOwn(layer, key)) {
       return {
         path: key,
         must: "be absent; clip time is span.startT and span.endT as normalised t, never seconds",

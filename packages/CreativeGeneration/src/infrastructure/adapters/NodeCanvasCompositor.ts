@@ -448,7 +448,7 @@ export class NodeCanvasCompositor implements CompositorPort {
     };
     // The draw order is the layer list (D121/D128): array position is z-order,
     // bottom first. A kind with no table entry throws — it never skips.
-    clearSpanExcludedVideoLayers(ctx, prepared, t);
+    clearSpanExcludedVideoLayers(ctx, prepared, t, motion);
     let copyDrawn = false;
     for (const layer of prepared.layers) {
       // A layer the brief disabled does not draw (X9). The check runs BEFORE
@@ -1107,7 +1107,7 @@ function drawTimeline(
     effectT: effectT ?? t,
     copyT,
   };
-  clearSpanExcludedVideoLayers(ctx, prepared, t);
+  clearSpanExcludedVideoLayers(ctx, prepared, t, motion);
   let copyDrawn = false;
   for (const layer of prepared.layers) {
     // A layer the brief disabled does not draw (X9), and the check runs BEFORE
@@ -1671,24 +1671,42 @@ function clearSpanExcludedVideoLayers(
   ctx: SKRSContext2D,
   prepared: PreparedCreative,
   t: number,
+  motion?: MotionKind,
 ): void {
   for (const layer of prepared.layers) {
     if (isDisabledLayer(layer)) continue;
     if (!videoLayerPaints(layer, t)) {
-      clearLayer(ctx, layer, prepared);
+      clearLayer(ctx, layer, prepared, motion);
     }
   }
 }
 
 /**
  * A span-excluded video layer clears its rect so the previous frame is not left
- * on the reused canvas (VT2).
+ * on the reused canvas (VT2). Scaled footprints under motion (Ken Burns) scale
+ * about the rect's centre, so clear the largest rect the layer's motion can paint
+ * clipped to the canvas.
  */
 function clearLayer(
   ctx: SKRSContext2D,
   layer: CreativeTemplateLayer,
   prepared: PreparedCreative,
+  motion?: MotionKind,
 ): void {
   const dest = layerPixelRect(layer, prepared.canvas, prepared.width, prepared.height);
-  ctx.clearRect(dest.x, dest.y, dest.w, dest.h);
+  let maxZoom = 1;
+  for (const track of groundMotionTracks(motion)) {
+    for (const stop of track.stops) {
+      maxZoom = Math.max(maxZoom, stop.value);
+    }
+  }
+  const cx = dest.x + dest.w / 2;
+  const cy = dest.y + dest.h / 2;
+  const scaledW = dest.w * maxZoom;
+  const scaledH = dest.h * maxZoom;
+  const x0 = Math.max(0, cx - scaledW / 2);
+  const y0 = Math.max(0, cy - scaledH / 2);
+  const x1 = Math.min(prepared.width, cx + scaledW / 2);
+  const y1 = Math.min(prepared.height, cy + scaledH / 2);
+  ctx.clearRect(x0, y0, Math.max(0, x1 - x0), Math.max(0, y1 - y0));
 }

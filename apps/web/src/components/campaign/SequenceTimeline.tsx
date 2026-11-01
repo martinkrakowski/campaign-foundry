@@ -220,13 +220,13 @@ function VideoClip({
   className,
   style,
   onSelect,
-}: {
-  name: string;
-  selected: boolean;
-  className: string;
-  style: CSSProperties;
-  onSelect?: () => void;
-}): ReactNode {
+}: Readonly<{
+  readonly name: string;
+  readonly selected: boolean;
+  readonly className: string;
+  readonly style: CSSProperties;
+  readonly onSelect?: () => void;
+}>): ReactNode {
   if (onSelect === undefined) {
     return (
       <div
@@ -271,16 +271,16 @@ function VideoLane({
   onSelectLayer,
   onSetLayerEnabled,
   onMoveLayer,
-}: {
-  row: SequenceVideoRow;
-  ordinal: number;
-  durationSec: number;
-  pxPerSec: number;
-  selectedLayerId?: string | null;
-  onSelectLayer?: (id: string) => void;
-  onSetLayerEnabled: (id: string, enabled: boolean) => void;
-  onMoveLayer: (from: number, to: number) => void;
-}): ReactNode {
+}: Readonly<{
+  readonly row: SequenceVideoRow;
+  readonly ordinal: number;
+  readonly durationSec: number;
+  readonly pxPerSec: number;
+  readonly selectedLayerId?: string | null;
+  readonly onSelectLayer?: (id: string) => void;
+  readonly onSetLayerEnabled: (id: string, enabled: boolean) => void;
+  readonly onMoveLayer: (from: number, to: number) => void;
+}>): ReactNode {
   const selected = selectedLayerId === row.id;
   const clipName = messages.sequenceVideoClip(
     ordinal + 1,
