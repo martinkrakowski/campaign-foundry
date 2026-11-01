@@ -3,8 +3,11 @@ import { join } from "node:path";
 import type { ObjectStorePort } from "@campaignfoundry/CampaignOrchestration";
 import { renderObjectKey } from "@campaignfoundry/Distribution";
 import { dumpBrief, errorMessage } from "@campaignfoundry/shared";
+import { collectRefs } from "../asset-files.js";
 import { hashBytes } from "../brief-files.js";
-import type { AssetStorePort } from "../ports/asset-store.port.js";
+import type { SqlQuery } from "../db/sql-client.js";
+import { parseBriefText } from "../load-brief.js";
+import { isAssetId, type AssetStorePort } from "../ports/asset-store.port.js";
 import type { BriefStorePort } from "../ports/brief-store.port.js";
 import type { DecisionStorePort } from "../ports/decision-store.port.js";
 import type { PoolStorePort } from "../ports/pool-store.port.js";
@@ -19,6 +22,13 @@ import { rewriteBriefRefs } from "./ref-rewrite.js";
 import { dryRowStores, predictRows, type RowSource } from "./rows-step.js";
 import type { ScannedCampaign } from "./scan.js";
 import type { StepContext } from "./steps.js";
+import {
+  existingCounts,
+  latestBodies,
+  type ExistingCounts,
+  type LatestBody,
+} from "./existing-campaigns.js";
+import { IMPORT_ACTOR } from "./import-tenant.js";
 
 /**
  * PT-8f, the read-only checks of `verify`: campaigns, their input assets, their
@@ -358,4 +368,154 @@ export async function verifyImport(
     );
   }
   return summarise(checks);
+}
+
+/**
+ * The latest `brief_version` actor of every live campaign of `orgId`, by slug:
+ * exactly the rows `latestBodies` returns, read directly and never through
+ * `listBriefs` (PT-8-2). A tombstoned campaign is not selected.
+ */
+async function latestActors(db: SqlQuery, orgId: string): Promise<ReadonlyMap<string, string>> {
+  const { rows } = await db.query<{ slug: string; actor: string }>(
+    `select slug, actor from (
+       select distinct on (c.id) c.slug, bv.actor
+         from campaign c
+         join brief_version bv on bv.campaign_id = c.id
+        where c.org_id = $1 and c.deleted_at is null
+        order by c.id, bv.version desc
+     ) latest
+     order by slug`,
+    [orgId],
+  );
+  return new Map(rows.map((row) => [row.slug, row.actor]));
+}
+
+/**
+ * One live campaign's latest version against the org-wide rules: the body
+ * parses, and every ref it carries is an asset id whose bytes can be read.
+ * A body that no longer parses is a mismatch carrying the parser's message; a
+ * path ref is a mismatch; an asset id with no readable bytes is a mismatch.
+ * This is the check `listBriefs` cannot do: it drops a body that fails to
+ * parse, so the parse-failure case is invisible to every reader that goes
+ * through it (PT-8-2).
+ */
+async function verifyLatestRow(
+  row: LatestBody,
+  assets: Pick<AssetStorePort, "readAssetById">,
+): Promise<{ parsed: boolean; checks: VerifyCheck[] }> {
+  let brief: ReturnType<typeof parseBriefText>;
+  try {
+    brief = parseBriefText(`${row.slug}.yaml`, dumpBrief(JSON.parse(row.body) as object));
+  } catch (error) {
+    return {
+      parsed: false,
+      checks: [
+        {
+          entity: "campaign",
+          slug: row.slug,
+          status: "mismatch",
+          reason: `latest brief_version does not parse: ${errorMessage(error)}`,
+        },
+      ],
+    };
+  }
+  const checks: VerifyCheck[] = [];
+  for (const ref of new Set(collectRefs(brief))) {
+    if (!isAssetId(ref)) {
+      checks.push({
+        entity: "asset",
+        slug: row.slug,
+        item: ref,
+        status: "mismatch",
+        reason: `latest brief_version still carries path ref ${JSON.stringify(ref)}`,
+      });
+    } else if ((await assets.readAssetById(ref)) === undefined) {
+      checks.push({
+        entity: "asset",
+        slug: row.slug,
+        item: ref,
+        id: ref,
+        status: "mismatch",
+        reason: `asset id ${ref} in latest brief_version has no readable bytes`,
+      });
+    }
+  }
+  return { parsed: true, checks };
+}
+
+/** The read-only org-wide half of `verify` (PT-8f 3): the org's rows, never the plan's. */
+export interface OrgVerifyResult {
+  readonly checks: readonly VerifyCheck[];
+  readonly counts: ExistingCounts;
+  readonly ok: boolean;
+}
+
+/** `verifyTarget`'s report: the plan's checks plus the org-wide ones, counted apart. */
+export interface VerifyTargetReport extends VerifyReport {
+  readonly orgChecks: readonly VerifyCheck[];
+  readonly orgCounts: ExistingCounts;
+}
+
+/**
+ * Verify the ORG-wide rules (PT-8f 3): every imported campaign's latest version
+ * is still authored by the import actor, and every live campaign's latest
+ * version parses and names only readable asset ids. Read-only, like every other
+ * check here: this reads the `campaign`, `brief_version` and `asset` tables and
+ * reads objects by id, and writes nothing.
+ */
+export async function verifyOrg(
+  db: SqlQuery,
+  assets: Pick<AssetStorePort, "readAssetById">,
+  ctx: Pick<StepContext, "orgId">,
+  importedSlugs: ReadonlySet<string>,
+): Promise<OrgVerifyResult> {
+  const bodies = await latestBodies(db, ctx.orgId);
+  const actors = await latestActors(db, ctx.orgId);
+  const counts = await existingCounts(db, ctx.orgId);
+  const checks: VerifyCheck[] = [];
+  for (const slug of importedSlugs) {
+    const actor = actors.get(slug);
+    if (actor !== IMPORT_ACTOR) {
+      checks.push({
+        entity: "campaign",
+        slug,
+        status: "mismatch",
+        reason:
+          `latest brief_version actor is ${JSON.stringify(actor ?? null)}, ` +
+          `expected ${JSON.stringify(IMPORT_ACTOR)}`,
+      });
+    }
+  }
+  for (const row of bodies) {
+    checks.push(...(await verifyLatestRow(row, assets)).checks);
+  }
+  const ok = checks.every((check) => check.status !== "mismatch");
+  return { checks, counts, ok };
+}
+
+/**
+ * The whole read-only verify: the plan's checks (`verifyImport`), then the
+ * org-wide ones. `counts` stays the plan's items only (PT-8f 6); `orgCounts`
+ * is the org's row counts; `ok` requires both halves.
+ */
+export async function verifyTarget(
+  db: SqlQuery,
+  stores: VerifyStores,
+  ctx: StepContext,
+  plan: ReplanResult,
+): Promise<VerifyTargetReport> {
+  const base = await verifyImport(stores, ctx, plan);
+  const importedSlugs = new Set(
+    base.checks
+      .filter((check) => check.entity === "campaign" && check.status === "match")
+      .map((check) => check.slug),
+  );
+  const org = await verifyOrg(db, stores.assets, ctx, importedSlugs);
+  return {
+    checks: base.checks,
+    counts: base.counts,
+    orgChecks: org.checks,
+    orgCounts: org.counts,
+    ok: base.ok && org.ok,
+  };
 }
