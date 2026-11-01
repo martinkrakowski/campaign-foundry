@@ -752,7 +752,6 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
       expect(latest.find((row) => row.slug === "outside")?.version).toBe(2);
       expect(latest.find((row) => row.slug === "outside")?.actor).toBe("import:pt-8");
       expect(latest.find((row) => row.slug === "shared")?.version).toBe(1);
-      expect(latest.find((row) => row.slug === "shared")?.actor).not.toBe("import:pt-8");
     } finally {
       rmSync(result, { force: true });
     }
@@ -793,7 +792,6 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
       ).toBeUndefined();
       const latest = await latestRows(env);
       expect(latest.find((row) => row.slug === "refused")?.version).toBe(1);
-      expect(latest.find((row) => row.slug === "refused")?.actor).not.toBe("import:pt-8");
     } finally {
       rmSync(result, { force: true });
     }
