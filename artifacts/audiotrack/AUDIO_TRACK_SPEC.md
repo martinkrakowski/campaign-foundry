@@ -219,12 +219,25 @@ minimum 1
 
 Then:
 
-```
-dur(i) = speech_budget * weight(i) / sum(weights)
-dur(i) = clamp(dur(i), min_word_s, max_word_s)
-```
+Then, three regimes (`k` = number of words, `D_i` = speech_duration_s):
 
-`min_word_s = 0.07`, `max_word_s = 0.90`. If clamps break the sum, redistribute leftover proportionally to unclamped words. If still short, scale every word uniformly so they fill `speech_budget`.
+1. **Pause compression.** If `D_i - sum(pause) < k * min_word_s`, compress the
+   internal pauses proportionally (`pause_k *= (D_i - k * min_word_s) / sum(pause)`)
+   before clamping any word, so the word budget lands exactly on `k * min_word_s`.
+2. **Water-filling.** If `k * min_word_s <= budget <= k * max_word_s`, allocate
+   `dur(i) = min(max_word_s, max(min_word_s, alpha * weight(i)))`, choosing the
+   smallest `alpha` such that the clamped durations sum to the budget. If the
+   raw proportional split `budget * weight(i) / sum(weights)` already falls
+   inside `[min_word_s, max_word_s]` for every word, use it as-is.
+3. **Rate clamp.** If `D_i < k * min_word_s` or `D_i > k * max_word_s + sum(pause)`,
+   emit `RATE_CLAMPED`: below the floor, drop pauses and scale words
+   proportionally to `D_i`; above the ceiling, cap every word at `max_word_s`
+   and pour the residual into the inter-word pauses (for `k > 1`) or into
+   trailing clip silence (for `k == 1`, which never stretches a word past
+   `max_word_s`). For `D_i == 0`, return no word timings and emit
+   `EMPTY_PHRASE_AUDIO`.
+
+`min_word_s = 0.07`, `max_word_s = 0.90`.
 
 Place words left to right, inserting `internal_pause` after a word when the original phrase text has a pause-class punct before the next word.
 
