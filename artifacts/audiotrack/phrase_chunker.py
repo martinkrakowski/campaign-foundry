@@ -612,6 +612,12 @@ def place_on_timeline(
     phrase_rows: list[dict] = []
     cursor = 0.0
     for pos, (phrase, dur) in enumerate(zip(phrases, speech_durations)):
+        if dur < 0:
+            raise ValueError("speech_durations must be >= 0")
+        if phrase.word_tokens and dur == 0:
+            raise ValueError(
+                f"Phrase {phrase.i} has words but zero speech duration"
+            )
         audio_dur = _audio_duration_for(audio_durations, pos, dur)
         if audio_dur < 0:
             raise ValueError("audio_durations must be >= 0")
@@ -675,10 +681,12 @@ def plan_to_json(
         words, phrase_rows, warnings = place_on_timeline(
             phrases, speech_durations, audio_durations
         )
+        if not words:
+            raise ValueError("Timed plan must contain at least one word")
         payload["phrases"] = phrase_rows
         payload["words"] = [asdict(w) for w in words]
-        payload["speech_start_s"] = words[0].start_s if words else 0.0
-        payload["speech_end_s"] = words[-1].end_s if words else 0.0
+        payload["speech_start_s"] = words[0].start_s
+        payload["speech_end_s"] = words[-1].end_s
         payload["warnings"] = warnings
     return payload
 

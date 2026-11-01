@@ -17,6 +17,7 @@ from phrase_chunker import (
     _is_opening_quote,
     _punct_pause,
     allocate_phrase,
+    place_on_timeline,
     plan_to_json,
     split_phrases,
     syllable_count,
@@ -264,6 +265,30 @@ class TimelineOutputTests(unittest.TestCase):
         self.assertFalse(
             any(w["code"] == "SILENCE_HEAVY" for w in plan_ok["warnings"])
         )
+
+    def test_zero_duration_word_bearing_phrase_refused_on_timeline(self):
+        phrase = _phrase_of(["Stop"])
+        with self.assertRaises(ValueError):
+            place_on_timeline([phrase], [0.0])
+
+    def test_zero_duration_first_phrase_with_subsequent_phrase_refused(self):
+        p1 = _phrase_of(["Stop"])
+        p2 = _phrase_of(["Go"])
+        with self.assertRaises(ValueError):
+            place_on_timeline([p1, p2], [0.0, 1.0])
+
+    def test_empty_timing_payload_refused_in_plan_to_json(self):
+        with self.assertRaises(ValueError):
+            plan_to_json("", [])
+
+    def test_normal_plan_still_serializes(self):
+        plan = plan_to_json("Hello world", [1.0])
+        self.assertTrue(len(plan["words"]) > 0)
+        self.assertAlmostEqual(plan["speech_start_s"], 0.0)
+        self.assertAlmostEqual(plan["speech_end_s"], 1.0)
+        self.assertEqual(len(plan["phrases"]), 1)
+        self.assertEqual(plan["phrases"][0]["word_start"], 0)
+        self.assertEqual(plan["phrases"][0]["word_end"], 1)
 
 
 class WaterfillAllocationTests(unittest.TestCase):
