@@ -1056,6 +1056,101 @@ describe("parseBrief", () => {
     });
   });
 
+  describe("layer span (VT2)", () => {
+    const throwMessage = (fn: () => void): string => {
+      try {
+        fn();
+      } catch (error) {
+        return (error as Error).message;
+      }
+      return "";
+    };
+
+    /** The canonical video template with a span swapped onto the video layer. */
+    const withSpan = (span: unknown) => ({
+      id: "canonical-video",
+      version: 1,
+      creativeType: "video",
+      unit: "standard-web",
+      layers: [
+        { id: "video", kind: "video", span },
+        { id: "shade", kind: "shade" },
+        { id: "animated-text", kind: "animated-text" },
+        { id: "logo", kind: "logo" },
+      ],
+    });
+
+    test("a video layer with a valid partial span parses and carries it verbatim", () => {
+      const parsed = parseBrief({
+        ...valid,
+        template: withSpan({ startT: 0.25, endT: 0.75 }),
+        output: { formats: ["motion"] },
+      });
+      expect(parsed.template.layers.find((layer) => layer.kind === "video")?.span).toEqual({
+        startT: 0.25,
+        endT: 0.75,
+      });
+    });
+
+    test("an out-of-range span is refused, naming span and its range", () => {
+      const message = throwMessage(() =>
+        parseBrief({
+          ...valid,
+          template: withSpan({ startT: 1.5, endT: 2 }),
+          output: { formats: ["motion"] },
+        }),
+      );
+      expect(message).toMatch(/template\.layers\[0\]\.span/);
+      expect(message).toContain("[0, 1]");
+    });
+
+    test("an own spans array is refused — one span per video layer, never a list", () => {
+      const message = throwMessage(() =>
+        parseBrief({
+          ...valid,
+          output: { formats: ["motion"] },
+          template: {
+            ...withSpan(undefined),
+            layers: [
+              {
+                id: "video",
+                kind: "video",
+                spans: [
+                  { startT: 0, endT: 0.6 },
+                  { startT: 0.4, endT: 1 },
+                ],
+              },
+              { id: "shade", kind: "shade" },
+              { id: "animated-text", kind: "animated-text" },
+              { id: "logo", kind: "logo" },
+            ],
+          },
+        }),
+      );
+      expect(message).toContain("be absent");
+      expect(message).not.toContain("not overlap");
+    });
+
+    test("an own startSec is refused — seconds are never stored", () => {
+      const message = throwMessage(() =>
+        parseBrief({
+          ...valid,
+          output: { formats: ["motion"] },
+          template: {
+            ...withSpan(undefined),
+            layers: [
+              { id: "video", kind: "video", startSec: 1 },
+              { id: "shade", kind: "shade" },
+              { id: "animated-text", kind: "animated-text" },
+              { id: "logo", kind: "logo" },
+            ],
+          },
+        }),
+      );
+      expect(message).toContain("never seconds");
+    });
+  });
+
   describe("output formats against the template's output families (X14)", () => {
     /** The canonical image-html template, layers and all — no edits needed. */
     const htmlTemplate = {

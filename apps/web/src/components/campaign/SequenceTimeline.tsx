@@ -58,12 +58,13 @@ import {
  * the neighbour transfer `onBoundaryCommit(boundary, delta)`, offered only at
  * INTERNAL joins, because the outer edges of the sequence are not boundaries.
  *
- * **Honest rows.** Every video layer is a full-duration row, disabled ones
- * included (VT-D7: a hidden row stays here, with its enable control, because
- * filtering it would remove the only thing that can turn it back on); the
- * music bed is display-only (VT-D5); nothing plays (VT-D6), so there is no
- * play control at all — not a disabled one — and video and bed clips say they
- * cannot be trimmed rather than offering a trim that would be a lie.
+ * **Honest rows.** A video row is placed by its span, and an absent span is
+ * the whole duration; disabled rows stay included (VT-D7: a hidden row stays
+ * here, with its enable control, because filtering it would remove the only
+ * thing that can turn it back on); the music bed is display-only (VT-D5);
+ * nothing plays (VT-D6), so there is no play control at all — not a disabled
+ * one — and video and bed clips say they cannot be trimmed rather than
+ * offering a trim that would be a lie.
  *
  * Wrapped in `memo` for the same reason the tape is: the rail re-renders on
  * keystrokes this component does not draw.
@@ -108,7 +109,7 @@ export interface SequenceTimelineProps {
    * handle — an inert slider would be an affordance the surface does not have.
    */
   readonly onBoundaryCommit: (boundary: number, delta: number) => void;
-  /** Every video layer as a full-duration row, disabled ones included. */
+  /** The video rows: each row carries its layer's span — absent is the whole duration. */
   readonly videoRows: readonly SequenceVideoRow[];
   /**
    * The picked layer, the same id the layer stack and the inspector read —
@@ -119,7 +120,7 @@ export interface SequenceTimelineProps {
   readonly onSelectLayer?: (id: string) => void;
   /** VT-D7 — hide/enable, the same `setLayerEnabled` the layer stack offers. */
   readonly onSetLayerEnabled: (id: string, enabled: boolean) => void;
-  /** Reorder in the stack (z-order), never a time shift: a video layer has no span. */
+  /** Reorder in the stack (z-order), never a time shift. */
   readonly onMoveLayer: (from: number, to: number) => void;
   /** Add another video layer — legal and uncapped for this type. */
   readonly onAddVideo: () => void;
@@ -201,6 +202,148 @@ function TrackButton({
     >
       {children}
     </button>
+  );
+}
+
+/* ── The video lanes (VT2) ────────────────────────────────────────────────── */
+
+/**
+ * One video clip box: placed from the row's span — `left`/`width` are pixel
+ * strings from `startT` / `endT`, the same happy-dom-safe form the text clips
+ * use (`calc(...)` there, literal pixels here). `onSelectLayer` defined → a
+ * `button`; undefined → a `div`, out of the tab order. The click still
+ * selects. There is no trim handle.
+ */
+function VideoClip({
+  name,
+  selected,
+  className,
+  style,
+  onSelect,
+}: {
+  name: string;
+  selected: boolean;
+  className: string;
+  style: CSSProperties;
+  onSelect?: () => void;
+}): ReactNode {
+  if (onSelect === undefined) {
+    return (
+      <div
+        aria-label={name}
+        data-sequence-clip="video"
+        title={name}
+        className={className}
+        style={style}
+      >
+        <FilmPerforations />
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      aria-label={name}
+      aria-pressed={selected}
+      data-sequence-clip="video"
+      title={name}
+      className={className}
+      style={style}
+      onClick={onSelect}
+    >
+      <FilmPerforations />
+    </button>
+  );
+}
+
+/**
+ * The video lane: one video layer, disabled ones included, its clip placed by
+ * the layer's span (absent is the whole duration). No drag, no trim — this
+ * lane offers stack order and enable in the header and nothing on the clip
+ * itself.
+ */
+function VideoLane({
+  row,
+  ordinal,
+  durationSec,
+  pxPerSec,
+  selectedLayerId,
+  onSelectLayer,
+  onSetLayerEnabled,
+  onMoveLayer,
+}: {
+  row: SequenceVideoRow;
+  ordinal: number;
+  durationSec: number;
+  pxPerSec: number;
+  selectedLayerId?: string | null;
+  onSelectLayer?: (id: string) => void;
+  onSetLayerEnabled: (id: string, enabled: boolean) => void;
+  onMoveLayer: (from: number, to: number) => void;
+}): ReactNode {
+  const selected = selectedLayerId === row.id;
+  const clipName = messages.sequenceVideoClip(
+    ordinal + 1,
+    row.startT * durationSec,
+    row.endT * durationSec,
+  );
+  const clipClass = cn(
+    "absolute inset-y-1 overflow-hidden rounded-md border bg-brand-tint text-brand-on-tint",
+    row.off && "opacity-40",
+    selected && "border-brand-primary shadow-[0_0_0_2px] shadow-brand-primary/30",
+  );
+  const clipStyle: CSSProperties = {
+    left: `${row.startT * durationSec * pxPerSec}px`,
+    width: `${(row.endT - row.startT) * durationSec * pxPerSec}px`,
+  };
+  return (
+    <Lane
+      header={
+        <span className="flex flex-col items-center gap-0.5">
+          <span>{messages.sequenceVideoTrack(ordinal + 1)}</span>
+          <span className="flex items-center gap-0.5">
+            {row.canMoveDown ? (
+              <TrackButton
+                name={messages.sequenceMoveVideoTrackDown(ordinal + 1)}
+                onClick={() => onMoveLayer(row.index, row.index - 1)}
+              >
+                ↓
+              </TrackButton>
+            ) : null}
+            {row.canMoveUp ? (
+              <TrackButton
+                name={messages.sequenceMoveVideoTrackUp(ordinal + 1)}
+                onClick={() => onMoveLayer(row.index, row.index + 1)}
+              >
+                ↑
+              </TrackButton>
+            ) : null}
+            {row.canToggle ? (
+              <TrackButton
+                name={
+                  row.off
+                    ? messages.sequenceShowVideoTrack(ordinal + 1)
+                    : messages.sequenceHideVideoTrack(ordinal + 1)
+                }
+                onClick={() => onSetLayerEnabled(row.id, row.off)}
+              >
+                {row.off ? "○" : "◉"}
+              </TrackButton>
+            ) : null}
+          </span>
+        </span>
+      }
+      durationSec={durationSec}
+      pxPerSec={pxPerSec}
+    >
+      <VideoClip
+        name={clipName}
+        selected={selected}
+        className={clipClass}
+        style={clipStyle}
+        onSelect={onSelectLayer === undefined ? undefined : () => onSelectLayer(row.id)}
+      />
+    </Lane>
   );
 }
 
@@ -476,89 +619,20 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
             />
           </Lane>
 
-          {/* The video tracks: every video layer, disabled ones included, one
-              full-duration clip each. No drag, no trim — a video layer has no
-              span to write (VT-D2), so the row offers stack order and enable in
-              the header and nothing on the clip itself. */}
-          {videoRows.map((row, ordinal) => {
-            const selected = props.selectedLayerId === row.id;
-            const clipName = messages.sequenceVideoClip(ordinal + 1, durationSec);
-            const clipClass = cn(
-              "absolute inset-y-1 left-0 overflow-hidden rounded-md border bg-brand-tint text-brand-on-tint",
-              row.off && "opacity-40",
-              selected && "border-brand-primary shadow-[0_0_0_2px] shadow-brand-primary/30",
-            );
-            const clipStyle = { width: `${durationSec * pxPerSec}px` };
-            return (
-              <Lane
-                key={row.id}
-                header={
-                  <span className="flex flex-col items-center gap-0.5">
-                    <span>{messages.sequenceVideoTrack(ordinal + 1)}</span>
-                    <span className="flex items-center gap-0.5">
-                      {row.canMoveDown ? (
-                        <TrackButton
-                          name={messages.sequenceMoveVideoTrackDown(ordinal + 1)}
-                          onClick={() => props.onMoveLayer(row.index, row.index - 1)}
-                        >
-                          ↓
-                        </TrackButton>
-                      ) : null}
-                      {row.canMoveUp ? (
-                        <TrackButton
-                          name={messages.sequenceMoveVideoTrackUp(ordinal + 1)}
-                          onClick={() => props.onMoveLayer(row.index, row.index + 1)}
-                        >
-                          ↑
-                        </TrackButton>
-                      ) : null}
-                      {row.canToggle ? (
-                        <TrackButton
-                          name={
-                            row.off
-                              ? messages.sequenceShowVideoTrack(ordinal + 1)
-                              : messages.sequenceHideVideoTrack(ordinal + 1)
-                          }
-                          onClick={() => props.onSetLayerEnabled(row.id, row.off)}
-                        >
-                          {row.off ? "○" : "◉"}
-                        </TrackButton>
-                      ) : null}
-                    </span>
-                  </span>
-                }
-                durationSec={durationSec}
-                pxPerSec={pxPerSec}
-              >
-                {/* No handler, no control (the tape's own Clip rule): a row with
-                    no layer pick to offer is a plain box, out of the tab order. */}
-                {props.onSelectLayer === undefined ? (
-                  <div
-                    aria-label={clipName}
-                    data-sequence-clip="video"
-                    title={clipName}
-                    className={clipClass}
-                    style={clipStyle}
-                  >
-                    <FilmPerforations />
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    aria-label={clipName}
-                    aria-pressed={selected}
-                    data-sequence-clip="video"
-                    title={clipName}
-                    className={clipClass}
-                    style={clipStyle}
-                    onClick={() => props.onSelectLayer?.(row.id)}
-                  >
-                    <FilmPerforations />
-                  </button>
-                )}
-              </Lane>
-            );
-          })}
+          {/* The video tracks: one lane per video layer, disabled ones included. */}
+          {videoRows.map((row, ordinal) => (
+            <VideoLane
+              key={row.id}
+              row={row}
+              ordinal={ordinal}
+              durationSec={durationSec}
+              pxPerSec={pxPerSec}
+              selectedLayerId={props.selectedLayerId}
+              onSelectLayer={props.onSelectLayer}
+              onSetLayerEnabled={props.onSetLayerEnabled}
+              onMoveLayer={props.onMoveLayer}
+            />
+          ))}
 
           {/* TL6 / VT-D8 — the keys lane, present only when the picked layer HAS
               keys, on the host that can commit them. */}

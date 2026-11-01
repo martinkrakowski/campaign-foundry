@@ -1776,10 +1776,11 @@ export function sequenceVideoTrack(position: number): string {
 /**
  * A video clip's accessible name (§7): kind, index and timing in seconds — the
  * one place the plan asks for seconds IN a label, and display-only (VT-D2: the
- * clip itself has no stored span; it runs the whole duration).
+ * clip's stored value is normalised `t`; `startSec` / `endSec` are that span's
+ * display form against the previewed duration).
  */
-export function sequenceVideoClip(position: number, durationSec: number): string {
-  return `Video clip ${position}, 0.00 to ${durationSec.toFixed(2)} seconds`;
+export function sequenceVideoClip(position: number, startSec: number, endSec: number): string {
+  return `Video clip ${position}, ${startSec.toFixed(2)} to ${endSec.toFixed(2)} seconds`;
 }
 /** A text clip's accessible name, with its resolved window in seconds (§7). */
 export function sequenceBeatClip(position: number, startSec: number, endSec: number): string {

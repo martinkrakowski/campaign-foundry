@@ -26,6 +26,7 @@ import {
 } from "./creative-types.js";
 import { LAYER_KINDS, type LayerKind } from "./layer-kinds.js";
 import { layerTracksProblem, type Track } from "./tracks.js";
+import { layerSpanProblem, layerTimeFieldProblem, type VideoSpan } from "./video-span.js";
 import { ANCHOR_VALUES, type AnchorKind } from "./variation-defaults.js";
 
 export { clickDestinationProblem, type ClickDestinationProblem } from "./click-destination.js";
@@ -641,6 +642,7 @@ interface LayerEntry {
   readonly props?: LayerProps;
   readonly link?: boolean;
   readonly tracks?: readonly Track[];
+  readonly span?: VideoSpan;
 }
 
 /**
@@ -652,7 +654,9 @@ interface LayerEntry {
  * when present, a boolean (D160), `frame`,
  * when present, a canvas-relative box (D130), `props`, when present, a shape
  * that kind may carry (D134), and `tracks`, when
- * present, that kind's own keyframe tracks (K1). An own `elements` property
+ * present, that kind's own keyframe tracks (K1), and `span`, when present,
+ * a normalised `t` window only the `video` kind may carry (VT2). An own
+ * `elements` property
  * refuses the entry outright (AR2) — so an element with an
  * unknown kind, a non-vocabulary anchor, a fraction outside [0, 1], or a
  * track on a kind that draws through no single mechanism cannot ride the
@@ -688,5 +692,7 @@ function isLayerEntry(layer: unknown): layer is LayerEntry {
     return false;
   }
   if (Object.prototype.hasOwnProperty.call(rec, "elements")) return false;
-  return layerTracksProblem(rec.kind as LayerKind, rec.tracks) === undefined;
+  if (layerTracksProblem(rec.kind as LayerKind, rec.tracks) !== undefined) return false;
+  if (layerTimeFieldProblem(rec) !== undefined) return false;
+  return layerSpanProblem(rec.kind as LayerKind, rec.span) === undefined;
 }

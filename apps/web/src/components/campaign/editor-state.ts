@@ -46,6 +46,14 @@ import type { EasingKind } from "@campaignfoundry/CampaignOrchestration/easing";
 // The layer's shape, from the same module the canonical templates are declared
 // in: the toggle writes the field, so it writes that module's type.
 import type { CreativeTemplateLayer } from "@campaignfoundry/CampaignOrchestration/creative-templates";
+// The video span rule (VT2): the one function that refuses a span at this
+// boundary, imported from the leaf subpath like every other domain rule —
+// `video-span.ts` reaches only `layer-kinds.ts`, so none of the barrel's
+// `node:fs` hitchhikers come with it.
+import {
+  layerSpanProblem,
+  type VideoSpan,
+} from "@campaignfoundry/CampaignOrchestration/video-span";
 import {
   BRIEF_SCHEMA_VERSION,
   isSupportedBriefSchemaVersion,
@@ -551,6 +559,11 @@ export type EditorAction =
   // switching a layer off writes `enabled: false` and switching it back on
   // removes the field — the canonical form every template already carries.
   | { type: "setLayerEnabled"; id: string; enabled: boolean }
+  // VT2 — a video layer's one span of normalised `t`, refused whole by
+  // `layerSpanProblem` (nothing clamped, nothing converted, seconds never
+  // stored). Absence means the whole duration; a full-duration candidate is
+  // canonicalised to absence.
+  | { type: "setVideoSpan"; layerId: string; startT: number; endT: number }
   // The layer's own geometry overrides (D134, `studio-editor.md` SE2): a patch
   // across every kind's props vocabulary, because a control only ever names
   // the fields its own layer's kind carries — `layerPropsProblem` refuses
@@ -1124,6 +1137,61 @@ function withEnabled(layer: CreativeTemplateLayer, value: boolean): CreativeTemp
 }
 
 /**
+ * Whether two spans are the same placement (VT2): equal means within
+ * `1e-9` on both ends — a candidate recomputed from seconds
+ * (`(0.35 * 6) / 6` is `0.3499999999999999`) must read as the stored span,
+ * not as a rewrite that would dirty the brief once per keystroke.
+ */
+function sameSpan(a: VideoSpan, b: VideoSpan): boolean {
+  return Math.abs(a.startT - b.startT) < 1e-9 && Math.abs(a.endT - b.endT) < 1e-9;
+}
+
+/**
+ * A layer with the full-duration `span` removed (VT2): `{ startT: 0, endT:
+ * 1 }` restates what absence says, exactly as `enabled: true` does, so the
+ * canonical form deletes the key. Only the exact full span drops (`===` here —
+ * the ulp-near full span is handled by the reducer's `sameSpan` check before
+ * this runs); a partial span is kept.
+ */
+function withoutFullVideoSpan(layer: CreativeTemplateLayer): CreativeTemplateLayer {
+  if (layer.span !== undefined && layer.span.startT === 0 && layer.span.endT === 1) {
+    const next: Record<string, unknown> = { ...layer };
+    delete next.span;
+    return next as unknown as CreativeTemplateLayer;
+  }
+  return layer;
+}
+
+/**
+ * VT2 — store a video layer's span. The no-op rules mirror `setLayerEnabled`:
+ * an unknown id, a non-video kind, a span the domain refuses (`layerSpanProblem`
+ * — never clamped), or a span already stored (within `1e-9`) all return the
+ * same state object, so no history entry is created. A candidate equal to the
+ * full duration is canonicalised to absence so an ulp-near full span is not
+ * stored.
+ */
+function setVideoSpan(
+  state: EditorState,
+  action: Extract<EditorAction, { type: "setVideoSpan" }>,
+): EditorState {
+  const index = state.template.layers.findIndex((layer) => layer.id === action.layerId);
+  if (index === -1) return state;
+  const layer = state.template.layers[index]!;
+  if (layer.kind !== "video") return state;
+  const candidate = { startT: action.startT, endT: action.endT };
+  if (layerSpanProblem("video", candidate) !== undefined) return state;
+  const stored = layer.span ?? { startT: 0, endT: 1 };
+  if (sameSpan(candidate, stored)) return state;
+  const next: Record<string, unknown> = { ...layer };
+  if (sameSpan(candidate, { startT: 0, endT: 1 })) delete next.span;
+  else next.span = candidate;
+  const nextLayers = state.template.layers.map((existing, i) =>
+    i === index ? canonicalLayer(next as unknown as CreativeTemplateLayer) : existing,
+  );
+  return { ...state, template: { ...state.template, layers: nextLayers } };
+}
+
+/**
  * A layer with `link` set to `value` in the one canonical form (D160): the
  * mechanics are `withEnabled`'s, the POLARITY is not — absence here means NOT
  * a click target, so ticking the box writes `link: true` and unticking it
@@ -1311,7 +1379,8 @@ function canonicalProps(layer: CreativeTemplateLayer): Record<string, unknown> |
   return kept;
 }
 
-function canonicalLayer(layer: CreativeTemplateLayer): CreativeTemplateLayer {
+function canonicalLayer(input: CreativeTemplateLayer): CreativeTemplateLayer {
+  const layer = withoutFullVideoSpan(input);
   const dropEnabled = layer.enabled === true;
   // D160 joins the same list, with `enabled`'s opposite sign: absence means
   // NOT linked, so it is `link: false` — not `link: true` — that restates
@@ -1658,6 +1727,8 @@ function reduceEditor(state: EditorState, action: EditorAction): EditorState {
         },
       };
     }
+    case "setVideoSpan":
+      return setVideoSpan(state, action);
     case "setLayerEnabled": {
       // D129, MP-D4 — the same offer discipline a remove and an add hold: a layer
       // the Template section could not offer (the last enabled instance of a

@@ -13,6 +13,7 @@ import {
   resolveTracks,
   scaleBasis,
   textEffectTracks,
+  videoSpanCovers,
   widthTermBasis,
   type CanvasSpec,
   type CompositeRequest,
@@ -453,6 +454,10 @@ export class NodeCanvasCompositor implements CompositorPort {
       // the copy guard below: a disabled copy layer that set `copyDrawn` would
       // silently drop the enabled copy that follows it.
       if (isDisabledLayer(layer)) continue;
+      // VT2 — a video layer paints only inside its span; an absent span is the
+      // whole duration. The skip is kind-specific and never touches the text
+      // guard below, and a skipped video layer does not change `copyDrawn`.
+      if (!videoLayerPaints(layer, t)) continue;
       if (layer.kind === "static-text" || layer.kind === "animated-text") {
         // A creative type's shared budget caps text-kind layers at one (D124);
         // this guard is defensive, not load-bearing — never draws copy twice.
@@ -1105,6 +1110,10 @@ function drawTimeline(
     // the copy guard below: a disabled copy layer that consumed the budget
     // would silently drop the enabled copy that follows it.
     if (isDisabledLayer(layer)) continue;
+    // VT2 — a video layer paints only inside its span; an absent span is the
+    // whole duration. The skip is kind-specific and runs before the text-kind
+    // guard below, and a skipped video layer does not change `copyDrawn`.
+    if (!videoLayerPaints(layer, t)) continue;
     if (layer.kind === "static-text" || layer.kind === "animated-text") {
       // A creative type's shared budget caps text-kind layers at one (D124);
       // this guard is defensive, not load-bearing — never draws the beat twice.
@@ -1633,4 +1642,16 @@ function drawLayer(layer: CreativeTemplateLayer, c: Omit<LayerDrawContext, "laye
  */
 function isDisabledLayer(layer: CreativeTemplateLayer): boolean {
   return layer.enabled === false;
+}
+
+/**
+ * Whether a dispatch loop paints this layer at `t` (VT2): only kind `video`
+ * honours a span — an absent span is the whole duration, and `image` still
+ * uses `paintBackground` on every frame. The skip runs immediately after the
+ * disabled check and before the text-kind guard in both draw loops.
+ */
+function videoLayerPaints(layer: CreativeTemplateLayer, t: number): boolean {
+  if (layer.kind !== "video") return true;
+  if (layer.span === undefined) return true;
+  return videoSpanCovers(layer.span, t);
 }

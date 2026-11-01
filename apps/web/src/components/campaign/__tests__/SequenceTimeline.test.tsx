@@ -76,8 +76,26 @@ const keyboardBeats = keyboardResolved.map((beat, index) => ({
 
 /** One enabled video row and one switched-off one — VT-D7's both-halves fixture. */
 const videoRows: SequenceTimelineProps["videoRows"] = [
-  { id: "video", index: 0, off: false, canToggle: true, canMoveUp: false, canMoveDown: false },
-  { id: "video-2", index: 4, off: true, canToggle: true, canMoveUp: true, canMoveDown: true },
+  {
+    id: "video",
+    index: 0,
+    startT: 0,
+    endT: 1,
+    off: false,
+    canToggle: true,
+    canMoveUp: false,
+    canMoveDown: false,
+  },
+  {
+    id: "video-2",
+    index: 4,
+    startT: 0,
+    endT: 1,
+    off: true,
+    canToggle: true,
+    canMoveUp: true,
+    canMoveDown: true,
+  },
 ];
 
 const baseProps: SequenceTimelineProps = {
@@ -139,7 +157,7 @@ const clipNamed = (arr: typeof beats, position: number) => {
   });
 };
 const videoClip = (position: number) =>
-  screen.getByRole("button", { name: messages.sequenceVideoClip(position, DURATION) });
+  screen.getByRole("button", { name: messages.sequenceVideoClip(position, 0, DURATION) });
 
 describe("the source rules the plan restates for this component (§5, §7, §9)", () => {
   test("the file is really the component the checks below grep", () => {
@@ -582,6 +600,28 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     expect(off.className).toContain("opacity-40");
   });
 
+  test("a partial span places the clip from its startT/endT (VT2)", () => {
+    renderTimeline({
+      videoRows: [
+        {
+          id: "video",
+          index: 0,
+          startT: 0.25,
+          endT: 0.75,
+          off: false,
+          canToggle: true,
+          canMoveUp: false,
+          canMoveDown: false,
+        },
+      ],
+    });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 0.25 * DURATION, 0.75 * DURATION),
+    });
+    expect(clip.style.left).toBe("42px");
+    expect(clip.style.width).toBe("84px");
+  });
+
   test("dragging a video clip horizontally changes nothing (§7: no span to write)", () => {
     const onMoveBeat = vi.fn();
     const onMoveLayer = vi.fn();
@@ -615,6 +655,8 @@ describe("the video rows (VT-D2, VT-D7)", () => {
         {
           id: "video",
           index: 0,
+          startT: 0,
+          endT: 1,
           off: false,
           canToggle: false,
           canMoveUp: false,
@@ -628,7 +670,7 @@ describe("the video rows (VT-D2, VT-D7)", () => {
   test("a row without a layer pick is a plain box, not a tab stop", () => {
     renderTimeline({ onSelectLayer: undefined, selectedLayerId: undefined });
     expect(
-      screen.queryByRole("button", { name: messages.sequenceVideoClip(1, DURATION) }),
+      screen.queryByRole("button", { name: messages.sequenceVideoClip(1, 0, DURATION) }),
     ).toBeNull();
     expect(document.querySelector('[data-sequence-clip="video"]')).toBeTruthy();
   });

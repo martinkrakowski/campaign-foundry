@@ -1,0 +1,172 @@
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { createCanvas } from "@napi-rs/canvas";
+import {
+  CANONICAL_TEMPLATES,
+  type BriefTemplate,
+  type CompositeRequest,
+  type CreativeTemplateLayer,
+  type CreativeType,
+  type CopyTimeline,
+  type LayerKind,
+} from "@campaignfoundry/CampaignOrchestration";
+import { NodeCanvasCompositor } from "../NodeCanvasCompositor.js";
+
+import { projectRoot } from "@campaignfoundry/shared";
+import { fsInputs } from "./fs-inputs.js";
+
+const background = (): Uint8Array => {
+  const c = createCanvas(64, 64);
+  const g = c.getContext("2d");
+  g.fillStyle = "#333333";
+  g.fillRect(0, 0, 64, 64);
+  return c.toBuffer("image/png");
+};
+
+type TemplateRequest = CompositeRequest & {
+  readonly template?: BriefTemplate;
+  readonly creativeType?: CreativeType;
+};
+
+const request = (over: Partial<TemplateRequest> = {}): TemplateRequest => ({
+  background: background(),
+  message: "Stay wild, stay hydrated",
+  brandColor: "#1473E6",
+  logoPath: "assets/inputs/hydra-logo.png",
+  canvas: { ratio: "1:1" },
+  layout: "headline-bottom",
+  tone: "bold",
+  ...over,
+});
+
+/** The kinds this compositor draws. */
+const DRAWABLE_KINDS = [
+  "image",
+  "fill",
+  "video",
+  "shade",
+  "accent",
+  "static-text",
+  "animated-text",
+  "logo",
+] as const;
+
+/**
+ * The compositor's dispatch table, reached through the TS-private seam (the
+ * same seam `NodeCanvasCompositor.layer-order.test.ts` uses).
+ */
+const layerTable = (): Record<(typeof DRAWABLE_KINDS)[number], (c: unknown) => void> =>
+  (
+    NodeCanvasCompositor as unknown as {
+      layerDrawers: Record<(typeof DRAWABLE_KINDS)[number], (c: unknown) => void>;
+    }
+  ).layerDrawers;
+
+/** Swap every drawer for a kind recorder; returns the recorded order. */
+function recordDrawOrder(): LayerKind[] {
+  const order: LayerKind[] = [];
+  const table = layerTable();
+  for (const kind of DRAWABLE_KINDS) {
+    vi.spyOn(table, kind).mockImplementation(() => {
+      order.push(kind);
+    });
+  }
+  return order;
+}
+
+/** The canonical video template's layers, in z-order. */
+const VIDEO_LAYERS = CANONICAL_TEMPLATES.video.layers;
+
+const videoTemplate = (layers: readonly CreativeTemplateLayer[]): BriefTemplate => ({
+  id: "canonical-video",
+  version: 1,
+  creativeType: "video",
+  unit: "standard-web",
+  layers,
+});
+
+const timelineReq = (
+  layers: readonly CreativeTemplateLayer[],
+): TemplateRequest & { durationSec: number; timeline: CopyTimeline } => ({
+  ...request({ template: videoTemplate(layers) }),
+  durationSec: 6,
+  timeline: {
+    beats: [{ text: "Stay wild, stay hydrated", weight: 1 }],
+    transition: "cut",
+    keyBeat: 1,
+  },
+});
+
+async function drawAt(req: TemplateRequest, t: number): Promise<LayerKind[]> {
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
+  const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
+  const order = recordDrawOrder();
+  NodeCanvasCompositor.draw(ctx, prepared, t);
+  return order;
+}
+
+describe("the video span paint skip (VT2)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("a video layer with no span paints on every frame — the golden-preserving case", async () => {
+    for (const t of [0, 0.5, 1]) {
+      const timelineOrder = await drawAt(timelineReq(VIDEO_LAYERS), t);
+      expect(timelineOrder).toContain("video");
+      const legacyOrder = await drawAt(request({ template: videoTemplate(VIDEO_LAYERS) }), t);
+      expect(legacyOrder).toContain("video");
+    }
+  });
+
+  test("a video layer paints only inside its span, on both paths", async () => {
+    const spanned: readonly CreativeTemplateLayer[] = [
+      { id: "video", kind: "video", span: { startT: 0.25, endT: 0.75 } },
+      { id: "shade", kind: "shade" },
+      { id: "animated-text", kind: "animated-text" },
+      { id: "logo", kind: "logo" },
+    ];
+    const makeReqs = [
+      (layers: readonly CreativeTemplateLayer[]) => timelineReq(layers),
+      (layers: readonly CreativeTemplateLayer[]) => request({ template: videoTemplate(layers) }),
+    ];
+    for (const makeReq of makeReqs) {
+      const order0 = await drawAt(makeReq(spanned), 0);
+      expect(order0).not.toContain("video");
+      expect(order0).toContain("shade");
+      expect(order0).toContain("logo");
+
+      const orderHalf = await drawAt(makeReq(spanned), 0.5);
+      expect(orderHalf).toContain("video");
+
+      const orderEnd = await drawAt(makeReq(spanned), 1);
+      expect(orderEnd).not.toContain("video");
+    }
+  });
+
+  test("two video layers with overlapping spans paint in list order, each inside its own span", async () => {
+    const twoVideo: readonly CreativeTemplateLayer[] = [
+      { id: "video", kind: "video", span: { startT: 0, endT: 0.5 } },
+      { id: "video-2", kind: "video", span: { startT: 0.25, endT: 1 } },
+      { id: "shade", kind: "shade" },
+      { id: "animated-text", kind: "animated-text" },
+      { id: "logo", kind: "logo" },
+    ];
+    const at04 = await drawAt(timelineReq(twoVideo), 0.4);
+    expect(at04.filter((kind) => kind === "video")).toEqual(["video", "video"]);
+    const at0 = await drawAt(timelineReq(twoVideo), 0);
+    expect(at0.filter((kind) => kind === "video")).toEqual(["video"]);
+    const at09 = await drawAt(timelineReq(twoVideo), 0.9);
+    expect(at09.filter((kind) => kind === "video")).toEqual(["video"]);
+  });
+
+  test("an image layer with no span still paints — the skip is kind-specific", async () => {
+    const imageOnly: readonly CreativeTemplateLayer[] = [
+      { id: "image", kind: "image" },
+      { id: "shade", kind: "shade" },
+      { id: "static-text", kind: "static-text" },
+      { id: "logo", kind: "logo" },
+    ];
+    const order = await drawAt(request({ template: videoTemplate(imageOnly) }), 0.5);
+    expect(order).toContain("image");
+  });
+});
