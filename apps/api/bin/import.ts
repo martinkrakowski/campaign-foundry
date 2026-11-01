@@ -516,7 +516,7 @@ function redactSecrets(text: string): string {
         passwords.add(parsed.password);
         try {
           const decoded = decodeURIComponent(parsed.password);
-          if (decoded !== "") passwords.add(decoded);
+          passwords.add(decoded);
         } catch {
           // An un-decodable password contributes only its encoded form.
         }
@@ -526,7 +526,7 @@ function redactSecrets(text: string): string {
         passwords.add(rawMatch[1]);
         try {
           const decoded = decodeURIComponent(rawMatch[1]);
-          if (decoded !== "") passwords.add(decoded);
+          passwords.add(decoded);
         } catch {
           // An un-decodable password contributes only its encoded form.
         }
