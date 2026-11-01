@@ -448,6 +448,7 @@ export class NodeCanvasCompositor implements CompositorPort {
     };
     // The draw order is the layer list (D121/D128): array position is z-order,
     // bottom first. A kind with no table entry throws — it never skips.
+    clearSpanExcludedVideoLayers(ctx, prepared, t);
     let copyDrawn = false;
     for (const layer of prepared.layers) {
       // A layer the brief disabled does not draw (X9). The check runs BEFORE
@@ -455,10 +456,9 @@ export class NodeCanvasCompositor implements CompositorPort {
       // silently drop the enabled copy that follows it.
       if (isDisabledLayer(layer)) continue;
       // VT2 — a video layer paints only inside its span; an absent span is the
-      // whole duration. A span-excluded video layer clears its rect so the
-      // previous frame is not left on the reused canvas.
+      // whole duration. A span-excluded video layer cleared its rect before
+      // the loop; inside the loop it only does continue.
       if (!videoLayerPaints(layer, t)) {
-        clearLayer(ctx, layer, prepared);
         continue;
       }
       if (layer.kind === "static-text" || layer.kind === "animated-text") {
@@ -1107,6 +1107,7 @@ function drawTimeline(
     effectT: effectT ?? t,
     copyT,
   };
+  clearSpanExcludedVideoLayers(ctx, prepared, t);
   let copyDrawn = false;
   for (const layer of prepared.layers) {
     // A layer the brief disabled does not draw (X9), and the check runs BEFORE
@@ -1114,10 +1115,9 @@ function drawTimeline(
     // would silently drop the enabled copy that follows it.
     if (isDisabledLayer(layer)) continue;
     // VT2 — a video layer paints only inside its span; an absent span is the
-    // whole duration. A span-excluded video layer clears its rect so the
-    // previous frame is not left on the reused canvas.
+    // whole duration. A span-excluded video layer cleared its rect before
+    // the loop; inside the loop it only does continue.
     if (!videoLayerPaints(layer, t)) {
-      clearLayer(ctx, layer, prepared);
       continue;
     }
     if (layer.kind === "static-text" || layer.kind === "animated-text") {
@@ -1660,6 +1660,24 @@ function videoLayerPaints(layer: CreativeTemplateLayer, t: number): boolean {
   if (layer.kind !== "video") return true;
   if (layer.span === undefined) return true;
   return videoSpanCovers(layer.span, t);
+}
+
+/**
+ * In both draw paths, clear the rects of span-excluded video layers before the
+ * layer loop so earlier layers already painted this frame are not erased (VT2).
+ * Disabled layers are not cleared.
+ */
+function clearSpanExcludedVideoLayers(
+  ctx: SKRSContext2D,
+  prepared: PreparedCreative,
+  t: number,
+): void {
+  for (const layer of prepared.layers) {
+    if (isDisabledLayer(layer)) continue;
+    if (!videoLayerPaints(layer, t)) {
+      clearLayer(ctx, layer, prepared);
+    }
+  }
 }
 
 /**
