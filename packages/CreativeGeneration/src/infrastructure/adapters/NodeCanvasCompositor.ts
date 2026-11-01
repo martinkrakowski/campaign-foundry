@@ -455,9 +455,12 @@ export class NodeCanvasCompositor implements CompositorPort {
       // silently drop the enabled copy that follows it.
       if (isDisabledLayer(layer)) continue;
       // VT2 — a video layer paints only inside its span; an absent span is the
-      // whole duration. The skip is kind-specific and never touches the text
-      // guard below, and a skipped video layer does not change `copyDrawn`.
-      if (!videoLayerPaints(layer, t)) continue;
+      // whole duration. A span-excluded video layer clears its rect so the
+      // previous frame is not left on the reused canvas.
+      if (!videoLayerPaints(layer, t)) {
+        clearLayer(ctx, layer, prepared);
+        continue;
+      }
       if (layer.kind === "static-text" || layer.kind === "animated-text") {
         // A creative type's shared budget caps text-kind layers at one (D124);
         // this guard is defensive, not load-bearing — never draws copy twice.
@@ -1111,9 +1114,12 @@ function drawTimeline(
     // would silently drop the enabled copy that follows it.
     if (isDisabledLayer(layer)) continue;
     // VT2 — a video layer paints only inside its span; an absent span is the
-    // whole duration. The skip is kind-specific and runs before the text-kind
-    // guard below, and a skipped video layer does not change `copyDrawn`.
-    if (!videoLayerPaints(layer, t)) continue;
+    // whole duration. A span-excluded video layer clears its rect so the
+    // previous frame is not left on the reused canvas.
+    if (!videoLayerPaints(layer, t)) {
+      clearLayer(ctx, layer, prepared);
+      continue;
+    }
     if (layer.kind === "static-text" || layer.kind === "animated-text") {
       // A creative type's shared budget caps text-kind layers at one (D124);
       // this guard is defensive, not load-bearing — never draws the beat twice.
@@ -1654,4 +1660,17 @@ function videoLayerPaints(layer: CreativeTemplateLayer, t: number): boolean {
   if (layer.kind !== "video") return true;
   if (layer.span === undefined) return true;
   return videoSpanCovers(layer.span, t);
+}
+
+/**
+ * A span-excluded video layer clears its rect so the previous frame is not left
+ * on the reused canvas (VT2).
+ */
+function clearLayer(
+  ctx: SKRSContext2D,
+  layer: CreativeTemplateLayer,
+  prepared: PreparedCreative,
+): void {
+  const dest = layerPixelRect(layer, prepared.canvas, prepared.width, prepared.height);
+  ctx.clearRect(dest.x, dest.y, dest.w, dest.h);
 }

@@ -104,6 +104,30 @@ async function drawAt(req: TemplateRequest, t: number): Promise<LayerKind[]> {
   return order;
 }
 
+/** Swap every drawer for a layer recorder; returns the recorded layers in paint order. */
+function recordDrawnLayers(): { kind: LayerKind; id: string }[] {
+  const drawn: { kind: LayerKind; id: string }[] = [];
+  const table = layerTable();
+  for (const kind of DRAWABLE_KINDS) {
+    vi.spyOn(table, kind).mockImplementation((c: unknown) => {
+      const layer = (c as { layer: CreativeTemplateLayer }).layer;
+      drawn.push({ kind, id: layer.id });
+    });
+  }
+  return drawn;
+}
+
+async function drawLayersAt(
+  req: TemplateRequest,
+  t: number,
+): Promise<{ kind: LayerKind; id: string }[]> {
+  const prepared = await NodeCanvasCompositor.prepare(req, "Inter", fsInputs(projectRoot()));
+  const ctx = createCanvas(prepared.width, prepared.height).getContext("2d");
+  const drawn = recordDrawnLayers();
+  NodeCanvasCompositor.draw(ctx, prepared, t);
+  return drawn;
+}
+
 describe("the video span paint skip (VT2)", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -151,12 +175,47 @@ describe("the video span paint skip (VT2)", () => {
       { id: "animated-text", kind: "animated-text" },
       { id: "logo", kind: "logo" },
     ];
-    const at04 = await drawAt(timelineReq(twoVideo), 0.4);
-    expect(at04.filter((kind) => kind === "video")).toEqual(["video", "video"]);
-    const at0 = await drawAt(timelineReq(twoVideo), 0);
-    expect(at0.filter((kind) => kind === "video")).toEqual(["video"]);
-    const at09 = await drawAt(timelineReq(twoVideo), 0.9);
-    expect(at09.filter((kind) => kind === "video")).toEqual(["video"]);
+    const at04 = await drawLayersAt(timelineReq(twoVideo), 0.4);
+    expect(at04.filter((l) => l.kind === "video").map((l) => l.id)).toEqual(["video", "video-2"]);
+    const at0 = await drawLayersAt(timelineReq(twoVideo), 0);
+    expect(at0.filter((l) => l.kind === "video").map((l) => l.id)).toEqual(["video"]);
+    const at09 = await drawLayersAt(timelineReq(twoVideo), 0.9);
+    expect(at09.filter((l) => l.kind === "video").map((l) => l.id)).toEqual(["video-2"]);
+  });
+
+  test("a span-excluded video layer clears its rect so the previous frame is gone (both paths)", async () => {
+    const spanned: readonly CreativeTemplateLayer[] = [
+      { id: "video", kind: "video", span: { startT: 0.25, endT: 0.75 } },
+      { id: "shade", kind: "shade" },
+      { id: "animated-text", kind: "animated-text" },
+      { id: "logo", kind: "logo" },
+    ];
+    const makeReqs = [
+      (layers: readonly CreativeTemplateLayer[]) => timelineReq(layers),
+      (layers: readonly CreativeTemplateLayer[]) => request({ template: videoTemplate(layers) }),
+    ];
+    for (const makeReq of makeReqs) {
+      const prepared = await NodeCanvasCompositor.prepare(
+        makeReq(spanned),
+        "Inter",
+        fsInputs(projectRoot()),
+      );
+      const canvas = createCanvas(prepared.width, prepared.height);
+      const ctx = canvas.getContext("2d");
+
+      // Frame 1: inside span (t = 0.5) — video layer paints the background
+      NodeCanvasCompositor.draw(ctx, prepared, 0.5);
+      const frame1Pixel = ctx.getImageData(0, 0, 1, 1).data;
+      expect(frame1Pixel[0]).toBe(51); // #333333
+      expect(frame1Pixel[3]).toBe(255);
+
+      // Frame 2: outside span (t = 0) on the SAME canvas — video layer clears its rect
+      NodeCanvasCompositor.draw(ctx, prepared, 0);
+      const frame2Pixel = ctx.getImageData(0, 0, 1, 1).data;
+      // Proves the old frame is gone: pixel was cleared rather than left on canvas
+      expect(frame2Pixel[3]).toBe(0);
+      expect(frame2Pixel[0]).toBe(0);
+    }
   });
 
   test("an image layer with no span still paints — the skip is kind-specific", async () => {

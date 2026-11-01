@@ -1779,11 +1779,8 @@ export function sequenceVideoTrack(position: number): string {
  * clip's stored value is normalised `t`; `startSec` / `endSec` are that span's
  * display form against the previewed duration).
  */
-export function sequenceVideoClip(position: number, startSec?: number, endSec?: number): string {
-  if (typeof startSec === "number" && typeof endSec === "number") {
-    return `Video clip ${position}, ${startSec.toFixed(2)} to ${endSec.toFixed(2)} seconds`;
-  }
-  return `Video clip ${position}`;
+export function sequenceVideoClip(position: number, startSec: number, endSec: number): string {
+  return `Video clip ${position}, ${startSec.toFixed(2)} to ${endSec.toFixed(2)} seconds`;
 }
 /** A text clip's accessible name, with its resolved window in seconds (§7). */
 export function sequenceBeatClip(position: number, startSec: number, endSec: number): string {

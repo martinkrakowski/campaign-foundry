@@ -33,6 +33,10 @@ describe("videoSpansOverlap — adjacent spans do not overlap (VT-D3)", () => {
   test("[0, 0.5] and [0.4, 1] overlap", () => {
     expect(videoSpansOverlap({ startT: 0, endT: 0.5 }, { startT: 0.4, endT: 1 })).toBe(true);
   });
+
+  test("non-overlapping [0.5, 1] and [0, 0.5] do not overlap (left comparison false)", () => {
+    expect(videoSpansOverlap({ startT: 0.5, endT: 1 }, { startT: 0, endT: 0.5 })).toBe(false);
+  });
 });
 
 describe("layerSpanProblem — the one span decision both boundaries read", () => {
