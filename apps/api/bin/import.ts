@@ -325,7 +325,7 @@ async function closeDatabase(io: ImportIO): Promise<void> {
       }
     }
   } catch (error) {
-    io.stderr(`could not close the database: ${errorMessage(error)}`);
+    io.stderr(redactSecrets(`could not close the database: ${errorMessage(error)}`));
   }
 }
 
@@ -500,25 +500,48 @@ function buildVerifyStores(orgId: string): VerifyStores {
 
 /**
  * Remove the configured credentials from a line `verify` prints: the password of
- * `DATABASE_URL` and the S3 secret access key, when either is set. A line can
- * carry them only through an error message; a setting that cannot be read or
- * parsed contributes no secret and is ignored rather than masking the error it
- * accompanies.
+ * `DATABASE_URL` (both raw and decoded) and the S3 secret access key, when either
+ * is set. A line can carry them only through an error message; a setting that cannot
+ * be read or parsed contributes no secret and is ignored rather than masking the
+ * error it accompanies.
  */
 function redactSecrets(text: string): string {
   let redacted = text;
   const url = databaseSettings().url;
   if (url !== undefined) {
     try {
-      const password = new URL(url).password;
-      if (password !== "") redacted = redacted.split(password).join("[redacted]");
+      const parsed = new URL(url);
+      const passwords = new Set<string>();
+      if (parsed.password !== "") {
+        passwords.add(parsed.password);
+        try {
+          const decoded = decodeURIComponent(parsed.password);
+          if (decoded !== "") passwords.add(decoded);
+        } catch {
+          // An un-decodable password contributes only its encoded form.
+        }
+      }
+      const rawMatch = /:\/\/[^:@/]*:([^@/]*)@/.exec(url);
+      if (rawMatch && rawMatch[1] !== "") {
+        passwords.add(rawMatch[1]);
+        try {
+          const decoded = decodeURIComponent(rawMatch[1]);
+          if (decoded !== "") passwords.add(decoded);
+        } catch {
+          // An un-decodable password contributes only its encoded form.
+        }
+      }
+      const sorted = Array.from(passwords).sort((a, b) => b.length - a.length);
+      for (const password of sorted) {
+        redacted = redacted.split(password).join("[redacted]");
+      }
     } catch {
       // An unparseable DATABASE_URL contributes no password to redact.
     }
   }
   try {
     const secret = objectStoreSettings()?.secretAccessKey;
-    if (secret !== undefined) {
+    if (secret !== undefined && secret !== "") {
       redacted = redacted.split(secret).join("[redacted]");
     }
   } catch {

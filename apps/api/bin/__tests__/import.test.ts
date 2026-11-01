@@ -864,7 +864,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("the verify subcommand (PT-8f3)", () => {
     expect(out[out.length - 1]).toBe("verify FAILED");
   });
 
-  test("a wrong --expect exits 1 before the target is read", async () => {
+  test("a wrong --expect exits 1 before the target's rows are read", async () => {
     const { digest } = await applyTree("expect");
     env.reinstall();
     const wrong = "0".repeat(64);
@@ -910,7 +910,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("the verify subcommand (PT-8f3)", () => {
   test("a store whose thrown error embeds the configured secrets redacts them on stderr", async () => {
     await applyTree("redact");
     env.reinstall();
-    process.env.DATABASE_URL = "postgres://user:sekrit@127.0.0.1:5432/db";
+    process.env.DATABASE_URL = "postgres://cf_test:p%40ss@127.0.0.1:5432/cf_home";
     process.env.S3_ENDPOINT = "http://127.0.0.1:9000";
     process.env.S3_PUBLIC_ENDPOINT = "http://127.0.0.1:9000";
     process.env.S3_REGION = "us-east-1";
@@ -922,7 +922,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("the verify subcommand (PT-8f3)", () => {
         if (prop === "get") {
           return async () => {
             throw new Error(
-              "could not reach postgres://user:sekrit@127.0.0.1:5432/db with S3_SECRET_ACCESS_KEY=shhh",
+              "could not reach postgres://cf_test:p%40ss@127.0.0.1:5432/cf_home (password p@ss) with S3_SECRET_ACCESS_KEY=shhh",
             );
           };
         }
@@ -931,18 +931,53 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("the verify subcommand (PT-8f3)", () => {
       },
     });
     setObjectStoreClient(evil);
+    env.db.end = vi.fn(async () => {
+      throw new Error(
+        "could not close pool for postgres://cf_test:p%40ss@127.0.0.1:5432/cf_home with password p@ss",
+      );
+    });
 
     const outPath = join(root!, "v.json");
     const { out, err, deps } = io();
     try {
       expect(await main(argv("verify", "--out", outPath), deps)).toBe(1);
+      expect(err).toHaveLength(2);
       expect(err[0]).toContain("[redacted]");
-      expect(err[0]).not.toContain("sekrit");
-      expect(err[0]).not.toContain("shhh");
+      expect(err[1]).toContain("could not close the database:");
+      expect(err[1]).toContain("[redacted]");
+      for (const line of err) {
+        expect(line).not.toContain("p%40ss");
+        expect(line).not.toContain("p@ss");
+        expect(line).not.toContain("shhh");
+      }
       expect(out).toEqual([]);
       expect(existsSync(outPath)).toBe(false);
     } finally {
       for (const key of S3_VARS) delete process.env[key];
+      process.env.DATABASE_URL = "postgres://nobody@unused.invalid:5432/none";
+    }
+  });
+
+  test("a database close error that embeds configured secrets redacts them on stderr", async () => {
+    await applyTree("closeredact");
+    env.reinstall();
+    process.env.DATABASE_URL = "postgres://cf_test:p%40ss@127.0.0.1:5432/cf_home";
+    env.db.end = vi.fn(async () => {
+      throw new Error(
+        "could not close pool for postgres://cf_test:p%40ss@127.0.0.1:5432/cf_home with password p@ss",
+      );
+    });
+
+    const { out, err, deps } = io();
+    try {
+      expect(await main(argv("verify"), deps)).toBe(0);
+      expect(err).toHaveLength(1);
+      expect(err[0]).toContain("could not close the database:");
+      expect(err[0]).toContain("[redacted]");
+      expect(err[0]).not.toContain("p%40ss");
+      expect(err[0]).not.toContain("p@ss");
+      expect(out[out.length - 1]).toBe("verify ok");
+    } finally {
       process.env.DATABASE_URL = "postgres://nobody@unused.invalid:5432/none";
     }
   });

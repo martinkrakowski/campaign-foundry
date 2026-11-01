@@ -471,7 +471,8 @@ campaign plus every live campaign of the org (path-ref absence, asset-id byte re
 and the `import:pt-8` actor on imported campaigns). It takes the same `--switched-at`,
 which the manifest already passes, and exits `0` when every planned and org-wide check
 matches and `1` on any mismatch. Optionally pin `--expect "$DIGEST"` (the digest of step 1)
-so a source changed since the plan is refused before any target read.
+so a source changed since the plan is refused after the org probe (`select id from org where id = $1`)
+and source re-plan, before the target's rows are read.
 
 ```sh
 STEP=verify
