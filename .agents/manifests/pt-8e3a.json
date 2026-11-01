@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "PT-8e3a",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/existing-apply.ts",
+      "before": "  if (replanned.normaliseCount > 0) {\n    return `apply needs --expect-existing <digest> when class-(P) campaigns would be normalised (digest ${replanned.digest})`;\n  }\n",
+      "after": "  if (replanned.normaliseCount > 0) {\n    return undefined;\n  }\n",
+      "because": "Dropping the missing --expect-existing refusal lets apply mutate unreviewed class-(P) campaigns without the operator's second digest (PT-8e 1, D225). Caught by the omitted --expect-existing fail-closed test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/existing-apply.test.ts",
+        "-t",
+        "apply fails closed before opening --result when class-\\(P\\) campaigns exist and --expect-existing is omitted"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/apply.ts",
+      "before": "  if ((counts.normalised ?? 0) > 0) return 1;\n",
+      "after": "  if ((counts.normalised ?? 0) > 9999) return 1;\n",
+      "because": "Ignoring `counts.normalised` in `exitCodeFor` makes a mixed run that normalised a zero-new-asset class-(P) campaign (reusing existing assets) and refused another return exit 3 ('wrote nothing') instead of exit 1 (D229).",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/existing-apply.test.ts",
+        "-t",
+        "mixed normalised \\+ refused exits 1"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

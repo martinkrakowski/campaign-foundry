@@ -32,6 +32,7 @@ import {
 import { dryRowStores, predictRows, type PlannedRow } from "./rows-step.js";
 import { errorMessage } from "@campaignfoundry/shared";
 import type { ScannedCampaign } from "./scan.js";
+import type { NormaliseResult } from "./normalise-step.js";
 /**
  * What `replan` hands the apply loop and the result builder: the same scan and
  * digest `plan` prints, plus the reviewed-content hashes the per-campaign step
@@ -228,6 +229,8 @@ export interface ApplyCounts {
   readonly rowsWritten: number;
   /** Objects the later steps CREATED in this run (PT-8d): such a run did not "write nothing" either. */
   readonly objectsMinted: number;
+  /** Existing class-(P) campaigns normalised in this run (PT-8e3); optional so existing callers stay unchanged. */
+  readonly normalised?: number;
 }
 
 /** Read the wider {@link CampaignResult} a step returned; a bare `{ outcome }` gets empty minted. */
@@ -394,6 +397,7 @@ export function exitCodeFor(counts: ApplyCounts, refused: number): 0 | 1 | 3 {
   if (counts.partial) return 1;
   if (refused === 0) return 0;
   if (counts.objectsMinted > 0) return 1;
+  if ((counts.normalised ?? 0) > 0) return 1;
   return counts.created + counts.completed + counts.rowsWritten === 0 ? 3 : 1;
 }
 
@@ -466,6 +470,11 @@ export class ResultWriter {
    */
   async object(minted: MintedObject): Promise<void> {
     await this.#append({ kind: "object", key: minted.key, path: minted.path });
+  }
+
+  /** Append one class-(P) normalisation line and fsync it before the next campaign starts (PT-8e3). */
+  async existing(entry: NormaliseResult): Promise<void> {
+    await this.#append({ kind: "existing", ...entry });
   }
 
   /** Write the summary line (the last line, written only when the loop ends). */
