@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as scanModule from "../../server/lib/import/scan.js";
@@ -898,7 +898,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("the verify subcommand (PT-8f3)", () => {
     const { out, err, deps } = io();
     expect(await main(argv("verify", "--out", badDir), deps)).toBe(1);
     expect(out).toEqual([]);
-    expect(err[0]).toContain("EISDIR");
+    expect(err[0]).toContain("EEXIST");
   });
 
   test("verify refuses an --out path under the project root or the output root and writes nothing", async () => {
@@ -928,6 +928,37 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("the verify subcommand (PT-8f3)", () => {
       `--out ${JSON.stringify(outPath)} has no existing parent directory: ${JSON.stringify(missingDir)}`,
     ]);
     expect(existsSync(outPath)).toBe(false);
+  });
+
+  test("an --out that is a symlink to a file under the project root exits 1 and the target is byte-identical; a dangling symlink creates nothing at its target", async () => {
+    await applyTree("out-symlink");
+    env.reinstall();
+
+    const targetFile = join(root!, "briefs/camp.yaml");
+    const originalBytes = readFileSync(targetFile);
+    const symlinkPath = join(tmpdir(), `cf-cli-symlink-target-${process.pid}.json`);
+    rmSync(symlinkPath, { force: true });
+    symlinkSync(targetFile, symlinkPath);
+    tmpFiles.push(symlinkPath);
+
+    const { out: out1, err: err1, deps: deps1 } = io();
+    expect(await main(argv("verify", "--out", symlinkPath), deps1)).toBe(1);
+    expect(out1).toEqual([]);
+    expect(err1[0]).toContain("EEXIST");
+    expect(readFileSync(targetFile)).toEqual(originalBytes);
+
+    env.reinstall();
+    const danglingTarget = join(root!, "briefs/does-not-exist.yaml");
+    const danglingSymlink = join(tmpdir(), `cf-cli-dangling-${process.pid}.json`);
+    rmSync(danglingSymlink, { force: true });
+    symlinkSync(danglingTarget, danglingSymlink);
+    tmpFiles.push(danglingSymlink);
+
+    const { out: out2, err: err2, deps: deps2 } = io();
+    expect(await main(argv("verify", "--out", danglingSymlink), deps2)).toBe(1);
+    expect(out2).toEqual([]);
+    expect(err2[0]).toContain("EEXIST");
+    expect(existsSync(danglingTarget)).toBe(false);
   });
 
   test("report rows whose error embeds configured secrets redacts them in stdout and in the --out file", async () => {
@@ -994,6 +1025,72 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("the verify subcommand (PT-8f3)", () => {
     }
   });
 
+  test('password a"b in a report reason never reaches the file', async () => {
+    writeAt(output!, "reports/camp.json", JSON.stringify({ halted: false, assets: [], log: [] }));
+    await applyTree("quote-secret");
+    env.reinstall();
+    process.env.DATABASE_URL = "postgres://cf_test:a%22b@127.0.0.1:5432/cf_home";
+
+    const realReports = getReportStore(importTenant("local"));
+    const evilReports = new Proxy(realReports, {
+      get(target, prop) {
+        if (prop === "getRevision") {
+          return async () => {
+            throw new Error('failed with password a"b');
+          };
+        }
+        const value = Reflect.get(target, prop);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    setReportStore(evilReports);
+
+    const outPath = join(tmpdir(), `cf-cli-verify-quote-secret-${process.pid}.json`);
+    rmSync(outPath, { force: true });
+    tmpFiles.push(outPath);
+    const { out, err, deps } = io();
+    try {
+      expect(await main(argv("verify", "--out", outPath), deps)).toBe(1);
+      expect(err).toEqual([]);
+      expect(existsSync(outPath)).toBe(true);
+      const fileContent = readFileSync(outPath, "utf8");
+      expect(fileContent).not.toContain('a"b');
+      expect(fileContent).not.toContain('a\\"b');
+      expect(fileContent).toContain("[redacted]");
+      const parsed = JSON.parse(fileContent) as {
+        ok: boolean;
+        checks: { entity: string; status: string; reason?: string }[];
+      };
+      expect(parsed.ok).toBe(false);
+      const reportCheck = parsed.checks.find((c) => c.entity === "report");
+      expect(reportCheck?.status).toBe("mismatch");
+      expect(reportCheck?.reason).toContain("[redacted]");
+      expect(reportCheck?.reason).not.toContain('a"b');
+      expect(reportCheck?.reason).not.toContain('a\\"b');
+    } finally {
+      process.env.DATABASE_URL = "postgres://nobody@unused.invalid:5432/none";
+    }
+  });
+
+  test("verify refuses an --out path under roots and redacts JSON-escaped secrets in the refusal", async () => {
+    await applyTree("out-refusal-secret");
+    env.reinstall();
+    process.env.DATABASE_URL = "postgres://cf_test:a%22b@127.0.0.1:5432/cf_home";
+    const outPath = join(root!, 'secret-a"b.json');
+    const { out, err, deps } = io();
+    try {
+      expect(await main(argv("verify", "--out", outPath), deps)).toBe(1);
+      expect(out).toEqual([]);
+      expect(err).toHaveLength(1);
+      expect(err[0]).toContain("[redacted]");
+      expect(err[0]).not.toContain('a"b');
+      expect(err[0]).not.toContain('a\\"b');
+      expect(existsSync(outPath)).toBe(false);
+    } finally {
+      process.env.DATABASE_URL = "postgres://nobody@unused.invalid:5432/none";
+    }
+  });
+
   test("a target read that throws exits 1 with the error on stderr, nothing on stdout and no --out file", async () => {
     await applyTree("throw");
     env.reinstall();
@@ -1056,6 +1153,42 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("the verify subcommand (PT-8f3)", () => {
     } finally {
       for (const key of S3_VARS) delete process.env[key];
       process.env.DATABASE_URL = "postgres://nobody@unused.invalid:5432/none";
+    }
+  });
+
+  test("secret s/+= appearing as s%2F%2B%3D is redacted", async () => {
+    await applyTree("s3-encoded-secret");
+    env.reinstall();
+    process.env.S3_ENDPOINT = "http://127.0.0.1:9000";
+    process.env.S3_PUBLIC_ENDPOINT = "http://127.0.0.1:9000";
+    process.env.S3_REGION = "us-east-1";
+    process.env.S3_BUCKET = "bucket";
+    process.env.S3_ACCESS_KEY_ID = "key";
+    process.env.S3_SECRET_ACCESS_KEY = "s/+=";
+
+    const evil = new Proxy(env.objects, {
+      get(target, prop) {
+        if (prop === "get") {
+          return async () => {
+            throw new Error("could not reach S3 with signature s%2F%2B%3D and key s/+=");
+          };
+        }
+        const value = Reflect.get(target, prop);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    setObjectStoreClient(evil);
+
+    const { out, err, deps } = io();
+    try {
+      expect(await main(argv("verify"), deps)).toBe(1);
+      expect(err).toHaveLength(1);
+      expect(err[0]).toContain("[redacted]");
+      expect(err[0]).not.toContain("s%2F%2B%3D");
+      expect(err[0]).not.toContain("s/+=");
+      expect(out).toEqual([]);
+    } finally {
+      for (const key of S3_VARS) delete process.env[key];
     }
   });
 

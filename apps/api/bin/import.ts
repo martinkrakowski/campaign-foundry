@@ -531,6 +531,10 @@ function redactSecrets(text: string): string {
           // An un-decodable password contributes only its encoded form.
         }
       }
+      for (const password of Array.from(passwords)) {
+        passwords.add(encodeURIComponent(password));
+        passwords.add(JSON.stringify(password).slice(1, -1));
+      }
       const sorted = Array.from(passwords).sort((a, b) => b.length - a.length);
       for (const password of sorted) {
         redacted = redacted.split(password).join("[redacted]");
@@ -542,7 +546,14 @@ function redactSecrets(text: string): string {
   try {
     const secret = objectStoreSettings()?.secretAccessKey;
     if (secret !== undefined && secret !== "") {
-      redacted = redacted.split(secret).join("[redacted]");
+      const secrets = new Set<string>();
+      secrets.add(secret);
+      secrets.add(encodeURIComponent(secret));
+      secrets.add(JSON.stringify(secret).slice(1, -1));
+      const sorted = Array.from(secrets).sort((a, b) => b.length - a.length);
+      for (const s of sorted) {
+        redacted = redacted.split(s).join("[redacted]");
+      }
     }
   } catch {
     // A misconfigured object store contributes no secret to redact.
@@ -635,20 +646,24 @@ async function verify(argv: readonly string[], io: ImportIO): Promise<number> {
       return 1;
     }
     const report = await verifyTarget(database(), buildVerifyStores(ctx.orgId), ctx, replanned);
-    const json = JSON.stringify({
-      switchedAt: switchedAtIso,
-      orgId: ctx.orgId,
-      digest: replanned.digest,
-      ok: report.ok,
-      counts: report.counts,
-      orgCounts: report.orgCounts,
-      checks: report.checks,
-      orgChecks: report.orgChecks,
-    });
+    const json = JSON.stringify(
+      {
+        switchedAt: switchedAtIso,
+        orgId: ctx.orgId,
+        digest: replanned.digest,
+        ok: report.ok,
+        counts: report.counts,
+        orgCounts: report.orgCounts,
+        checks: report.checks,
+        orgChecks: report.orgChecks,
+      },
+      (_key: string, value: unknown): unknown =>
+        typeof value === "string" ? redactSecrets(value) : value,
+    );
     // The `--out` write happens BEFORE anything is printed: a failed write
     // throws into the catch below — exit 1, nothing printed, no partial file.
     if (flags.out !== undefined) {
-      await writeFile(flags.out, `${redactSecrets(json)}\n`, { encoding: "utf8" });
+      await writeFile(flags.out, `${json}\n`, { encoding: "utf8", flag: "wx" });
     }
     printVerifyReport(io, switchedAtIso, ctx.orgId, replanned.digest, report);
     return report.ok ? 0 : 1;
