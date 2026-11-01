@@ -558,19 +558,20 @@ function printVerifyReport(
   digest: string,
   report: VerifyTargetReport,
 ): void {
-  io.stdout(`import verify — switched-at: ${switchedAtIso}`);
-  io.stdout(`org: ${orgId}`);
-  io.stdout(`digest: ${digest}`);
+  const line = (text: string): void => io.stdout(redactSecrets(text));
+  line(`import verify — switched-at: ${switchedAtIso}`);
+  line(`org: ${orgId}`);
+  line(`digest: ${digest}`);
   for (const entity of VERIFY_ENTITIES) {
     const count = report.counts[entity];
-    io.stdout(
+    line(
       `${entity}: ${count.checked} checked, ${count.matched} matched, ` +
         `${count.checked - count.matched} mismatched`,
     );
   }
   for (const check of report.checks) {
     if (check.status !== "mismatch") continue;
-    io.stdout(
+    line(
       `${check.slug}${check.item ? ` (${check.item})` : ""}: ${check.entity} mismatch: ${check.reason}`,
     );
   }
@@ -578,15 +579,15 @@ function printVerifyReport(
   // found one (actor, path ref, asset id, parse failure), so nothing here needs
   // a status filter the way the plan's checks above do.
   for (const check of report.orgChecks) {
-    io.stdout(
+    line(
       `org: ${check.slug}${check.item ? ` (${check.item})` : ""}: ${check.entity} mismatch: ${check.reason}`,
     );
   }
-  io.stdout(
+  line(
     `org: ${report.orgCounts.campaigns} campaigns, ${report.orgCounts.briefVersions} versions, ` +
       `${report.orgCounts.assets} assets`,
   );
-  io.stdout(`verify ${report.ok ? "ok" : "FAILED"}`);
+  line(`verify ${report.ok ? "ok" : "FAILED"}`);
 }
 
 /**
@@ -617,6 +618,13 @@ async function verify(argv: readonly string[], io: ImportIO): Promise<number> {
       return 1;
     }
     const { ctx, switchedAtIso } = outcome.source;
+    if (flags.out !== undefined) {
+      const pathProblem = await checkResultPath(flags.out, ctx);
+      if (pathProblem !== undefined) {
+        io.stderr(redactSecrets(pathProblem.replace(/^--result/, "--out")));
+        return 1;
+      }
+    }
     const replanned = await replan(ctx);
     if (flags.expect !== undefined && replanned.digest !== flags.expect) {
       io.stderr(
@@ -640,7 +648,7 @@ async function verify(argv: readonly string[], io: ImportIO): Promise<number> {
     // The `--out` write happens BEFORE anything is printed: a failed write
     // throws into the catch below — exit 1, nothing printed, no partial file.
     if (flags.out !== undefined) {
-      await writeFile(flags.out, `${json}\n`, { encoding: "utf8" });
+      await writeFile(flags.out, `${redactSecrets(json)}\n`, { encoding: "utf8" });
     }
     printVerifyReport(io, switchedAtIso, ctx.orgId, replanned.digest, report);
     return report.ok ? 0 : 1;

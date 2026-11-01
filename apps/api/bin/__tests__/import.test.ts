@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as scanModule from "../../server/lib/import/scan.js";
@@ -9,7 +9,12 @@ import { USAGE, VERIFY_USAGE, main } from "../import.js";
 import type { CampaignEntry } from "../../server/lib/import/apply.js";
 import { importTenant } from "../../server/lib/import/import-tenant.js";
 import { setObjectStoreClient } from "../../server/lib/object-store/index.js";
-import { getAssetStore, setAssetStore } from "../../server/lib/ports/index.js";
+import {
+  getAssetStore,
+  getReportStore,
+  setAssetStore,
+  setReportStore,
+} from "../../server/lib/ports/index.js";
 import {
   failOnNth,
   ON_A_REAL_TEST_SERVER,
@@ -749,7 +754,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("the verify subcommand (PT-8f3)", () => {
     dropRoot(root);
     root = undefined;
     output = undefined;
-    for (const path of tmpFiles.splice(0)) rmSync(path, { force: true });
+    for (const path of tmpFiles.splice(0)) rmSync(path, { recursive: true, force: true });
     for (const key of S3_VARS) delete process.env[key];
     await restoreApplyEnvironment();
   });
@@ -817,7 +822,8 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("the verify subcommand (PT-8f3)", () => {
   test("plan → apply → verify: a clean target exits 0, writes valid JSON before stdout, and prints entity counts", async () => {
     const { digest } = await applyTree("e2e");
     env.reinstall();
-    const outPath = join(root!, "verify.json");
+    const outPath = join(tmpdir(), `cf-cli-verify-e2e-${process.pid}.json`);
+    tmpFiles.push(outPath);
     const { out, err, deps } = io();
     expect(await main(argv("verify", "--expect", digest, "--out", outPath), deps)).toBe(0);
     expect(err).toEqual([]);
@@ -887,19 +893,113 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("the verify subcommand (PT-8f3)", () => {
   test("an --out write failure exits 1 with nothing printed to stdout", async () => {
     await applyTree("outfail");
     env.reinstall();
-    const outPath = join(root!, "no-such-dir", "v.json");
+    const badDir = mkdtempSync(join(tmpdir(), "cf-bad-out-"));
+    tmpFiles.push(badDir);
+    const { out, err, deps } = io();
+    expect(await main(argv("verify", "--out", badDir), deps)).toBe(1);
+    expect(out).toEqual([]);
+    expect(err[0]).toContain("EISDIR");
+  });
+
+  test("verify refuses an --out path under the project root or the output root and writes nothing", async () => {
+    await applyTree("out-under-roots");
+    for (const rel of ["verify.json", "output/verify.json"]) {
+      // Each run closes the pool it opened (req 20), so the next run needs the
+      // double reinstalled — as every other multi-run test here does.
+      env.reinstall();
+      const outPath = join(root!, rel);
+      const { out, err, deps } = io();
+      expect(await main(argv("verify", "--out", outPath), deps)).toBe(1);
+      expect(out).toEqual([]);
+      expect(err).toEqual([`--out ${JSON.stringify(outPath)} is under the project or output root`]);
+      expect(existsSync(outPath)).toBe(false);
+    }
+  });
+
+  test("verify refuses an --out path whose parent directory does not exist and writes nothing", async () => {
+    await applyTree("out-no-parent");
+    env.reinstall();
+    const missingDir = join(tmpdir(), `cf-no-parent-${process.pid}`);
+    const outPath = join(missingDir, "verify.json");
     const { out, err, deps } = io();
     expect(await main(argv("verify", "--out", outPath), deps)).toBe(1);
     expect(out).toEqual([]);
-    expect(err[0]).toContain("ENOENT");
+    expect(err).toEqual([
+      `--out ${JSON.stringify(outPath)} has no existing parent directory: ${JSON.stringify(missingDir)}`,
+    ]);
     expect(existsSync(outPath)).toBe(false);
+  });
+
+  test("report rows whose error embeds configured secrets redacts them in stdout and in the --out file", async () => {
+    writeAt(output!, "reports/camp.json", JSON.stringify({ halted: false, assets: [], log: [] }));
+    await applyTree("report-secrets");
+    env.reinstall();
+    process.env.DATABASE_URL = "postgres://cf_test:p%40ss@127.0.0.1:5432/cf_home";
+    process.env.S3_ENDPOINT = "http://127.0.0.1:9000";
+    process.env.S3_PUBLIC_ENDPOINT = "http://127.0.0.1:9000";
+    process.env.S3_REGION = "us-east-1";
+    process.env.S3_BUCKET = "bucket";
+    process.env.S3_ACCESS_KEY_ID = "key";
+    process.env.S3_SECRET_ACCESS_KEY = "shhh";
+
+    const realReports = getReportStore(importTenant("local"));
+    const evilReports = new Proxy(realReports, {
+      get(target, prop) {
+        if (prop === "getRevision") {
+          return async () => {
+            throw new Error(
+              "could not reach postgres://cf_test:p%40ss@127.0.0.1:5432/cf_home (password p@ss) with S3_SECRET_ACCESS_KEY=shhh",
+            );
+          };
+        }
+        const value = Reflect.get(target, prop);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    setReportStore(evilReports);
+
+    const outPath = join(tmpdir(), `cf-cli-verify-report-secrets-${process.pid}.json`);
+    tmpFiles.push(outPath);
+    const { out, err, deps } = io();
+    try {
+      expect(await main(argv("verify", "--out", outPath), deps)).toBe(1);
+      expect(err).toEqual([]);
+      expect(existsSync(outPath)).toBe(true);
+      const fileContent = readFileSync(outPath, "utf8");
+      const streamsAndFile = [...out, ...err, fileContent];
+      for (const text of streamsAndFile) {
+        expect(text).not.toContain("p%40ss");
+        expect(text).not.toContain("p@ss");
+        expect(text).not.toContain("shhh");
+      }
+      expect(fileContent).toContain("[redacted]");
+      expect(out.some((line) => line.includes("[redacted]"))).toBe(true);
+      expect(out.some((line) => line.includes("report mismatch:"))).toBe(true);
+      expect(out[out.length - 1]).toBe("verify FAILED");
+
+      const parsed = JSON.parse(fileContent) as {
+        ok: boolean;
+        checks: { entity: string; status: string; reason?: string }[];
+      };
+      expect(parsed.ok).toBe(false);
+      const reportCheck = parsed.checks.find((c) => c.entity === "report");
+      expect(reportCheck?.status).toBe("mismatch");
+      expect(reportCheck?.reason).toContain("[redacted]");
+      expect(reportCheck?.reason).not.toContain("p%40ss");
+      expect(reportCheck?.reason).not.toContain("p@ss");
+      expect(reportCheck?.reason).not.toContain("shhh");
+    } finally {
+      for (const key of S3_VARS) delete process.env[key];
+      process.env.DATABASE_URL = "postgres://nobody@unused.invalid:5432/none";
+    }
   });
 
   test("a target read that throws exits 1 with the error on stderr, nothing on stdout and no --out file", async () => {
     await applyTree("throw");
     env.reinstall();
     setAssetStore(failOnNth(getAssetStore(importTenant("local")), "readAssetById", 1));
-    const outPath = join(root!, "v.json");
+    const outPath = join(tmpdir(), `cf-cli-verify-throw-${process.pid}.json`);
+    tmpFiles.push(outPath);
     const { out, err, deps } = io();
     expect(await main(argv("verify", "--out", outPath), deps)).toBe(1);
     expect(err[0]).toBe("injected");
@@ -937,7 +1037,8 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("the verify subcommand (PT-8f3)", () => {
       );
     });
 
-    const outPath = join(root!, "v.json");
+    const outPath = join(tmpdir(), `cf-cli-verify-redact-${process.pid}.json`);
+    tmpFiles.push(outPath);
     const { out, err, deps } = io();
     try {
       expect(await main(argv("verify", "--out", outPath), deps)).toBe(1);

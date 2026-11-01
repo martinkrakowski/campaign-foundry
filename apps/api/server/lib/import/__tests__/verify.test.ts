@@ -910,6 +910,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("verify: org-wide checks (PT-8f3)", () =>
     root = t.root;
     await apply(env, t.root, t.output, "o5");
     await insertLiveCampaign("broken", "not json");
+    await insertLiveCampaign("pathy", motionBody("pathy", "assets/logo.png", "assets/logo.png"));
 
     const ctx = ctxWith(t.root, t.output);
     const planned = await replan(ctx);
@@ -920,9 +921,60 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("verify: org-wide checks (PT-8f3)", () =>
     expect(broken.entity).toBe("campaign");
     expect(broken.status).toBe("mismatch");
     expect(broken.reason).toMatch(/^latest brief_version does not parse: /);
+    const pathy = got.orgChecks.find((check) => check.slug === "pathy")!;
+    expect(pathy).toEqual({
+      entity: "asset",
+      slug: "pathy",
+      item: "assets/logo.png",
+      status: "mismatch",
+      reason: 'latest brief_version still carries path ref "assets/logo.png"',
+    });
     // The imported campaign's own org checks still ran and passed.
     expect(got.orgChecks.filter((check) => check.slug === "camp")).toEqual([]);
     expect(sent).toEqual(READ_ONLY);
+  });
+
+  test("a second org's rows do not count in orgCounts and are not verified in orgChecks", async () => {
+    const t = tree({});
+    root = t.root;
+    await apply(env, t.root, t.output, "o7");
+
+    // Insert a second organisation and seed it with a campaign, brief_version, and asset
+    await env.db.query(`insert into org (id, name) values ($1, $2)`, ["other", "Other Org"]);
+    const { rows: otherCamp } = await env.db.query<{ id: string }>(
+      `insert into campaign (org_id, slug) values ($1, $2) returning id`,
+      ["other", "other-camp"],
+    );
+    await env.db.query(
+      `insert into brief_version (campaign_id, version, body, revision, actor)
+       values ($1, 1, $2, $3, $4)`,
+      [
+        otherCamp[0]!.id,
+        JSON.stringify(motionBody("other-camp", "assets/logo.png")),
+        "rev-other",
+        "foreign-user",
+      ],
+    );
+    await env.db.query(
+      `insert into asset (org_id, campaign_id, kind, name, size, sha256, content_type)
+       values ($1, $2, 'input', $3, $4, $5, 'image/png')`,
+      ["other", otherCamp[0]!.id, "other.png", 10, "sha-other"],
+    );
+
+    const ctx = ctxWith(t.root, t.output);
+    const planned = await replan(ctx);
+    const { got, sent } = await watched(env, () => verifyTarget(env.db, stores(), ctx, planned));
+
+    expect(got.ok).toBe(true);
+    expect(got.orgChecks).toEqual([]);
+    // local has only 1 campaign, 1 brief_version, 1 asset from apply: other org's rows are excluded
+    expect(got.orgCounts).toEqual({ campaigns: 1, briefVersions: 1, reports: 0, assets: 1 });
+    expect(sent).toEqual(READ_ONLY);
+
+    const localCounts = await existingCounts(env.db, "local");
+    expect(localCounts).toEqual({ campaigns: 1, briefVersions: 1, reports: 0, assets: 1 });
+    const otherCounts = await existingCounts(env.db, "other");
+    expect(otherCounts).toEqual({ campaigns: 1, briefVersions: 1, reports: 0, assets: 1 });
   });
 
   test("verifyOrg reports an imported slug with no live campaign as an actor mismatch", async () => {
