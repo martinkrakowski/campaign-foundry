@@ -805,6 +805,21 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     expect(onVideoSpanCommit).not.toHaveBeenCalled();
   });
 
+  test("a zero-duration clip click calls no span commit and still selects", () => {
+    const onVideoSpanCommit = vi.fn();
+    const onSelectLayer = vi.fn();
+    renderTimeline({ durationSec: 0, onVideoSpanCommit, onSelectLayer });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 0, 0),
+    });
+    fireEvent.pointerDown(clip, { clientX: 0 });
+    fireEvent.pointerUp(clip, { clientX: 0 });
+    fireEvent.click(clip);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    expect(onSelectLayer).toHaveBeenCalledTimes(1);
+    expect(onSelectLayer).toHaveBeenCalledWith("video");
+  });
+
   test("the end slider paints on change and commits once on pointerup and keyup", () => {
     const onVideoSpanCommit = vi.fn();
     const onScrubLive = vi.fn();
@@ -835,6 +850,29 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     expect(onVideoSpanCommit).not.toHaveBeenCalled();
   });
 
+  test("a span off the frame grid, then keyup and pointerup on each slider with no change event, commits nothing; a real change event followed by pointerup commits once", () => {
+    const onVideoSpanCommit = vi.fn();
+    const offGridRow = {
+      ...halfRow,
+      startT: 0.123,
+      endT: 0.789,
+    };
+    renderTimeline({ videoRows: [offGridRow], onVideoSpanCommit });
+    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
+    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+
+    fireEvent.keyUp(start);
+    fireEvent.pointerUp(start);
+    fireEvent.keyUp(end);
+    fireEvent.pointerUp(end);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+
+    fireEvent.change(end, { target: { value: "4" } });
+    fireEvent.pointerUp(end);
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith("video", 0.123, 4 / DURATION);
+  });
+
   test("the start slider commits a moved start edge", () => {
     const onVideoSpanCommit = vi.fn();
     renderTimeline({ onVideoSpanCommit });
@@ -843,6 +881,21 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     fireEvent.pointerUp(start);
     expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
     expect(onVideoSpanCommit).toHaveBeenCalledWith("video", 1 / DURATION, 1);
+  });
+
+  test("during a change event the slider's left style follows the in-flight value", () => {
+    renderTimeline({ videoRows: [halfRow] });
+    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
+    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+
+    expect(start.style.left).toBe("42px");
+    expect(end.style.left).toBe("126px");
+
+    fireEvent.change(start, { target: { value: "2" } });
+    expect(start.style.left).toBe("56px");
+
+    fireEvent.change(end, { target: { value: "5" } });
+    expect(end.style.left).toBe("140px");
   });
 
   test("hide calls onSetLayerEnabled, and a disabled row still offers enable", () => {

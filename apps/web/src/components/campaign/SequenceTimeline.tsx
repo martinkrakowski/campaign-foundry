@@ -319,6 +319,7 @@ function VideoClip({
     dragRef.current = null;
     setDrag(null);
     if (current === null) return;
+    if (durationSec <= 0) return;
     const deltaT = (current.clientX - current.originX) / pxPerSec / durationSec;
     const span = slidSpan(current.origin, deltaT);
     if (span !== current.origin) {
@@ -348,10 +349,17 @@ function VideoClip({
   // parent's props move the thumb on their own.
   const [startDragSec, setStartDragSec] = useState<number | null>(null);
   const [endDragSec, setEndDragSec] = useState<number | null>(null);
+  /** In-flight seconds for each slider: set in onChange, read and cleared on commit. */
+  const inFlightStartRef = useRef<number | null>(null);
+  const inFlightEndRef = useRef<number | null>(null);
 
-  /** An edge thumb's release: compare in SECONDS before converting, so an
-   *  untouched slider never round-trips `t` and commits a hair-shifted twin. */
-  const commitSlider = (which: "start" | "end", seconds: number) => {
+  /** An edge thumb's release: commit only when that slider's onChange fired
+   *  since the gesture began, reading and clearing the in-flight value. */
+  const commitSlider = (which: "start" | "end") => {
+    const inFlight = which === "start" ? inFlightStartRef : inFlightEndRef;
+    const seconds = inFlight.current;
+    inFlight.current = null;
+    if (seconds === null) return;
     const displayed = which === "start" ? startT * durationSec : endT * durationSec;
     if (Math.abs(seconds - displayed) < 1e-9) return;
     const otherT = which === "start" ? endT : startT;
@@ -362,7 +370,7 @@ function VideoClip({
   // The painted left follows the finger while a drag is live; the width (the
   // span's length) never changes mid-gesture.
   let visualLeft = style.left;
-  if (drag !== null) {
+  if (drag !== null && durationSec > 0) {
     const length = drag.origin.endT - drag.origin.startT;
     const deltaT = (drag.clientX - drag.originX) / pxPerSec / durationSec;
     const visualStartT = Math.min(Math.max(0, drag.origin.startT + deltaT), 1 - length);
@@ -386,9 +394,10 @@ function VideoClip({
     onKeyDown,
   };
   const sliderClass =
-    "absolute inset-y-1 z-10 w-3 cursor-ew-resize accent-brand-primary opacity-60 hover:opacity-100 focus-visible:opacity-100";
+    "absolute top-1/2 z-10 h-6 w-24 -translate-x-12 -translate-y-1/2 cursor-ew-resize accent-brand-primary opacity-60 hover:opacity-100 hover:z-20 focus-visible:opacity-100 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary";
   const edgeSlider = (which: "start" | "end") => {
     const isStart = which === "start";
+    const inFlight = isStart ? inFlightStartRef : inFlightEndRef;
     const dragSec = isStart ? startDragSec : endDragSec;
     const setDragSec = isStart ? setStartDragSec : setEndDragSec;
     const shown = dragSec ?? (isStart ? startT * durationSec : endT * durationSec);
@@ -400,22 +409,27 @@ function VideoClip({
             ? messages.sequenceVideoSpanStart(position)
             : messages.sequenceVideoSpanEnd(position)
         }
+        aria-valuenow={(isStart ? startT : endT) * durationSec}
         min={0}
         max={durationSec}
         step={1 / MOTION_FPS}
         value={shown}
-        onChange={(e) => setDragSec(Number(e.target.value))}
-        onPointerUp={(e) => {
-          setDragSec(null);
-          commitSlider(which, Number(e.currentTarget.value));
+        onChange={(e) => {
+          const val = Number(e.target.value);
+          inFlight.current = val;
+          setDragSec(val);
         }}
-        onKeyUp={(e) => {
+        onPointerUp={() => {
           setDragSec(null);
-          commitSlider(which, Number(e.currentTarget.value));
+          commitSlider(which);
         }}
-        className={sliderClass}
+        onKeyUp={() => {
+          setDragSec(null);
+          commitSlider(which);
+        }}
+        className={cn(sliderClass, dragSec !== null && "z-20 opacity-100")}
         style={{
-          left: `${(isStart ? startT : endT) * durationSec * pxPerSec - 6}px`,
+          left: `${shown * pxPerSec}px`,
         }}
       />
     );
