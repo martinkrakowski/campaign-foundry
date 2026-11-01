@@ -201,7 +201,7 @@ def _break_overflow(
     spoken_text: str,
 ) -> bool:
     """True when appending token would breach max_words or max_chars."""
-    if token.kind != "word" or not buf:
+    if token.kind != "word" or _word_count(buf) < 1:
         return False
     prospective = list(buf) + [token]
     return (

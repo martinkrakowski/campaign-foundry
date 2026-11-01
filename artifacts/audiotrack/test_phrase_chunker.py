@@ -356,5 +356,11 @@ class SpecWorkedExampleTests(unittest.TestCase):
         self.assertAlmostEqual(plan["speech_end_s"], 4.05, places=4)
 
 
+class OverflowPunctuationTests(unittest.TestCase):
+    def test_leading_quote_survives_a_max_chars_overflow(self):
+        phrases = split_phrases('"hello', ChunkerConfig(max_chars=5))
+        self.assertIn('"', "".join(p.text for p in phrases))
+
+
 if __name__ == "__main__":
     unittest.main()
