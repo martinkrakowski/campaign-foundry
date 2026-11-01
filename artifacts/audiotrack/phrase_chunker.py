@@ -124,9 +124,11 @@ def syllable_count(word: str) -> int:
         return 1
     groups = VOWEL_GROUP_RE.findall(cleaned)
     count = len(groups)
-    # Only apply the silent-e rule to pure-ASCII spellings; accented words
-    # like "café" pronounce the final vowel group.
-    if word.isascii() and cleaned.endswith("e") and not cleaned.endswith(("le", "ie")) and count > 1:
+    # A trailing "e" is usually silent ("late" -> 1); keep it for "le"/"ie"
+    # endings ("table" -> 2) and for single-vowel-group words. This applies to
+    # any spelling, accented or not: "café" ends in é, while "naïve" and
+    # "façade" end in a silent "e".
+    if cleaned.endswith("e") and not cleaned.endswith(("le", "ie")) and count > 1:
         count -= 1
     return max(1, count)
 
@@ -171,24 +173,6 @@ def _is_closing_quote(token: Token, spoken_text: str) -> bool:
     return token.start > 0 and not spoken_text[token.start - 1].isspace()
 
 
-def _unmatched_open_quote_index(
-    buf: Sequence[Token],
-    spoken_text: str,
-) -> int | None:
-    """Index of an opening quote in buf that is still unclosed, or None.
-
-    Scanning from the end, an opening quote met before any closing quote is
-    unmatched; a closing quote met first means every earlier opening quote
-    is already closed."""
-    for pos in range(len(buf) - 1, -1, -1):
-        token = buf[pos]
-        if _is_closing_quote(token, spoken_text):
-            return None
-        if _is_opening_quote(token, spoken_text):
-            return pos
-    return None
-
-
 def _closing_punct(tokens: Sequence[Token], spoken_text: str) -> str:
     for token in reversed(tokens):
         if token.kind == "word":
@@ -197,6 +181,71 @@ def _closing_punct(tokens: Sequence[Token], spoken_text: str) -> str:
             return token.text
         # Trailing closing quotes and ")" are decor, not phrase-enders.
     return ""
+
+
+def _flush_buffer(
+    buf: list[Token],
+    phrases: list[PhrasePlan],
+    spoken_text: str,
+) -> None:
+    """Emit the pending buffer as a phrase (when it holds words) and clear it."""
+    if buf and _word_count(buf) > 0:
+        phrases.append(_make_phrase(len(phrases), buf, spoken_text))
+    buf.clear()
+
+
+def _break_overflow(
+    buf: Sequence[Token],
+    token: Token,
+    config: ChunkerConfig,
+    spoken_text: str,
+) -> bool:
+    """True when appending token would breach max_words or max_chars."""
+    if token.kind != "word" or not buf:
+        return False
+    prospective = list(buf) + [token]
+    return (
+        _word_count(prospective) > config.max_words
+        or _char_len(prospective, spoken_text) > config.max_chars
+    )
+
+
+def _is_sentence_end_punct(token: Token) -> bool:
+    return token.kind == "punct" and token.text in (SENTENCE_END | CLAUSE_END)
+
+
+def _is_comma_like_close(token: Token, words_now: int, config: ChunkerConfig) -> bool:
+    return (
+        token.kind == "punct"
+        and (token.text in COMMA_LIKE or token.text == ")")
+        and words_now >= config.min_words
+    )
+
+
+def _apply_soft_break(
+    token: Token,
+    idx: int,
+    tokens: Sequence[Token],
+    buf: list[Token],
+    phrases: list[PhrasePlan],
+    config: ChunkerConfig,
+    spoken_text: str,
+) -> bool:
+    """Split before a soft-break word when both sides carry enough words."""
+    if token.kind != "word" or token.lower not in SOFT_BREAKS:
+        return False
+    words_now = _word_count(buf)
+    if words_now <= 1:
+        return False
+    if words_now - 1 < config.soft_min_words:
+        return False
+    remaining_words = sum(1 for t in tokens[idx:] if t.kind == "word")
+    if remaining_words < config.min_words:
+        return False
+    break_word = buf.pop()
+    _flush_buffer(buf, phrases, spoken_text)
+    buf.append(break_word)
+    return True
 
 
 def split_phrases(spoken_text: str, config: ChunkerConfig | None = None) -> list[PhrasePlan]:
@@ -208,71 +257,28 @@ def split_phrases(spoken_text: str, config: ChunkerConfig | None = None) -> list
     phrases: list[PhrasePlan] = []
     buf: list[Token] = []
 
-    def flush() -> None:
-        nonlocal quote_carry
-        quote_carry = False
-        if not buf or _word_count(buf) == 0:
-            buf.clear()
-            return
-        phrases.append(
-            _make_phrase(len(phrases), buf, spoken_text)
-        )
-        buf.clear()
-
     idx = 0
-    quote_carry = False
     while idx < len(tokens):
         token = tokens[idx]
-        if token.kind == "word" and buf:
-            prospective = buf + [token]
-            if _word_count(buf) >= 1 and (
-                _word_count(prospective) > config.max_words
-                or _char_len(prospective, spoken_text) > config.max_chars
-            ):
-                if quote_carry:
-                    # A quotation was carried across the previous forced
-                    # break; never split inside it, keep appending.
-                    pass
-                else:
-                    quote_pos = _unmatched_open_quote_index(buf, spoken_text)
-                    if quote_pos is None:
-                        flush()
-                    else:
-                        carried = buf[quote_pos:]
-                        del buf[quote_pos:]
-                        flush()
-                        buf.extend(carried)
-                        quote_carry = True
-
+        if _break_overflow(buf, token, config, spoken_text):
+            _flush_buffer(buf, phrases, spoken_text)
         buf.append(token)
         words_now = _word_count(buf)
 
         close = False
-        if token.kind == "punct" and token.text in (SENTENCE_END | CLAUSE_END):
+        if _is_sentence_end_punct(token):
             close = True
-        elif (
-            token.kind == "punct"
-            and (token.text in COMMA_LIKE or token.text == ")")
-            and words_now >= config.min_words
-        ):
+        elif _is_comma_like_close(token, words_now, config):
             close = True
-        elif token.kind == "word" and token.lower in SOFT_BREAKS and words_now > 1:
-            words_before = words_now - 1
-            remaining_words = sum(1 for t in tokens[idx:] if t.kind == "word")
-            if (
-                words_before >= config.soft_min_words
-                and remaining_words >= config.min_words
-            ):
-                soft = buf.pop()
-                flush()
-                buf.append(soft)
+        elif _apply_soft_break(token, idx, tokens, buf, phrases, config, spoken_text):
+            pass
 
         if close:
             idx = _absorb_closing_run(tokens, idx, buf, spoken_text)
-            flush()
+            _flush_buffer(buf, phrases, spoken_text)
         idx += 1
 
-    flush()
+    _flush_buffer(buf, phrases, spoken_text)
 
     return _repair_boundary_quotes(phrases, spoken_text)
 
@@ -415,6 +421,107 @@ def _solve_waterfill(
     return [min(max_w, max(min_w, alpha * w)) for w in weights]
 
 
+def _build_words(
+    words: Sequence[Token],
+    durs: Sequence[float],
+    pauses: Sequence[float],
+    word_index_start: int,
+    phrase_index: int,
+) -> list[AllocatedWord]:
+    out: list[AllocatedWord] = []
+    t = 0.0
+    for i, word in enumerate(words):
+        start = t
+        end = t + durs[i]
+        out.append(
+            AllocatedWord(
+                i=word_index_start + i,
+                text=word.text,
+                spoken=word.text,
+                start_s=round(start, 4),
+                end_s=round(end, 4),
+                char_start=word.start,
+                char_end=word.end,
+                phrase_index=phrase_index,
+            )
+        )
+        t = end
+        if i < len(pauses):
+            t += pauses[i]
+    return out
+
+
+def _short_clip(
+    weights: Sequence[float],
+    speech_duration_s: float,
+    pause_count: int,
+) -> tuple[list[float], list[float], bool, bool]:
+    """speech_duration_s < n * min_word_s: no room for pauses; scale words
+    proportionally across the shortened clip."""
+    w_sum = sum(weights)
+    durs = [speech_duration_s * (w / w_sum) for w in weights]
+    return durs, [0.0] * pause_count, True, False
+
+
+def _scale_pauses(
+    weights: Sequence[float],
+    raw_pauses: list[float],
+    speech_duration_s: float,
+    config: ChunkerConfig,
+) -> tuple[list[float], list[float], bool, bool]:
+    """min_total <= speech_duration_s <= max_total + pause_sum: compress pauses
+    first when words would fall under the floor, then water-fill."""
+    pause_sum = sum(raw_pauses)
+    min_total = len(weights) * config.min_word_s
+    if speech_duration_s - pause_sum < min_total and pause_sum > 0:
+        scale = (speech_duration_s - min_total) / pause_sum
+        pauses = [p * scale for p in raw_pauses]
+        budget = min_total
+    else:
+        pauses = list(raw_pauses)
+        budget = speech_duration_s - pause_sum
+    durs = _solve_waterfill(weights, budget, config.min_word_s, config.max_word_s)
+    return durs, pauses, False, False
+
+
+def _clamp_words(
+    raw_pauses: list[float],
+    speech_duration_s: float,
+    max_total: float,
+    pause_sum: float,
+    config: ChunkerConfig,
+    n: int,
+) -> tuple[list[float], list[float], bool, bool]:
+    """speech_duration_s > max_total + pause_sum: cap every word at max_word_s
+    and pour the residual into inter-word pauses (or trailing silence for a
+    single word)."""
+    durs = [config.max_word_s] * n
+    residual = speech_duration_s - max_total - pause_sum
+    if n > 1:
+        pauses = [p + residual / (n - 1) for p in raw_pauses]
+    else:
+        pauses = list(raw_pauses)
+    return durs, pauses, True, n == 1
+
+
+def _resolve_timings(
+    weights: Sequence[float],
+    raw_pauses: list[float],
+    speech_duration_s: float,
+    config: ChunkerConfig,
+    n: int,
+) -> tuple[list[float], list[float], bool, bool]:
+    """Pick the allocation regime: (durations, pauses, clamped, trailing silence)."""
+    pause_sum = sum(raw_pauses)
+    min_total = n * config.min_word_s
+    max_total = n * config.max_word_s
+    if speech_duration_s < min_total:
+        return _short_clip(weights, speech_duration_s, len(raw_pauses))
+    if speech_duration_s <= max_total + pause_sum:
+        return _scale_pauses(weights, raw_pauses, speech_duration_s, config)
+    return _clamp_words(raw_pauses, speech_duration_s, max_total, pause_sum, config, n)
+
+
 def allocate_phrase(
     phrase: PhrasePlan,
     speech_duration_s: float,
@@ -442,26 +549,9 @@ def allocate_phrase(
     n = len(words)
     weights = [word_weight(w.text) for w in words]
     raw_pauses = _internal_pauses(words, phrase.tokens, config)
-    pause_sum = sum(raw_pauses)
-    min_total = n * config.min_word_s
-    max_total = n * config.max_word_s
-
-    trailing_silence = False
-    if speech_duration_s < min_total:
-        durs, pauses, clamped = _clamp_below_floor(
-            weights, speech_duration_s, len(raw_pauses)
-        )
-    elif speech_duration_s <= max_total + pause_sum:
-        durs, pauses, clamped = _clamp_in_band(
-            weights, raw_pauses, speech_duration_s, config
-        )
-    else:
-        durs, pauses, clamped = _clamp_above_ceiling(
-            raw_pauses, speech_duration_s, max_total, pause_sum, config, n
-        )
-        # A lone clamped word never stretches past max_word_s; the residual
-        # stays trailing clip silence, so the word ends at its own duration.
-        trailing_silence = n == 1
+    durs, pauses, clamped, trailing_silence = _resolve_timings(
+        weights, raw_pauses, speech_duration_s, config, n
+    )
     if clamped and warnings_out is not None:
         warnings_out.append(
             {
@@ -473,82 +563,29 @@ def allocate_phrase(
             }
         )
 
-    out: list[AllocatedWord] = []
-    t = 0.0
-    for i, word in enumerate(words):
-        start = t
-        end = t + durs[i]
-        out.append(
-            AllocatedWord(
-                i=word_index_start + i,
-                text=word.text,
-                spoken=word.text,
-                start_s=round(start, 4),
-                end_s=round(end, 4),
-                char_start=word.start,
-                char_end=word.end,
-                phrase_index=phrase.i,
-            )
-        )
-        t = end
-        if i < len(pauses):
-            t += pauses[i]
+    out = _build_words(words, durs, pauses, word_index_start, phrase.i)
     if out and not trailing_silence:
         out[-1].end_s = round(speech_duration_s, 4)
     return out
 
 
-def _clamp_below_floor(
-    weights: Sequence[float],
-    speech_duration_s: float,
-    pause_count: int,
-) -> tuple[list[float], list[float], bool]:
-    """speech_duration_s < n * min_word_s: no room for pauses; scale words
-    proportionally inside the shortened phrase."""
-    w_sum = sum(weights)
-    durs = [speech_duration_s * (w / w_sum) for w in weights]
-    return durs, [0.0] * pause_count, True
+def _audio_duration_for(
+    audio_durations: Sequence[float] | None,
+    pos: int,
+    default: float,
+) -> float:
+    if audio_durations is None:
+        return default
+    return float(audio_durations[pos])
 
 
-def _clamp_in_band(
-    weights: Sequence[float],
-    raw_pauses: list[float],
-    speech_duration_s: float,
-    config: ChunkerConfig,
-) -> tuple[list[float], list[float], bool]:
-    """min_total <= speech_duration_s <= max_total + pause_sum: compress
-    pauses first if words would fall under the floor, then water-fill."""
-    pause_sum = sum(raw_pauses)
-    min_total = len(weights) * config.min_word_s
-    if speech_duration_s - pause_sum < min_total and pause_sum > 0:
-        scale = (speech_duration_s - min_total) / pause_sum
-        pauses = [p * scale for p in raw_pauses]
-        budget = min_total
-    else:
-        pauses = list(raw_pauses)
-        budget = speech_duration_s - pause_sum
-    durs = _solve_waterfill(weights, budget, config.min_word_s, config.max_word_s)
-    return durs, pauses, False
-
-
-def _clamp_above_ceiling(
-    raw_pauses: list[float],
-    speech_duration_s: float,
-    max_total: float,
-    pause_sum: float,
-    config: ChunkerConfig,
-    n: int,
-) -> tuple[list[float], list[float], bool]:
-    """speech_duration_s > max_total + pause_sum: cap every word at max_word_s
-    and pour the residual into inter-word pauses (or trailing silence for a
-    single word)."""
-    durs = [config.max_word_s] * n
-    residual = speech_duration_s - max_total - pause_sum
-    if n > 1:
-        pauses = [p + residual / (n - 1) for p in raw_pauses]
-    else:
-        pauses = list(raw_pauses)
-    return durs, pauses, True
+def _phrase_word_bounds(
+    allocated: Sequence[AllocatedWord],
+    words: Sequence[AllocatedWord],
+) -> tuple[int, int]:
+    if allocated:
+        return allocated[0].i, allocated[-1].i
+    return len(words), len(words)
 
 
 def place_on_timeline(
@@ -575,7 +612,7 @@ def place_on_timeline(
     phrase_rows: list[dict] = []
     cursor = 0.0
     for pos, (phrase, dur) in enumerate(zip(phrases, speech_durations)):
-        audio_dur = dur if audio_durations is None else float(audio_durations[pos])
+        audio_dur = _audio_duration_for(audio_durations, pos, dur)
         if audio_dur < 0:
             raise ValueError("audio_durations must be >= 0")
         if audio_dur > 0 and dur < 0.35 * audio_dur:
@@ -596,12 +633,13 @@ def place_on_timeline(
             word.end_s = round(word.end_s + start, 4)
         words.extend(allocated)
         end = start + dur
+        word_start, word_end = _phrase_word_bounds(allocated, words)
         phrase_rows.append(
             {
                 "i": phrase.i,
                 "text": phrase.text,
-                "word_start": allocated[0].i if allocated else len(words),
-                "word_end": allocated[-1].i if allocated else len(words),
+                "word_start": word_start,
+                "word_end": word_end,
                 "start_s": round(start, 4),
                 "end_s": round(end, 4),
                 "audio_duration_s": round(audio_dur, 4),

@@ -75,6 +75,11 @@ class UnicodeTokenizationTests(unittest.TestCase):
 
         self.assertEqual(word_weight("late"), 0.35 * 4 + 0.65 * 1)
 
+    def test_syllable_count_silent_e_on_accented_spellings(self):
+        self.assertEqual(syllable_count("café"), 2)
+        self.assertEqual(syllable_count("naïve"), 1)
+        self.assertEqual(syllable_count("façade"), 2)
+
 
 class DoubleHyphenDashTests(unittest.TestCase):
     """Defect #5."""
@@ -89,6 +94,20 @@ class DoubleHyphenDashTests(unittest.TestCase):
         cfg = ChunkerConfig()
         self.assertEqual(_punct_pause("--", cfg), _punct_pause("—", cfg))
         self.assertEqual(_punct_pause("--", cfg), cfg.pause_dash_s)
+
+    def test_double_hyphen_split_and_internal_gap(self):
+        # "--" is a comma-like split trigger once min_words is met...
+        split_cfg = ChunkerConfig(min_words=2)
+        phrases = split_phrases("one two -- three four", split_cfg)
+        self.assertEqual([p.text for p in phrases], ["one two --", "three four"])
+        # ...and a pause-class punct inside a phrase: the gap before the next
+        # word equals pause_dash_s.
+        cfg = ChunkerConfig()
+        single = split_phrases("one two -- three four five six seven")
+        self.assertEqual(len(single), 1)
+        out = allocate_phrase(single[0], 2.0)
+        gap = out[2].start_s - out[1].end_s
+        self.assertAlmostEqual(gap, cfg.pause_dash_s, places=4)
 
 
 class ParenPauseTests(unittest.TestCase):
@@ -118,11 +137,20 @@ class QuoteRepairTests(unittest.TestCase):
             [p.text for p in phrases], ["Stop.", '"Hello" she said.']
         )
 
-    def test_trailing_opening_quote_pulled_forward_at_forced_break(self):
+    def test_overflow_breaks_before_word_even_inside_quotes(self):
         cfg = ChunkerConfig(max_words=3)
         phrases = split_phrases('He said "go now before dusk" quickly', cfg)
-        self.assertEqual(phrases[0].text, "He said")
-        self.assertEqual(phrases[1].text, '"go now before dusk" quickly')
+        self.assertTrue(all(len(p.word_tokens) <= 3 for p in phrases))
+        self.assertEqual(
+            [p.text for p in phrases],
+            ['He said "go', 'now before dusk"', "quickly"],
+        )
+
+    def test_cap_still_applies_after_apostrophe_opening_quote(self):
+        cfg = ChunkerConfig(max_words=2)
+        phrases = split_phrases("the '90s and more", cfg)
+        self.assertTrue(all(len(p.word_tokens) <= 2 for p in phrases))
+        self.assertEqual([p.text for p in phrases], ["the '90s", "and more"])
 
     def test_close_quote_stays_with_sentence(self):
         phrases = split_phrases('He said "wait." Next.')
@@ -242,11 +270,18 @@ class WaterfillAllocationTests(unittest.TestCase):
         )
 
     def test_skewed_weights_waterfill_within_bounds(self):
-        # Weights roughly 9:1:1:1 -> raw split would clamp the long word.
+        # Measured defect-10 case (docs/planning/2026-09-13...): a long word
+        # beside three short ones over 2.0 s. The old allocator returned
+        # 1.6216 s for the long word; the clamp must bind at 0.90 and the
+        # remainder must be redistributed inside [min_word_s, max_word_s].
         out = allocate_phrase(
-            self._phrase_of(["extraordinarily", "a", "I", "b"]), 2.0
+            self._phrase_of(
+                ["pneumonoultramicroscopicsilicovolcanoconiosis", "a", "I", "b"]
+            ),
+            2.0,
         )
         durs = [w.end_s - w.start_s for w in out]
+        self.assertAlmostEqual(durs[0], 0.90, places=4)
         for d in durs:
             self.assertGreaterEqual(d, 0.07)
             self.assertLessEqual(d, 0.90)
@@ -292,7 +327,6 @@ class SpecWorkedExampleTests(unittest.TestCase):
 
     def test_word_timings_match_spec(self):
         plan = plan_to_json(self.TEXT, [0.78, 1.92, 1.48])
-        self.assertEqual(plan["duration_s"] if "duration_s" in plan else None, None)
         words = plan["words"]
         # Phrase 0: Stop / scrolling split the 0.78s clip by weight.
         self.assertAlmostEqual(words[0]["start_s"], 0.0, places=4)
@@ -301,6 +335,25 @@ class SpecWorkedExampleTests(unittest.TestCase):
         self.assertAlmostEqual(words[2]["start_s"], 1.06, places=4)
         # Total speech span.
         self.assertAlmostEqual(plan["speech_end_s"], 4.74, places=4)
+
+    def test_spec5_example_comma_gap_and_durations(self):
+        plan = plan_to_json(
+            "The market opened lower after overnight futures sold off, and yields jumped.",
+            [2.86, 1.05],
+        )
+        phrases = plan["phrases"]
+        self.assertEqual(
+            [p["text"] for p in phrases],
+            [
+                "The market opened lower after overnight futures sold off,",
+                "and yields jumped.",
+            ],
+        )
+        self.assertAlmostEqual(phrases[0]["speech_duration_s"], 2.86, places=4)
+        self.assertAlmostEqual(phrases[1]["speech_duration_s"], 1.05, places=4)
+        self.assertAlmostEqual(phrases[1]["gap_before_s"], 0.14, places=4)
+        self.assertAlmostEqual(phrases[1]["start_s"], 3.00, places=4)
+        self.assertAlmostEqual(plan["speech_end_s"], 4.05, places=4)
 
 
 if __name__ == "__main__":
