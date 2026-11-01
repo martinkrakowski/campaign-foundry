@@ -104,8 +104,8 @@ export function layerStackKey(state: EditorState): string {
 
 /**
  * One video row of the sequence timeline (`2026-10-12_motion-sequence-editor.md`
- * §4.1): each video layer, disabled ones included, drawn as one clip spanning
- * the whole duration.
+ * §4.1): each video layer, disabled ones included, one row carrying the layer's
+ * span — absent is `0` and `1`, the whole duration.
  *
  * Every offer is answered here rather than in the component, for the same
  * reason `LayerStackRow`'s are: `toggleableLayerIds` and `layerMoveDirections`
@@ -121,6 +121,10 @@ export interface SequenceVideoRow {
    * callbacks take, the same index `LayerStack`'s own move buttons use.
    */
   readonly index: number;
+  /** The layer's span's start, normalised `t` — `0` when the layer has no span. */
+  readonly startT: number;
+  /** The layer's span's end, normalised `t` — `1` when the layer has no span. */
+  readonly endT: number;
   readonly off: boolean;
   readonly canToggle: boolean;
   readonly canMoveUp: boolean;
@@ -137,14 +141,38 @@ export function sequenceVideoRows(state: EditorState): readonly SequenceVideoRow
   return layerStackProps(state)
     .rows.map((row, index) => ({ row, index }))
     .filter(({ row }) => row.kind === "video")
-    .map(({ row, index }) => ({
-      id: row.id,
-      index,
-      off: row.off,
-      canToggle: row.toggleable,
-      canMoveUp: row.mayMoveUp,
-      canMoveDown: row.mayMoveDown,
-    }));
+    .map(({ row, index }) => {
+      const layer = state.template.layers[index]!;
+      return {
+        id: row.id,
+        index,
+        startT: layer.span?.startT ?? 0,
+        endT: layer.span?.endT ?? 1,
+        off: row.off,
+        canToggle: row.toggleable,
+        canMoveUp: row.mayMoveUp,
+        canMoveDown: row.mayMoveDown,
+      };
+    });
+}
+
+/**
+ * The key `BriefEditor` memoises the sequence rows on (VT2): `JSON.stringify`
+ * of every layer's id, kind, enabled flag and span, in list order — in one
+ * expression, no branch besides `?.` and `??`. The layer fingerprint is the
+ * wrong key once the rows read spans, and the list order matters because the
+ * video rows' indices are layer indices: moving any layer shifts them.
+ */
+export function sequenceVideoRowsKey(state: EditorState): string {
+  return JSON.stringify(
+    state.template.layers.map((layer) => [
+      layer.id,
+      layer.kind,
+      layer.enabled !== false,
+      layer.span?.startT ?? null,
+      layer.span?.endT ?? null,
+    ]),
+  );
 }
 
 /**

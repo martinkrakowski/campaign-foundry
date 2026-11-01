@@ -31,6 +31,8 @@ import {
   layerFrameProblem,
   layerLinkProblem,
   layerPropsProblem,
+  layerSpanProblem,
+  layerTimeFieldProblem,
   layerTracksProblem,
   outputFamilyProblem,
   satisfiesOrderConstraints,
@@ -368,6 +370,25 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
     if (tracksProblem !== undefined) {
       throw new Error(
         `Campaign brief field "template.layers[${i}].tracks${tracksProblem.path}" must ${tracksProblem.must}; got ${JSON.stringify(tracksProblem.value)}.`,
+      );
+    }
+
+    // VT2 — a video layer holds one `span`, and the keys AROUND it are
+    // refused rather than converted: an own `spans` property (whatever its
+    // value) and an own seconds key (`start` / `end` / `dur` / `startSec` /
+    // `endSec`). The decisions are the domain's `layerTimeFieldProblem` and
+    // `layerSpanProblem`, shared with `isBriefTemplate` so the two boundaries
+    // cannot drift — only the message shape is local, the same tracks shape.
+    const timeFieldProblem = layerTimeFieldProblem(layer);
+    if (timeFieldProblem !== undefined) {
+      throw new Error(
+        `Campaign brief field "template.layers[${i}].${timeFieldProblem.path}" must ${timeFieldProblem.must}; got ${JSON.stringify(timeFieldProblem.value)}.`,
+      );
+    }
+    const spanProblem = layerSpanProblem(layer.kind as LayerKind, layer.span);
+    if (spanProblem !== undefined) {
+      throw new Error(
+        `Campaign brief field "template.layers[${i}].span${spanProblem.path}" must ${spanProblem.must}; got ${JSON.stringify(spanProblem.value)}.`,
       );
     }
   }

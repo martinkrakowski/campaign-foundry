@@ -116,6 +116,7 @@ import {
   layerStackProps,
   sequenceCanAddText,
   sequenceVideoRows,
+  sequenceVideoRowsKey,
 } from "./layer-stack-props";
 import { useViewportMinWidth, RAIL_VIEWPORT_MIN_PX } from "@/lib/use-viewport-min-width";
 import { DEFAULT_DURATION_SEC } from "@campaignfoundry/CampaignOrchestration/variation-defaults";
@@ -1695,17 +1696,20 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const layerStackFingerprint = layerStackKey(state);
   const layerStack = useMemo(() => rawLayerStackProps, [layerStackFingerprint]);
   /**
-   * VT1 — the sequence timeline's video rows, memoised on the SAME fingerprint
-   * the stack is: `sequenceVideoRows` reads exactly the layer facts that key
-   * carries (each layer's id, kind and enabled flag, in order), so a fresh array
-   * here per render would defeat the `memo`-wrapped `SequenceTimeline` the way a
-   * fresh `layerStack` would defeat the stack (CC1/CC2).
+   * VT1/VT2 — the sequence timeline's video rows, memoised on their own key:
+   * `sequenceVideoRows` reads each layer's id, kind, enabled flag AND span, so
+   * the stack's `layerStackFingerprint` (which carries no span) is the wrong
+   * key — a span write would not refresh the timeline until the rows memo
+   * depends on a key that includes it. A fresh array here per render would
+   * defeat the `memo`-wrapped `SequenceTimeline` the way a fresh `layerStack`
+   * would defeat the stack (CC1/CC2).
    */
+  const sequenceVideoRowsFingerprint = sequenceVideoRowsKey(state);
   const sequenceRows = useMemo(
-    // The stack's own precedent: `state` is read through the fingerprint only,
+    // The stack's own precedent: `state` is read through the key only,
     // the same way `layerStack` memoises a fresh `layerStackProps` result.
     () => sequenceVideoRows(state),
-    [layerStackFingerprint],
+    [sequenceVideoRowsFingerprint],
   );
   /**
    * VT-D4 — whether "Add a text track" may act. Keyed the same way: the fact is

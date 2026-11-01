@@ -11,6 +11,7 @@ import type { LayerFrame } from "./creative-geometry.js";
 import type { CreativeType } from "./creative-types.js";
 import type { LayerKind } from "./layer-kinds.js";
 import type { Track } from "./tracks.js";
+import type { VideoSpan } from "./video-span.js";
 
 export const CANONICAL_TEMPLATE_IDS = [
   "canonical-image-text",
@@ -61,6 +62,15 @@ export interface CreativeTemplateLayer {
    * one single mechanism may carry a defined list (K1a's kind decision).
    */
   readonly tracks?: readonly Track[];
+  /**
+   * The video layer's span (VT2): one window of normalised `t` in [0, 1]
+   * over which the compositor paints the layer. Optional, and absent means
+   * the whole duration — every canonical template omits the key (the same
+   * absence mechanism `frame` uses). Only kind `video` may carry it; the
+   * boundary refuses a span on any other kind, and an own `spans` or seconds
+   * key is refused rather than converted.
+   */
+  readonly span?: VideoSpan;
 }
 
 export interface CreativeTemplate {

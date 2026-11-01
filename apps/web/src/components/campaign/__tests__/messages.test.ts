@@ -84,6 +84,9 @@ const SAMPLE_ARGS = {
   // VT1 — the text clip's label carries its resolved window in seconds, so the
   // generic string args cannot be .toFixed()-ed.
   sequenceBeatClip: [1, 1.8, 4.2],
+  // VT2 — the video clip's label carries its resolved window in seconds, so the
+  // generic string args cannot be .toFixed()-ed.
+  sequenceVideoClip: [1, 0, 6],
 } as const satisfies Partial<Record<keyof typeof messages, readonly unknown[]>>;
 
 /** A string, a number, a string array, a boolean — enough for most formatters. */
@@ -278,5 +281,12 @@ describe("template messages (L5)", () => {
     expect(messages.templateOcclusionNote("Logo", "Accent", "overlap")).toBe(
       "the logo layer now sits above the accent and will overlap where it sits",
     );
+  });
+});
+
+describe("sequenceVideoClip", () => {
+  test("formats position and start/end timing in seconds", () => {
+    expect(messages.sequenceVideoClip(1, 0, 6)).toBe("Video clip 1, 0.00 to 6.00 seconds");
+    expect(messages.sequenceVideoClip(2, 1.25, 4.5)).toBe("Video clip 2, 1.25 to 4.50 seconds");
   });
 });

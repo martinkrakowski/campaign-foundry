@@ -1370,3 +1370,72 @@ describe("layerFrameProblem and isBriefTemplate layer frame (D130)", () => {
     });
   });
 });
+
+describe("layerSpanProblem and isBriefTemplate layer span (VT2)", () => {
+  const withLayer = (layer: unknown, creativeType: CreativeType = "image-text"): boolean => {
+    const kind = (layer as { kind?: unknown } | null)?.kind;
+    const canonical = CANONICAL_TEMPLATES[creativeType].layers;
+    return isBriefTemplate({
+      id: CANONICAL_TEMPLATES[creativeType].id,
+      version: 1,
+      creativeType,
+      unit: "standard-web",
+      layers:
+        typeof kind === "string" && canonical.some((l) => l.kind === kind)
+          ? canonical.map((l) => (l.kind === kind ? layer : l))
+          : [...canonical, layer],
+    });
+  };
+
+  test("a valid partial span on the video layer is accepted", () => {
+    expect(
+      withLayer({ id: "video", kind: "video", span: { startT: 0.25, endT: 0.75 } }, "video"),
+    ).toBe(true);
+  });
+
+  test("the same span on the shade layer of the video template is refused", () => {
+    expect(
+      withLayer({ id: "shade", kind: "shade", span: { startT: 0.25, endT: 0.75 } }, "video"),
+    ).toBe(false);
+  });
+
+  test("{ startT: 0, endT: 1 } on the video layer is accepted", () => {
+    expect(withLayer({ id: "video", kind: "video", span: { startT: 0, endT: 1 } }, "video")).toBe(
+      true,
+    );
+  });
+
+  test("an own spans array, and an own startSec, are refused", () => {
+    expect(
+      withLayer(
+        {
+          id: "video",
+          kind: "video",
+          spans: [
+            { startT: 0, endT: 0.6 },
+            { startT: 0.4, endT: 1 },
+          ],
+        },
+        "video",
+      ),
+    ).toBe(false);
+    expect(withLayer({ id: "video", kind: "video", startSec: 1 }, "video")).toBe(false);
+  });
+
+  test("two video layers with overlapping spans are accepted", () => {
+    const layers = [
+      { id: "video", kind: "video", span: { startT: 0.25, endT: 1 } },
+      ...CANONICAL_TEMPLATES.video.layers.slice(1),
+      { id: "video-2", kind: "video", span: { startT: 0, endT: 0.5 } },
+    ];
+    expect(
+      isBriefTemplate({
+        id: "canonical-video",
+        version: 1,
+        creativeType: "video",
+        unit: "standard-web",
+        layers,
+      }),
+    ).toBe(true);
+  });
+});

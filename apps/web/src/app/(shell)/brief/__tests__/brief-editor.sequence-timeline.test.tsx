@@ -365,7 +365,9 @@ describe("VT1 — the sequence editor's mount gates and wired gestures", () => {
         async (user, saved) => {
           // The pick the diamonds ride on (CC3): the video row itself is the
           // pick control on the sequence host.
-          await user.click(screen.getByRole("button", { name: messages.sequenceVideoClip(1, 6) }));
+          await user.click(
+            screen.getByRole("button", { name: messages.sequenceVideoClip(1, 0, 6) }),
+          );
           const key = await screen.findByRole("slider", {
             name: messages.tapeDiamondName(messages.TRACK_PROPERTY_LABEL.opacity, 0),
           });
