@@ -881,6 +881,73 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     fireEvent.pointerUp(start);
     expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
     expect(onVideoSpanCommit).toHaveBeenCalledWith("video", 1 / DURATION, 1);
+
+    onVideoSpanCommit.mockClear();
+    fireEvent.change(start, { target: { value: "2" } });
+    fireEvent.keyUp(start);
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith("video", 2 / DURATION, 1);
+  });
+
+  test("releasing an edge slider with no delta from the displayed position commits nothing", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
+    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
+    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+
+    // An in-flight change matching the displayed seconds (0.25 * 6 = 1.5 s)
+    // hits the Math.abs(seconds - displayed) < 1e-9 check and returns without committing.
+    fireEvent.change(start, { target: { value: "1.5" } });
+    fireEvent.pointerUp(start);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+
+    fireEvent.change(start, { target: { value: "1.5" } });
+    fireEvent.keyUp(start);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+
+    // Same for the end slider (0.75 * 6 = 4.5 s): pointerup and keyup both commit nothing.
+    fireEvent.change(end, { target: { value: "4.5" } });
+    fireEvent.pointerUp(end);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+
+    fireEvent.change(end, { target: { value: "4.5" } });
+    fireEvent.keyUp(end);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("edge sliders clamp against each other keeping the one-frame minimum gap, and clamp at timeline ends", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
+    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
+    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+    const minGap = 1 / MOTION_FPS / DURATION;
+
+    // Start slider pushed past the end edge (4.5s): clamps to endT - minGap
+    fireEvent.change(start, { target: { value: "5" } });
+    fireEvent.pointerUp(start);
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith("video", 0.75 - minGap, 0.75);
+
+    // Start slider pushed below 0: clamps to 0
+    onVideoSpanCommit.mockClear();
+    fireEvent.change(start, { target: { value: "-1" } });
+    fireEvent.pointerUp(start);
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith("video", 0, 0.75);
+
+    // End slider pushed before the start edge (1.5s): clamps to startT + minGap
+    onVideoSpanCommit.mockClear();
+    fireEvent.change(end, { target: { value: "1" } });
+    fireEvent.pointerUp(end);
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith("video", 0.25, 0.25 + minGap);
+
+    // End slider pushed past duration (6s): clamps to 1
+    onVideoSpanCommit.mockClear();
+    fireEvent.change(end, { target: { value: "10" } });
+    fireEvent.pointerUp(end);
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith("video", 0.25, 1);
   });
 
   test("during a change event the slider's left style follows the in-flight value", () => {
@@ -992,6 +1059,15 @@ describe("the video rows (VT-D2, VT-D7)", () => {
       "video",
       0.25 + 1 / DURATION,
       0.25 + 1 / DURATION + 0.5,
+    );
+
+    onVideoSpanCommit.mockClear();
+    fireEvent.keyDown(clip, { key: "ArrowLeft" });
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith(
+      "video",
+      0.25 - 1 / DURATION,
+      0.25 - 1 / DURATION + 0.5,
     );
   });
 

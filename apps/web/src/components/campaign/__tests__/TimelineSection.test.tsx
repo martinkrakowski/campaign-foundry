@@ -930,4 +930,64 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
       restore();
     }
   });
+
+  test("releasing an edge slider commits setVideoSpan through the reducer", async () => {
+    await runLiveAtNarrowWidth(videoState(), async ({ dispatch, state }) => {
+      const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+      fireEvent.change(end, { target: { value: "3" } });
+      fireEvent.pointerUp(end);
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "setVideoSpan",
+        layerId: "video",
+        startT: 0,
+        endT: 0.5,
+      });
+      expect(state().template.layers.find((l) => l.id === "video")?.span).toEqual({
+        startT: 0,
+        endT: 0.5,
+      });
+
+      const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
+      fireEvent.change(start, { target: { value: "1" } });
+      fireEvent.pointerUp(start);
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "setVideoSpan",
+        layerId: "video",
+        startT: 1 / 6,
+        endT: 0.5,
+      });
+      expect(state().template.layers.find((l) => l.id === "video")?.span).toEqual({
+        startT: 1 / 6,
+        endT: 0.5,
+      });
+    });
+  });
+
+  test("nudging a video clip with arrow keys commits setVideoSpan through the reducer", async () => {
+    const videoWithSpanState = () => ({
+      ...videoState(),
+      template: {
+        ...videoState().template,
+        layers: videoState().template.layers.map((layer) =>
+          layer.id === "video" ? { ...layer, span: { startT: 0.25, endT: 0.75 } } : layer,
+        ),
+      },
+    });
+
+    await runLiveAtNarrowWidth(videoWithSpanState(), async ({ dispatch, state }) => {
+      const clip = document.querySelector('[data-sequence-clip="video"]') as HTMLElement;
+      expect(clip).toBeTruthy();
+      fireEvent.keyDown(clip, { key: "ArrowRight" });
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "setVideoSpan",
+        layerId: "video",
+        startT: 0.25 + 1 / 6,
+        endT: 0.75 + 1 / 6,
+      });
+      expect(state().template.layers.find((l) => l.id === "video")?.span).toEqual({
+        startT: 0.25 + 1 / 6,
+        endT: 0.75 + 1 / 6,
+      });
+    });
+  });
 });
