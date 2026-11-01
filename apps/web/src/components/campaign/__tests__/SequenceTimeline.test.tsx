@@ -752,6 +752,47 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     expect(onSelectLayer).not.toHaveBeenCalled();
   });
 
+  test("during a body drag both edge ranges' left move with the clip", () => {
+    renderTimeline({ videoRows: [halfRow] });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 1.5, 4.5),
+    });
+    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
+    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+
+    expect(clip.style.left).toBe("42px");
+    expect(start.style.left).toBe("42px");
+    expect(end.style.left).toBe("126px");
+
+    fireEvent.pointerDown(clip, { clientX: 0 });
+    fireEvent.pointerMove(clip, { clientX: 28 });
+
+    expect(clip.style.left).toBe("70px");
+    expect(start.style.left).toBe("70px");
+    expect(end.style.left).toBe("154px");
+
+    fireEvent.pointerMove(clip, { clientX: 200 });
+    expect(clip.style.left).toBe("84px");
+    expect(start.style.left).toBe("84px");
+    expect(end.style.left).toBe("168px");
+  });
+
+  test("a pointerup at a new x with no move before it commits that x", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 1.5, 4.5),
+    });
+    fireEvent.pointerDown(clip, { clientX: 0 });
+    fireEvent.pointerUp(clip, { clientX: 28 });
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith(
+      "video",
+      0.25 + 1 / DURATION,
+      Math.min(1, 0.25 + 1 / DURATION + 0.5),
+    );
+  });
+
   test("the arrow keys nudge the clip one step per press, clamping at the edges", () => {
     const onVideoSpanCommit = vi.fn();
     renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
@@ -982,6 +1023,20 @@ describe("the video rows (VT-D2, VT-D7)", () => {
 
     fireEvent.change(end, { target: { value: "5" } });
     expect(end.style.left).toBe("140px");
+  });
+
+  test("edge slider inputs carry pointer-events-none and vendor thumb auto classes because jsdom cannot hit-test narrow clip drag takeover", () => {
+    renderTimeline({ videoRows: [halfRow] });
+    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
+    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+
+    expect(start.className).toContain("pointer-events-none");
+    expect(start.className).toContain("[&::-webkit-slider-thumb]:pointer-events-auto");
+    expect(start.className).toContain("[&::-moz-range-thumb]:pointer-events-auto");
+
+    expect(end.className).toContain("pointer-events-none");
+    expect(end.className).toContain("[&::-webkit-slider-thumb]:pointer-events-auto");
+    expect(end.className).toContain("[&::-moz-range-thumb]:pointer-events-auto");
   });
 
   test("hide calls onSetLayerEnabled, and a disabled row still offers enable", () => {

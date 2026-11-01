@@ -314,13 +314,13 @@ function VideoClip({
     dragRef.current = next;
     setDrag(next);
   };
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent<HTMLElement>) => {
     const current = dragRef.current;
     dragRef.current = null;
     setDrag(null);
     if (current === null) return;
     if (durationSec <= 0) return;
-    const deltaT = (current.clientX - current.originX) / pxPerSec / durationSec;
+    const deltaT = (e.clientX - current.originX) / pxPerSec / durationSec;
     const span = slidSpan(current.origin, deltaT);
     if (span !== current.origin) {
       movedRef.current = true;
@@ -369,12 +369,12 @@ function VideoClip({
 
   // The painted left follows the finger while a drag is live; the width (the
   // span's length) never changes mid-gesture.
+  let liveSpan = origin;
   let visualLeft = style.left;
   if (drag !== null && durationSec > 0) {
-    const length = drag.origin.endT - drag.origin.startT;
     const deltaT = (drag.clientX - drag.originX) / pxPerSec / durationSec;
-    const visualStartT = Math.min(Math.max(0, drag.origin.startT + deltaT), 1 - length);
-    visualLeft = `${visualStartT * durationSec * pxPerSec}px`;
+    liveSpan = slidSpan(drag.origin, deltaT);
+    visualLeft = `${liveSpan.startT * durationSec * pxPerSec}px`;
   }
   const clipStyle = { ...style, left: visualLeft };
   const interactiveClass = cn(
@@ -394,13 +394,14 @@ function VideoClip({
     onKeyDown,
   };
   const sliderClass =
-    "absolute top-1/2 z-10 h-6 w-24 -translate-x-12 -translate-y-1/2 cursor-ew-resize accent-brand-primary opacity-60 hover:opacity-100 hover:z-20 focus-visible:opacity-100 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary";
+    "absolute top-1/2 z-10 h-6 w-24 -translate-x-12 -translate-y-1/2 cursor-ew-resize accent-brand-primary opacity-60 hover:opacity-100 hover:z-20 focus-visible:opacity-100 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-moz-range-thumb]:pointer-events-auto";
   const edgeSlider = (which: "start" | "end") => {
     const isStart = which === "start";
     const inFlight = isStart ? inFlightStartRef : inFlightEndRef;
     const dragSec = isStart ? startDragSec : endDragSec;
     const setDragSec = isStart ? setStartDragSec : setEndDragSec;
-    const shown = dragSec ?? (isStart ? startT * durationSec : endT * durationSec);
+    const baseSec = (isStart ? liveSpan.startT : liveSpan.endT) * durationSec;
+    const shown = dragSec ?? baseSec;
     return (
       <input
         type="range"
