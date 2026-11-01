@@ -1,11 +1,23 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as scanModule from "../../server/lib/import/scan.js";
 import { database, resetDatabase, setDatabase } from "../../server/lib/db/database.js";
 import type { SqlClient } from "../../server/lib/db/sql-client.js";
-import { USAGE, main } from "../import.js";
+import { USAGE, VERIFY_USAGE, main } from "../import.js";
+import type { CampaignEntry } from "../../server/lib/import/apply.js";
+import { importTenant } from "../../server/lib/import/import-tenant.js";
+import { setObjectStoreClient } from "../../server/lib/object-store/index.js";
+import { getAssetStore, setAssetStore } from "../../server/lib/ports/index.js";
 import {
+  failOnNth,
+  ON_A_REAL_TEST_SERVER,
+  restoreApplyEnvironment,
+  useApplyEnvironment,
+} from "../../server/lib/import/__tests__/fixtures/apply-harness.js";
+import {
+  briefBody,
   dropRoot,
   makeRoot,
   writeAt,
@@ -23,9 +35,9 @@ import {
  * returns, which is why a refusal is a return value here rather than an exit.
  *
  * The exit code IS the taxonomy: `1` for every RUN-level refusal (an unreadable source, a
- * bad `--org`, a missing or un-parseable `--switched-at`, an unknown subcommand, and the
- * two stubs), and `0` for a plan that carries per-campaign refusals — because a brief the
- * parser refuses is a fact about the tree, not a failure to have run.
+ * bad `--org`, a missing or un-parseable `--switched-at`, an unknown subcommand, and
+ * `verify`'s guards/refusals), and `0` for a plan that carries per-campaign refusals — because
+ * a brief the parser refuses is a fact about the tree, not a failure to have run.
  */
 
 const SWITCHED_AT = "2026-10-01T00:00:00Z";
@@ -317,8 +329,8 @@ describe("import CLI (PT-8a)", () => {
   });
 
   test("an UNKNOWN or MISSING subcommand is the usage, and exits 1", async () => {
-    // `apply` and `verify` are NOT here: they are known subcommands that refuse with
-    // `not yet implemented`, which is a different refusal from "there is no such command".
+    // `apply` and `verify` are NOT here: they are known subcommands with their own
+    // refusals, which is a different refusal from "there is no such command".
     for (const argv of [[], ["inspect"], ["--help"], ["--switched-at", SWITCHED_AT]]) {
       const { err, deps } = io();
       expect(await main(argv, deps)).toBe(1);
@@ -326,10 +338,43 @@ describe("import CLI (PT-8a)", () => {
     }
   });
 
-  test("verify refuses as not-yet-implemented, and exits 1", async () => {
-    const { err, deps } = io();
-    expect(await main(["verify"], deps)).toBe(1);
-    expect(err).toEqual(["verify: not yet implemented"]);
+  test("verify --help prints the usage and exits 0", async () => {
+    const { out, err, deps } = io();
+    expect(await main(["verify", "--help"], deps)).toBe(0);
+    expect(err).toEqual([]);
+    expect(out.join("\n")).toContain("usage: yarn import verify --switched-at <iso>");
+    expect(out.join("\n")).toContain("0  every planned and org-wide check matched");
+    expect(out.join("\n")).toContain(
+      "1  at least one check mismatched, or the run itself was refused",
+    );
+  });
+
+  test("verify on the file stores refuses and exits 1", async () => {
+    const { out, err, deps } = io();
+    expect(
+      await main(
+        ["verify", "--project-root", root!, "--output-root", output!, "--switched-at", SWITCHED_AT],
+        deps,
+      ),
+    ).toBe(1);
+    expect(out).toEqual([]);
+    expect(err).toEqual(["verify needs STORE_BACKEND=postgres, and STORE_BACKEND is fs"]);
+  });
+
+  test("an unparseable DATABASE_URL does not break verify's refusal", async () => {
+    const saved = process.env["DATABASE_URL"];
+    process.env["DATABASE_URL"] = "::not-a-url";
+    const { out, err, deps } = io();
+    try {
+      expect(await main(["verify", "--project-root", root!, "--output-root", output!], deps)).toBe(
+        1,
+      );
+      expect(err).toEqual(["verify needs STORE_BACKEND=postgres, and STORE_BACKEND is fs"]);
+      expect(out).toEqual([]);
+    } finally {
+      if (saved === undefined) delete process.env["DATABASE_URL"];
+      else process.env["DATABASE_URL"] = saved;
+    }
   });
 
   test("apply --help prints a usage holding the three exit-code lines", async () => {
@@ -355,7 +400,10 @@ describe("import CLI (PT-8a)", () => {
       expect(await main(["verify"])).toBe(1);
       expect(await main(["inspect"])).toBe(1);
       expect(await main(planArgv())).toBe(0);
-      expect(error).toHaveBeenNthCalledWith(1, "verify: not yet implemented");
+      expect(error).toHaveBeenNthCalledWith(
+        1,
+        "verify needs STORE_BACKEND=postgres, and STORE_BACKEND is fs",
+      );
       expect(error).toHaveBeenNthCalledWith(2, USAGE);
       expect(log).toHaveBeenCalledWith(`import plan — switched-at: ${SWITCHED_AT}`);
     } finally {
@@ -665,5 +713,301 @@ describe("the plan file, the exit classes and the pool (PT-8a2 reqs 18 and 20)",
     // way a refusal that already named its problem is not re-reported.
     expect(await main(planArgv(), io().deps)).toBe(0);
     expect(spy.end).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe.skipIf(ON_A_REAL_TEST_SERVER)("the verify subcommand (PT-8f3)", () => {
+  type Env = Awaited<ReturnType<typeof useApplyEnvironment>>;
+  let env: Env;
+  let root: string | undefined;
+  let output: string | undefined;
+  const tmpFiles: string[] = [];
+  const S3_VARS = [
+    "S3_ENDPOINT",
+    "S3_PUBLIC_ENDPOINT",
+    "S3_REGION",
+    "S3_BUCKET",
+    "S3_ACCESS_KEY_ID",
+    "S3_SECRET_ACCESS_KEY",
+  ] as const;
+
+  beforeEach(async () => {
+    env = await useApplyEnvironment();
+    root = makeRoot();
+    output = join(root, "output");
+    mkdirSync(output, { recursive: true });
+    writeAt(root, "assets/inputs/logo.png", PNG);
+    writeBrief(root, "camp.yaml", {
+      id: "camp",
+      products: [
+        { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/inputs/logo.png" },
+      ],
+    });
+  });
+
+  afterEach(async () => {
+    dropRoot(root);
+    root = undefined;
+    output = undefined;
+    for (const path of tmpFiles.splice(0)) rmSync(path, { force: true });
+    for (const key of S3_VARS) delete process.env[key];
+    await restoreApplyEnvironment();
+  });
+
+  function argv(subcommand: string, ...extra: readonly string[]): string[] {
+    return [
+      subcommand,
+      "--project-root",
+      root!,
+      "--output-root",
+      output!,
+      "--org",
+      "local",
+      "--switched-at",
+      SWITCHED_AT,
+      ...extra,
+    ];
+  }
+
+  /** `plan` then `apply` the tree; answers the plan's digest and the minted asset's key. */
+  async function applyTree(label: string): Promise<{ digest: string; assetKey: string }> {
+    const planOut = join(tmpdir(), `cf-cli-plan-${label}-${process.pid}.json`);
+    const result = join(tmpdir(), `cf-cli-result-${label}-${process.pid}.jsonl`);
+    rmSync(planOut, { force: true });
+    rmSync(result, { force: true });
+    tmpFiles.push(planOut, result);
+    const deps = { stdout: () => {}, stderr: () => {} };
+
+    expect(await main(argv("plan", "--out", planOut), deps)).toBe(0);
+    const digest = (JSON.parse(readFileSync(planOut, "utf8")) as { digest: string }).digest;
+
+    env.reinstall();
+    expect(
+      await main(
+        [
+          "apply",
+          "--project-root",
+          root!,
+          "--output-root",
+          output!,
+          "--org",
+          "local",
+          "--switched-at",
+          SWITCHED_AT,
+          "--expect",
+          digest,
+          "--result",
+          result,
+        ],
+        deps,
+      ),
+    ).toBe(0);
+    const lines = readFileSync(result, "utf8")
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const campaign = lines.find(
+      (line) => line.kind === "campaign" && line.slug === "camp",
+    ) as unknown as CampaignEntry | undefined;
+    const assetKey = campaign?.minted.assets[0]?.key ?? "";
+    expect(assetKey).not.toBe("");
+    return { digest, assetKey };
+  }
+
+  test("plan → apply → verify: a clean target exits 0, writes valid JSON before stdout, and prints entity counts", async () => {
+    const { digest } = await applyTree("e2e");
+    env.reinstall();
+    const outPath = join(root!, "verify.json");
+    const { out, err, deps } = io();
+    expect(await main(argv("verify", "--expect", digest, "--out", outPath), deps)).toBe(0);
+    expect(err).toEqual([]);
+    expect(out[0]).toBe(`import verify — switched-at: ${SWITCHED_AT}`);
+    expect(out[1]).toBe("org: local");
+    expect(out[2]).toBe(`digest: ${digest}`);
+    expect(out).toContain("campaign: 1 checked, 1 matched, 0 mismatched");
+    expect(out).toContain("asset: 1 checked, 1 matched, 0 mismatched");
+    expect(out).toContain("render: 0 checked, 0 matched, 0 mismatched");
+    expect(out).toContain("org: 1 campaigns, 1 versions, 1 assets");
+    expect(out[out.length - 1]).toBe("verify ok");
+
+    const report = JSON.parse(readFileSync(outPath, "utf8")) as {
+      switchedAt: string;
+      orgId: string;
+      digest: string;
+      ok: boolean;
+      counts: Record<string, { checked: number; matched: number }>;
+      orgCounts: { campaigns: number; briefVersions: number; assets: number };
+      checks: unknown[];
+      orgChecks: unknown[];
+    };
+    expect(report.switchedAt).toBe(SWITCHED_AT);
+    expect(report.orgId).toBe("local");
+    expect(report.digest).toBe(digest);
+    expect(report.ok).toBe(true);
+    expect(report.counts.campaign).toEqual({ checked: 1, matched: 1 });
+    expect(report.orgCounts).toEqual({ campaigns: 1, briefVersions: 1, reports: 0, assets: 1 });
+    expect(report.orgChecks).toEqual([]);
+  });
+
+  test("flipping one byte of a stored object makes verify exit 1 naming that asset", async () => {
+    const { assetKey } = await applyTree("flip");
+    const stored = Buffer.from((await env.objects.get(assetKey))!.bytes);
+    stored[stored.length - 1] = stored[stored.length - 1]! ^ 0xff;
+    await env.objects.put(assetKey, stored);
+
+    env.reinstall();
+    const { out, err, deps } = io();
+    expect(await main(argv("verify"), deps)).toBe(1);
+    expect(err).toEqual([]);
+    expect(out).toContain("campaign: 1 checked, 0 matched, 1 mismatched");
+    expect(out.some((line) => line.includes(": asset mismatch: "))).toBe(true);
+    expect(out[out.length - 1]).toBe("verify FAILED");
+  });
+
+  test("a wrong --expect exits 1 before the target is read", async () => {
+    const { digest } = await applyTree("expect");
+    env.reinstall();
+    const wrong = "0".repeat(64);
+    const { out, err, deps } = io();
+    expect(await main(argv("verify", "--expect", wrong), deps)).toBe(1);
+    expect(out).toEqual([]);
+    expect(err).toEqual([`verify: --expect ${wrong} differs from re-planned digest ${digest}`]);
+  });
+
+  test("unknown flags and --result are refused by verify", async () => {
+    for (const flag of ["--result", "--bogus"]) {
+      env.reinstall();
+      const { out, err, deps } = io();
+      expect(await main(argv("verify", flag, "x"), deps)).toBe(1);
+      expect(out).toEqual([]);
+      expect(err).toEqual([`${flag} is not a flag this command takes.`]);
+    }
+  });
+
+  test("an --out write failure exits 1 with nothing printed to stdout", async () => {
+    await applyTree("outfail");
+    env.reinstall();
+    const outPath = join(root!, "no-such-dir", "v.json");
+    const { out, err, deps } = io();
+    expect(await main(argv("verify", "--out", outPath), deps)).toBe(1);
+    expect(out).toEqual([]);
+    expect(err[0]).toContain("ENOENT");
+    expect(existsSync(outPath)).toBe(false);
+  });
+
+  test("a target read that throws exits 1 with the error on stderr, nothing on stdout and no --out file", async () => {
+    await applyTree("throw");
+    env.reinstall();
+    setAssetStore(failOnNth(getAssetStore(importTenant("local")), "readAssetById", 1));
+    const outPath = join(root!, "v.json");
+    const { out, err, deps } = io();
+    expect(await main(argv("verify", "--out", outPath), deps)).toBe(1);
+    expect(err[0]).toBe("injected");
+    expect(out).toEqual([]);
+    expect(existsSync(outPath)).toBe(false);
+  });
+
+  test("a store whose thrown error embeds the configured secrets redacts them on stderr", async () => {
+    await applyTree("redact");
+    env.reinstall();
+    process.env.DATABASE_URL = "postgres://user:sekrit@127.0.0.1:5432/db";
+    process.env.S3_ENDPOINT = "http://127.0.0.1:9000";
+    process.env.S3_PUBLIC_ENDPOINT = "http://127.0.0.1:9000";
+    process.env.S3_REGION = "us-east-1";
+    process.env.S3_BUCKET = "bucket";
+    process.env.S3_ACCESS_KEY_ID = "key";
+    process.env.S3_SECRET_ACCESS_KEY = "shhh";
+    const evil = new Proxy(env.objects, {
+      get(target, prop) {
+        if (prop === "get") {
+          return async () => {
+            throw new Error(
+              "could not reach postgres://user:sekrit@127.0.0.1:5432/db with S3_SECRET_ACCESS_KEY=shhh",
+            );
+          };
+        }
+        const value = Reflect.get(target, prop);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    setObjectStoreClient(evil);
+
+    const outPath = join(root!, "v.json");
+    const { out, err, deps } = io();
+    try {
+      expect(await main(argv("verify", "--out", outPath), deps)).toBe(1);
+      expect(err[0]).toContain("[redacted]");
+      expect(err[0]).not.toContain("sekrit");
+      expect(err[0]).not.toContain("shhh");
+      expect(out).toEqual([]);
+      expect(existsSync(outPath)).toBe(false);
+    } finally {
+      for (const key of S3_VARS) delete process.env[key];
+      process.env.DATABASE_URL = "postgres://nobody@unused.invalid:5432/none";
+    }
+  });
+
+  test("verify prints org-wide mismatches with an org: prefix", async () => {
+    await applyTree("actorcli");
+    await env.db.query(
+      `update brief_version set actor = $1
+        where campaign_id = (select id from campaign where slug = $2)`,
+      ["user-1", "camp"],
+    );
+    // A live campaign whose latest version still carries a path ref: an org-wide
+    // asset mismatch that also exercises the `item` half of the printed org line.
+    const inserted = await env.db.query<{ id: string }>(
+      `insert into campaign (org_id, slug) values ($1, $2) returning id`,
+      ["local", "pathy"],
+    );
+    await env.db.query(
+      `insert into brief_version (campaign_id, version, body, revision, actor)
+       values ($1, 1, $2, $3, $4)`,
+      [
+        inserted.rows[0]!.id,
+        JSON.stringify(
+          briefBody({
+            id: "pathy",
+            products: [
+              { id: "p1", name: "P1", primaryColor: "#111111", logoPath: "assets/logo.png" },
+            ],
+          }),
+        ),
+        "rev-pathy",
+        "import:pt-8",
+      ],
+    );
+    env.reinstall();
+    const { out, err, deps } = io();
+    expect(await main(argv("verify"), deps)).toBe(1);
+    expect(err).toEqual([]);
+    expect(out).toContain(
+      'org: camp: campaign mismatch: latest brief_version actor is "user-1", expected "import:pt-8"',
+    );
+    expect(out).toContain(
+      'org: pathy (assets/logo.png): asset mismatch: latest brief_version still carries path ref "assets/logo.png"',
+    );
+    expect(out[out.length - 1]).toBe("verify FAILED");
+  });
+
+  test("verify without --switched-at exits 1", async () => {
+    env.reinstall();
+    const { out, err, deps } = io();
+    expect(
+      await main(
+        ["verify", "--project-root", root!, "--output-root", output!, "--org", "local"],
+        deps,
+      ),
+    ).toBe(1);
+    expect(out).toEqual([]);
+    expect(err).toEqual(["--switched-at <iso> is required"]);
+  });
+
+  test("verify refuses unless OBJECT_STORE is s3", async () => {
+    process.env.OBJECT_STORE = "fs";
+    const { out, err, deps } = io();
+    expect(await main(argv("verify"), deps)).toBe(1);
+    expect(out).toEqual([]);
+    expect(err).toEqual(["verify needs OBJECT_STORE=s3, and OBJECT_STORE is fs"]);
   });
 });

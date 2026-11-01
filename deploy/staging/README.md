@@ -344,8 +344,8 @@ one: its tag is the short commit that `yarn deploy:staging` built.
 - A staging `plan` waits until PT-8d0 is in the image the Job runs.
 - `apply` waits until PT-8d4, PT-8e3 and PT-8f3 are in that image and the plan has been read,
   including path-shape refusals, drafts and unreferenced files.
-- The Job is not applied while `verify` is still unimplemented. As of this commit
-  `apps/api/bin/import.ts` answers `verify: not yet implemented` and exits 1.
+- `verify` runs read-only against postgres + s3 after apply and exits 1 on any
+  mismatch (optionally pinning `--expect "$DIGEST"`).
 
 **`--switched-at`.** Every subcommand takes the same `--switched-at`, from the owner's own
 record of the PT-4j deploy. This repository has no deploy log. The value is the instant staging
@@ -466,14 +466,24 @@ written before the next render, and its campaign's line lists it again under
 `minted.objects`: delete each key once. These are the renders of the campaigns this
 run imported (set (a)); the renders of a normalised campaign come with PT-8e3.
 
-**5. `verify`** (PT-8f). Read-only; it exits non-zero on any mismatch. As of this commit it is
-not built: the command answers `verify: not yet implemented` and exits 1. PT-8f3 fixes its
-flags and updates this step; it takes the same `--switched-at`, which the manifest already
-passes.
+**5. `verify`** (PT-8f3). Read-only; it re-plans the source and checks every planned
+campaign plus every live campaign of the org (path-ref absence, asset-id byte readability
+and the `import:pt-8` actor on imported campaigns). It takes the same `--switched-at`,
+which the manifest already passes, and exits `0` when every planned and org-wide check
+matches and `1` on any mismatch. Optionally pin `--expect "$DIGEST"` (the digest of step 1)
+so a source changed since the plan is refused before any target read.
 
 ```sh
 STEP=verify
 ARGS='"verify"'
+```
+
+Or, with the digest pinned:
+
+```sh
+STEP=verify
+DIGEST='PUT-THE-DIGEST-HERE'
+ARGS="\"verify\", \"--expect\", \"$DIGEST\""
 ```
 
 **6. Start the app again:**

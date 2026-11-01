@@ -16,7 +16,8 @@ import {
   getReportStore,
 } from "../../ports/index.js";
 import { replan, type CampaignEntry } from "../apply.js";
-import { importTenant } from "../import-tenant.js";
+import { existingCounts } from "../existing-campaigns.js";
+import { IMPORT_ACTOR, importTenant } from "../import-tenant.js";
 import type { StepContext } from "../steps.js";
 import type { ReportFieldPlan } from "../plan.js";
 import { renderFingerprints } from "../render-file.js";
@@ -24,8 +25,10 @@ import {
   summarise,
   verifyCampaign,
   verifyImport,
+  verifyOrg,
   verifyRenders,
   verifyRows,
+  verifyTarget,
   type VerifyStores,
 } from "../verify.js";
 import {
@@ -734,5 +737,213 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("verify: renders and expected refusals", 
     expect(empty.ok).toBe(true);
     expect(empty.checks).toEqual([]);
     expect(Object.values(empty.counts)).toEqual(Array(6).fill({ checked: 0, matched: 0 }));
+  });
+});
+
+describe.skipIf(ON_A_REAL_TEST_SERVER)("verify: org-wide checks (PT-8f3)", () => {
+  let env: Env;
+  let root: string | undefined;
+
+  beforeEach(async () => {
+    env = await useApplyEnvironment();
+  });
+
+  afterEach(async () => {
+    dropRoot(root);
+    root = undefined;
+    for (const path of results.splice(0)) rmSync(path, { force: true });
+    await restoreApplyEnvironment();
+  });
+
+  /** Insert a live campaign with one stored brief_version, without going through the store's validation. */
+  async function insertLiveCampaign(slug: string, body: unknown): Promise<void> {
+    const { rows } = await env.db.query<{ id: string }>(
+      `insert into campaign (org_id, slug) values ($1, $2) returning id`,
+      ["local", slug],
+    );
+    const campaignId = rows[0]!.id;
+    await env.db.query(
+      `insert into brief_version (campaign_id, version, body, revision, actor)
+       values ($1, 1, $2, $3, $4)`,
+      [campaignId, JSON.stringify(body), `rev-${slug}`, IMPORT_ACTOR],
+    );
+  }
+
+  /** A body that parses under authoring defaults and carries a motion timeline. */
+  function motionBody(slug: string, logoPath: string, background?: string): unknown {
+    return {
+      ...briefBody({ id: slug }),
+      products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath }],
+      mode: "variation",
+      variation: { count: 2, axes: { motion: ["ken-burns-in"], duration: [6] } },
+      output: { formats: ["static", "motion"], platforms: ["instagram-feed", "instagram-reel"] },
+      copy: {
+        timeline: {
+          beats: [
+            { text: "New season", weight: 2, ...(background === undefined ? {} : { background }) },
+            { text: "Built for the cold", weight: 3 },
+          ],
+          transition: "fade",
+          keyBeat: 1,
+        },
+      },
+    };
+  }
+
+  test("verifyTarget passes after apply and a normalised live campaign, and performs zero writes", async () => {
+    const t = tree({});
+    root = t.root;
+    expect((await apply(env, t.root, t.output, "o1")).code).toBe(0);
+
+    const briefs = getBriefStore(importTenant("local"));
+    const assets = getAssetStore(importTenant("local"));
+    await briefs.createCampaign("legacy", {});
+    const written = await assets.writeAsset("legacy", "logo.png", PNG);
+    await briefs.createBrief(
+      briefBody({
+        id: "legacy",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: written.id! }],
+      }),
+    );
+
+    const before = await existingCounts(env.db, "local");
+    const ctx = ctxWith(t.root, t.output);
+    const planned = await replan(ctx);
+    const { got, sent } = await watched(env, () => verifyTarget(env.db, stores(), ctx, planned));
+
+    expect(got.ok).toBe(true);
+    expect(got.orgChecks).toEqual([]);
+    expect(statuses(got.checks)).toEqual(["campaign:match", "asset:match"]);
+    expect(got.counts.campaign).toEqual({ checked: 1, matched: 1 });
+    expect(got.counts.asset).toEqual({ checked: 1, matched: 1 });
+    expect(got.orgCounts).toEqual({ campaigns: 2, briefVersions: 2, reports: 0, assets: 2 });
+    expect(sent).toEqual(READ_ONLY);
+    expect(await existingCounts(env.db, "local")).toEqual(before);
+  });
+
+  test("a live campaign whose latest version still carries a path ref is an asset mismatch", async () => {
+    const t = tree({});
+    root = t.root;
+    await apply(env, t.root, t.output, "o2");
+    await insertLiveCampaign("pathy", motionBody("pathy", "assets/logo.png", "assets/logo.png"));
+
+    const ctx = ctxWith(t.root, t.output);
+    const planned = await replan(ctx);
+    const { got, sent } = await watched(env, () => verifyTarget(env.db, stores(), ctx, planned));
+
+    expect(got.ok).toBe(false);
+    expect(got.orgChecks).toEqual([
+      {
+        entity: "asset",
+        slug: "pathy",
+        item: "assets/logo.png",
+        status: "mismatch",
+        reason: 'latest brief_version still carries path ref "assets/logo.png"',
+      },
+    ]);
+    expect(sent).toEqual(READ_ONLY);
+  });
+
+  test("a live campaign whose latest version names an asset id that cannot be read is an asset mismatch", async () => {
+    const t = tree({});
+    root = t.root;
+    await apply(env, t.root, t.output, "o3");
+
+    const briefs = getBriefStore(importTenant("local"));
+    const assets = getAssetStore(importTenant("local"));
+    await briefs.createCampaign("ghost", {});
+    const written = await assets.writeAsset("ghost", "logo.png", PNG);
+    await env.objects.delete(written.objectKey!);
+    await briefs.createBrief(
+      briefBody({
+        id: "ghost",
+        products: [{ id: "p1", name: "P1", primaryColor: "#111111", logoPath: written.id! }],
+      }),
+    );
+
+    const ctx = ctxWith(t.root, t.output);
+    const planned = await replan(ctx);
+    const { got, sent } = await watched(env, () => verifyTarget(env.db, stores(), ctx, planned));
+
+    expect(got.ok).toBe(false);
+    expect(got.orgChecks).toEqual([
+      {
+        entity: "asset",
+        slug: "ghost",
+        item: written.id!,
+        id: written.id!,
+        status: "mismatch",
+        reason: `asset id ${written.id} in latest brief_version has no readable bytes`,
+      },
+    ]);
+    expect(sent).toEqual(READ_ONLY);
+  });
+
+  test("an imported campaign whose latest version was edited by a user is a campaign mismatch naming the actor", async () => {
+    const t = tree({});
+    root = t.root;
+    await apply(env, t.root, t.output, "o4");
+    await env.db.query(
+      `update brief_version set actor = $1
+        where campaign_id = (select id from campaign where slug = $2)`,
+      ["user-1", "camp"],
+    );
+
+    const ctx = ctxWith(t.root, t.output);
+    const planned = await replan(ctx);
+    const { got, sent } = await watched(env, () => verifyTarget(env.db, stores(), ctx, planned));
+
+    expect(got.ok).toBe(false);
+    expect(got.orgChecks).toEqual([
+      {
+        entity: "campaign",
+        slug: "camp",
+        status: "mismatch",
+        reason: 'latest brief_version actor is "user-1", expected "import:pt-8"',
+      },
+    ]);
+    expect(sent).toEqual(READ_ONLY);
+  });
+
+  test("a live campaign whose latest version does not parse is a campaign mismatch and the rest are still checked", async () => {
+    const t = tree({});
+    root = t.root;
+    await apply(env, t.root, t.output, "o5");
+    await insertLiveCampaign("broken", "not json");
+
+    const ctx = ctxWith(t.root, t.output);
+    const planned = await replan(ctx);
+    const { got, sent } = await watched(env, () => verifyTarget(env.db, stores(), ctx, planned));
+
+    expect(got.ok).toBe(false);
+    const broken = got.orgChecks.find((check) => check.slug === "broken")!;
+    expect(broken.entity).toBe("campaign");
+    expect(broken.status).toBe("mismatch");
+    expect(broken.reason).toMatch(/^latest brief_version does not parse: /);
+    // The imported campaign's own org checks still ran and passed.
+    expect(got.orgChecks.filter((check) => check.slug === "camp")).toEqual([]);
+    expect(sent).toEqual(READ_ONLY);
+  });
+
+  test("verifyOrg reports an imported slug with no live campaign as an actor mismatch", async () => {
+    const t = tree({});
+    root = t.root;
+    await apply(env, t.root, t.output, "o6");
+
+    const ctx = ctxWith(t.root, t.output);
+    const { got, sent } = await watched(env, () =>
+      verifyOrg(env.db, stores().assets, { orgId: ctx.orgId }, new Set(["phantom"])),
+    );
+
+    expect(got.ok).toBe(false);
+    expect(got.checks).toEqual([
+      {
+        entity: "campaign",
+        slug: "phantom",
+        status: "mismatch",
+        reason: 'latest brief_version actor is null, expected "import:pt-8"',
+      },
+    ]);
+    expect(sent).toEqual(READ_ONLY);
   });
 });

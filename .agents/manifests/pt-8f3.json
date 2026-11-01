@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "lane": "PT-8f3",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/verify.ts",
+      "before": "    if (!isAssetId(ref)) {",
+      "after": "    if (isAssetId(ref)) {",
+      "because": "PT-8f3: a live campaign's latest version must carry no path ref — a path ref is a mismatch. Flipping the guard sends a path ref into the asset-id branch, which reads it as an id and reports the wrong reason.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/verify.test.ts",
+        "-t",
+        "a live campaign whose latest version still carries a path ref is an asset mismatch"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/verify.ts",
+      "before": "    if (actor !== IMPORT_ACTOR) {",
+      "after": "    if (actor === IMPORT_ACTOR) {",
+      "because": "PT-8f3: an imported campaign whose latest version was overwritten by a user must be a mismatch naming the actor. Flipping the comparison reports a mismatch when the actor is correct, so a clean org fails.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/verify.test.ts",
+        "-t",
+        "an imported campaign whose latest version was edited by a user is a campaign mismatch naming the actor"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/import.ts",
+      "before": "    return report.ok ? 0 : 1;",
+      "after": "    return 0;",
+      "because": "PT-8f3: verify exits 1 when any check mismatched. Returning 0 unconditionally hides a flipped-byte mismatch from the exit-code contract.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/import.test.ts",
+        "-t",
+        "flipping one byte of a stored object makes verify exit 1 naming that asset"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/bin/import.ts",
+      "before": "  return redacted;",
+      "after": "  return text;",
+      "because": "PT-8f3: no secret reaches ImportIO or --out. A redactSecrets that returns its input unchanged lets a configured password or S3 secret embedded in an error message reach stderr.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/bin/__tests__/import.test.ts",
+        "-t",
+        "a store whose thrown error embeds the configured secrets redacts them on stderr"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}
