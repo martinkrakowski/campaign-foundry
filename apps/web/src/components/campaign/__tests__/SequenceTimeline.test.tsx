@@ -98,6 +98,18 @@ const videoRows: SequenceTimelineProps["videoRows"] = [
   },
 ];
 
+/** A half-span video row — VT2b's drag/trim fixture (length 0.5). */
+const halfRow: SequenceTimelineProps["videoRows"][number] = {
+  id: "video",
+  index: 0,
+  startT: 0.25,
+  endT: 0.75,
+  off: false,
+  canToggle: true,
+  canMoveUp: false,
+  canMoveDown: false,
+};
+
 const baseProps: SequenceTimelineProps = {
   durationSec: DURATION,
   beats,
@@ -115,6 +127,7 @@ const baseProps: SequenceTimelineProps = {
   onSelectLayer: vi.fn(),
   onSetLayerEnabled: vi.fn(),
   onMoveLayer: vi.fn(),
+  onVideoSpanCommit: vi.fn(),
   onAddVideo: vi.fn(),
   canAddText: false,
   onAddText: vi.fn(),
@@ -594,7 +607,7 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     renderTimeline();
     const enabled = videoClip(1);
     const off = videoClip(2);
-    // Not resizable means the width is the whole clip and there is no handle.
+    // A full-span row still occupies the whole duration; its edge controls may trim it.
     expect(enabled.style.width).toBe("168px");
     expect(off.style.width).toBe("168px");
     expect(off.className).toContain("opacity-40");
@@ -622,20 +635,214 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     expect(clip.style.width).toBe("84px");
   });
 
-  test("dragging a video clip horizontally changes nothing (§7: no span to write)", () => {
+  test("dragging a video clip commits the shifted span once, on release", () => {
+    const onVideoSpanCommit = vi.fn();
+    const onSelectLayer = vi.fn();
     const onMoveBeat = vi.fn();
     const onMoveLayer = vi.fn();
     const onScrubLive = vi.fn();
     const onScrubCommit = vi.fn();
-    renderTimeline({ onMoveBeat, onMoveLayer, onScrubLive, onScrubCommit });
-    const clip = videoClip(1);
+    renderTimeline({
+      videoRows: [halfRow],
+      onVideoSpanCommit,
+      onSelectLayer,
+      onMoveBeat,
+      onMoveLayer,
+      onScrubLive,
+      onScrubCommit,
+    });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 1.5, 4.5),
+    });
     fireEvent.pointerDown(clip, { clientX: 0 });
-    fireEvent.pointerMove(clip, { clientX: 200 });
-    fireEvent.pointerUp(clip);
-    expect(onMoveBeat).not.toHaveBeenCalled();
-    expect(onMoveLayer).not.toHaveBeenCalled();
+    fireEvent.pointerMove(clip, { clientX: 28 });
+    // §8's preview-cost rule: nothing follows the finger but the view.
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    fireEvent.pointerUp(clip, { clientX: 28 });
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith(
+      "video",
+      0.25 + 1 / DURATION,
+      Math.min(1, 0.25 + 1 / DURATION + 0.5),
+    );
     expect(onScrubLive).not.toHaveBeenCalled();
     expect(onScrubCommit).not.toHaveBeenCalled();
+    expect(onMoveBeat).not.toHaveBeenCalled();
+    expect(onMoveLayer).not.toHaveBeenCalled();
+    expect(onSelectLayer).not.toHaveBeenCalled();
+  });
+
+  test("a drag that returns to its origin is a click: it selects and commits nothing", () => {
+    const onVideoSpanCommit = vi.fn();
+    const onSelectLayer = vi.fn();
+    const originRow: SequenceTimelineProps["videoRows"][number] = {
+      ...halfRow,
+      // 0.3 + (0.9 - 0.3) is 0.9000000000000001: rebuilding the pair by value
+      // would treat this plain click as a move, so a value-equal ulp-shifted
+      // span is a failed test.
+      startT: 0.3,
+      endT: 0.9,
+    };
+    renderTimeline({ videoRows: [originRow], onVideoSpanCommit, onSelectLayer });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 1.8, 5.4),
+    });
+    fireEvent.pointerDown(clip, { clientX: 0 });
+    fireEvent.pointerMove(clip, { clientX: 28 });
+    fireEvent.pointerMove(clip, { clientX: 0 });
+    fireEvent.pointerUp(clip, { clientX: 0 });
+    fireEvent.click(clip);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    expect(onSelectLayer).toHaveBeenCalledWith("video");
+  });
+
+  test("a drag past either end clamps to the nearest legal position", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 1.5, 4.5),
+    });
+    // Far right: start clamps to 1 - length (0.5).
+    fireEvent.pointerDown(clip, { clientX: 0 });
+    fireEvent.pointerMove(clip, { clientX: 84 });
+    fireEvent.pointerUp(clip, { clientX: 84 });
+    expect(onVideoSpanCommit).toHaveBeenLastCalledWith("video", 0.5, 1);
+
+    onVideoSpanCommit.mockClear();
+    // Far left: start clamps to 0.
+    fireEvent.pointerDown(clip, { clientX: 56 });
+    fireEvent.pointerMove(clip, { clientX: 0 });
+    fireEvent.pointerUp(clip, { clientX: 0 });
+    expect(onVideoSpanCommit).toHaveBeenLastCalledWith("video", 0, 0.5);
+  });
+
+  test("a pointercancel clears the drag and commits nothing", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 1.5, 4.5),
+    });
+    fireEvent.pointerDown(clip, { clientX: 0 });
+    fireEvent.pointerMove(clip, { clientX: 28 });
+    fireEvent.pointerCancel(clip);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("stray pointer events with no drag in flight commit nothing", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 1.5, 4.5),
+    });
+    fireEvent.pointerMove(clip, { clientX: 84 });
+    fireEvent.pointerUp(clip, { clientX: 84 });
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("a drag's trailing click is not a selection", () => {
+    const onSelectLayer = vi.fn();
+    renderTimeline({ videoRows: [halfRow], onSelectLayer });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 1.5, 4.5),
+    });
+    fireEvent.pointerDown(clip, { clientX: 0 });
+    fireEvent.pointerMove(clip, { clientX: 28 });
+    fireEvent.pointerUp(clip, { clientX: 28 });
+    fireEvent.click(clip);
+    expect(onSelectLayer).not.toHaveBeenCalled();
+  });
+
+  test("the arrow keys nudge the clip one step per press, clamping at the edges", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 1.5, 4.5),
+    });
+    fireEvent.keyDown(clip, { key: "ArrowRight" });
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith(
+      "video",
+      0.25 + 1 / DURATION,
+      0.25 + 1 / DURATION + 0.5,
+    );
+
+    onVideoSpanCommit.mockClear();
+    fireEvent.keyDown(clip, { key: "ArrowLeft" });
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith(
+      "video",
+      0.25 - 1 / DURATION,
+      0.25 - 1 / DURATION + 0.5,
+    );
+
+    // A full-span row at the left edge: the clamp returns the origin → no commit.
+    onVideoSpanCommit.mockClear();
+    renderTimeline({ onVideoSpanCommit });
+    fireEvent.keyDown(videoClip(1), { key: "ArrowLeft" });
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("auto-repeat is not a run of commits; a non-arrow key is left alone", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 1.5, 4.5),
+    });
+    fireEvent.keyDown(clip, { key: "ArrowRight", repeat: true });
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    // Not an arrow: not prevented, and no commit.
+    expect(fireEvent.keyDown(clip, { key: "Enter" })).toBe(true);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("ArrowRight on a zero-duration timeline commits nothing", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderTimeline({ durationSec: 0, onVideoSpanCommit });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 0, 0),
+    });
+    fireEvent.keyDown(clip, { key: "ArrowRight" });
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("the end slider paints on change and commits once on pointerup and keyup", () => {
+    const onVideoSpanCommit = vi.fn();
+    const onScrubLive = vi.fn();
+    renderTimeline({ onVideoSpanCommit, onScrubLive });
+    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+    fireEvent.change(end, { target: { value: "3" } });
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    fireEvent.pointerUp(end);
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith("video", 0, 0.5);
+    expect(onScrubLive).not.toHaveBeenCalled();
+
+    onVideoSpanCommit.mockClear();
+    fireEvent.change(end, { target: { value: "4" } });
+    fireEvent.keyUp(end);
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith("video", 0, 4 / DURATION);
+  });
+
+  test("an untouched end slider commits nothing on pointerup or keyup", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
+    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+    // The displayed seconds are endT * durationSec (4.5); the untouched thumb
+    // round-trips to the same number, so the 1e-9 seconds check holds.
+    fireEvent.pointerUp(end);
+    fireEvent.keyUp(end);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("the start slider commits a moved start edge", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderTimeline({ onVideoSpanCommit });
+    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
+    fireEvent.change(start, { target: { value: "1" } });
+    fireEvent.pointerUp(start);
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith("video", 1 / DURATION, 1);
   });
 
   test("hide calls onSetLayerEnabled, and a disabled row still offers enable", () => {
@@ -667,12 +874,72 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     expect(screen.queryByRole("button", { name: messages.sequenceHideVideoTrack(1) })).toBeNull();
   });
 
-  test("a row without a layer pick is a plain box, not a tab stop", () => {
+  test("a row without a layer pick is a focusable group, not a button", () => {
     renderTimeline({ onSelectLayer: undefined, selectedLayerId: undefined });
     expect(
       screen.queryByRole("button", { name: messages.sequenceVideoClip(1, 0, DURATION) }),
     ).toBeNull();
-    expect(document.querySelector('[data-sequence-clip="video"]')).toBeTruthy();
+    const clip = document.querySelector('[data-sequence-clip="video"]');
+    expect(clip).toBeTruthy();
+    // Keyboard-focusable (VT2b) with the same accessible name the button host carries.
+    expect(clip!.getAttribute("role")).toBe("group");
+    expect(clip!.getAttribute("tabindex")).toBe("0");
+    expect(clip!.getAttribute("aria-label")).toBe(messages.sequenceVideoClip(1, 0, DURATION));
+    // A click here must not bubble to the scrollport's canvas scrub.
+    const onScrubCommit = vi.fn();
+    renderTimeline({
+      onSelectLayer: undefined,
+      selectedLayerId: undefined,
+      onScrubCommit,
+    });
+    fireEvent.click(document.querySelector('[data-sequence-clip="video"]')!);
+    expect(onScrubCommit).not.toHaveBeenCalled();
+  });
+
+  test("the plain-div clip drags, commits once, and its click never scrubs", () => {
+    const onVideoSpanCommit = vi.fn();
+    const onScrubLive = vi.fn();
+    const onScrubCommit = vi.fn();
+    renderTimeline({
+      onSelectLayer: undefined,
+      selectedLayerId: undefined,
+      videoRows: [halfRow],
+      onVideoSpanCommit,
+      onScrubLive,
+      onScrubCommit,
+    });
+    const clip = document.querySelector('[data-sequence-clip="video"]') as HTMLElement;
+    fireEvent.pointerDown(clip, { clientX: 0 });
+    fireEvent.pointerMove(clip, { clientX: 28 });
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    fireEvent.pointerUp(clip, { clientX: 28 });
+    fireEvent.click(clip, { clientX: 28 });
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith(
+      "video",
+      0.25 + 1 / DURATION,
+      Math.min(1, 0.25 + 1 / DURATION + 0.5),
+    );
+    expect(onScrubLive).not.toHaveBeenCalled();
+    expect(onScrubCommit).not.toHaveBeenCalled();
+  });
+
+  test("the plain-div clip receives the arrow-key nudge", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderTimeline({
+      onSelectLayer: undefined,
+      selectedLayerId: undefined,
+      videoRows: [halfRow],
+      onVideoSpanCommit,
+    });
+    const clip = document.querySelector('[data-sequence-clip="video"]') as HTMLElement;
+    fireEvent.keyDown(clip, { key: "ArrowRight" });
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith(
+      "video",
+      0.25 + 1 / DURATION,
+      0.25 + 1 / DURATION + 0.5,
+    );
   });
 
   test("reorder in the header is stack order, via the row's own layer index", () => {
@@ -730,8 +997,11 @@ describe("the music bed (VT-D5) and the note (§10 question 2)", () => {
     expect(
       screen.getByText(messages.tapeAudioSpan(DURATION, encodedDurationSec(DURATION, MOTION_FPS))),
     ).toBeTruthy();
-    // The note that says the clip cannot be trimmed.
+    // The updated note says only the MUSIC BED cannot be trimmed (VT2b).
     expect(screen.getByText(messages.sequenceFullSpanNote)).toBeTruthy();
+    // The audio lane gains no trim control — no input inside the lane itself
+    // (the playhead range lives in TapeTransport, not here).
+    expect(document.querySelector("[data-tape-audio-span]")?.querySelector("input")).toBeNull();
   });
 
   test("no bed, no row — an empty waveform would imply one the brief does not carry", () => {
