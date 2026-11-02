@@ -364,6 +364,76 @@ async function collectExistingRenders(
   return { counts, entries, outOfScope };
 }
 
+/** Run `apply` expecting failure with partial existing-renders and summary entries. */
+async function expectPartialPlannedApply(
+  env: Env,
+  t: { root: string; output: string },
+  slug: string,
+  label: string,
+): Promise<{
+  entry: Record<string, unknown>;
+  summary: Record<string, unknown>;
+  lines: Record<string, unknown>[];
+}> {
+  const result = freshResult(label);
+  try {
+    const plan = await runPlan(env, t.root, t.output);
+    const { code, err } = await runPlannedApply(env, t.root, t.output, plan, result);
+    expect(code).toBe(1);
+    expect(err).toEqual([]);
+    const lines = readResultLines(result);
+    const entry = lines.find(
+      (line) => line.kind === "existing-renders" && line.slug === slug,
+    ) as Record<string, unknown>;
+    expect(entry.partial).toBe(true);
+    const summary = lines.find((line) => line.kind === "summary") as Record<string, unknown>;
+    expect(summary.partial).toBe(true);
+    const latest = await latestRows(env);
+    expect(latest.find((row) => row.slug === slug)?.version).toBe(2);
+    return { entry, summary, lines };
+  } finally {
+    rmSync(result, { force: true });
+  }
+}
+
+/** Assert that a single proof render for `slug` is classified out-of-scope. */
+async function expectSingleOutOfScopeProof(
+  env: Env,
+  t: { root: string; output: string },
+  slug: string,
+): Promise<void> {
+  const path = `${slug}/proof.png`;
+  writeAt(t.output, path, PNG);
+  await seedReport(env, slug, [path]);
+  const { counts, entries, outOfScope } = await collectExistingRenders(env, t);
+  expect(counts.outOfScope).toBe(1);
+  expect(entries).toHaveLength(0);
+  expect(outOfScope).toHaveLength(1);
+  expect(outOfScope[0]).toMatchObject({
+    slug,
+    path,
+  });
+}
+
+/** Assert that a single render for `slug` is refused with `reasonSubstring`. */
+async function expectSingleRefusedRender(
+  env: Env,
+  t: { root: string },
+  slug: string,
+  reasonSubstring: string,
+): Promise<void> {
+  const { counts, entries } = await collectExistingRenders(env, t, [slug]);
+  expect(counts.partial).toBe(true);
+  expect(entries).toHaveLength(1);
+  expect(entries[0]!.slug).toBe(slug);
+  expect(entries[0]!.renders).toHaveLength(1);
+  const render = entries[0]!.renders[0]!;
+  expect(render.status).toBe("refused");
+  if (render.status === "refused") {
+    expect(render.reason).toContain(reasonSubstring);
+  }
+}
+
 describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation", () => {
   let env: Env;
   let root: string | undefined;
@@ -1139,27 +1209,10 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     const slug = "missing-r";
     await seedClassPWithLogo(t.root, slug);
     await seedReport(env, slug, [`${slug}/missing.png`]);
-    const result = freshResult("partial-missing");
-    try {
-      const plan = await runPlan(env, t.root, t.output);
-      const { code, err } = await runPlannedApply(env, t.root, t.output, plan, result);
-      expect(code).toBe(1);
-      expect(err).toEqual([]);
-      const lines = readResultLines(result);
-      const entry = lines.find(
-        (line) => line.kind === "existing-renders" && line.slug === slug,
-      ) as Record<string, unknown>;
-      expect(entry.partial).toBe(true);
-      const renders = entry.renders as Record<string, unknown>[];
-      expect(renders).toHaveLength(1);
-      expect(renders[0]!.status).toBe("missing");
-      const summary = lines.find((line) => line.kind === "summary") as Record<string, unknown>;
-      expect(summary.partial).toBe(true);
-      const latest = await latestRows(env);
-      expect(latest.find((row) => row.slug === slug)?.version).toBe(2);
-    } finally {
-      rmSync(result, { force: true });
-    }
+    const { entry } = await expectPartialPlannedApply(env, t, slug, "partial-missing");
+    const renders = entry.renders as Record<string, unknown>[];
+    expect(renders).toHaveLength(1);
+    expect(renders[0]!.status).toBe("missing");
   });
 
   test("readOutputRender refuses symlinks and paths escaping outputRoot", async () => {
@@ -1220,71 +1273,64 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     }
   });
 
-  test("in-scope existing campaign with an unparseable stored report body records a stepError, marks the entry partial and exits 1", async () => {
+  test("an out-of-scope report naming a directory and one naming a symlink, with no stored object: neither is listed", async () => {
     const t = tree();
     root = t.root;
-    const slug = "bad-json-r";
-    await seedClassPWithLogo(t.root, slug);
-    await env.db.query(
-      "insert into report (org_id, campaign_id, body, revision) values ('local', $1, $2, $3)",
-      [slug, "this is not json {", "r-bad"],
-    );
-    const result = freshResult("bad-json-report");
-    try {
-      const plan = await runPlan(env, t.root, t.output);
-      const { code, err } = await runPlannedApply(env, t.root, t.output, plan, result);
-      expect(code).toBe(1);
-      expect(err).toEqual([]);
-      const lines = readResultLines(result);
-      const entry = lines.find(
-        (line) => line.kind === "existing-renders" && line.slug === slug,
-      ) as Record<string, unknown>;
-      expect(entry.partial).toBe(true);
-      expect(entry.scope).toBe("normalised");
-      expect(entry.renders).toEqual([]);
-      expect(entry.minted).toEqual([]);
-      expect(entry.stepError).toMatch(/^the stored report body for bad-json-r is not JSON/);
-      const summary = lines.find((line) => line.kind === "summary") as Record<string, unknown>;
-      expect(summary.partial).toBe(true);
-      const latest = await latestRows(env);
-      expect(latest.find((row) => row.slug === slug)?.version).toBe(2);
-    } finally {
-      rmSync(result, { force: true });
-    }
+    const dirSlug = "oos-dir";
+    await seedDatedCampaign(env, dirSlug, "2026-10-02T00:00:00Z");
+    mkdirSync(join(t.output, dirSlug, "folder.png"), { recursive: true });
+    await seedReport(env, dirSlug, [`${dirSlug}/folder.png`]);
+
+    const symSlug = "oos-sym";
+    await seedDatedCampaign(env, symSlug, "2026-10-02T00:00:00Z");
+    writeAt(t.output, `${symSlug}/target.png`, PNG);
+    linkAt(t.output, `${symSlug}/sym.png`, join(t.output, `${symSlug}/target.png`));
+    await seedReport(env, symSlug, [`${symSlug}/sym.png`]);
+
+    const { counts, entries, outOfScope } = await collectExistingRenders(env, t);
+    expect(counts.outOfScope).toBe(0);
+    expect(entries).toHaveLength(0);
+    expect(outOfScope).toHaveLength(0);
   });
 
-  test("in-scope existing campaign with a non-object JSON stored report body records a stepError, marks the entry partial and exits 1", async () => {
-    const t = tree();
-    root = t.root;
-    const slug = "non-obj-r";
-    await seedClassPWithLogo(t.root, slug);
-    await env.db.query(
-      "insert into report (org_id, campaign_id, body, revision) values ('local', $1, $2, $3)",
-      [slug, JSON.stringify(["not", "an", "object"]), "r-arr"],
-    );
-    const result = freshResult("non-obj-report");
-    try {
-      const plan = await runPlan(env, t.root, t.output);
-      const { code, err } = await runPlannedApply(env, t.root, t.output, plan, result);
-      expect(code).toBe(1);
-      expect(err).toEqual([]);
-      const lines = readResultLines(result);
-      const entry = lines.find(
-        (line) => line.kind === "existing-renders" && line.slug === slug,
-      ) as Record<string, unknown>;
-      expect(entry.partial).toBe(true);
+  test.each([
+    {
+      desc: "an unparseable stored report body",
+      label: "bad-json-report",
+      slug: "bad-json-r",
+      body: "this is not json {",
+      revision: "r-bad",
+      stepError: /^the stored report body for bad-json-r is not JSON/,
+    },
+    {
+      desc: "a non-object JSON stored report body",
+      label: "non-obj-report",
+      slug: "non-obj-r",
+      body: JSON.stringify(["not", "an", "object"]),
+      revision: "r-arr",
+      stepError: "the stored report body for non-obj-r is not a JSON object",
+    },
+  ])(
+    "in-scope existing campaign with $desc records a stepError, marks the entry partial and exits 1",
+    async ({ label, slug, body, revision, stepError }) => {
+      const t = tree();
+      root = t.root;
+      await seedClassPWithLogo(t.root, slug);
+      await env.db.query(
+        "insert into report (org_id, campaign_id, body, revision) values ('local', $1, $2, $3)",
+        [slug, body, revision],
+      );
+      const { entry } = await expectPartialPlannedApply(env, t, slug, label);
       expect(entry.scope).toBe("normalised");
       expect(entry.renders).toEqual([]);
       expect(entry.minted).toEqual([]);
-      expect(entry.stepError).toBe(`the stored report body for ${slug} is not a JSON object`);
-      const summary = lines.find((line) => line.kind === "summary") as Record<string, unknown>;
-      expect(summary.partial).toBe(true);
-      const latest = await latestRows(env);
-      expect(latest.find((row) => row.slug === slug)?.version).toBe(2);
-    } finally {
-      rmSync(result, { force: true });
-    }
-  });
+      if (typeof stepError === "string") {
+        expect(entry.stepError).toBe(stepError);
+      } else {
+        expect(entry.stepError).toMatch(stepError);
+      }
+    },
+  );
 
   test("applyExistingRenders records a stepError for null and primitive JSON report bodies", async () => {
     const t = tree();
@@ -1325,22 +1371,14 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     root = t.root;
     const slug = "malformed-brief";
     await briefs().createCampaign(slug);
+    await setCreatedAt(env, slug, "2026-09-30T23:59:00Z");
     await env.db.query(
       "insert into brief_version (campaign_id, version, actor, body, revision) " +
         "select id, 1, 'user-1', 'not valid json {', 'r-malformed' from campaign " +
         "where org_id = 'local' and slug = $1",
       [slug],
     );
-    writeAt(t.output, `${slug}/proof.png`, PNG);
-    await seedReport(env, slug, [`${slug}/proof.png`]);
-    const { counts, entries, outOfScope } = await collectExistingRenders(env, t);
-    expect(counts.outOfScope).toBe(1);
-    expect(entries).toHaveLength(0);
-    expect(outOfScope).toHaveLength(1);
-    expect(outOfScope[0]).toMatchObject({
-      slug,
-      path: `${slug}/proof.png`,
-    });
+    await expectSingleOutOfScopeProof(env, t, slug);
   });
 
   test("readOutputRender and hasRenderSourceOnDisk safely reject escaping paths", async () => {
@@ -1365,16 +1403,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     root = t.root;
     const slug = "no-brief-camp";
     await briefs().createCampaign(slug);
-    writeAt(t.output, `${slug}/proof.png`, PNG);
-    await seedReport(env, slug, [`${slug}/proof.png`]);
-    const { counts, entries, outOfScope } = await collectExistingRenders(env, t);
-    expect(counts.outOfScope).toBe(1);
-    expect(entries).toHaveLength(0);
-    expect(outOfScope).toHaveLength(1);
-    expect(outOfScope[0]).toMatchObject({
-      slug,
-      path: `${slug}/proof.png`,
-    });
+    await expectSingleOutOfScopeProof(env, t, slug);
   });
 
   test("empty report paths for scoped and out-of-scope campaigns", async () => {
@@ -1444,17 +1473,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     symlinkSync(realDir, join(t.output, slug, "symdir"));
 
     await seedReport(env, slug, [`${slug}/symdir/render.png`]);
-
-    const { counts, entries } = await collectExistingRenders(env, t, [slug]);
-    expect(counts.partial).toBe(true);
-    expect(entries).toHaveLength(1);
-    expect(entries[0]!.slug).toBe(slug);
-    expect(entries[0]!.renders).toHaveLength(1);
-    const render = entries[0]!.renders[0]!;
-    expect(render.status).toBe("refused");
-    if (render.status === "refused") {
-      expect(render.reason).toContain("symlink");
-    }
+    await expectSingleRefusedRender(env, t, slug, "symlink");
   });
 
   test("stampOutputRender refuses a directory at the report's path", async () => {
@@ -1466,17 +1485,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     mkdirSync(join(t.output, slug, "folder.png"), { recursive: true });
 
     await seedReport(env, slug, [`${slug}/folder.png`]);
-
-    const { counts, entries } = await collectExistingRenders(env, t, [slug]);
-    expect(counts.partial).toBe(true);
-    expect(entries).toHaveLength(1);
-    expect(entries[0]!.slug).toBe(slug);
-    expect(entries[0]!.renders).toHaveLength(1);
-    const render = entries[0]!.renders[0]!;
-    expect(render.status).toBe("refused");
-    if (render.status === "refused") {
-      expect(render.reason).toContain("is not a regular file");
-    }
+    await expectSingleRefusedRender(env, t, slug, "is not a regular file");
   });
 
   test("campaign with version > 1 and import actor but non-zero path refs is classified out-of-scope", async () => {
@@ -1484,6 +1493,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     root = t.root;
     const slug = "imp-actor-with-refs";
     await briefs().createCampaign(slug);
+    await setCreatedAt(env, slug, "2026-09-30T23:59:00Z");
     const logo = campLogo(slug);
     writeAt(t.root, logo, PNG);
     const briefWithRef = briefBody({ id: slug, products: [product(logo)] });
@@ -1493,14 +1503,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
         "where org_id = 'local' and slug = $2",
       [JSON.stringify(briefWithRef), slug],
     );
-    writeAt(t.output, `${slug}/proof.png`, PNG);
-    await seedReport(env, slug, [`${slug}/proof.png`]);
-
-    const { counts, entries, outOfScope } = await collectExistingRenders(env, t);
-    expect(counts.outOfScope).toBe(1);
-    expect(entries).toHaveLength(0);
-    expect(outOfScope).toHaveLength(1);
-    expect(outOfScope[0]!.slug).toBe(slug);
+    await expectSingleOutOfScopeProof(env, t, slug);
   });
 
   test("applyExistingRenders defaults objects store when undefined", async () => {

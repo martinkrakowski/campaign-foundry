@@ -402,8 +402,8 @@ async function hasRenderSourceOnDisk(outputRoot: string, path: string): Promise<
     return false;
   }
   try {
-    await lstat(file);
-    return true;
+    const st = await lstat(file);
+    return st.isFile();
   } catch {
     return false;
   }
