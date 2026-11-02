@@ -883,6 +883,22 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     expect(onVideoSpanCommit).not.toHaveBeenCalled();
   });
 
+  test("with { startT: 1 / 6, endT: 1 }: a rightward nudge commits nothing", () => {
+    const endingAtOneRow: SequenceTimelineProps["videoRows"][number] = {
+      ...halfRow,
+      startT: 1 / 6,
+      endT: 1,
+    };
+    const { onVideoSpanCommit } = setupTimeline({
+      videoRows: [endingAtOneRow],
+    });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 1, 6),
+    });
+    fireEvent.keyDown(clip, { key: "ArrowRight" });
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
   test("auto-repeat is not a run of commits; a non-arrow key is left alone", () => {
     const { onVideoSpanCommit, clip } = setupHalfRow();
     fireEvent.keyDown(clip, { key: "ArrowRight", repeat: true });

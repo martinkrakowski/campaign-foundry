@@ -231,7 +231,7 @@ function slidSpan(origin: VideoSpan, deltaT: number): VideoSpan {
   let startT = origin.startT + deltaT;
   if (startT < 0) startT = 0;
   if (startT > 1 - length) startT = 1 - length;
-  if (startT === origin.startT) return origin;
+  if (Math.abs(startT - origin.startT) < 1e-9) return origin;
   return { startT, endT: Math.min(1, startT + length) };
 }
 
