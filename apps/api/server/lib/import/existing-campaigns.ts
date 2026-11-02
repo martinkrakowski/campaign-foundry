@@ -261,6 +261,7 @@ export interface ExistingCampaignsPlan {
 export async function planExistingCampaigns(
   db: SqlQuery,
   ctx: StepContext,
+  excludeSlugs?: ReadonlySet<string>,
 ): Promise<ExistingCampaignsPlan> {
   const campaigns: ExistingCampaignPlan[] = [];
   let normalise = 0;
@@ -269,6 +270,7 @@ export async function planExistingCampaigns(
   const digested: DigestedCampaign[] = [];
   const drafts = await draftCounts(db, ctx.orgId);
   for (const row of await latestBodies(db, ctx.orgId)) {
+    if (excludeSlugs?.has(row.slug)) continue;
     const found = classifyExisting(ctx, row);
     if (found === undefined) continue;
     const { slug, revision } = found;

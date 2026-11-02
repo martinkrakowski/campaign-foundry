@@ -36,14 +36,24 @@ import {
   planProbes,
   replan,
   ResultWriter,
+  type ApplyCounts,
   type CampaignEntry,
   type PlanProbe,
+  type ReplanResult,
 } from "../server/lib/import/apply.js";
+import {
+  applyExistingNormalise,
+  checkExistingDigest,
+  replanExisting,
+  type ExistingReplan,
+} from "../server/lib/import/existing-apply.js";
+import type { NormaliseResult } from "../server/lib/import/normalise-step.js";
+import type { StepContext } from "../server/lib/import/steps.js";
 import { IMPORT_STEPS } from "../server/lib/import/steps.js";
 import { planRenderProbes } from "../server/lib/import/renders-plan.js";
 import { renderFingerprints } from "../server/lib/import/render-file.js";
 import type { RenderContext } from "../server/lib/import/renders-step.js";
-import { scanBriefs } from "../server/lib/import/scan.js";
+import { scanBriefs, type ScanResult } from "../server/lib/import/scan.js";
 import { assemblePlan, unreferencedInputsPlan } from "../server/lib/import/plan.js";
 import { assembleCensus } from "../server/lib/import/census.js";
 import { digestSourceFiles, planDigest } from "../server/lib/import/digest.js";
@@ -80,7 +90,7 @@ export const USAGE =
  */
 export const APPLY_USAGE =
   "usage: yarn import apply --switched-at <iso> --project-root <dir> --output-root <dir>" +
-  " --org <id> --expect <digest> --result <path> [--include-samples]" +
+  " --org <id> --expect <digest> [--expect-existing <digest>] --result <path> [--include-samples]" +
   "\nexit codes:\n" +
   "  0  nothing was refused and nothing is partial\n" +
   "  1  at least one campaign is partial (a write of it failed, or one of its report, pool or decision rows was refused, or one of its renders is missing, was refused or failed), or the run itself failed, or the run wrote something and refused at least one campaign\n" +
@@ -115,6 +125,7 @@ function resultWriteError(resultPath: string | undefined, error: unknown): Error
 type ParsedFlags = SourceFlags & {
   readonly out?: string;
   readonly expect?: string;
+  readonly expectExisting?: string;
   readonly result?: string;
 };
 
@@ -123,43 +134,52 @@ export interface ImportIO {
   readonly stderr: (line: string) => void;
 }
 
-/** The flags each subcommand owns; anything else is refused (PT-8f3). */
-const SUBCOMMAND_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
-  plan: new Set(["--out"]),
-  apply: new Set(["--expect", "--result"]),
-  verify: new Set(["--out", "--expect"]),
+type MutableFlags = {
+  projectRoot?: string;
+  outputRoot?: string;
+  org?: string;
+  switchedAt?: string;
+  out?: string;
+  expect?: string;
+  expectExisting?: string;
+  result?: string;
+  includeSamples: boolean;
 };
 
-/** The flags `plan`, `apply` and `verify` parse, before `resolveSource` trusts them. */
-type FlagState = {
-  readonly projectRoot?: string;
-  readonly outputRoot?: string;
-  readonly org?: string;
-  readonly switchedAt?: string;
-  readonly out?: string;
-  readonly expect?: string;
-  readonly result?: string;
-  readonly includeSamples: boolean;
+const COMMON_VALUE_FLAGS: Readonly<Record<string, keyof MutableFlags>> = {
+  "--project-root": "projectRoot",
+  "--output-root": "outputRoot",
+  "--org": "org",
+  "--switched-at": "switchedAt",
 };
 
-/** Assign one owned flag to the flag state; an unowned flag refuses the run. */
-function assignFlag(
+const SUBCOMMAND_VALUE_FLAGS: Readonly<
+  Record<string, { readonly cmd: readonly string[]; readonly key: keyof MutableFlags }>
+> = {
+  "--out": { cmd: ["plan", "verify"], key: "out" },
+  "--expect": { cmd: ["apply", "verify"], key: "expect" },
+  "--expect-existing": { cmd: ["apply"], key: "expectExisting" },
+  "--result": { cmd: ["apply"], key: "result" },
+};
+
+function applyValueFlag(
   subcommand: string,
-  flags: FlagState,
+  flags: MutableFlags,
   flag: string,
   value: string,
-): FlagState | string {
-  if (!SUBCOMMAND_FLAGS[subcommand]!.has(flag)) {
+): MutableFlags | string {
+  const common = COMMON_VALUE_FLAGS[flag];
+  if (common !== undefined) return { ...flags, [common]: value };
+  const specific = SUBCOMMAND_VALUE_FLAGS[flag];
+  if (specific === undefined || !specific.cmd.includes(subcommand)) {
     return `${flag} is not a flag this command takes.`;
   }
-  if (flag === "--out") return { ...flags, out: value };
-  if (flag === "--expect") return { ...flags, expect: value };
-  return { ...flags, result: value };
+  return { ...flags, [specific.key]: value };
 }
 
 /** argv's flags, as {@link resolveSource} takes them. An unknown flag refuses the run. */
 function parseFlags(subcommand: string, argv: readonly string[]): ParsedFlags | string {
-  let flags: FlagState = { includeSamples: false };
+  let flags: MutableFlags = { includeSamples: false };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]!;
     if (flag === "--include-samples") {
@@ -171,15 +191,9 @@ function parseFlags(subcommand: string, argv: readonly string[]): ParsedFlags | 
     // `--switched-at` and then report the timestamp as an unknown flag (CodeRabbit on #681).
     if (value === undefined || value.startsWith("--")) return `${flag} needs a value.`;
     i++;
-    if (flag === "--project-root") flags = { ...flags, projectRoot: value };
-    else if (flag === "--output-root") flags = { ...flags, outputRoot: value };
-    else if (flag === "--org") flags = { ...flags, org: value };
-    else if (flag === "--switched-at") flags = { ...flags, switchedAt: value };
-    else {
-      const assigned = assignFlag(subcommand, flags, flag, value);
-      if (typeof assigned === "string") return assigned;
-      flags = assigned;
-    }
+    const next = applyValueFlag(subcommand, flags, flag, value);
+    if (typeof next === "string") return next;
+    flags = next;
   }
   return flags;
 }
@@ -262,7 +276,8 @@ async function plan(argv: readonly string[], io: ImportIO): Promise<number> {
         assembled.reports,
         files,
       );
-      existingCampaigns = await planExistingCampaigns(database(), ctx);
+      const sourceSlugs = sourceCampaignSlugs(result);
+      existingCampaigns = await planExistingCampaigns(database(), ctx, sourceSlugs);
     } else {
       probesSkipped = "needs STORE_BACKEND=postgres and OBJECT_STORE=s3";
     }
@@ -333,13 +348,159 @@ async function closeDatabase(io: ImportIO): Promise<void> {
 const EXPECT_REQUIRED = "apply needs --expect <digest>";
 const RESULT_REQUIRED = "apply needs --result <path>";
 
+/** Wrap one result-file write so a failure names the file and the system's code. */
+async function writeWithResultGuard(
+  resultPath: string,
+  action: () => Promise<void>,
+): Promise<void> {
+  try {
+    await action();
+  } catch (error) {
+    throw resultWriteError(resultPath, error);
+  }
+}
+
+/** Print any assets minted for a campaign (imported or class-(P) normalised). */
+function printMintedAssets(
+  io: ImportIO,
+  campaignId: string | undefined,
+  assets: readonly { readonly id: string; readonly name: string; readonly key: string }[],
+): void {
+  if (assets.length > 0) {
+    io.stdout(`  minted: campaign ${campaignId}, ${assets.length} asset(s)`);
+    for (const asset of assets) {
+      io.stdout(`    asset ${asset.id} ${asset.name} ${asset.key}`);
+    }
+  }
+}
+
+/** Print one class-(P) normalisation entry on stdout (PT-8e3). */
+function printNormaliseEntry(io: ImportIO, entry: NormaliseResult): void {
+  const why = entry.reason ? `: ${entry.reason}` : "";
+  io.stdout(`${entry.slug}: existing ${entry.status}${why}`);
+  printMintedAssets(io, entry.campaignId, entry.minted.assets);
+  for (const skipped of entry.notImported) {
+    io.stdout(`  input ${skipped.name}: not imported: ${skipped.reason}`);
+  }
+}
+
+interface ValidatedApply {
+  readonly ctx: StepContext;
+  readonly switchedAtIso: string;
+}
+
+/** The run-level refusals that must all pass before `apply` writes anything. */
+async function validateApplyPreconditions(flags: ParsedFlags): Promise<ValidatedApply | string> {
+  if (flags.expect === undefined) return EXPECT_REQUIRED;
+  if (flags.result === undefined) return RESULT_REQUIRED;
+  const guard = applyGuards();
+  if (guard !== undefined) return guard;
+  const outcome = await resolveSource(flags);
+  if (!outcome.ok) return outcome.reason;
+  const { ctx, switchedAtIso } = outcome.source;
+  const pathProblem = await checkResultPath(flags.result, ctx);
+  if (pathProblem !== undefined) return pathProblem;
+  return { ctx, switchedAtIso };
+}
+
+/** Run the apply body after the guard rails have passed: campaigns, then class-(P) normalisation. */
+async function runApplyBody(
+  writer: ResultWriter,
+  resultPath: string,
+  io: ImportIO,
+  ctx: StepContext,
+  replanned: ReplanResult,
+  existingReplanned: ExistingReplan,
+): Promise<number> {
+  const hashedCtx: RenderContext = {
+    ...ctx,
+    expectedHashes: replanned.expectedHashes,
+    renderFingerprints: renderFingerprints(replanned.files),
+  };
+  await writer.header();
+  for (const refusal of replanned.result.refusals) {
+    const slug = refusal.slug ?? refusal.sourcePath;
+    io.stdout(`${slug}: refused: ${refusal.reason}`);
+    await writeWithResultGuard(resultPath, () =>
+      writer.add({
+        slug,
+        outcome: "refused",
+        reason: refusal.reason,
+        minted: { assets: [] },
+        unreferencedInputs: { count: 0, names: [] },
+      }),
+    );
+  }
+  const onMinted = async (
+    slug: string,
+    object: { readonly key: string; readonly path: string },
+  ) => {
+    io.stdout(`${slug}: minted render ${object.path} ${object.key}`);
+    await writeWithResultGuard(resultPath, () => writer.object(object));
+  };
+  const counts = await applyCampaigns(
+    hashedCtx,
+    replanned.result.campaigns,
+    IMPORT_STEPS,
+    async (entry: CampaignEntry) => {
+      io.stdout(`${entry.slug}: ${entry.outcome}${entry.reason ? `: ${entry.reason}` : ""}`);
+      printMintedAssets(io, entry.minted.campaignId, entry.minted.assets);
+      for (const note of entryNotes(entry)) io.stdout(note);
+      await writeWithResultGuard(resultPath, () => writer.add(entry));
+    },
+    onMinted,
+  );
+  const normCounts = await applyExistingNormalise(
+    database(),
+    ctx,
+    existingReplanned,
+    async (entry) => {
+      printNormaliseEntry(io, entry);
+      await writeWithResultGuard(resultPath, () => writer.existing(entry));
+    },
+  );
+  const refused = replanned.result.refusals.length + counts.refused + normCounts.refused;
+  const merged: ApplyCounts = {
+    ...counts,
+    refused,
+    partial: counts.partial || normCounts.partial,
+    objectsMinted: counts.objectsMinted + normCounts.assetsMinted,
+    ...(normCounts.normalised > 0 ? { normalised: normCounts.normalised } : {}),
+  };
+  await writer.summary(merged);
+  io.stdout(
+    `${counts.created} created, ${counts.completed} completed, ` +
+      `${counts.unchanged} unchanged, ${refused} refused`,
+  );
+  if (normCounts.normalised > 0) {
+    io.stdout(`${normCounts.normalised} existing campaign(s) normalised`);
+  }
+  if (!merged.partial && refused > 0) {
+    io.stdout(`${refused} campaign(s) refused; nothing of theirs was written`);
+  }
+  return exitCodeFor(merged, refused);
+}
+
+/** Slugs discovered in the import source tree (campaigns and scan refusals alike). */
+function sourceCampaignSlugs(source: ScanResult | ReplanResult): ReadonlySet<string> {
+  const result = "result" in source ? source.result : source;
+  const slugs = new Set<string>();
+  for (const campaign of result.campaigns) slugs.add(campaign.slug);
+  for (const refusal of result.refusals) {
+    if (refusal.slug) slugs.add(refusal.slug);
+  }
+  return slugs;
+}
+
 /**
  * `apply`: re-plan the source, refuse unless the re-planned digest equals
  * `--expect` (N1/D225), refuse unless the target is the postgres/s3 backend with
  * an org row (N2/D225), refuse a result path that already exists or sits under a
  * source root (N4/D229), then run each campaign through {@link IMPORT_STEPS} and
- * write the result file as it goes (D229/D221). Every refusal below runs before
- * the first write; the database is closed once in `finally`, as `plan` does.
+ * write the result file as it goes (D229/D221). Class-(P) normalisation runs
+ * behind the second digest (`--expect-existing`, D225/D228) before `--result`
+ * is opened. Every refusal below runs before the first write; the database is
+ * closed once in `finally`, as `plan` does.
  */
 async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
   if (argv.includes("--help")) {
@@ -353,35 +514,24 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
       io.stderr(flags);
       return 1;
     }
-    if (flags.expect === undefined) {
-      io.stderr(EXPECT_REQUIRED);
+    const validated = await validateApplyPreconditions(flags);
+    if (typeof validated === "string") {
+      io.stderr(validated);
       return 1;
     }
-    if (flags.result === undefined) {
-      io.stderr(RESULT_REQUIRED);
-      return 1;
-    }
-    const guard = applyGuards();
-    if (guard !== undefined) {
-      io.stderr(guard);
-      return 1;
-    }
-    const outcome = await resolveSource(flags);
-    if (!outcome.ok) {
-      io.stderr(outcome.reason);
-      return 1;
-    }
-    const { ctx, switchedAtIso } = outcome.source;
-    const pathProblem = await checkResultPath(flags.result, ctx);
-    if (pathProblem !== undefined) {
-      io.stderr(pathProblem);
-      return 1;
-    }
+    const { ctx, switchedAtIso } = validated;
     const replanned = await replan(ctx);
     if (replanned.digest !== flags.expect) {
       io.stderr(
         `--expect ${flags.expect} does not match the re-planned digest ${replanned.digest}`,
       );
+      return 1;
+    }
+    const sourceSlugs = sourceCampaignSlugs(replanned);
+    const existingReplanned = await replanExisting(database(), ctx, sourceSlugs);
+    const existingProblem = checkExistingDigest(existingReplanned, flags.expectExisting);
+    if (existingProblem !== undefined) {
+      io.stderr(existingProblem);
       return 1;
     }
     if (existsSync(flags.result!)) {
@@ -390,75 +540,7 @@ async function apply(argv: readonly string[], io: ImportIO): Promise<number> {
     }
     handle = await openResult(flags.result!);
     const writer = new ResultWriter(handle, switchedAtIso, ctx.orgId, replanned.digest);
-    // The reviewed hashes for rows and assets, and the reviewed stamp of every
-    // planned render (PT-8d): a render file is read only if it still has its stamp.
-    const hashedCtx: RenderContext = {
-      ...ctx,
-      expectedHashes: replanned.expectedHashes,
-      renderFingerprints: renderFingerprints(replanned.files),
-    };
-    const resultPath = flags.result;
-    await writer.header();
-    for (const refusal of replanned.result.refusals) {
-      const slug = refusal.slug ?? refusal.sourcePath;
-      io.stdout(`${slug}: refused: ${refusal.reason}`);
-      try {
-        await writer.add({
-          slug,
-          outcome: "refused",
-          reason: refusal.reason,
-          minted: { assets: [] },
-          unreferencedInputs: { count: 0, names: [] },
-        });
-      } catch (error) {
-        throw resultWriteError(resultPath, error);
-      }
-    }
-    const counts = await applyCampaigns(
-      hashedCtx,
-      replanned.result.campaigns,
-      IMPORT_STEPS,
-      async (entry: CampaignEntry) => {
-        io.stdout(`${entry.slug}: ${entry.outcome}${entry.reason ? `: ${entry.reason}` : ""}`);
-        if (entry.minted.assets.length > 0) {
-          io.stdout(
-            `  minted: campaign ${entry.minted.campaignId}, ${entry.minted.assets.length} asset(s)`,
-          );
-          for (const asset of entry.minted.assets) {
-            io.stdout(`    asset ${asset.id} ${asset.name} ${asset.key}`);
-          }
-        }
-        for (const note of entryNotes(entry)) io.stdout(note);
-        try {
-          await writer.add(entry);
-        } catch (error) {
-          throw resultWriteError(resultPath, error);
-        }
-      },
-      // Grok PT-8d 6 and PT-8g G1: each created render is printed, then put on
-      // the result file and synced, BEFORE the step writes the next one.
-      async (slug, object) => {
-        io.stdout(`${slug}: minted render ${object.path} ${object.key}`);
-        try {
-          await writer.object(object);
-        } catch (error) {
-          throw resultWriteError(resultPath, error);
-        }
-      },
-    );
-    // A refused CAMPAIGN is refused before any write: at the scan (it never
-    // reaches `applyCampaigns`) or by the campaign step. A refused ROW of an
-    // imported campaign is not counted here: it makes that line partial.
-    const refused = replanned.result.refusals.length + counts.refused;
-    await writer.summary({ ...counts, refused });
-    io.stdout(
-      `${counts.created} created, ${counts.completed} completed, ` +
-        `${counts.unchanged} unchanged, ${refused} refused`,
-    );
-    if (!counts.partial && refused > 0) {
-      io.stdout(`${refused} campaign(s) refused; nothing of theirs was written`);
-    }
-    return exitCodeFor(counts, refused);
+    return await runApplyBody(writer, flags.result!, io, ctx, replanned, existingReplanned);
   } catch (error) {
     io.stderr(errorMessage(error));
     return 1;
