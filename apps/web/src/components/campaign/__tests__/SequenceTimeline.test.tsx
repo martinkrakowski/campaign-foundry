@@ -711,6 +711,25 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     expect(onSelectLayer).toHaveBeenCalledWith("video");
   });
 
+  test("a plain click on a span ending at 1 commits nothing and selects the layer", () => {
+    const onVideoSpanCommit = vi.fn();
+    const onSelectLayer = vi.fn();
+    const endingAtOneRow: SequenceTimelineProps["videoRows"][number] = {
+      ...halfRow,
+      startT: 1 / 6,
+      endT: 1,
+    };
+    renderTimeline({ videoRows: [endingAtOneRow], onVideoSpanCommit, onSelectLayer });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 1, 6),
+    });
+    fireEvent.pointerDown(clip, { clientX: 28 });
+    fireEvent.pointerUp(clip, { clientX: 28 });
+    fireEvent.click(clip);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    expect(onSelectLayer).toHaveBeenCalledWith("video");
+  });
+
   test("a drag past either end clamps to the nearest legal position", () => {
     const onVideoSpanCommit = vi.fn();
     renderHalfRow({ onVideoSpanCommit });
@@ -741,7 +760,30 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     const clip = halfClip();
     fireEvent.pointerMove(clip, { clientX: 84 });
     fireEvent.pointerUp(clip, { clientX: 84 });
+    fireEvent.pointerCancel(clip);
     expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("a second pointer is ignored while a video clip drag is in flight", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderHalfRow({ onVideoSpanCommit });
+    const clip = halfClip();
+
+    fireEvent.pointerDown(clip, { pointerId: 1, clientX: 0 });
+    fireEvent.pointerDown(clip, { pointerId: 2, clientX: 100 });
+    fireEvent.pointerMove(clip, { pointerId: 2, clientX: 200 });
+    fireEvent.pointerCancel(clip, { pointerId: 2 });
+    fireEvent.pointerUp(clip, { pointerId: 2, clientX: 200 });
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+
+    fireEvent.pointerMove(clip, { pointerId: 1, clientX: 28 });
+    fireEvent.pointerUp(clip, { pointerId: 1, clientX: 28 });
+    expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
+    expect(onVideoSpanCommit).toHaveBeenCalledWith(
+      "video",
+      0.25 + 1 / DURATION,
+      Math.min(1, 0.25 + 1 / DURATION + 0.5),
+    );
   });
 
   test("a drag's trailing click is not a selection", () => {
@@ -871,6 +913,19 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     expect(onVideoSpanCommit).not.toHaveBeenCalled();
     expect(onSelectLayer).toHaveBeenCalledTimes(1);
     expect(onSelectLayer).toHaveBeenCalledWith("video");
+  });
+
+  test("an edge slider change on a zero-duration timeline commits nothing on release", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderTimeline({ durationSec: 0, onVideoSpanCommit });
+    const { start, end } = spanSliders();
+    fireEvent.change(start, { target: { value: "1" } });
+    fireEvent.pointerUp(start);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+
+    fireEvent.change(end, { target: { value: "1" } });
+    fireEvent.keyUp(end);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
   });
 
   test("the end slider paints on change and commits once on pointerup and keyup", () => {

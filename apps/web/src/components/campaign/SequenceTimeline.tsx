@@ -226,6 +226,7 @@ type VideoSpan = { readonly startT: number; readonly endT: number };
  * `0.9000000000000001`, so identity with `origin` is the test.
  */
 function slidSpan(origin: VideoSpan, deltaT: number): VideoSpan {
+  if (deltaT === 0) return origin;
   const length = origin.endT - origin.startT;
   let startT = origin.startT + deltaT;
   if (startT < 0) startT = 0;
@@ -291,6 +292,7 @@ function VideoClip({
 }>): ReactNode {
   const origin = { startT, endT };
   const [drag, setDrag] = useState<{
+    readonly pointerId: number;
     readonly originX: number;
     readonly origin: VideoSpan;
     readonly clientX: number;
@@ -301,24 +303,25 @@ function VideoClip({
   const movedRef = useRef(false);
 
   const onPointerDown = (e: React.PointerEvent<HTMLElement>) => {
+    if (dragRef.current !== null) return;
     e.currentTarget.setPointerCapture?.(e.pointerId);
     movedRef.current = false;
-    const next = { originX: e.clientX, origin, clientX: e.clientX };
+    const next = { pointerId: e.pointerId, originX: e.clientX, origin, clientX: e.clientX };
     dragRef.current = next;
     setDrag(next);
   };
   const onPointerMove = (e: React.PointerEvent<HTMLElement>) => {
     const current = dragRef.current;
-    if (current === null) return;
+    if (current === null || e.pointerId !== current.pointerId) return;
     const next = { ...current, clientX: e.clientX };
     dragRef.current = next;
     setDrag(next);
   };
   const onPointerUp = (e: React.PointerEvent<HTMLElement>) => {
     const current = dragRef.current;
+    if (current === null || e.pointerId !== current.pointerId) return;
     dragRef.current = null;
     setDrag(null);
-    if (current === null) return;
     if (durationSec <= 0) return;
     const deltaT = (e.clientX - current.originX) / pxPerSec / durationSec;
     const span = slidSpan(current.origin, deltaT);
@@ -327,7 +330,9 @@ function VideoClip({
       onVideoSpanCommit(span.startT, span.endT);
     }
   };
-  const onPointerCancel = () => {
+  const onPointerCancel = (e: React.PointerEvent<HTMLElement>) => {
+    const current = dragRef.current;
+    if (current === null || e.pointerId !== current.pointerId) return;
     dragRef.current = null;
     setDrag(null);
     movedRef.current = false;
@@ -360,6 +365,7 @@ function VideoClip({
     const seconds = inFlight.current;
     inFlight.current = null;
     if (seconds === null) return;
+    if (durationSec <= 0) return;
     const displayed = which === "start" ? startT * durationSec : endT * durationSec;
     if (Math.abs(seconds - displayed) < 1e-9) return;
     const otherT = which === "start" ? endT : startT;
