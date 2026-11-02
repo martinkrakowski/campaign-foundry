@@ -1296,8 +1296,8 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     const slug = "malformed-brief";
     await briefs().createCampaign(slug);
     await env.db.query(
-      "insert into brief_version (campaign_id, version, actor, body) " +
-        "select id, 1, 'user-1', 'not valid json {' from campaign " +
+      "insert into brief_version (campaign_id, version, actor, body, revision) " +
+        "select id, 1, 'user-1', 'not valid json {', 'r-malformed' from campaign " +
         "where org_id = 'local' and slug = $1",
       [slug],
     );
@@ -1484,8 +1484,8 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     writeAt(t.root, logo, PNG);
     const briefWithRef = briefBody({ id: slug, products: [product(logo)] });
     await env.db.query(
-      "insert into brief_version (campaign_id, version, actor, body) " +
-        "select id, 2, 'import:pt-8', $1 from campaign " +
+      "insert into brief_version (campaign_id, version, actor, body, revision) " +
+        "select id, 2, 'import:pt-8', $1, 'r-imp' from campaign " +
         "where org_id = 'local' and slug = $2",
       [JSON.stringify(briefWithRef), slug],
     );
