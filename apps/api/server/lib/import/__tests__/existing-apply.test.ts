@@ -17,6 +17,7 @@ import {
   applyExistingRenders,
   replanExisting,
   type ExistingRenderEntry,
+  type ExistingRendersCounts,
   type ExistingReplan,
   type OutOfScopeRender,
 } from "../existing-apply.js";
@@ -304,6 +305,63 @@ async function seedReport(env: Env, slug: string, paths: readonly string[]): Pro
     "insert into report (org_id, campaign_id, body, revision) values ('local', $1, $2, $3)",
     [slug, renderBody(paths), "r-render"],
   );
+}
+
+/** A live zero-ref campaign pinned to `createdAt` (defaulting to before SWITCHED_AT), optionally with a report. */
+async function seedDatedCampaign(
+  env: Env,
+  slug: string,
+  createdAt = "2026-09-30T23:59:00Z",
+  reportPaths?: readonly string[],
+): Promise<void> {
+  await seedLiveZeroRefCampaign(env, slug);
+  await setCreatedAt(env, slug, createdAt);
+  if (reportPaths !== undefined) {
+    await seedReport(env, slug, reportPaths);
+  }
+}
+
+/**
+ * Run `applyExistingRenders` with collector callbacks, returning counts, entries, and out-of-scope items.
+ */
+async function collectExistingRenders(
+  env: Env,
+  t: { root: string },
+  normalised: Iterable<string> = [],
+  noUploadOrOptions?: Iterable<string> | Parameters<typeof applyExistingRenders>[6],
+  options?: Parameters<typeof applyExistingRenders>[6],
+): Promise<{
+  counts: ExistingRendersCounts;
+  entries: ExistingRenderEntry[];
+  outOfScope: OutOfScopeRender[];
+}> {
+  const isIterable =
+    noUploadOrOptions !== undefined &&
+    typeof (noUploadOrOptions as Iterable<unknown>)[Symbol.iterator] === "function";
+  const imported = isIterable ? (noUploadOrOptions as Iterable<string>) : [];
+  const opts = isIterable
+    ? options
+    : (noUploadOrOptions as Parameters<typeof applyExistingRenders>[6]);
+  const entries: ExistingRenderEntry[] = [];
+  const outOfScope: OutOfScopeRender[] = [];
+  const counts = await applyExistingRenders(
+    env.db,
+    env.objects,
+    ctxWith(t.root),
+    new Set(imported),
+    new Set(normalised),
+    {
+      onMinted: async () => {},
+      onEntry: async (entry) => {
+        entries.push(entry);
+      },
+      onOutOfScope: async (item) => {
+        outOfScope.push(item);
+      },
+    },
+    opts,
+  );
+  return { counts, entries, outOfScope };
 }
 
 describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation", () => {
@@ -1239,21 +1297,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
         "insert into report (org_id, campaign_id, body, revision) values ('local', $1, $2, $3)",
         [slug, body, "r-sub"],
       );
-      const entries: ExistingRenderEntry[] = [];
-      const counts = await applyExistingRenders(
-        env.db,
-        env.objects,
-        ctxWith(t.root),
-        new Set(),
-        new Set([slug]),
-        {
-          onMinted: async () => {},
-          onEntry: async (entry) => {
-            entries.push(entry);
-          },
-          onOutOfScope: async () => {},
-        },
-      );
+      const { counts, entries } = await collectExistingRenders(env, t, [slug]);
       expect(counts.partial).toBe(true);
       expect(entries).toHaveLength(1);
       expect(entries[0]!.stepError).toBe(`the stored report body for ${slug} is not a JSON object`);
@@ -1265,21 +1309,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     root = t.root;
     const slug = "missing-target";
     await seedReport(env, slug, [`${slug}/proof.png`]);
-    const entries: ExistingRenderEntry[] = [];
-    const counts = await applyExistingRenders(
-      env.db,
-      env.objects,
-      ctxWith(t.root),
-      new Set(),
-      new Set([slug]),
-      {
-        onMinted: async () => {},
-        onEntry: async (entry) => {
-          entries.push(entry);
-        },
-        onOutOfScope: async () => {},
-      },
-    );
+    const { counts, entries } = await collectExistingRenders(env, t, [slug]);
     expect(counts.partial).toBe(true);
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
@@ -1303,24 +1333,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     );
     writeAt(t.output, `${slug}/proof.png`, PNG);
     await seedReport(env, slug, [`${slug}/proof.png`]);
-    const entries: ExistingRenderEntry[] = [];
-    const outOfScope: OutOfScopeRender[] = [];
-    const counts = await applyExistingRenders(
-      env.db,
-      env.objects,
-      ctxWith(t.root),
-      new Set(),
-      new Set(),
-      {
-        onMinted: async () => {},
-        onEntry: async (entry) => {
-          entries.push(entry);
-        },
-        onOutOfScope: async (item) => {
-          outOfScope.push(item);
-        },
-      },
-    );
+    const { counts, entries, outOfScope } = await collectExistingRenders(env, t);
     expect(counts.outOfScope).toBe(1);
     expect(entries).toHaveLength(0);
     expect(outOfScope).toHaveLength(1);
@@ -1334,33 +1347,12 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     const t = tree();
     root = t.root;
     const scopedSlug = "scoped-escape";
-    await seedLiveZeroRefCampaign(env, scopedSlug);
-    await setCreatedAt(env, scopedSlug, "2026-09-30T23:59:00Z");
-    await seedReport(env, scopedSlug, ["../escape-outside.png"]);
+    await seedDatedCampaign(env, scopedSlug, "2026-09-30T23:59:00Z", ["../escape-outside.png"]);
 
     const oosSlug = "oos-escape";
-    await seedLiveZeroRefCampaign(env, oosSlug);
-    await setCreatedAt(env, oosSlug, "2026-10-02T00:00:00Z");
-    await seedReport(env, oosSlug, ["../escape-oos.png"]);
+    await seedDatedCampaign(env, oosSlug, "2026-10-02T00:00:00Z", ["../escape-oos.png"]);
 
-    const entries: ExistingRenderEntry[] = [];
-    const outOfScope: OutOfScopeRender[] = [];
-    const counts = await applyExistingRenders(
-      env.db,
-      env.objects,
-      ctxWith(t.root),
-      new Set(),
-      new Set([scopedSlug]),
-      {
-        onMinted: async () => {},
-        onEntry: async (entry) => {
-          entries.push(entry);
-        },
-        onOutOfScope: async (item) => {
-          outOfScope.push(item);
-        },
-      },
-    );
+    const { counts, entries, outOfScope } = await collectExistingRenders(env, t, [scopedSlug]);
     expect(counts.partial).toBe(true);
     expect(entries).toHaveLength(1);
     expect(entries[0]!.slug).toBe(scopedSlug);
@@ -1375,24 +1367,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     await briefs().createCampaign(slug);
     writeAt(t.output, `${slug}/proof.png`, PNG);
     await seedReport(env, slug, [`${slug}/proof.png`]);
-    const entries: ExistingRenderEntry[] = [];
-    const outOfScope: OutOfScopeRender[] = [];
-    const counts = await applyExistingRenders(
-      env.db,
-      env.objects,
-      ctxWith(t.root),
-      new Set(),
-      new Set(),
-      {
-        onMinted: async () => {},
-        onEntry: async (entry) => {
-          entries.push(entry);
-        },
-        onOutOfScope: async (item) => {
-          outOfScope.push(item);
-        },
-      },
-    );
+    const { counts, entries, outOfScope } = await collectExistingRenders(env, t);
     expect(counts.outOfScope).toBe(1);
     expect(entries).toHaveLength(0);
     expect(outOfScope).toHaveLength(1);
@@ -1406,33 +1381,12 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     const t = tree();
     root = t.root;
     const scopedSlug = "scoped-empty-paths";
-    await seedLiveZeroRefCampaign(env, scopedSlug);
-    await setCreatedAt(env, scopedSlug, "2026-09-30T23:59:00Z");
-    await seedReport(env, scopedSlug, []);
+    await seedDatedCampaign(env, scopedSlug, "2026-09-30T23:59:00Z", []);
 
     const oosSlug = "oos-empty-paths";
-    await seedLiveZeroRefCampaign(env, oosSlug);
-    await setCreatedAt(env, oosSlug, "2026-10-02T00:00:00Z");
-    await seedReport(env, oosSlug, []);
+    await seedDatedCampaign(env, oosSlug, "2026-10-02T00:00:00Z", []);
 
-    const entries: ExistingRenderEntry[] = [];
-    const outOfScope: OutOfScopeRender[] = [];
-    const counts = await applyExistingRenders(
-      env.db,
-      env.objects,
-      ctxWith(t.root),
-      new Set(),
-      new Set(),
-      {
-        onMinted: async () => {},
-        onEntry: async (entry) => {
-          entries.push(entry);
-        },
-        onOutOfScope: async (item) => {
-          outOfScope.push(item);
-        },
-      },
-    );
+    const { counts, entries, outOfScope } = await collectExistingRenders(env, t);
     expect(counts.objectsMinted).toBe(0);
     expect(counts.partial).toBe(false);
     expect(counts.outOfScope).toBe(0);
@@ -1444,30 +1398,14 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     const t = tree();
     root = t.root;
     const slug = "dir-and-cap";
-    await seedLiveZeroRefCampaign(env, slug);
-    await setCreatedAt(env, slug, "2026-09-30T23:59:00Z");
+    await seedDatedCampaign(env, slug);
 
     mkdirSync(join(t.output, `${slug}/adir`), { recursive: true });
     writeAt(t.output, `${slug}/big.png`, PNG);
 
     await seedReport(env, slug, [`${slug}/adir`, `${slug}/big.png`]);
 
-    const entries: ExistingRenderEntry[] = [];
-    const counts = await applyExistingRenders(
-      env.db,
-      env.objects,
-      ctxWith(t.root),
-      new Set(),
-      new Set(),
-      {
-        onMinted: async () => {},
-        onEntry: async (entry) => {
-          entries.push(entry);
-        },
-        onOutOfScope: async () => {},
-      },
-      { maxBytes: 10 },
-    );
+    const { counts, entries } = await collectExistingRenders(env, t, [], { maxBytes: 10 });
     expect(counts.partial).toBe(true);
     expect(entries).toHaveLength(1);
     expect(entries[0]!.renders).toHaveLength(2);
@@ -1479,25 +1417,12 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     const t = tree();
     root = t.root;
     const slug = "stamp-escape";
-    await seedLiveZeroRefCampaign(env, slug);
-    await setCreatedAt(env, slug, "2026-09-30T23:59:00Z");
-    await seedReport(env, slug, ["../escape-outside.png", `${slug}/../escape-rel.png`]);
+    await seedDatedCampaign(env, slug, "2026-09-30T23:59:00Z", [
+      "../escape-outside.png",
+      `${slug}/../escape-rel.png`,
+    ]);
 
-    const entries: ExistingRenderEntry[] = [];
-    const counts = await applyExistingRenders(
-      env.db,
-      env.objects,
-      ctxWith(t.root),
-      new Set(),
-      new Set([slug]),
-      {
-        onMinted: async () => {},
-        onEntry: async (entry) => {
-          entries.push(entry);
-        },
-        onOutOfScope: async () => {},
-      },
-    );
+    const { counts, entries } = await collectExistingRenders(env, t, [slug]);
     expect(counts.partial).toBe(true);
     expect(entries).toHaveLength(1);
     expect(entries[0]!.slug).toBe(slug);
@@ -1510,8 +1435,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     const t = tree();
     root = t.root;
     const slug = "sym-parent-camp";
-    await seedLiveZeroRefCampaign(env, slug);
-    await setCreatedAt(env, slug, "2026-09-30T23:59:00Z");
+    await seedDatedCampaign(env, slug);
 
     const realDir = join(t.output, "real-parent");
     mkdirSync(realDir, { recursive: true });
@@ -1521,21 +1445,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
 
     await seedReport(env, slug, [`${slug}/symdir/render.png`]);
 
-    const entries: ExistingRenderEntry[] = [];
-    const counts = await applyExistingRenders(
-      env.db,
-      env.objects,
-      ctxWith(t.root),
-      new Set(),
-      new Set([slug]),
-      {
-        onMinted: async () => {},
-        onEntry: async (entry) => {
-          entries.push(entry);
-        },
-        onOutOfScope: async () => {},
-      },
-    );
+    const { counts, entries } = await collectExistingRenders(env, t, [slug]);
     expect(counts.partial).toBe(true);
     expect(entries).toHaveLength(1);
     expect(entries[0]!.slug).toBe(slug);
@@ -1551,28 +1461,13 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     const t = tree();
     root = t.root;
     const slug = "dir-path-camp";
-    await seedLiveZeroRefCampaign(env, slug);
-    await setCreatedAt(env, slug, "2026-09-30T23:59:00Z");
+    await seedDatedCampaign(env, slug);
 
     mkdirSync(join(t.output, slug, "folder.png"), { recursive: true });
 
     await seedReport(env, slug, [`${slug}/folder.png`]);
 
-    const entries: ExistingRenderEntry[] = [];
-    const counts = await applyExistingRenders(
-      env.db,
-      env.objects,
-      ctxWith(t.root),
-      new Set(),
-      new Set([slug]),
-      {
-        onMinted: async () => {},
-        onEntry: async (entry) => {
-          entries.push(entry);
-        },
-        onOutOfScope: async () => {},
-      },
-    );
+    const { counts, entries } = await collectExistingRenders(env, t, [slug]);
     expect(counts.partial).toBe(true);
     expect(entries).toHaveLength(1);
     expect(entries[0]!.slug).toBe(slug);
@@ -1601,24 +1496,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     writeAt(t.output, `${slug}/proof.png`, PNG);
     await seedReport(env, slug, [`${slug}/proof.png`]);
 
-    const entries: ExistingRenderEntry[] = [];
-    const outOfScope: OutOfScopeRender[] = [];
-    const counts = await applyExistingRenders(
-      env.db,
-      env.objects,
-      ctxWith(t.root),
-      new Set(),
-      new Set(),
-      {
-        onMinted: async () => {},
-        onEntry: async (entry) => {
-          entries.push(entry);
-        },
-        onOutOfScope: async (item) => {
-          outOfScope.push(item);
-        },
-      },
-    );
+    const { counts, entries, outOfScope } = await collectExistingRenders(env, t);
     expect(counts.outOfScope).toBe(1);
     expect(entries).toHaveLength(0);
     expect(outOfScope).toHaveLength(1);
