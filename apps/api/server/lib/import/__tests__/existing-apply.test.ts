@@ -12,7 +12,13 @@ import { isAssetId } from "../../ports/asset-store.port.js";
 import { getAssetStore, getBriefStore } from "../../ports/index.js";
 import { applyCampaigns, openResult, replan, ResultWriter } from "../apply.js";
 import type { HashedContext, CampaignResult } from "../campaign-step.js";
-import { applyExistingNormalise, replanExisting, type ExistingReplan } from "../existing-apply.js";
+import {
+  applyExistingNormalise,
+  applyExistingRenders,
+  replanExisting,
+  type ExistingRenderEntry,
+  type ExistingReplan,
+} from "../existing-apply.js";
 import { importTenant } from "../import-tenant.js";
 import type { NormaliseResult } from "../normalise-step.js";
 import type { PlannedCampaign, StepAddition, StepContext, StepLine } from "../steps.js";
@@ -977,10 +983,12 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
       `${late}/on-disk-already-in-s3.png`,
       `${late}/absent-on-disk.png`,
       `${late}/mystery.xyz`,
+      "other/proof.png",
     ];
     writeAt(t.output, `${late}/on-disk-missing-s3.png`, PNG);
     writeAt(t.output, `${late}/on-disk-already-in-s3.png`, PNG);
     writeAt(t.output, `${late}/mystery.xyz`, PNG);
+    writeAt(t.output, "other/proof.png", PNG);
     await seedReport(env, late, paths);
     const alreadyKey = renderObjectKey(
       renderPrefix("local", lateId),
@@ -1127,5 +1135,157 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     } finally {
       rmSync(result, { force: true });
     }
+  });
+
+  test("out-of-scope report path with an unresolvable object key is neither listed nor touched", async () => {
+    const t = tree();
+    root = t.root;
+    const slug = "oos-bad-key";
+    await seedLiveZeroRefCampaign(env, slug);
+    await setCreatedAt(env, slug, "2026-10-02T00:00:00Z");
+    const badPath = "mismatched-slug/render.png";
+    writeAt(t.output, badPath, PNG);
+    await seedReport(env, slug, [badPath]);
+
+    const result = freshResult("oos-bad-key");
+    try {
+      const digest = await sourceDigest(t.root);
+      const { code, err } = await runPlannedApply(env, t.root, t.output, { digest }, result);
+      expect(code).toBe(0);
+      expect(err).toEqual([]);
+      const lines = readResultLines(result);
+      expect(lines.filter((line) => line.kind === "out-of-scope-render")).toHaveLength(0);
+      expect(env.objects.putCount).toBe(0);
+    } finally {
+      rmSync(result, { force: true });
+    }
+  });
+
+  test("in-scope existing campaign with an unparseable stored report body records a stepError, marks the entry partial and exits 1", async () => {
+    const t = tree();
+    root = t.root;
+    const slug = "bad-json-r";
+    await seedClassPWithLogo(t.root, slug);
+    await env.db.query(
+      "insert into report (org_id, campaign_id, body, revision) values ('local', $1, $2, $3)",
+      [slug, "this is not json {", "r-bad"],
+    );
+    const result = freshResult("bad-json-report");
+    try {
+      const plan = await runPlan(env, t.root, t.output);
+      const { code, err } = await runPlannedApply(env, t.root, t.output, plan, result);
+      expect(code).toBe(1);
+      expect(err).toEqual([]);
+      const lines = readResultLines(result);
+      const entry = lines.find(
+        (line) => line.kind === "existing-renders" && line.slug === slug,
+      ) as Record<string, unknown>;
+      expect(entry.partial).toBe(true);
+      expect(entry.scope).toBe("normalised");
+      expect(entry.renders).toEqual([]);
+      expect(entry.minted).toEqual([]);
+      expect(entry.stepError).toMatch(/^the stored report body for bad-json-r is not JSON/);
+      const summary = lines.find((line) => line.kind === "summary") as Record<string, unknown>;
+      expect(summary.partial).toBe(true);
+      const latest = await latestRows(env);
+      expect(latest.find((row) => row.slug === slug)?.version).toBe(2);
+    } finally {
+      rmSync(result, { force: true });
+    }
+  });
+
+  test("in-scope existing campaign with a non-object JSON stored report body records a stepError, marks the entry partial and exits 1", async () => {
+    const t = tree();
+    root = t.root;
+    const slug = "non-obj-r";
+    await seedClassPWithLogo(t.root, slug);
+    await env.db.query(
+      "insert into report (org_id, campaign_id, body, revision) values ('local', $1, $2, $3)",
+      [slug, JSON.stringify(["not", "an", "object"]), "r-arr"],
+    );
+    const result = freshResult("non-obj-report");
+    try {
+      const plan = await runPlan(env, t.root, t.output);
+      const { code, err } = await runPlannedApply(env, t.root, t.output, plan, result);
+      expect(code).toBe(1);
+      expect(err).toEqual([]);
+      const lines = readResultLines(result);
+      const entry = lines.find(
+        (line) => line.kind === "existing-renders" && line.slug === slug,
+      ) as Record<string, unknown>;
+      expect(entry.partial).toBe(true);
+      expect(entry.scope).toBe("normalised");
+      expect(entry.renders).toEqual([]);
+      expect(entry.minted).toEqual([]);
+      expect(entry.stepError).toBe(`the stored report body for ${slug} is not a JSON object`);
+      const summary = lines.find((line) => line.kind === "summary") as Record<string, unknown>;
+      expect(summary.partial).toBe(true);
+      const latest = await latestRows(env);
+      expect(latest.find((row) => row.slug === slug)?.version).toBe(2);
+    } finally {
+      rmSync(result, { force: true });
+    }
+  });
+
+  test("applyExistingRenders records a stepError for null and primitive JSON report bodies", async () => {
+    const t = tree();
+    root = t.root;
+    for (const [slug, body] of [
+      ["null-body", "null"],
+      ["string-body", JSON.stringify("just a string")],
+    ] as const) {
+      await env.db.query(
+        "insert into report (org_id, campaign_id, body, revision) values ('local', $1, $2, $3)",
+        [slug, body, "r-sub"],
+      );
+      const entries: ExistingRenderEntry[] = [];
+      const counts = await applyExistingRenders(
+        env.db,
+        env.objects,
+        ctxWith(t.root),
+        new Set(),
+        new Set([slug]),
+        {
+          onMinted: async () => {},
+          onEntry: async (entry) => {
+            entries.push(entry);
+          },
+          onOutOfScope: async () => {},
+        },
+      );
+      expect(counts.partial).toBe(true);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.stepError).toBe(`the stored report body for ${slug} is not a JSON object`);
+    }
+  });
+
+  test("applyExistingRenders records a stepError when the campaign target cannot be resolved for a scoped report", async () => {
+    const t = tree();
+    root = t.root;
+    const slug = "missing-target";
+    await seedReport(env, slug, [`${slug}/proof.png`]);
+    const entries: ExistingRenderEntry[] = [];
+    const counts = await applyExistingRenders(
+      env.db,
+      env.objects,
+      ctxWith(t.root),
+      new Set(),
+      new Set([slug]),
+      {
+        onMinted: async () => {},
+        onEntry: async (entry) => {
+          entries.push(entry);
+        },
+        onOutOfScope: async () => {},
+      },
+    );
+    expect(counts.partial).toBe(true);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      slug,
+      scope: "normalised",
+      partial: true,
+      stepError: `the target holds no campaign ${slug}; none of its renders was written`,
+    });
   });
 });
