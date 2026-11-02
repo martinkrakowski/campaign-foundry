@@ -26,11 +26,7 @@ import { normaliseCampaign, type NormaliseDeps, type NormaliseResult } from "./n
 import { parentsAreReal } from "./census.js";
 import { classifyRefs } from "./classify.js";
 import { fingerprint } from "./digest.js";
-import {
-  MAX_RENDER_BYTES,
-  readReviewedRender,
-  type RenderFileOptions,
-} from "./render-file.js";
+import { MAX_RENDER_BYTES, readReviewedRender, type RenderFileOptions } from "./render-file.js";
 import {
   importRenders,
   mintedRenders,
@@ -558,9 +554,7 @@ export async function applyExistingRenders(
     if (scope === "out-of-scope") {
       const paths = reportPaths(Buffer.from(report.body, "utf8"));
       const campaignId =
-        paths.length > 0
-          ? await campaignUuidAnyState(db, ctx.orgId, report.slug)
-          : undefined;
+        paths.length > 0 ? await campaignUuidAnyState(db, ctx.orgId, report.slug) : undefined;
       for (const path of paths) {
         const listed = await checkOutOfScopePath(
           store,

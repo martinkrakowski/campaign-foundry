@@ -285,10 +285,10 @@ async function seedLiveZeroRefCampaign(
 
 /** Pin a campaign's `created_at` column to the given instant. */
 async function setCreatedAt(env: Env, slug: string, iso: string): Promise<void> {
-  await env.db.query(
-    "update campaign set created_at = $1 where org_id = 'local' and slug = $2",
-    [iso, slug],
-  );
+  await env.db.query("update campaign set created_at = $1 where org_id = 'local' and slug = $2", [
+    iso,
+    slug,
+  ]);
 }
 
 /** Insert a stored `report` row naming `paths` as its render output paths. */
@@ -841,7 +841,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
       expect(objIndex).toBeLessThan(erIndex);
       const entry = lines[erIndex] as Record<string, unknown>;
       expect(entry.scope).toBe("normalised");
-      expect(((entry.renders as Record<string, unknown>[])[0]!).status).toBe("written");
+      expect((entry.renders as Record<string, unknown>[])[0]!.status).toBe("written");
 
       env.reinstall();
       const digest2 = await sourceDigest(t.root);
@@ -858,7 +858,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
         (line) => line.kind === "existing-renders" && line.slug === slug,
       ) as Record<string, unknown>;
       expect(entry2.scope).toBe("normalised");
-      expect(((entry2.renders as Record<string, unknown>[])[0]!).status).toBe("skipped");
+      expect((entry2.renders as Record<string, unknown>[])[0]!.status).toBe("skipped");
       const obj2 = await env.objects.get(key);
       expect(Buffer.from(obj2!.bytes).equals(PNG)).toBe(true);
 
@@ -945,7 +945,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
         (line) => line.kind === "existing-renders" && line.slug === "pre-no-upload",
       ) as Record<string, unknown>;
       expect(preEntry.scope).toBe("no-upload");
-      expect(((preEntry.renders as Record<string, unknown>[])[0]!).status).toBe("written");
+      expect((preEntry.renders as Record<string, unknown>[])[0]!.status).toBe("written");
 
       for (const slug of ["at-switch", "pre-with-asset"]) {
         const listed = lines.filter(
