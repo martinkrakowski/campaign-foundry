@@ -1000,6 +1000,20 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     expect(onVideoSpanCommit).not.toHaveBeenCalled();
   });
 
+  test("a cancelled edge drag commits nothing and restores the value, and aria-valuenow follows a live drag", () => {
+    const onVideoSpanCommit = vi.fn();
+    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
+    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
+
+    fireEvent.change(start, { target: { value: "2" } });
+    expect(start.getAttribute("aria-valuenow")).toBe("2");
+    fireEvent.pointerCancel(start);
+    expect(start.getAttribute("aria-valuenow")).toBe("1.5");
+    fireEvent.pointerUp(start);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    expect(start.className).toContain("touch-none");
+  });
+
   test("edge sliders clamp against each other keeping the one-frame minimum gap, and clamp at timeline ends", () => {
     const onVideoSpanCommit = vi.fn();
     renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });

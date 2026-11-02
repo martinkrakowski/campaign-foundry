@@ -410,7 +410,7 @@ function VideoClip({
             ? messages.sequenceVideoSpanStart(position)
             : messages.sequenceVideoSpanEnd(position)
         }
-        aria-valuenow={(isStart ? startT : endT) * durationSec}
+        aria-valuenow={shown}
         min={0}
         max={durationSec}
         step={1 / MOTION_FPS}
@@ -428,7 +428,11 @@ function VideoClip({
           setDragSec(null);
           commitSlider(which);
         }}
-        className={cn(sliderClass, dragSec !== null && "z-20 opacity-100")}
+        onPointerCancel={() => {
+          inFlight.current = null;
+          setDragSec(null);
+        }}
+        className={cn(sliderClass, "touch-none", dragSec !== null && "z-20 opacity-100")}
         style={{
           left: 0,
           width: `${durationSec * pxPerSec}px`,
