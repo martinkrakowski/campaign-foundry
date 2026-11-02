@@ -148,6 +148,9 @@ const renderTimeline = (overrides: Partial<SequenceTimelineProps> = {}) => {
   return render(<SequenceTimeline {...props} />);
 };
 
+const renderHalfRow = (overrides: Partial<SequenceTimelineProps> = {}) =>
+  renderTimeline({ videoRows: [halfRow], ...overrides });
+
 /**
  * The component's own source, for the checks that are about what is NOT in the
  * file. Read from disk rather than imported: the point is the text a reviewer
@@ -171,6 +174,21 @@ const clipNamed = (arr: typeof beats, position: number) => {
 };
 const videoClip = (position: number) =>
   screen.getByRole("button", { name: messages.sequenceVideoClip(position, 0, DURATION) });
+const halfClip = (position = 1) =>
+  screen.getByRole("button", { name: messages.sequenceVideoClip(position, 1.5, 4.5) });
+const spanSliders = (position = 1) => ({
+  start: screen.getByRole("slider", {
+    name: messages.sequenceVideoSpanStart(position),
+  }) as HTMLInputElement,
+  end: screen.getByRole("slider", {
+    name: messages.sequenceVideoSpanEnd(position),
+  }) as HTMLInputElement,
+});
+const drag = (el: Element, fromX: number, toX: number) => {
+  fireEvent.pointerDown(el, { clientX: fromX });
+  fireEvent.pointerMove(el, { clientX: toX });
+  fireEvent.pointerUp(el, { clientX: toX });
+};
 
 describe("the source rules the plan restates for this component (§5, §7, §9)", () => {
   test("the file is really the component the checks below grep", () => {
@@ -642,8 +660,7 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     const onMoveLayer = vi.fn();
     const onScrubLive = vi.fn();
     const onScrubCommit = vi.fn();
-    renderTimeline({
-      videoRows: [halfRow],
+    renderHalfRow({
       onVideoSpanCommit,
       onSelectLayer,
       onMoveBeat,
@@ -651,9 +668,7 @@ describe("the video rows (VT-D2, VT-D7)", () => {
       onScrubLive,
       onScrubCommit,
     });
-    const clip = screen.getByRole("button", {
-      name: messages.sequenceVideoClip(1, 1.5, 4.5),
-    });
+    const clip = halfClip();
     fireEvent.pointerDown(clip, { clientX: 0 });
     fireEvent.pointerMove(clip, { clientX: 28 });
     // §8's preview-cost rule: nothing follows the finger but the view.
@@ -698,30 +713,22 @@ describe("the video rows (VT-D2, VT-D7)", () => {
 
   test("a drag past either end clamps to the nearest legal position", () => {
     const onVideoSpanCommit = vi.fn();
-    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
-    const clip = screen.getByRole("button", {
-      name: messages.sequenceVideoClip(1, 1.5, 4.5),
-    });
+    renderHalfRow({ onVideoSpanCommit });
+    const clip = halfClip();
     // Far right: start clamps to 1 - length (0.5).
-    fireEvent.pointerDown(clip, { clientX: 0 });
-    fireEvent.pointerMove(clip, { clientX: 84 });
-    fireEvent.pointerUp(clip, { clientX: 84 });
+    drag(clip, 0, 84);
     expect(onVideoSpanCommit).toHaveBeenLastCalledWith("video", 0.5, 1);
 
     onVideoSpanCommit.mockClear();
     // Far left: start clamps to 0.
-    fireEvent.pointerDown(clip, { clientX: 56 });
-    fireEvent.pointerMove(clip, { clientX: 0 });
-    fireEvent.pointerUp(clip, { clientX: 0 });
+    drag(clip, 56, 0);
     expect(onVideoSpanCommit).toHaveBeenLastCalledWith("video", 0, 0.5);
   });
 
   test("a pointercancel clears the drag and commits nothing", () => {
     const onVideoSpanCommit = vi.fn();
-    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
-    const clip = screen.getByRole("button", {
-      name: messages.sequenceVideoClip(1, 1.5, 4.5),
-    });
+    renderHalfRow({ onVideoSpanCommit });
+    const clip = halfClip();
     fireEvent.pointerDown(clip, { clientX: 0 });
     fireEvent.pointerMove(clip, { clientX: 28 });
     fireEvent.pointerCancel(clip);
@@ -730,10 +737,8 @@ describe("the video rows (VT-D2, VT-D7)", () => {
 
   test("stray pointer events with no drag in flight commit nothing", () => {
     const onVideoSpanCommit = vi.fn();
-    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
-    const clip = screen.getByRole("button", {
-      name: messages.sequenceVideoClip(1, 1.5, 4.5),
-    });
+    renderHalfRow({ onVideoSpanCommit });
+    const clip = halfClip();
     fireEvent.pointerMove(clip, { clientX: 84 });
     fireEvent.pointerUp(clip, { clientX: 84 });
     expect(onVideoSpanCommit).not.toHaveBeenCalled();
@@ -741,28 +746,17 @@ describe("the video rows (VT-D2, VT-D7)", () => {
 
   test("a drag's trailing click is not a selection", () => {
     const onSelectLayer = vi.fn();
-    renderTimeline({ videoRows: [halfRow], onSelectLayer });
-    const clip = screen.getByRole("button", {
-      name: messages.sequenceVideoClip(1, 1.5, 4.5),
-    });
-    fireEvent.pointerDown(clip, { clientX: 0 });
-    fireEvent.pointerMove(clip, { clientX: 28 });
-    fireEvent.pointerUp(clip, { clientX: 28 });
+    renderHalfRow({ onSelectLayer });
+    const clip = halfClip();
+    drag(clip, 0, 28);
     fireEvent.click(clip);
     expect(onSelectLayer).not.toHaveBeenCalled();
   });
 
   test("during a body drag both edge ranges' left move with the clip", () => {
-    renderTimeline({ videoRows: [halfRow] });
-    const clip = screen.getByRole("button", {
-      name: messages.sequenceVideoClip(1, 1.5, 4.5),
-    });
-    const start = screen.getByRole("slider", {
-      name: messages.sequenceVideoSpanStart(1),
-    }) as HTMLInputElement;
-    const end = screen.getByRole("slider", {
-      name: messages.sequenceVideoSpanEnd(1),
-    }) as HTMLInputElement;
+    renderHalfRow();
+    const clip = halfClip();
+    const { start, end } = spanSliders();
 
     expect(clip.style.left).toBe("42px");
     expect(start.value).toBe("1.5");
@@ -788,9 +782,8 @@ describe("the video rows (VT-D2, VT-D7)", () => {
   });
 
   test("the range's width equals durationSec * pxPerSec", () => {
-    renderTimeline({ videoRows: [halfRow] });
-    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
-    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+    renderHalfRow();
+    const { start, end } = spanSliders();
 
     expect(start.style.width).toBe(`${DURATION * 28}px`);
     expect(end.style.width).toBe(`${DURATION * 28}px`);
@@ -804,10 +797,8 @@ describe("the video rows (VT-D2, VT-D7)", () => {
 
   test("a pointerup at a new x with no move before it commits that x", () => {
     const onVideoSpanCommit = vi.fn();
-    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
-    const clip = screen.getByRole("button", {
-      name: messages.sequenceVideoClip(1, 1.5, 4.5),
-    });
+    renderHalfRow({ onVideoSpanCommit });
+    const clip = halfClip();
     fireEvent.pointerDown(clip, { clientX: 0 });
     fireEvent.pointerUp(clip, { clientX: 28 });
     expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
@@ -820,10 +811,8 @@ describe("the video rows (VT-D2, VT-D7)", () => {
 
   test("the arrow keys nudge the clip one step per press, clamping at the edges", () => {
     const onVideoSpanCommit = vi.fn();
-    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
-    const clip = screen.getByRole("button", {
-      name: messages.sequenceVideoClip(1, 1.5, 4.5),
-    });
+    renderHalfRow({ onVideoSpanCommit });
+    const clip = halfClip();
     fireEvent.keyDown(clip, { key: "ArrowRight" });
     expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
     expect(onVideoSpanCommit).toHaveBeenCalledWith(
@@ -850,10 +839,8 @@ describe("the video rows (VT-D2, VT-D7)", () => {
 
   test("auto-repeat is not a run of commits; a non-arrow key is left alone", () => {
     const onVideoSpanCommit = vi.fn();
-    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
-    const clip = screen.getByRole("button", {
-      name: messages.sequenceVideoClip(1, 1.5, 4.5),
-    });
+    renderHalfRow({ onVideoSpanCommit });
+    const clip = halfClip();
     fireEvent.keyDown(clip, { key: "ArrowRight", repeat: true });
     expect(onVideoSpanCommit).not.toHaveBeenCalled();
     // Not an arrow: not prevented, and no commit.
@@ -890,7 +877,7 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     const onVideoSpanCommit = vi.fn();
     const onScrubLive = vi.fn();
     renderTimeline({ onVideoSpanCommit, onScrubLive });
-    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+    const { end } = spanSliders();
     fireEvent.change(end, { target: { value: "3" } });
     expect(onVideoSpanCommit).not.toHaveBeenCalled();
     fireEvent.pointerUp(end);
@@ -907,8 +894,8 @@ describe("the video rows (VT-D2, VT-D7)", () => {
 
   test("an untouched end slider commits nothing on pointerup or keyup", () => {
     const onVideoSpanCommit = vi.fn();
-    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
-    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+    renderHalfRow({ onVideoSpanCommit });
+    const { end } = spanSliders();
     // The displayed seconds are endT * durationSec (4.5); the untouched thumb
     // round-trips to the same number, so the 1e-9 seconds check holds.
     fireEvent.pointerUp(end);
@@ -924,8 +911,7 @@ describe("the video rows (VT-D2, VT-D7)", () => {
       endT: 0.789,
     };
     renderTimeline({ videoRows: [offGridRow], onVideoSpanCommit });
-    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
-    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+    const { start, end } = spanSliders();
 
     fireEvent.keyUp(start);
     fireEvent.pointerUp(start);
@@ -942,7 +928,7 @@ describe("the video rows (VT-D2, VT-D7)", () => {
   test("the start slider commits a moved start edge", () => {
     const onVideoSpanCommit = vi.fn();
     renderTimeline({ onVideoSpanCommit });
-    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
+    const { start } = spanSliders();
     fireEvent.change(start, { target: { value: "1" } });
     fireEvent.pointerUp(start);
     expect(onVideoSpanCommit).toHaveBeenCalledTimes(1);
@@ -957,9 +943,8 @@ describe("the video rows (VT-D2, VT-D7)", () => {
 
   test("releasing an edge slider with no delta from the displayed position commits nothing", () => {
     const onVideoSpanCommit = vi.fn();
-    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
-    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
-    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+    renderHalfRow({ onVideoSpanCommit });
+    const { start, end } = spanSliders();
 
     // An in-flight change matching the displayed seconds (0.25 * 6 = 1.5 s)
     // hits the Math.abs(seconds - displayed) < 1e-9 check and returns without committing.
@@ -983,9 +968,8 @@ describe("the video rows (VT-D2, VT-D7)", () => {
 
   test("an edge slider dragged and returned to its displayed seconds commits nothing on pointerup", () => {
     const onVideoSpanCommit = vi.fn();
-    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
-    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
-    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+    renderHalfRow({ onVideoSpanCommit });
+    const { start, end } = spanSliders();
 
     // Start edge (halfRow: 0.25 * 6 = 1.5s): dragged and came back to displayed seconds
     fireEvent.change(start, { target: { value: "2" } });
@@ -1002,8 +986,8 @@ describe("the video rows (VT-D2, VT-D7)", () => {
 
   test("a cancelled edge drag commits nothing and restores the value, and aria-valuenow follows a live drag", () => {
     const onVideoSpanCommit = vi.fn();
-    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
-    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
+    renderHalfRow({ onVideoSpanCommit });
+    const { start } = spanSliders();
 
     fireEvent.change(start, { target: { value: "2" } });
     expect(start.getAttribute("aria-valuenow")).toBe("2");
@@ -1016,9 +1000,8 @@ describe("the video rows (VT-D2, VT-D7)", () => {
 
   test("edge sliders clamp against each other keeping the one-frame minimum gap, and clamp at timeline ends", () => {
     const onVideoSpanCommit = vi.fn();
-    renderTimeline({ videoRows: [halfRow], onVideoSpanCommit });
-    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
-    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+    renderHalfRow({ onVideoSpanCommit });
+    const { start, end } = spanSliders();
     const minGap = 1 / MOTION_FPS / DURATION;
 
     // Start slider pushed past the end edge (4.5s): clamps to endT - minGap
@@ -1050,13 +1033,8 @@ describe("the video rows (VT-D2, VT-D7)", () => {
   });
 
   test("during a change event the slider's value follows the in-flight value", () => {
-    renderTimeline({ videoRows: [halfRow] });
-    const start = screen.getByRole("slider", {
-      name: messages.sequenceVideoSpanStart(1),
-    }) as HTMLInputElement;
-    const end = screen.getByRole("slider", {
-      name: messages.sequenceVideoSpanEnd(1),
-    }) as HTMLInputElement;
+    renderHalfRow();
+    const { start, end } = spanSliders();
 
     expect(start.value).toBe("1.5");
     expect(end.value).toBe("4.5");
@@ -1073,9 +1051,8 @@ describe("the video rows (VT-D2, VT-D7)", () => {
   });
 
   test("edge slider inputs carry pointer-events-none and vendor thumb auto classes because jsdom cannot hit-test narrow clip drag takeover", () => {
-    renderTimeline({ videoRows: [halfRow] });
-    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
-    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+    renderHalfRow();
+    const { start, end } = spanSliders();
 
     expect(start.className).toContain("pointer-events-none");
     expect(start.className).toContain("[&::-webkit-slider-thumb]:pointer-events-auto");
@@ -1141,10 +1118,9 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     const onVideoSpanCommit = vi.fn();
     const onScrubLive = vi.fn();
     const onScrubCommit = vi.fn();
-    renderTimeline({
+    renderHalfRow({
       onSelectLayer: undefined,
       selectedLayerId: undefined,
-      videoRows: [halfRow],
       onVideoSpanCommit,
       onScrubLive,
       onScrubCommit,
@@ -1167,10 +1143,9 @@ describe("the video rows (VT-D2, VT-D7)", () => {
 
   test("the plain-div clip receives the arrow-key nudge", () => {
     const onVideoSpanCommit = vi.fn();
-    renderTimeline({
+    renderHalfRow({
       onSelectLayer: undefined,
       selectedLayerId: undefined,
-      videoRows: [halfRow],
       onVideoSpanCommit,
     });
     const clip = document.querySelector('[data-sequence-clip="video"]') as HTMLElement;

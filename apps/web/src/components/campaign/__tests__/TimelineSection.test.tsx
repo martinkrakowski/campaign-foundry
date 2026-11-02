@@ -712,6 +712,17 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
     );
   };
 
+  const spanSliders = (position = 1) => ({
+    start: screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(position) }),
+    end: screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(position) }),
+  });
+
+  const drag = (el: Element, fromX: number, toX: number) => {
+    fireEvent.pointerDown(el, { clientX: fromX });
+    fireEvent.pointerMove(el, { clientX: toX });
+    fireEvent.pointerUp(el);
+  };
+
   /**
    * Render the section at the narrow width and run the assertions, then put the
    * viewport back. The mount-gate tests share this scaffold — the try/finally
@@ -890,9 +901,7 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
       // writes once. The fit floor in happy-dom is 28 px/s over the 6 s pair,
       // so 84 px is the second half — beat 2's window.
       const clip = screen.getByRole("button", { name: messages.sequenceBeatClip(1, 0, 3) });
-      fireEvent.pointerDown(clip, { clientX: 28 });
-      fireEvent.pointerMove(clip, { clientX: 84 });
-      fireEvent.pointerUp(clip);
+      drag(clip, 28, 84);
       expect(dispatch).toHaveBeenCalledWith({ type: "moveBeat", from: 0, to: 1 });
     } finally {
       restore();
@@ -933,7 +942,7 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
 
   test("releasing an edge slider commits setVideoSpan through the reducer", async () => {
     await runLiveAtNarrowWidth(videoState(), async ({ dispatch, state }) => {
-      const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+      const { start, end } = spanSliders();
       fireEvent.change(end, { target: { value: "3" } });
       fireEvent.pointerUp(end);
       expect(dispatch).toHaveBeenCalledWith({
@@ -947,7 +956,6 @@ describe("TimelineSection — the narrow host's VT-D1 gate", () => {
         endT: 0.5,
       });
 
-      const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
       fireEvent.change(start, { target: { value: "1" } });
       fireEvent.pointerUp(start);
       expect(dispatch).toHaveBeenCalledWith({
