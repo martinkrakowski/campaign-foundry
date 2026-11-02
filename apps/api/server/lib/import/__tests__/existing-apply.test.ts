@@ -10,7 +10,7 @@ import { isAssetId } from "../../ports/asset-store.port.js";
 import { getAssetStore, getBriefStore } from "../../ports/index.js";
 import { applyCampaigns, openResult, replan, ResultWriter } from "../apply.js";
 import type { HashedContext, CampaignResult } from "../campaign-step.js";
-import { applyExistingNormalise, replanExisting } from "../existing-apply.js";
+import { applyExistingNormalise, replanExisting, type ExistingReplan } from "../existing-apply.js";
 import { importTenant } from "../import-tenant.js";
 import type { NormaliseResult } from "../normalise-step.js";
 import type { PlannedCampaign, StepAddition, StepContext, StepLine } from "../steps.js";
@@ -46,6 +46,11 @@ function product(logoPath: string, inputAsset?: string) {
   };
 }
 
+/** Path relative to the source tree for a campaign's input asset. */
+function campLogo(slug: string, file = "logo.png"): string {
+  return `assets/inputs/${slug}/${file}`;
+}
+
 /**
  * Seed a campaign whose STORED body round-trips the parser byte-for-byte
  * (PT-8e 3): `createBrief` stores `JSON.stringify` of the parsed brief, which is
@@ -58,6 +63,18 @@ async function seedClassP(
 ) {
   const parsed = parseBriefText(`${slug}.yaml`, dumpBrief(briefBody({ id: slug, ...overrides })));
   return briefs().createBrief(parsed);
+}
+
+/** Seed a class-(P) campaign after writing its PNG logo to the tree. */
+async function seedClassPWithLogo(
+  root: string,
+  slug: string,
+  file = "logo.png",
+  bytes: Buffer = PNG,
+) {
+  const path = campLogo(slug, file);
+  writeAt(root, path, bytes);
+  return seedClassP(slug, { products: [product(path)] });
 }
 
 /** A source tree with an empty `briefs/` and an output dir: no source campaigns, only assets. */
@@ -85,23 +102,62 @@ async function sourceDigest(root: string): Promise<string> {
   return (await replan(ctxWith(root))).digest;
 }
 
+/** Re-plan both source tree and existing class-(P) campaigns against the DB. */
+async function replanSourceAndExisting(
+  env: Env,
+  root: string,
+): Promise<{ digest: string; replanned: ExistingReplan }> {
+  const digest = await sourceDigest(root);
+  const replanned = await replanExisting(env.db, ctxWith(root));
+  return { digest, replanned };
+}
+
 function freshResult(label: string): string {
   return join(tmpdir(), `cf-existing-apply-${label}-${process.pid}.json`);
 }
 
-function applyArgv(root: string, output: string, extra: readonly string[]): string[] {
-  return [
-    "apply",
-    "--project-root",
-    root,
-    "--output-root",
-    output,
-    "--switched-at",
-    SWITCHED_AT,
-    "--org",
-    "local",
-    ...extra,
-  ];
+/** Run `apply` through `main()` against the harness environment. */
+async function runApply(
+  env: Env,
+  root: string,
+  output: string,
+  extra: readonly string[],
+): Promise<{ code: number; err: string[] }> {
+  env.reinstall();
+  const err: string[] = [];
+  const code = await main(
+    [
+      "apply",
+      "--project-root",
+      root,
+      "--output-root",
+      output,
+      "--switched-at",
+      SWITCHED_AT,
+      "--org",
+      "local",
+      ...extra,
+    ],
+    { stdout: () => {}, stderr: (line) => err.push(line) },
+  );
+  return { code, err };
+}
+
+/** Run `apply` with an expected plan/digest and result path. */
+async function runPlannedApply(
+  env: Env,
+  root: string,
+  output: string,
+  plan: { digest: string; existingDigest?: string },
+  result: string,
+): Promise<{ code: number; err: string[] }> {
+  return runApply(env, root, output, [
+    "--expect",
+    plan.digest,
+    ...(plan.existingDigest !== undefined ? ["--expect-existing", plan.existingDigest] : []),
+    "--result",
+    result,
+  ]);
 }
 
 /** `plan` against the harness target, returning the source digest and the class-(P) second digest. */
@@ -137,15 +193,20 @@ async function runPlan(
   return { digest: json.digest, existingDigest: json.existingCampaigns!.digest };
 }
 
+/** Read non-empty JSON lines from a result file. */
+function readResultLines(path: string): Record<string, unknown>[] {
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
 /** The JSON-lines `--result` file, split into header, existing entries and summary. */
 function parseResult(path: string): {
   existing: Record<string, unknown>[];
   summary?: { kind: string; refused: number; partial: boolean };
 } {
-  const lines = readFileSync(path, "utf8")
-    .split("\n")
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const lines = readResultLines(path);
   const existing = lines.filter((line) => line.kind === "existing");
   const summaries = lines.filter((line) => line.kind === "summary");
   return {
@@ -203,17 +264,11 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
   test("apply fails closed before opening --result when class-(P) campaigns exist and --expect-existing is omitted", async () => {
     const t = tree();
     root = t.root;
-    writeAt(t.root, "assets/inputs/p-camp/logo.png", PNG);
-    await seedClassP("p-camp", { products: [product("assets/inputs/p-camp/logo.png")] });
+    await seedClassPWithLogo(t.root, "p-camp");
     const result = freshResult("1");
     try {
       const digest = await sourceDigest(t.root);
-      env.reinstall();
-      const err: string[] = [];
-      const code = await main(
-        applyArgv(t.root, t.output, ["--expect", digest, "--result", result]),
-        { stdout: () => {}, stderr: (line) => err.push(line) },
-      );
+      const { code, err } = await runPlannedApply(env, t.root, t.output, { digest }, result);
       expect(code).toBe(1);
       expect(err).toHaveLength(1);
       expect(err[0]).toMatch(
@@ -236,19 +291,14 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
       const result = freshResult("2b");
       try {
         const digest = await sourceDigest(t.root);
-        env.reinstall();
-        const err: string[] = [];
-        const code = await main(
-          applyArgv(t.root, t.output, [
-            "--expect",
-            digest,
-            "--expect-existing",
-            "0".repeat(64),
-            "--result",
-            result,
-          ]),
-          { stdout: () => {}, stderr: (line) => err.push(line) },
-        );
+        const { code, err } = await runApply(env, t.root, t.output, [
+          "--expect",
+          digest,
+          "--expect-existing",
+          "0".repeat(64),
+          "--result",
+          result,
+        ]);
         expect(code).toBe(1);
         expect(err).toHaveLength(1);
         expect(err[0]).toContain("does not match the existing-campaigns digest");
@@ -264,28 +314,19 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     {
       const t = tree();
       root = t.root;
-      writeAt(t.root, "assets/inputs/old/logo.png", PNG);
       env.reinstall();
-      const stored = await seedClassP("old", {
-        products: [product("assets/inputs/old/logo.png")],
-      });
+      const stored = await seedClassPWithLogo(t.root, "old");
       const result = freshResult("2a");
       try {
-        const digest = await sourceDigest(t.root);
-        const replanned = await replanExisting(env.db, ctxWith(t.root));
-        env.reinstall();
-        const err: string[] = [];
-        const code = await main(
-          applyArgv(t.root, t.output, [
-            "--expect",
-            digest,
-            "--expect-existing",
-            "0".repeat(64),
-            "--result",
-            result,
-          ]),
-          { stdout: () => {}, stderr: (line) => err.push(line) },
-        );
+        const { digest, replanned } = await replanSourceAndExisting(env, t.root);
+        const { code, err } = await runApply(env, t.root, t.output, [
+          "--expect",
+          digest,
+          "--expect-existing",
+          "0".repeat(64),
+          "--result",
+          result,
+        ]);
         expect(code).toBe(1);
         expect(err).toHaveLength(1);
         expect(err[0]).toContain("does not match the existing-campaigns digest");
@@ -354,10 +395,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
         objectsMinted: 1,
       });
       await handle.close();
-      const lines = readFileSync(result, "utf8")
-        .split("\n")
-        .filter((line) => line.length > 0)
-        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      const lines = readResultLines(result);
       expect(lines[1]).toMatchObject({ kind: "object", key: "k/1", path: "p/1" });
       expect(lines[2]).toMatchObject({ kind: "summary", objectsMinted: 1 });
     } finally {
@@ -368,8 +406,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
   test("replanExisting skips campaigns whose latest version already uses asset ids", async () => {
     const t = tree();
     root = t.root;
-    writeAt(t.root, "assets/inputs/path/logo.png", PNG);
-    await seedClassP("path", { products: [product("assets/inputs/path/logo.png")] });
+    await seedClassPWithLogo(t.root, "path");
     // An already-normalised campaign: its refs are asset ids, so it is not class (P).
     await briefs().createCampaign("idonly");
     const asset = await assets().writeAsset("idonly", "logo.png", PNG);
@@ -397,16 +434,10 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
   test("batch class-(P) normalisation rewrites path refs to asset ids as import:pt-8, imports unreferenced own inputs, leaves existing report row untouched, and a second apply writes no new version", async () => {
     const t = tree();
     root = t.root;
-    writeAt(t.root, "assets/inputs/old/logo.png", PNG);
-    writeAt(t.root, "assets/inputs/old/extra.png", PNG);
-    writeAt(t.root, "assets/inputs/old/bad.png", NOT_A_PNG);
-    writeAt(t.root, "assets/inputs/two/logo.png", PNG);
-    const oldBrief = await seedClassP("old", {
-      products: [product("assets/inputs/old/logo.png")],
-    });
-    const twoBrief = await seedClassP("two", {
-      products: [product("assets/inputs/two/logo.png")],
-    });
+    writeAt(t.root, campLogo("old", "extra.png"), PNG);
+    writeAt(t.root, campLogo("old", "bad.png"), NOT_A_PNG);
+    const oldBrief = await seedClassPWithLogo(t.root, "old");
+    const twoBrief = await seedClassPWithLogo(t.root, "two");
     await env.db.query(
       "insert into report (org_id, campaign_id, body, revision) values ('local', $1, $2, $3)",
       [oldBrief.campaignId, JSON.stringify({ legacy: "row" }), "r-legacy"],
@@ -419,19 +450,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     const r2 = freshResult("4b");
     try {
       const plan = await runPlan(env, t.root, t.output);
-      env.reinstall();
-      const err: string[] = [];
-      const first = await main(
-        applyArgv(t.root, t.output, [
-          "--expect",
-          plan.digest,
-          "--expect-existing",
-          plan.existingDigest,
-          "--result",
-          r1,
-        ]),
-        { stdout: () => {}, stderr: (line) => err.push(line) },
-      );
+      const { code: first, err } = await runPlannedApply(env, t.root, t.output, plan, r1);
       expect(first).toBe(0);
       expect(err).toEqual([]);
       env.reinstall();
@@ -485,11 +504,12 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
 
       // A second apply over the same source writes no new version.
       const putsBeforeSecond = env.objects.putCount;
-      env.reinstall();
-      const secondErr: string[] = [];
-      const second = await main(
-        applyArgv(t.root, t.output, ["--expect", plan.digest, "--result", r2]),
-        { stdout: () => {}, stderr: (line) => secondErr.push(line) },
+      const { code: second, err: secondErr } = await runPlannedApply(
+        env,
+        t.root,
+        t.output,
+        { digest: plan.digest },
+        r2,
       );
       expect(second).toBe(0);
       expect(secondErr).toEqual([]);
@@ -506,32 +526,22 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
   test("one clean class-(P) campaign reusing its assets alongside a refused one: mixed normalised + refused exits 1", async () => {
     const t = tree();
     root = t.root;
-    writeAt(t.root, "assets/inputs/clean/logo.png", PNG);
-    await seedClassP("clean", {
-      products: [product("assets/inputs/clean/logo.png")],
-    });
+    await seedClassPWithLogo(t.root, "clean");
     await seedClassP("blocked", {
-      products: [product("assets/inputs/blocked/logo.png")],
+      products: [product(campLogo("blocked"))],
     });
     // Pre-store the clean campaign's asset so the normalise reuses it: assetsMinted 0.
     await assets().writeAsset("clean", "logo.png", PNG);
     const result = freshResult("5b");
     try {
-      const digest = await sourceDigest(t.root);
-      const replanned = await replanExisting(env.db, ctxWith(t.root));
+      const { digest, replanned } = await replanSourceAndExisting(env, t.root);
       expect(replanned.normaliseCount).toBe(1);
-      env.reinstall();
-      const err: string[] = [];
-      const code = await main(
-        applyArgv(t.root, t.output, [
-          "--expect",
-          digest,
-          "--expect-existing",
-          replanned.digest,
-          "--result",
-          result,
-        ]),
-        { stdout: () => {}, stderr: (line) => err.push(line) },
+      const { code, err } = await runPlannedApply(
+        env,
+        t.root,
+        t.output,
+        { digest, existingDigest: replanned.digest },
+        result,
       );
       expect(code).toBe(1);
       expect(err).toEqual([]);
@@ -553,10 +563,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
   test("a draft-bearing class-(P) campaign is refused without writing and exits 3", async () => {
     const t = tree();
     root = t.root;
-    writeAt(t.root, "assets/inputs/drafted/logo.png", PNG);
-    const drafted = await seedClassP("drafted", {
-      products: [product("assets/inputs/drafted/logo.png")],
-    });
+    const drafted = await seedClassPWithLogo(t.root, "drafted");
     await env.db.query(
       "insert into draft (campaign_id, user_id, org_id, state, base_revision) " +
         "select id, 'user-1', 'local', '{}'::jsonb, $1::text from campaign " +
@@ -565,20 +572,13 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     );
     const result = freshResult("5a");
     try {
-      const digest = await sourceDigest(t.root);
-      const replanned = await replanExisting(env.db, ctxWith(t.root));
-      env.reinstall();
-      const err: string[] = [];
-      const code = await main(
-        applyArgv(t.root, t.output, [
-          "--expect",
-          digest,
-          "--expect-existing",
-          replanned.digest,
-          "--result",
-          result,
-        ]),
-        { stdout: () => {}, stderr: (line) => err.push(line) },
+      const { digest, replanned } = await replanSourceAndExisting(env, t.root);
+      const { code, err } = await runPlannedApply(
+        env,
+        t.root,
+        t.output,
+        { digest, existingDigest: replanned.digest },
+        result,
       );
       expect(code).toBe(3);
       expect(err).toEqual([]);
@@ -603,10 +603,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
   test("mid-write 409 conflict on rewriteBrief records conflict, keeps minted assets on the result line, and marks the run partial (exit 1)", async () => {
     const t = tree();
     root = t.root;
-    writeAt(t.root, "assets/inputs/conflict/logo.png", PNG);
-    await seedClassP("conflict", {
-      products: [product("assets/inputs/conflict/logo.png")],
-    });
+    await seedClassPWithLogo(t.root, "conflict");
     const ctx = ctxWith(t.root);
     const replanned = await replanExisting(env.db, ctx);
     const realBriefs = briefs();
@@ -653,10 +650,11 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
   test("an existing non-class-P campaign and no --expect-existing gives a refused line in the result file and exit 3", async () => {
     const t = tree();
     root = t.root;
-    writeAt(t.root, "assets/inputs/camp/logo.png", PNG);
+    const logo = campLogo("camp");
+    writeAt(t.root, logo, PNG);
     writeBrief(t.root, "camp.yaml", {
       id: "camp",
-      products: [product("assets/inputs/camp/logo.png")],
+      products: [product(logo)],
     });
     // Pre-existing campaign in the DB whose body differs from the import tree:
     // not class (P) because it is a source campaign taking the import path.
@@ -670,7 +668,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
             id: "p1",
             name: "SOMEONE ELSE",
             primaryColor: "#222222",
-            logoPath: "assets/inputs/camp/logo.png",
+            logoPath: logo,
           },
         ],
       }),
@@ -678,18 +676,10 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     const result = freshResult("non-class-p");
     try {
       const digest = await sourceDigest(t.root);
-      env.reinstall();
-      const err: string[] = [];
-      const code = await main(
-        applyArgv(t.root, t.output, ["--expect", digest, "--result", result]),
-        { stdout: () => {}, stderr: (line) => err.push(line) },
-      );
+      const { code, err } = await runPlannedApply(env, t.root, t.output, { digest }, result);
       expect(code).toBe(3);
       expect(err).toEqual([]);
-      const lines = readFileSync(result, "utf8")
-        .split("\n")
-        .filter((line) => line.length > 0)
-        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      const lines = readResultLines(result);
       const campaignLine = lines.find((line) => line.kind === "campaign");
       expect(campaignLine).toMatchObject({
         slug: "camp",
@@ -715,34 +705,20 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
   test("plan and apply hash the same set when a class-(P) campaign is in both the source tree and DB", async () => {
     const t = tree();
     root = t.root;
-    writeAt(t.root, "assets/inputs/shared/logo.png", PNG);
+    const sharedLogo = campLogo("shared");
+    writeAt(t.root, sharedLogo, PNG);
     writeBrief(t.root, "shared.yaml", {
       id: "shared",
-      products: [product("assets/inputs/shared/logo.png")],
+      products: [product(sharedLogo)],
     });
-    writeAt(t.root, "assets/inputs/outside/logo.png", PNG);
     await seedClassP("shared", {
-      products: [product("assets/inputs/shared/logo.png")],
+      products: [product(sharedLogo)],
     });
-    await seedClassP("outside", {
-      products: [product("assets/inputs/outside/logo.png")],
-    });
+    await seedClassPWithLogo(t.root, "outside");
     const result = freshResult("hash-same-set");
     try {
       const plan = await runPlan(env, t.root, t.output);
-      env.reinstall();
-      const err: string[] = [];
-      const code = await main(
-        applyArgv(t.root, t.output, [
-          "--expect",
-          plan.digest,
-          "--expect-existing",
-          plan.existingDigest,
-          "--result",
-          result,
-        ]),
-        { stdout: () => {}, stderr: (line) => err.push(line) },
-      );
+      const { code, err } = await runPlannedApply(env, t.root, t.output, plan, result);
       expect(code).toBe(1);
       expect(err).toEqual([]);
       const parsed = parseResult(result);
@@ -760,30 +736,15 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
   test("a scan refusal with a truthy slug matching a stored class-(P) campaign is not normalised", async () => {
     const t = tree();
     root = t.root;
-    writeAt(t.root, "assets/inputs/refused/logo.png", PNG);
-    await seedClassP("refused", {
-      products: [product("assets/inputs/refused/logo.png")],
-    });
+    await seedClassPWithLogo(t.root, "refused");
     writeBrief(t.root, "refused.yaml", {
       id: "refused",
-      products: [product("assets/inputs/refused/missing.png")],
+      products: [product(campLogo("refused", "missing.png"))],
     });
     const result = freshResult("refused-slug");
     try {
       const plan = await runPlan(env, t.root, t.output);
-      env.reinstall();
-      const err: string[] = [];
-      const code = await main(
-        applyArgv(t.root, t.output, [
-          "--expect",
-          plan.digest,
-          "--expect-existing",
-          plan.existingDigest,
-          "--result",
-          result,
-        ]),
-        { stdout: () => {}, stderr: (line) => err.push(line) },
-      );
+      const { code, err } = await runPlannedApply(env, t.root, t.output, plan, result);
       expect(code).toBe(3);
       expect(err).toEqual([]);
       const parsed = parseResult(result);

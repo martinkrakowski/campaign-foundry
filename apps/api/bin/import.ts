@@ -360,16 +360,25 @@ async function writeWithResultGuard(
   }
 }
 
+/** Print any assets minted for a campaign (imported or class-(P) normalised). */
+function printMintedAssets(
+  io: ImportIO,
+  campaignId: string | undefined,
+  assets: readonly { readonly id: string; readonly name: string; readonly key: string }[],
+): void {
+  if (assets.length > 0) {
+    io.stdout(`  minted: campaign ${campaignId}, ${assets.length} asset(s)`);
+    for (const asset of assets) {
+      io.stdout(`    asset ${asset.id} ${asset.name} ${asset.key}`);
+    }
+  }
+}
+
 /** Print one class-(P) normalisation entry on stdout (PT-8e3). */
 function printNormaliseEntry(io: ImportIO, entry: NormaliseResult): void {
   const why = entry.reason ? `: ${entry.reason}` : "";
   io.stdout(`${entry.slug}: existing ${entry.status}${why}`);
-  if (entry.minted.assets.length > 0) {
-    io.stdout(`  minted: campaign ${entry.campaignId}, ${entry.minted.assets.length} asset(s)`);
-    for (const asset of entry.minted.assets) {
-      io.stdout(`    asset ${asset.id} ${asset.name} ${asset.key}`);
-    }
-  }
+  printMintedAssets(io, entry.campaignId, entry.minted.assets);
   for (const skipped of entry.notImported) {
     io.stdout(`  input ${skipped.name}: not imported: ${skipped.reason}`);
   }
@@ -435,14 +444,7 @@ async function runApplyBody(
     IMPORT_STEPS,
     async (entry: CampaignEntry) => {
       io.stdout(`${entry.slug}: ${entry.outcome}${entry.reason ? `: ${entry.reason}` : ""}`);
-      if (entry.minted.assets.length > 0) {
-        io.stdout(
-          `  minted: campaign ${entry.minted.campaignId}, ${entry.minted.assets.length} asset(s)`,
-        );
-        for (const asset of entry.minted.assets) {
-          io.stdout(`    asset ${asset.id} ${asset.name} ${asset.key}`);
-        }
-      }
+      printMintedAssets(io, entry.minted.campaignId, entry.minted.assets);
       for (const note of entryNotes(entry)) io.stdout(note);
       await writeWithResultGuard(resultPath, () => writer.add(entry));
     },
