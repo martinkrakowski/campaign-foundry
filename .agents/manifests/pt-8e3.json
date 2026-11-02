@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "lane": "PT-8e3b",
+  "mutations": [
+    {
+      "file": "apps/api/server/lib/import/existing-apply.ts",
+      "before": "  if (!state.hasAsset && state.createdAtMs < ctx.switchedAt.getTime()) return \"no-upload\";\n",
+      "after": "  if (!state.hasAsset && state.createdAtMs <= ctx.switchedAt.getTime()) return \"no-upload\";\n",
+      "because": "Relaxing `<` to `<=` on `--switched-at` admits a campaign created at the cutover instant into set (c), violating D223(c) ('campaign.created_at before --switched-at'). Caught by the at-switch boundary test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/existing-apply.test.ts",
+        "-t",
+        "set \\(c\\) imports renders for a live no-upload campaign created before --switched-at"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/import/existing-apply.ts",
+      "before": "  if (!state.hasAsset && state.createdAtMs < ctx.switchedAt.getTime()) return \"no-upload\";\n",
+      "after": "  if (state.createdAtMs < ctx.switchedAt.getTime()) return \"no-upload\";\n",
+      "because": "Dropping `!state.hasAsset` admits a campaign that already holds uploaded assets into set (c), violating D223(c) ('no path ref, no asset row'). Caught by the pre-with-asset scope boundary test.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/import/__tests__/existing-apply.test.ts",
+        "-t",
+        "set \\(c\\) imports renders for a live no-upload campaign created before --switched-at"
+      ],
+      "verdict": "caught"
+    }
+  ]
+}

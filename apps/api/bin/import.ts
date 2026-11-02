@@ -43,9 +43,12 @@ import {
 } from "../server/lib/import/apply.js";
 import {
   applyExistingNormalise,
+  applyExistingRenders,
   checkExistingDigest,
   replanExisting,
   type ExistingReplan,
+  type ExistingRenderEntry,
+  type OutOfScopeRender,
 } from "../server/lib/import/existing-apply.js";
 import type { NormaliseResult } from "../server/lib/import/normalise-step.js";
 import type { StepContext } from "../server/lib/import/steps.js";
@@ -384,6 +387,16 @@ function printNormaliseEntry(io: ImportIO, entry: NormaliseResult): void {
   }
 }
 
+/** Print one scoped existing-campaign renders entry on stdout (PT-8e3b). */
+function printExistingRenderEntry(io: ImportIO, entry: ExistingRenderEntry): void {
+  io.stdout(`${entry.slug}: existing renders (${entry.scope})`);
+  for (const render of entry.renders) {
+    const why = "reason" in render && render.reason ? `: ${render.reason}` : "";
+    io.stdout(`  render ${render.path}: ${render.status}${why}`);
+  }
+  if (entry.stepError) io.stdout(`  a later step failed: ${entry.stepError}`);
+}
+
 interface ValidatedApply {
   readonly ctx: StepContext;
   readonly switchedAtIso: string;
@@ -459,12 +472,31 @@ async function runApplyBody(
       await writeWithResultGuard(resultPath, () => writer.existing(entry));
     },
   );
+  const importedSlugs = sourceCampaignSlugs(replanned);
+  const renderCounts = await applyExistingRenders(
+    database(),
+    undefined,
+    ctx,
+    importedSlugs,
+    normCounts.normalisedSlugs,
+    {
+      onMinted,
+      onEntry: async (entry) => {
+        printExistingRenderEntry(io, entry);
+        await writeWithResultGuard(resultPath, () => writer.existingRenders(entry));
+      },
+      onOutOfScope: async (item: OutOfScopeRender) => {
+        io.stdout(`${item.slug}: render ${item.path}: ${item.reason}`);
+        await writeWithResultGuard(resultPath, () => writer.outOfScopeRender(item));
+      },
+    },
+  );
   const refused = replanned.result.refusals.length + counts.refused + normCounts.refused;
   const merged: ApplyCounts = {
     ...counts,
     refused,
-    partial: counts.partial || normCounts.partial,
-    objectsMinted: counts.objectsMinted + normCounts.assetsMinted,
+    partial: counts.partial || normCounts.partial || renderCounts.partial,
+    objectsMinted: counts.objectsMinted + normCounts.assetsMinted + renderCounts.objectsMinted,
     ...(normCounts.normalised > 0 ? { normalised: normCounts.normalised } : {}),
   };
   await writer.summary(merged);

@@ -1279,4 +1279,38 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("the verify subcommand (PT-8f3)", () => {
     expect(out).toEqual([]);
     expect(err).toEqual(["verify needs OBJECT_STORE=s3, and OBJECT_STORE is fs"]);
   });
+
+  test("apply prints a step error on stdout when a scoped existing-campaign report fails", async () => {
+    const inserted = await env.db.query<{ id: string }>(
+      `insert into campaign (org_id, slug, created_at) values ('local', 'pre-camp', '2026-09-30T00:00:00Z') returning id`,
+    );
+    await env.db.query(
+      `insert into brief_version (campaign_id, version, body, revision, actor)
+       values ($1, 1, $2, 'rev-1', 'import:pt-8')`,
+      [inserted.rows[0]!.id, JSON.stringify(briefBody({ id: "pre-camp", products: [] }))],
+    );
+    await env.db.query(
+      `insert into report (org_id, campaign_id, body, revision) values ('local', 'pre-camp', 'not-valid-json {', 'r-1')`,
+    );
+
+    const planOut = join(tmpdir(), `cf-cli-plan-step-err-${process.pid}.json`);
+    const result = join(tmpdir(), `cf-cli-result-step-err-${process.pid}.jsonl`);
+    tmpFiles.push(planOut, result);
+
+    const depsPlan = { stdout: () => {}, stderr: () => {} };
+    expect(await main(argv("plan", "--out", planOut), depsPlan)).toBe(0);
+    const digest = (JSON.parse(readFileSync(planOut, "utf8")) as { digest: string }).digest;
+
+    env.reinstall();
+    const { out, err, deps } = io();
+    const code = await main(argv("apply", "--expect", digest, "--result", result), deps);
+    expect(code).toBe(1);
+    expect(err).toEqual([]);
+    expect(out).toContain("pre-camp: existing renders (no-upload)");
+    expect(
+      out.some((line) =>
+        line.startsWith("  a later step failed: the stored report body for pre-camp is not JSON"),
+      ),
+    ).toBe(true);
+  });
 });
