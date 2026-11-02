@@ -33,6 +33,7 @@ import { dryRowStores, predictRows, type PlannedRow } from "./rows-step.js";
 import { errorMessage } from "@campaignfoundry/shared";
 import type { ScannedCampaign } from "./scan.js";
 import type { NormaliseResult } from "./normalise-step.js";
+import type { ExistingRenderEntry, OutOfScopeRender } from "./existing-apply.js";
 /**
  * What `replan` hands the apply loop and the result builder: the same scan and
  * digest `plan` prints, plus the reviewed-content hashes the per-campaign step
@@ -475,6 +476,16 @@ export class ResultWriter {
   /** Append one class-(P) normalisation line and fsync it before the next campaign starts (PT-8e3). */
   async existing(entry: NormaliseResult): Promise<void> {
     await this.#append({ kind: "existing", ...entry });
+  }
+
+  /** Append one scoped existing-campaign renders line (sets b and c) and fsync it (PT-8e3b). */
+  async existingRenders(entry: ExistingRenderEntry): Promise<void> {
+    await this.#append({ kind: "existing-renders", ...entry });
+  }
+
+  /** Append one out-of-scope render line (listed, never written, D223) and fsync it (PT-8e3b). */
+  async outOfScopeRender(entry: OutOfScopeRender): Promise<void> {
+    await this.#append({ kind: "out-of-scope-render", ...entry });
   }
 
   /** Write the summary line (the last line, written only when the loop ends). */
