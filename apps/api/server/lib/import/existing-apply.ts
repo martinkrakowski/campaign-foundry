@@ -340,7 +340,7 @@ function classifyRenderScope(
 ): ExistingRenderScope {
   if (normalisedSlugs.has(slug)) return "normalised";
   if (state === undefined) return "out-of-scope";
-  const zeroRefs = state.body !== undefined && hasZeroPathRefs(ctx, slug, state.body);
+  const zeroRefs = hasZeroPathRefs(ctx, slug, state.body);
   if (state.version !== undefined && state.version > 1 && state.actor === IMPORT_ACTOR) {
     if (zeroRefs) return "normalised";
   }
@@ -361,7 +361,7 @@ function classifyRenderScope(
 async function stampOutputRender(
   outputRoot: string,
   path: string,
-  options: RenderFileOptions = {},
+  options?: RenderFileOptions,
 ): Promise<Map<string, string>> {
   const stamps = new Map<string, string>();
   let file: string;
@@ -381,7 +381,7 @@ async function stampOutputRender(
   if (parents !== undefined) return stamps;
   if (st.isSymbolicLink()) return stamps;
   if (!st.isFile()) return stamps;
-  const maxBytes = options.maxBytes ?? MAX_RENDER_BYTES;
+  const maxBytes = options?.maxBytes ?? MAX_RENDER_BYTES;
   if (st.size > maxBytes) return stamps;
   stamps.set(rel, fingerprint(st));
   return stamps;
@@ -391,7 +391,7 @@ async function stampOutputRender(
 async function readOutputRender(
   outputRoot: string,
   path: string,
-  options: RenderFileOptions = {},
+  options?: RenderFileOptions,
 ): Promise<Reviewed> {
   const stamps = await stampOutputRender(outputRoot, path, options);
   return readReviewedRender(outputRoot, path, stamps, options);

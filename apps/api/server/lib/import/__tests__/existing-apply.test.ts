@@ -18,6 +18,7 @@ import {
   replanExisting,
   type ExistingRenderEntry,
   type ExistingReplan,
+  type OutOfScopeRender,
 } from "../existing-apply.js";
 import { importTenant } from "../import-tenant.js";
 import type { NormaliseResult } from "../normalise-step.js";
@@ -1287,5 +1288,262 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
       partial: true,
       stepError: `the target holds no campaign ${slug}; none of its renders was written`,
     });
+  });
+
+  test("classifyRenderScope catches unparseable brief body and classifies report out-of-scope", async () => {
+    const t = tree();
+    root = t.root;
+    const slug = "malformed-brief";
+    await briefs().createCampaign(slug);
+    await env.db.query(
+      "insert into brief_version (campaign_id, version, actor, body) " +
+        "select id, 1, 'user-1', 'not valid json {' from campaign " +
+        "where org_id = 'local' and slug = $1",
+      [slug],
+    );
+    writeAt(t.output, `${slug}/proof.png`, PNG);
+    await seedReport(env, slug, [`${slug}/proof.png`]);
+    const entries: ExistingRenderEntry[] = [];
+    const outOfScope: OutOfScopeRender[] = [];
+    const counts = await applyExistingRenders(
+      env.db,
+      env.objects,
+      ctxWith(t.root),
+      new Set(),
+      new Set(),
+      {
+        onMinted: async () => {},
+        onEntry: async (entry) => {
+          entries.push(entry);
+        },
+        onOutOfScope: async (item) => {
+          outOfScope.push(item);
+        },
+      },
+    );
+    expect(counts.outOfScope).toBe(1);
+    expect(entries).toHaveLength(0);
+    expect(outOfScope).toHaveLength(1);
+    expect(outOfScope[0]).toMatchObject({
+      slug,
+      path: `${slug}/proof.png`,
+    });
+  });
+
+  test("readOutputRender and hasRenderSourceOnDisk safely reject escaping paths", async () => {
+    const t = tree();
+    root = t.root;
+    const scopedSlug = "scoped-escape";
+    await seedLiveZeroRefCampaign(env, scopedSlug);
+    await setCreatedAt(env, scopedSlug, "2026-09-30T23:59:00Z");
+    await seedReport(env, scopedSlug, ["../escape-outside.png"]);
+
+    const oosSlug = "oos-escape";
+    await seedLiveZeroRefCampaign(env, oosSlug);
+    await setCreatedAt(env, oosSlug, "2026-10-02T00:00:00Z");
+    await seedReport(env, oosSlug, ["../escape-oos.png"]);
+
+    const entries: ExistingRenderEntry[] = [];
+    const outOfScope: OutOfScopeRender[] = [];
+    const counts = await applyExistingRenders(
+      env.db,
+      env.objects,
+      ctxWith(t.root),
+      new Set(),
+      new Set(),
+      {
+        onMinted: async () => {},
+        onEntry: async (entry) => {
+          entries.push(entry);
+        },
+        onOutOfScope: async (item) => {
+          outOfScope.push(item);
+        },
+      },
+    );
+    expect(counts.partial).toBe(true);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.slug).toBe(scopedSlug);
+    expect(entries[0]!.renders[0]!.status).toBe("refused");
+    expect(outOfScope).toHaveLength(0);
+  });
+
+  test("stored campaign without brief_version row is handled as out-of-scope", async () => {
+    const t = tree();
+    root = t.root;
+    const slug = "no-brief-camp";
+    await briefs().createCampaign(slug);
+    writeAt(t.output, `${slug}/proof.png`, PNG);
+    await seedReport(env, slug, [`${slug}/proof.png`]);
+    const entries: ExistingRenderEntry[] = [];
+    const outOfScope: OutOfScopeRender[] = [];
+    const counts = await applyExistingRenders(
+      env.db,
+      env.objects,
+      ctxWith(t.root),
+      new Set(),
+      new Set(),
+      {
+        onMinted: async () => {},
+        onEntry: async (entry) => {
+          entries.push(entry);
+        },
+        onOutOfScope: async (item) => {
+          outOfScope.push(item);
+        },
+      },
+    );
+    expect(counts.outOfScope).toBe(1);
+    expect(entries).toHaveLength(0);
+    expect(outOfScope).toHaveLength(1);
+    expect(outOfScope[0]).toMatchObject({
+      slug,
+      path: `${slug}/proof.png`,
+    });
+  });
+
+  test("empty report paths for scoped and out-of-scope campaigns", async () => {
+    const t = tree();
+    root = t.root;
+    const scopedSlug = "scoped-empty-paths";
+    await seedLiveZeroRefCampaign(env, scopedSlug);
+    await setCreatedAt(env, scopedSlug, "2026-09-30T23:59:00Z");
+    await seedReport(env, scopedSlug, []);
+
+    const oosSlug = "oos-empty-paths";
+    await seedLiveZeroRefCampaign(env, oosSlug);
+    await setCreatedAt(env, oosSlug, "2026-10-02T00:00:00Z");
+    await seedReport(env, oosSlug, []);
+
+    const entries: ExistingRenderEntry[] = [];
+    const outOfScope: OutOfScopeRender[] = [];
+    const counts = await applyExistingRenders(
+      env.db,
+      env.objects,
+      ctxWith(t.root),
+      new Set(),
+      new Set(),
+      {
+        onMinted: async () => {},
+        onEntry: async (entry) => {
+          entries.push(entry);
+        },
+        onOutOfScope: async (item) => {
+          outOfScope.push(item);
+        },
+      },
+    );
+    expect(counts.objectsMinted).toBe(0);
+    expect(counts.partial).toBe(false);
+    expect(counts.outOfScope).toBe(0);
+    expect(entries).toHaveLength(0);
+    expect(outOfScope).toHaveLength(0);
+  });
+
+  test("stampOutputRender refuses directory paths and files exceeding options.maxBytes", async () => {
+    const t = tree();
+    root = t.root;
+    const slug = "dir-and-cap";
+    await seedLiveZeroRefCampaign(env, slug);
+    await setCreatedAt(env, slug, "2026-09-30T23:59:00Z");
+
+    mkdirSync(join(t.output, `${slug}/adir`), { recursive: true });
+    writeAt(t.output, `${slug}/big.png`, PNG);
+
+    await seedReport(env, slug, [`${slug}/adir`, `${slug}/big.png`]);
+
+    const entries: ExistingRenderEntry[] = [];
+    const counts = await applyExistingRenders(
+      env.db,
+      env.objects,
+      ctxWith(t.root),
+      new Set(),
+      new Set(),
+      {
+        onMinted: async () => {},
+        onEntry: async (entry) => {
+          entries.push(entry);
+        },
+        onOutOfScope: async () => {},
+      },
+      { maxBytes: 10 },
+    );
+    expect(counts.partial).toBe(true);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.renders).toHaveLength(2);
+    expect(entries[0]!.renders[0]!.status).toBe("refused");
+    expect(entries[0]!.renders[1]!.status).toBe("refused");
+  });
+
+  test("campaign with version > 1 and import actor but non-zero path refs is classified out-of-scope", async () => {
+    const t = tree();
+    root = t.root;
+    const slug = "imp-actor-with-refs";
+    await briefs().createCampaign(slug);
+    const logo = campLogo(slug);
+    writeAt(t.root, logo, PNG);
+    const briefWithRef = briefBody({ id: slug, products: [product(logo)] });
+    await env.db.query(
+      "insert into brief_version (campaign_id, version, actor, body) " +
+        "select id, 2, 'import:pt-8', $1 from campaign " +
+        "where org_id = 'local' and slug = $2",
+      [JSON.stringify(briefWithRef), slug],
+    );
+    writeAt(t.output, `${slug}/proof.png`, PNG);
+    await seedReport(env, slug, [`${slug}/proof.png`]);
+
+    const entries: ExistingRenderEntry[] = [];
+    const outOfScope: OutOfScopeRender[] = [];
+    const counts = await applyExistingRenders(
+      env.db,
+      env.objects,
+      ctxWith(t.root),
+      new Set(),
+      new Set(),
+      {
+        onMinted: async () => {},
+        onEntry: async (entry) => {
+          entries.push(entry);
+        },
+        onOutOfScope: async (item) => {
+          outOfScope.push(item);
+        },
+      },
+    );
+    expect(counts.outOfScope).toBe(1);
+    expect(entries).toHaveLength(0);
+    expect(outOfScope).toHaveLength(1);
+    expect(outOfScope[0]!.slug).toBe(slug);
+  });
+
+  test("applyExistingRenders defaults objects store when undefined", async () => {
+    const t = tree();
+    root = t.root;
+    const counts = await applyExistingRenders(
+      env.db,
+      undefined,
+      ctxWith(t.root),
+      new Set(),
+      new Set(),
+      {
+        onMinted: async () => {},
+        onEntry: async () => {},
+        onOutOfScope: async () => {},
+      },
+    );
+    expect(counts.objectsMinted).toBe(0);
+    expect(counts.partial).toBe(false);
+    expect(counts.outOfScope).toBe(0);
+  });
+
+  test("applyExistingNormalise falls back to default stores when partial stores are passed", async () => {
+    const t = tree();
+    root = t.root;
+    const ctx = ctxWith(t.root);
+    const replanned = { items: [], normaliseCount: 0, digest: "abc" };
+    const counts = await applyExistingNormalise(env.db, ctx, replanned, async () => {}, {
+      draftCount: async () => 0,
+    });
+    expect(counts.normalised).toBe(0);
   });
 });
