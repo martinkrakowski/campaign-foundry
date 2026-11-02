@@ -757,24 +757,49 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     const clip = screen.getByRole("button", {
       name: messages.sequenceVideoClip(1, 1.5, 4.5),
     });
-    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
-    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+    const start = screen.getByRole("slider", {
+      name: messages.sequenceVideoSpanStart(1),
+    }) as HTMLInputElement;
+    const end = screen.getByRole("slider", {
+      name: messages.sequenceVideoSpanEnd(1),
+    }) as HTMLInputElement;
 
     expect(clip.style.left).toBe("42px");
-    expect(start.style.left).toBe("42px");
-    expect(end.style.left).toBe("126px");
+    expect(start.value).toBe("1.5");
+    expect(end.value).toBe("4.5");
+    expect(start.style.left).toBe("0px");
+    expect(end.style.left).toBe("0px");
 
     fireEvent.pointerDown(clip, { clientX: 0 });
     fireEvent.pointerMove(clip, { clientX: 28 });
 
     expect(clip.style.left).toBe("70px");
-    expect(start.style.left).toBe("70px");
-    expect(end.style.left).toBe("154px");
+    expect(start.value).toBe("2.5");
+    expect(end.value).toBe("5.5");
+    expect(start.style.left).toBe("0px");
+    expect(end.style.left).toBe("0px");
 
     fireEvent.pointerMove(clip, { clientX: 200 });
     expect(clip.style.left).toBe("84px");
-    expect(start.style.left).toBe("84px");
-    expect(end.style.left).toBe("168px");
+    expect(start.value).toBe("3");
+    expect(end.value).toBe("6");
+    expect(start.style.left).toBe("0px");
+    expect(end.style.left).toBe("0px");
+  });
+
+  test("the range's width equals durationSec * pxPerSec", () => {
+    renderTimeline({ videoRows: [halfRow] });
+    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
+    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+
+    expect(start.style.width).toBe(`${DURATION * 28}px`);
+    expect(end.style.width).toBe(`${DURATION * 28}px`);
+    expect(start.style.left).toBe("0px");
+    expect(end.style.left).toBe("0px");
+
+    fireEvent.change(screen.getByLabelText(messages.tapeZoomName), { target: { value: "60" } });
+    expect(start.style.width).toBe(`${DURATION * 60}px`);
+    expect(end.style.width).toBe(`${DURATION * 60}px`);
   });
 
   test("a pointerup at a new x with no move before it commits that x", () => {
@@ -1010,19 +1035,27 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     expect(onVideoSpanCommit).toHaveBeenCalledWith("video", 0.25, 1);
   });
 
-  test("during a change event the slider's left style follows the in-flight value", () => {
+  test("during a change event the slider's value follows the in-flight value", () => {
     renderTimeline({ videoRows: [halfRow] });
-    const start = screen.getByRole("slider", { name: messages.sequenceVideoSpanStart(1) });
-    const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+    const start = screen.getByRole("slider", {
+      name: messages.sequenceVideoSpanStart(1),
+    }) as HTMLInputElement;
+    const end = screen.getByRole("slider", {
+      name: messages.sequenceVideoSpanEnd(1),
+    }) as HTMLInputElement;
 
-    expect(start.style.left).toBe("42px");
-    expect(end.style.left).toBe("126px");
+    expect(start.value).toBe("1.5");
+    expect(end.value).toBe("4.5");
+    expect(start.style.left).toBe("0px");
+    expect(end.style.left).toBe("0px");
 
     fireEvent.change(start, { target: { value: "2" } });
-    expect(start.style.left).toBe("56px");
+    expect(start.value).toBe("2");
+    expect(start.style.left).toBe("0px");
 
     fireEvent.change(end, { target: { value: "5" } });
-    expect(end.style.left).toBe("140px");
+    expect(end.value).toBe("5");
+    expect(end.style.left).toBe("0px");
   });
 
   test("edge slider inputs carry pointer-events-none and vendor thumb auto classes because jsdom cannot hit-test narrow clip drag takeover", () => {

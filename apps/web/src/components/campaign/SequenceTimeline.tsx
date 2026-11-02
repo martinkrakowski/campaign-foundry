@@ -394,7 +394,7 @@ function VideoClip({
     onKeyDown,
   };
   const sliderClass =
-    "absolute top-1/2 z-10 h-6 w-24 -translate-x-12 -translate-y-1/2 cursor-ew-resize accent-brand-primary opacity-60 hover:opacity-100 hover:z-20 focus-visible:opacity-100 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-moz-range-thumb]:pointer-events-auto";
+    "absolute top-1/2 z-10 h-6 -translate-y-1/2 cursor-ew-resize accent-brand-primary opacity-60 hover:opacity-100 hover:z-20 focus-visible:opacity-100 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-moz-range-thumb]:pointer-events-auto";
   const edgeSlider = (which: "start" | "end") => {
     const isStart = which === "start";
     const inFlight = isStart ? inFlightStartRef : inFlightEndRef;
@@ -430,7 +430,8 @@ function VideoClip({
         }}
         className={cn(sliderClass, dragSec !== null && "z-20 opacity-100")}
         style={{
-          left: `${shown * pxPerSec}px`,
+          left: 0,
+          width: `${durationSec * pxPerSec}px`,
         }}
       />
     );
