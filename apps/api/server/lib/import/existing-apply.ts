@@ -365,18 +365,14 @@ async function stampOutputRender(
 ): Promise<Map<string, string>> {
   const stamps = new Map<string, string>();
   let file: string;
-  try {
-    file = resolveConfined(outputRoot, path);
-  } catch {
-    return stamps;
-  }
-  const rel = relative(outputRoot, file);
   let st: Stats;
   try {
+    file = resolveConfined(outputRoot, path);
     st = await lstat(file);
   } catch {
     return stamps;
   }
+  const rel = relative(outputRoot, file);
   const parents = await parentsAreReal(outputRoot, rel);
   if (parents !== undefined) return stamps;
   if (st.isSymbolicLink()) return stamps;

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -1350,7 +1350,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
       env.objects,
       ctxWith(t.root),
       new Set(),
-      new Set(),
+      new Set([scopedSlug]),
       {
         onMinted: async () => {},
         onEntry: async (entry) => {
@@ -1473,6 +1473,115 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("existing class-(P) apply normalisation",
     expect(entries[0]!.renders).toHaveLength(2);
     expect(entries[0]!.renders[0]!.status).toBe("refused");
     expect(entries[0]!.renders[1]!.status).toBe("refused");
+  });
+
+  test("stampOutputRender refuses escaping paths for a scoped campaign", async () => {
+    const t = tree();
+    root = t.root;
+    const slug = "stamp-escape";
+    await seedLiveZeroRefCampaign(env, slug);
+    await setCreatedAt(env, slug, "2026-09-30T23:59:00Z");
+    await seedReport(env, slug, ["../escape-outside.png", `${slug}/../escape-rel.png`]);
+
+    const entries: ExistingRenderEntry[] = [];
+    const counts = await applyExistingRenders(
+      env.db,
+      env.objects,
+      ctxWith(t.root),
+      new Set(),
+      new Set([slug]),
+      {
+        onMinted: async () => {},
+        onEntry: async (entry) => {
+          entries.push(entry);
+        },
+        onOutOfScope: async () => {},
+      },
+    );
+    expect(counts.partial).toBe(true);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.slug).toBe(slug);
+    expect(entries[0]!.renders).toHaveLength(2);
+    expect(entries[0]!.renders[0]!.status).toBe("refused");
+    expect(entries[0]!.renders[1]!.status).toBe("refused");
+  });
+
+  test("stampOutputRender refuses a render under a symlinked parent directory", async () => {
+    const t = tree();
+    root = t.root;
+    const slug = "sym-parent-camp";
+    await seedLiveZeroRefCampaign(env, slug);
+    await setCreatedAt(env, slug, "2026-09-30T23:59:00Z");
+
+    const realDir = join(t.output, "real-parent");
+    mkdirSync(realDir, { recursive: true });
+    writeAt(t.output, "real-parent/render.png", PNG);
+    mkdirSync(join(t.output, slug), { recursive: true });
+    symlinkSync(realDir, join(t.output, slug, "symdir"));
+
+    await seedReport(env, slug, [`${slug}/symdir/render.png`]);
+
+    const entries: ExistingRenderEntry[] = [];
+    const counts = await applyExistingRenders(
+      env.db,
+      env.objects,
+      ctxWith(t.root),
+      new Set(),
+      new Set([slug]),
+      {
+        onMinted: async () => {},
+        onEntry: async (entry) => {
+          entries.push(entry);
+        },
+        onOutOfScope: async () => {},
+      },
+    );
+    expect(counts.partial).toBe(true);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.slug).toBe(slug);
+    expect(entries[0]!.renders).toHaveLength(1);
+    const render = entries[0]!.renders[0]!;
+    expect(render.status).toBe("refused");
+    if (render.status === "refused") {
+      expect(render.reason).toContain("symlink");
+    }
+  });
+
+  test("stampOutputRender refuses a directory at the report's path", async () => {
+    const t = tree();
+    root = t.root;
+    const slug = "dir-path-camp";
+    await seedLiveZeroRefCampaign(env, slug);
+    await setCreatedAt(env, slug, "2026-09-30T23:59:00Z");
+
+    mkdirSync(join(t.output, slug, "folder.png"), { recursive: true });
+
+    await seedReport(env, slug, [`${slug}/folder.png`]);
+
+    const entries: ExistingRenderEntry[] = [];
+    const counts = await applyExistingRenders(
+      env.db,
+      env.objects,
+      ctxWith(t.root),
+      new Set(),
+      new Set([slug]),
+      {
+        onMinted: async () => {},
+        onEntry: async (entry) => {
+          entries.push(entry);
+        },
+        onOutOfScope: async () => {},
+      },
+    );
+    expect(counts.partial).toBe(true);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.slug).toBe(slug);
+    expect(entries[0]!.renders).toHaveLength(1);
+    const render = entries[0]!.renders[0]!;
+    expect(render.status).toBe("refused");
+    if (render.status === "refused") {
+      expect(render.reason).toContain("is not a regular file");
+    }
   });
 
   test("campaign with version > 1 and import actor but non-zero path refs is classified out-of-scope", async () => {
