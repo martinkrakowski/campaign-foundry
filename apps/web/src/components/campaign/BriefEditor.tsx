@@ -2293,6 +2293,11 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
                     dispatch({ type: "setLayerEnabled", id, enabled })
                   }
                   onMoveLayer={(from, to) => dispatch({ type: "moveLayer", from, to })}
+                  /* VT2b — the span write, the same reducer action the whole
+                     editor uses. The timeline commits once, on release. */
+                  onVideoSpanCommit={(id, startT, endT) =>
+                    dispatch({ type: "setVideoSpan", layerId: id, startT, endT })
+                  }
                   /* Add-track: video is uncapped for this type; text is the
                      shared budget's, disabled with its reason once the one
                      layer exists (VT-D4). */

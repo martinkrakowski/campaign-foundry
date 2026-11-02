@@ -220,6 +220,37 @@ describe("VT1 — the sequence editor's mount gates and wired gestures", () => {
       });
     });
 
+    test("trimming and dragging a video clip writes the layer's span, never seconds", async () => {
+      await openAtWidth(videoBrief, 1440, async (user, saved) => {
+        // The clip starts full-length: first commit a shorter span through the
+        // end slider (3 s of a 6 s clip is t 0.5), then Save.
+        const end = screen.getByRole("slider", { name: messages.sequenceVideoSpanEnd(1) });
+        fireEvent.change(end, { target: { value: "3" } });
+        fireEvent.pointerUp(end);
+        await save(user);
+        await waitFor(() => expect(saved).toHaveLength(1));
+        let layers = (saved[0]?.template as { layers: Record<string, unknown>[] }).layers;
+        let video = layers.find((l) => l.id === "video");
+        expect(video?.span).toEqual({ startT: 0, endT: 0.5 });
+        expect(video).not.toHaveProperty("startSec");
+
+        // Drag the now half-length body by +28 clientX (one second at the fit
+        // floor) and release; the start moves by 1/6 and the length holds.
+        const clip = await screen.findByRole("button", {
+          name: messages.sequenceVideoClip(1, 0, 3),
+        });
+        fireEvent.pointerDown(clip, { clientX: 0 });
+        fireEvent.pointerMove(clip, { clientX: 28 });
+        fireEvent.pointerUp(clip, { clientX: 28 });
+        await save(user);
+        await waitFor(() => expect(saved).toHaveLength(2));
+        layers = (saved[1]?.template as { layers: Record<string, unknown>[] }).layers;
+        video = layers.find((l) => l.id === "video");
+        expect(video?.span).toEqual({ startT: 0 + 1 / 6, endT: 0 + 1 / 6 + 0.5 });
+        expect(video).not.toHaveProperty("startSec");
+      });
+    });
+
     test("add text stays disabled: the one animated-text layer already exists", async () => {
       await openAtWidth(videoBrief, 1440, async (user, saved) => {
         const control = (await screen.findByRole("button", {

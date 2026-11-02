@@ -98,6 +98,18 @@ const videoRows: SequenceTimelineProps["videoRows"] = [
   },
 ];
 
+/** A half-span video row — VT2b's drag/trim fixture (length 0.5). */
+const halfRow: SequenceTimelineProps["videoRows"][number] = {
+  id: "video",
+  index: 0,
+  startT: 0.25,
+  endT: 0.75,
+  off: false,
+  canToggle: true,
+  canMoveUp: false,
+  canMoveDown: false,
+};
+
 const baseProps: SequenceTimelineProps = {
   durationSec: DURATION,
   beats,
@@ -115,6 +127,7 @@ const baseProps: SequenceTimelineProps = {
   onSelectLayer: vi.fn(),
   onSetLayerEnabled: vi.fn(),
   onMoveLayer: vi.fn(),
+  onVideoSpanCommit: vi.fn(),
   onAddVideo: vi.fn(),
   canAddText: false,
   onAddText: vi.fn(),
@@ -134,6 +147,9 @@ const renderTimeline = (overrides: Partial<SequenceTimelineProps> = {}) => {
   }
   return render(<SequenceTimeline {...props} />);
 };
+
+const renderHalfRow = (overrides: Partial<SequenceTimelineProps> = {}) =>
+  renderTimeline({ videoRows: [halfRow], ...overrides });
 
 /**
  * The component's own source, for the checks that are about what is NOT in the
@@ -158,6 +174,56 @@ const clipNamed = (arr: typeof beats, position: number) => {
 };
 const videoClip = (position: number) =>
   screen.getByRole("button", { name: messages.sequenceVideoClip(position, 0, DURATION) });
+const halfClip = (position = 1) =>
+  screen.getByRole("button", { name: messages.sequenceVideoClip(position, 1.5, 4.5) });
+const spanSliders = (position = 1) => ({
+  start: screen.getByRole("slider", {
+    name: messages.sequenceVideoSpanStart(position),
+  }) as HTMLInputElement,
+  end: screen.getByRole("slider", {
+    name: messages.sequenceVideoSpanEnd(position),
+  }) as HTMLInputElement,
+});
+const drag = (el: Element, fromX: number, toX: number) => {
+  fireEvent.pointerDown(el, { clientX: fromX });
+  fireEvent.pointerMove(el, { clientX: toX });
+  fireEvent.pointerUp(el, { clientX: toX });
+};
+const setupTimeline = (overrides: Partial<SequenceTimelineProps> = {}) => {
+  const onVideoSpanCommit = vi.fn();
+  renderTimeline({ onVideoSpanCommit, ...overrides });
+  return {
+    onVideoSpanCommit,
+    get clip() {
+      return halfClip();
+    },
+    get start() {
+      return spanSliders().start;
+    },
+    get end() {
+      return spanSliders().end;
+    },
+  };
+};
+const setupHalfRow = (overrides: Partial<SequenceTimelineProps> = {}) =>
+  setupTimeline({ videoRows: [halfRow], ...overrides });
+const clickClip = (el: Element, clientX = 0) => {
+  fireEvent.pointerDown(el, { clientX });
+  fireEvent.pointerUp(el, { clientX });
+  fireEvent.click(el);
+};
+const changePointerUp = (el: Element, value: string) => {
+  fireEvent.change(el, { target: { value } });
+  fireEvent.pointerUp(el);
+};
+const changeKeyUp = (el: Element, value: string) => {
+  fireEvent.change(el, { target: { value } });
+  fireEvent.keyUp(el);
+};
+const expectSpanCommit = (fn: ReturnType<typeof vi.fn>, startT: number, endT: number) => {
+  expect(fn).toHaveBeenCalledTimes(1);
+  expect(fn).toHaveBeenCalledWith("video", startT, endT);
+};
 
 describe("the source rules the plan restates for this component (§5, §7, §9)", () => {
   test("the file is really the component the checks below grep", () => {
@@ -594,7 +660,7 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     renderTimeline();
     const enabled = videoClip(1);
     const off = videoClip(2);
-    // Not resizable means the width is the whole clip and there is no handle.
+    // A full-span row still occupies the whole duration; its edge controls may trim it.
     expect(enabled.style.width).toBe("168px");
     expect(off.style.width).toBe("168px");
     expect(off.className).toContain("opacity-40");
@@ -622,20 +688,403 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     expect(clip.style.width).toBe("84px");
   });
 
-  test("dragging a video clip horizontally changes nothing (§7: no span to write)", () => {
+  test("dragging a video clip commits the shifted span once, on release", () => {
+    const onSelectLayer = vi.fn();
     const onMoveBeat = vi.fn();
     const onMoveLayer = vi.fn();
     const onScrubLive = vi.fn();
     const onScrubCommit = vi.fn();
-    renderTimeline({ onMoveBeat, onMoveLayer, onScrubLive, onScrubCommit });
-    const clip = videoClip(1);
+    const { onVideoSpanCommit, clip } = setupHalfRow({
+      onSelectLayer,
+      onMoveBeat,
+      onMoveLayer,
+      onScrubLive,
+      onScrubCommit,
+    });
     fireEvent.pointerDown(clip, { clientX: 0 });
-    fireEvent.pointerMove(clip, { clientX: 200 });
-    fireEvent.pointerUp(clip);
-    expect(onMoveBeat).not.toHaveBeenCalled();
-    expect(onMoveLayer).not.toHaveBeenCalled();
+    fireEvent.pointerMove(clip, { clientX: 28 });
+    // §8's preview-cost rule: nothing follows the finger but the view.
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    fireEvent.pointerUp(clip, { clientX: 28 });
+    expectSpanCommit(
+      onVideoSpanCommit,
+      0.25 + 1 / DURATION,
+      Math.min(1, 0.25 + 1 / DURATION + 0.5),
+    );
     expect(onScrubLive).not.toHaveBeenCalled();
     expect(onScrubCommit).not.toHaveBeenCalled();
+    expect(onMoveBeat).not.toHaveBeenCalled();
+    expect(onMoveLayer).not.toHaveBeenCalled();
+    expect(onSelectLayer).not.toHaveBeenCalled();
+  });
+
+  test("a drag that returns to its origin is a click: it selects and commits nothing", () => {
+    const onVideoSpanCommit = vi.fn();
+    const onSelectLayer = vi.fn();
+    const originRow: SequenceTimelineProps["videoRows"][number] = {
+      ...halfRow,
+      // 0.3 + (0.9 - 0.3) is 0.9000000000000001: rebuilding the pair by value
+      // would treat this plain click as a move, so a value-equal ulp-shifted
+      // span is a failed test.
+      startT: 0.3,
+      endT: 0.9,
+    };
+    renderTimeline({ videoRows: [originRow], onVideoSpanCommit, onSelectLayer });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 1.8, 5.4),
+    });
+    fireEvent.pointerDown(clip, { clientX: 0 });
+    fireEvent.pointerMove(clip, { clientX: 28 });
+    fireEvent.pointerMove(clip, { clientX: 0 });
+    fireEvent.pointerUp(clip, { clientX: 0 });
+    fireEvent.click(clip);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    expect(onSelectLayer).toHaveBeenCalledWith("video");
+  });
+
+  test("a plain click on a span ending at 1 commits nothing and selects the layer", () => {
+    const onSelectLayer = vi.fn();
+    const endingAtOneRow: SequenceTimelineProps["videoRows"][number] = {
+      ...halfRow,
+      startT: 1 / 6,
+      endT: 1,
+    };
+    const { onVideoSpanCommit } = setupTimeline({
+      videoRows: [endingAtOneRow],
+      onSelectLayer,
+    });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 1, 6),
+    });
+    clickClip(clip, 28);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    expect(onSelectLayer).toHaveBeenCalledWith("video");
+  });
+
+  test("a drag past either end clamps to the nearest legal position", () => {
+    const { onVideoSpanCommit, clip } = setupHalfRow();
+    // Far right: start clamps to 1 - length (0.5).
+    drag(clip, 0, 84);
+    expect(onVideoSpanCommit).toHaveBeenLastCalledWith("video", 0.5, 1);
+
+    onVideoSpanCommit.mockClear();
+    // Far left: start clamps to 0.
+    drag(clip, 56, 0);
+    expect(onVideoSpanCommit).toHaveBeenLastCalledWith("video", 0, 0.5);
+  });
+
+  test("a pointercancel clears the drag and commits nothing", () => {
+    const { onVideoSpanCommit, clip } = setupHalfRow();
+    fireEvent.pointerDown(clip, { clientX: 0 });
+    fireEvent.pointerMove(clip, { clientX: 28 });
+    fireEvent.pointerCancel(clip);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("stray pointer events with no drag in flight commit nothing", () => {
+    const { onVideoSpanCommit, clip } = setupHalfRow();
+    fireEvent.pointerMove(clip, { clientX: 84 });
+    fireEvent.pointerUp(clip, { clientX: 84 });
+    fireEvent.pointerCancel(clip);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("a second pointer is ignored while a video clip drag is in flight", () => {
+    const { onVideoSpanCommit, clip } = setupHalfRow();
+
+    fireEvent.pointerDown(clip, { pointerId: 1, clientX: 0 });
+    fireEvent.pointerDown(clip, { pointerId: 2, clientX: 100 });
+    fireEvent.pointerMove(clip, { pointerId: 2, clientX: 200 });
+    fireEvent.pointerCancel(clip, { pointerId: 2 });
+    fireEvent.pointerUp(clip, { pointerId: 2, clientX: 200 });
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+
+    fireEvent.pointerMove(clip, { pointerId: 1, clientX: 28 });
+    fireEvent.pointerUp(clip, { pointerId: 1, clientX: 28 });
+    expectSpanCommit(
+      onVideoSpanCommit,
+      0.25 + 1 / DURATION,
+      Math.min(1, 0.25 + 1 / DURATION + 0.5),
+    );
+  });
+
+  test("a drag's trailing click is not a selection", () => {
+    const onSelectLayer = vi.fn();
+    renderHalfRow({ onSelectLayer });
+    const clip = halfClip();
+    drag(clip, 0, 28);
+    fireEvent.click(clip);
+    expect(onSelectLayer).not.toHaveBeenCalled();
+  });
+
+  test("during a body drag both edge ranges' left move with the clip", () => {
+    const { clip, start, end } = setupHalfRow();
+
+    expect(clip.style.left).toBe("42px");
+    expect(start.value).toBe("1.5");
+    expect(end.value).toBe("4.5");
+    expect(start.style.left).toBe("0px");
+    expect(end.style.left).toBe("0px");
+
+    fireEvent.pointerDown(clip, { clientX: 0 });
+    fireEvent.pointerMove(clip, { clientX: 28 });
+
+    expect(clip.style.left).toBe("70px");
+    expect(start.value).toBe("2.5");
+    expect(end.value).toBe("5.5");
+    expect(start.style.left).toBe("0px");
+    expect(end.style.left).toBe("0px");
+
+    fireEvent.pointerMove(clip, { clientX: 200 });
+    expect(clip.style.left).toBe("84px");
+    expect(start.value).toBe("3");
+    expect(end.value).toBe("6");
+    expect(start.style.left).toBe("0px");
+    expect(end.style.left).toBe("0px");
+  });
+
+  test("the range's width equals durationSec * pxPerSec", () => {
+    const { start, end } = setupHalfRow();
+
+    expect(start.style.width).toBe(`${DURATION * 28}px`);
+    expect(end.style.width).toBe(`${DURATION * 28}px`);
+    expect(start.style.left).toBe("0px");
+    expect(end.style.left).toBe("0px");
+
+    fireEvent.change(screen.getByLabelText(messages.tapeZoomName), { target: { value: "60" } });
+    expect(start.style.width).toBe(`${DURATION * 60}px`);
+    expect(end.style.width).toBe(`${DURATION * 60}px`);
+  });
+
+  test("a pointerup at a new x with no move before it commits that x", () => {
+    const { onVideoSpanCommit, clip } = setupHalfRow();
+    fireEvent.pointerDown(clip, { clientX: 0 });
+    fireEvent.pointerUp(clip, { clientX: 28 });
+    expectSpanCommit(
+      onVideoSpanCommit,
+      0.25 + 1 / DURATION,
+      Math.min(1, 0.25 + 1 / DURATION + 0.5),
+    );
+  });
+
+  test("the arrow keys nudge the clip one step per press, clamping at the edges", () => {
+    const { onVideoSpanCommit, clip } = setupHalfRow();
+    fireEvent.keyDown(clip, { key: "ArrowRight" });
+    expectSpanCommit(onVideoSpanCommit, 0.25 + 1 / DURATION, 0.25 + 1 / DURATION + 0.5);
+
+    onVideoSpanCommit.mockClear();
+    fireEvent.keyDown(clip, { key: "ArrowLeft" });
+    expectSpanCommit(onVideoSpanCommit, 0.25 - 1 / DURATION, 0.25 - 1 / DURATION + 0.5);
+
+    // A full-span row at the left edge: the clamp returns the origin → no commit.
+    onVideoSpanCommit.mockClear();
+    renderTimeline({ onVideoSpanCommit });
+    fireEvent.keyDown(videoClip(1), { key: "ArrowLeft" });
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("with { startT: 1 / 6, endT: 1 }: a rightward nudge commits nothing", () => {
+    const endingAtOneRow: SequenceTimelineProps["videoRows"][number] = {
+      ...halfRow,
+      startT: 1 / 6,
+      endT: 1,
+    };
+    const { onVideoSpanCommit } = setupTimeline({
+      videoRows: [endingAtOneRow],
+    });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 1, 6),
+    });
+    fireEvent.keyDown(clip, { key: "ArrowRight" });
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("auto-repeat is not a run of commits; a non-arrow key is left alone", () => {
+    const { onVideoSpanCommit, clip } = setupHalfRow();
+    fireEvent.keyDown(clip, { key: "ArrowRight", repeat: true });
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    // Not an arrow: not prevented, and no commit.
+    expect(fireEvent.keyDown(clip, { key: "Enter" })).toBe(true);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("ArrowRight on a zero-duration timeline commits nothing", () => {
+    const { onVideoSpanCommit } = setupTimeline({ durationSec: 0 });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 0, 0),
+    });
+    fireEvent.keyDown(clip, { key: "ArrowRight" });
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("a zero-duration clip click calls no span commit and still selects", () => {
+    const onSelectLayer = vi.fn();
+    const { onVideoSpanCommit } = setupTimeline({ durationSec: 0, onSelectLayer });
+    const clip = screen.getByRole("button", {
+      name: messages.sequenceVideoClip(1, 0, 0),
+    });
+    clickClip(clip, 0);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    expect(onSelectLayer).toHaveBeenCalledTimes(1);
+    expect(onSelectLayer).toHaveBeenCalledWith("video");
+  });
+
+  test("an edge slider change on a zero-duration timeline commits nothing on release", () => {
+    const { onVideoSpanCommit, start, end } = setupTimeline({ durationSec: 0 });
+    changePointerUp(start, "1");
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+
+    changeKeyUp(end, "1");
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("the end slider paints on change and commits once on pointerup and keyup", () => {
+    const onScrubLive = vi.fn();
+    const { onVideoSpanCommit, end } = setupTimeline({ onScrubLive });
+    fireEvent.change(end, { target: { value: "3" } });
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    fireEvent.pointerUp(end);
+    expectSpanCommit(onVideoSpanCommit, 0, 0.5);
+    expect(onScrubLive).not.toHaveBeenCalled();
+
+    onVideoSpanCommit.mockClear();
+    changeKeyUp(end, "4");
+    expectSpanCommit(onVideoSpanCommit, 0, 4 / DURATION);
+  });
+
+  test("an untouched end slider commits nothing on pointerup or keyup", () => {
+    const { onVideoSpanCommit, end } = setupHalfRow();
+    // The displayed seconds are endT * durationSec (4.5); the untouched thumb
+    // round-trips to the same number, so the 1e-9 seconds check holds.
+    fireEvent.pointerUp(end);
+    fireEvent.keyUp(end);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("a span off the frame grid, then keyup and pointerup on each slider with no change event, commits nothing; a real change event followed by pointerup commits once", () => {
+    const offGridRow = {
+      ...halfRow,
+      startT: 0.123,
+      endT: 0.789,
+    };
+    const { onVideoSpanCommit, start, end } = setupTimeline({ videoRows: [offGridRow] });
+
+    fireEvent.keyUp(start);
+    fireEvent.pointerUp(start);
+    fireEvent.keyUp(end);
+    fireEvent.pointerUp(end);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+
+    changePointerUp(end, "4");
+    expectSpanCommit(onVideoSpanCommit, 0.123, 4 / DURATION);
+  });
+
+  test("the start slider commits a moved start edge", () => {
+    const { onVideoSpanCommit, start } = setupTimeline();
+    changePointerUp(start, "1");
+    expectSpanCommit(onVideoSpanCommit, 1 / DURATION, 1);
+
+    onVideoSpanCommit.mockClear();
+    changeKeyUp(start, "2");
+    expectSpanCommit(onVideoSpanCommit, 2 / DURATION, 1);
+  });
+
+  test("releasing an edge slider with no delta from the displayed position commits nothing", () => {
+    const { onVideoSpanCommit, start, end } = setupHalfRow();
+
+    // An in-flight change matching the displayed seconds (0.25 * 6 = 1.5 s)
+    // hits the Math.abs(seconds - displayed) < 1e-9 check and returns without committing.
+    changePointerUp(start, "1.5");
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+
+    changeKeyUp(start, "1.5");
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+
+    // Same for the end slider (0.75 * 6 = 4.5 s): pointerup and keyup both commit nothing.
+    changePointerUp(end, "4.5");
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+
+    changeKeyUp(end, "4.5");
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("an edge slider dragged and returned to its displayed seconds commits nothing on pointerup", () => {
+    const { onVideoSpanCommit, start, end } = setupHalfRow();
+
+    // Start edge (halfRow: 0.25 * 6 = 1.5s): dragged and came back to displayed seconds
+    fireEvent.change(start, { target: { value: "2" } });
+    changePointerUp(start, "1.5");
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+
+    // End edge (halfRow: 0.75 * 6 = 4.5s): dragged and came back to displayed seconds
+    fireEvent.change(end, { target: { value: "5" } });
+    changePointerUp(end, "4.5");
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+  });
+
+  test("a cancelled edge drag commits nothing and restores the value, and aria-valuenow follows a live drag", () => {
+    const { onVideoSpanCommit, start } = setupHalfRow();
+
+    fireEvent.change(start, { target: { value: "2" } });
+    expect(start.getAttribute("aria-valuenow")).toBe("2");
+    fireEvent.pointerCancel(start);
+    expect(start.getAttribute("aria-valuenow")).toBe("1.5");
+    fireEvent.pointerUp(start);
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    expect(start.className).toContain("touch-none");
+  });
+
+  test("edge sliders clamp against each other keeping the one-frame minimum gap, and clamp at timeline ends", () => {
+    const { onVideoSpanCommit, start, end } = setupHalfRow();
+    const minGap = 1 / MOTION_FPS / DURATION;
+
+    // Start slider pushed past the end edge (4.5s): clamps to endT - minGap
+    changePointerUp(start, "5");
+    expectSpanCommit(onVideoSpanCommit, 0.75 - minGap, 0.75);
+
+    // Start slider pushed below 0: clamps to 0
+    onVideoSpanCommit.mockClear();
+    changePointerUp(start, "-1");
+    expectSpanCommit(onVideoSpanCommit, 0, 0.75);
+
+    // End slider pushed before the start edge (1.5s): clamps to startT + minGap
+    onVideoSpanCommit.mockClear();
+    changePointerUp(end, "1");
+    expectSpanCommit(onVideoSpanCommit, 0.25, 0.25 + minGap);
+
+    // End slider pushed past duration (6s): clamps to 1
+    onVideoSpanCommit.mockClear();
+    changePointerUp(end, "10");
+    expectSpanCommit(onVideoSpanCommit, 0.25, 1);
+  });
+
+  test("during a change event the slider's value follows the in-flight value", () => {
+    const { start, end } = setupHalfRow();
+
+    expect(start.value).toBe("1.5");
+    expect(end.value).toBe("4.5");
+    expect(start.style.left).toBe("0px");
+    expect(end.style.left).toBe("0px");
+
+    fireEvent.change(start, { target: { value: "2" } });
+    expect(start.value).toBe("2");
+    expect(start.style.left).toBe("0px");
+
+    fireEvent.change(end, { target: { value: "5" } });
+    expect(end.value).toBe("5");
+    expect(end.style.left).toBe("0px");
+  });
+
+  test("edge slider inputs carry pointer-events-none and vendor thumb auto classes because jsdom cannot hit-test narrow clip drag takeover", () => {
+    const { start, end } = setupHalfRow();
+
+    expect(start.className).toContain("pointer-events-none");
+    expect(start.className).toContain("[&::-webkit-slider-thumb]:pointer-events-auto");
+    expect(start.className).toContain("[&::-moz-range-thumb]:pointer-events-auto");
+
+    expect(end.className).toContain("pointer-events-none");
+    expect(end.className).toContain("[&::-webkit-slider-thumb]:pointer-events-auto");
+    expect(end.className).toContain("[&::-moz-range-thumb]:pointer-events-auto");
   });
 
   test("hide calls onSetLayerEnabled, and a disabled row still offers enable", () => {
@@ -667,12 +1116,64 @@ describe("the video rows (VT-D2, VT-D7)", () => {
     expect(screen.queryByRole("button", { name: messages.sequenceHideVideoTrack(1) })).toBeNull();
   });
 
-  test("a row without a layer pick is a plain box, not a tab stop", () => {
+  test("a row without a layer pick is a focusable group, not a button", () => {
     renderTimeline({ onSelectLayer: undefined, selectedLayerId: undefined });
     expect(
       screen.queryByRole("button", { name: messages.sequenceVideoClip(1, 0, DURATION) }),
     ).toBeNull();
-    expect(document.querySelector('[data-sequence-clip="video"]')).toBeTruthy();
+    const clip = document.querySelector('[data-sequence-clip="video"]');
+    expect(clip).toBeTruthy();
+    // Keyboard-focusable (VT2b) with the same accessible name the button host carries.
+    expect(clip!.getAttribute("role")).toBe("group");
+    expect(clip!.getAttribute("tabindex")).toBe("0");
+    expect(clip!.getAttribute("aria-label")).toBe(messages.sequenceVideoClip(1, 0, DURATION));
+    // A click here must not bubble to the scrollport's canvas scrub.
+    const onScrubCommit = vi.fn();
+    renderTimeline({
+      onSelectLayer: undefined,
+      selectedLayerId: undefined,
+      onScrubCommit,
+    });
+    fireEvent.click(document.querySelector('[data-sequence-clip="video"]')!);
+    expect(onScrubCommit).not.toHaveBeenCalled();
+  });
+
+  test("the plain-div clip drags, commits once, and its click never scrubs", () => {
+    const onScrubLive = vi.fn();
+    const onScrubCommit = vi.fn();
+    const { onVideoSpanCommit } = setupHalfRow({
+      onSelectLayer: undefined,
+      selectedLayerId: undefined,
+      onScrubLive,
+      onScrubCommit,
+    });
+    const clip = document.querySelector('[data-sequence-clip="video"]') as HTMLElement;
+    fireEvent.pointerDown(clip, { clientX: 0 });
+    fireEvent.pointerMove(clip, { clientX: 28 });
+    expect(onVideoSpanCommit).not.toHaveBeenCalled();
+    fireEvent.pointerUp(clip, { clientX: 28 });
+    fireEvent.click(clip, { clientX: 28 });
+    expectSpanCommit(
+      onVideoSpanCommit,
+      0.25 + 1 / DURATION,
+      Math.min(1, 0.25 + 1 / DURATION + 0.5),
+    );
+    expect(onScrubLive).not.toHaveBeenCalled();
+    expect(onScrubCommit).not.toHaveBeenCalled();
+  });
+
+  test("the plain-div clip receives the arrow-key nudge", () => {
+    const { onVideoSpanCommit } = setupHalfRow({
+      onSelectLayer: undefined,
+      selectedLayerId: undefined,
+    });
+    const clip = document.querySelector('[data-sequence-clip="video"]') as HTMLElement;
+    fireEvent.keyDown(clip, { key: "ArrowRight" });
+    expectSpanCommit(onVideoSpanCommit, 0.25 + 1 / DURATION, 0.25 + 1 / DURATION + 0.5);
+
+    onVideoSpanCommit.mockClear();
+    fireEvent.keyDown(clip, { key: "ArrowLeft" });
+    expectSpanCommit(onVideoSpanCommit, 0.25 - 1 / DURATION, 0.25 - 1 / DURATION + 0.5);
   });
 
   test("reorder in the header is stack order, via the row's own layer index", () => {
@@ -730,8 +1231,11 @@ describe("the music bed (VT-D5) and the note (§10 question 2)", () => {
     expect(
       screen.getByText(messages.tapeAudioSpan(DURATION, encodedDurationSec(DURATION, MOTION_FPS))),
     ).toBeTruthy();
-    // The note that says the clip cannot be trimmed.
+    // The updated note says only the MUSIC BED cannot be trimmed (VT2b).
     expect(screen.getByText(messages.sequenceFullSpanNote)).toBeTruthy();
+    // The audio lane gains no trim control — no input inside the lane itself
+    // (the playhead range lives in TapeTransport, not here).
+    expect(document.querySelector("[data-tape-audio-span]")?.querySelector("input")).toBeNull();
   });
 
   test("no bed, no row — an empty waveform would imply one the brief does not carry", () => {

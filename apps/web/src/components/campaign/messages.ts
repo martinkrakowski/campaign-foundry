@@ -1782,6 +1782,14 @@ export function sequenceVideoTrack(position: number): string {
 export function sequenceVideoClip(position: number, startSec: number, endSec: number): string {
   return `Video clip ${position}, ${startSec.toFixed(2)} to ${endSec.toFixed(2)} seconds`;
 }
+/** The start edge slider of a video clip's span, by the clip's own index (VT2b). */
+export function sequenceVideoSpanStart(position: number): string {
+  return `Video clip ${position} start`;
+}
+/** The end edge slider of a video clip's span, by the clip's own index (VT2b). */
+export function sequenceVideoSpanEnd(position: number): string {
+  return `Video clip ${position} end`;
+}
 /** A text clip's accessible name, with its resolved window in seconds (§7). */
 export function sequenceBeatClip(position: number, startSec: number, endSec: number): string {
   return `Text clip ${position}, ${startSec.toFixed(2)} to ${endSec.toFixed(2)} seconds`;
@@ -1801,12 +1809,12 @@ export function sequenceMoveVideoTrackDown(position: number): string {
   return `Move video track ${position} down`;
 }
 /**
- * The panel's own statement of what it will not pretend (§10 question 2): video
- * and music-bed clips have no in/out to write, and the surface says so rather
- * than offering a trim that would be a lie.
+ * The panel's own statement of what it will not pretend (§10 question 2): the
+ * music bed has no in/out to write, and the surface says so rather than
+ * offering a trim that would be a lie (VT-D5). Video clips CAN be trimmed —
+ * the note names only the bed.
  */
-export const sequenceFullSpanNote =
-  "Video and music-bed clips run the whole clip. They cannot be trimmed here yet.";
+export const sequenceFullSpanNote = "The music bed runs the whole clip. It cannot be trimmed here.";
 
 export const timelineBeatSceneLabel = (n: number) => `Beat ${n} scene`;
 export const timelineBeatSceneClearLabel = (n: number) => `Clear beat ${n} scene`;

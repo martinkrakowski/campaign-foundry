@@ -180,6 +180,9 @@ export function TimelineSection({
                commit a `setTrackStop` it has no pick for. */
         onSetLayerEnabled={(id, enabled) => dispatch({ type: "setLayerEnabled", id, enabled })}
         onMoveLayer={(from, to) => dispatch({ type: "moveLayer", from, to })}
+        onVideoSpanCommit={(id, startT, endT) =>
+          dispatch({ type: "setVideoSpan", layerId: id, startT, endT })
+        }
         onAddVideo={() => dispatch({ type: "addLayer", kind: "video" })}
         canAddText={sequenceCanAddText(state)}
         onAddText={() => dispatch({ type: "addLayer", kind: "animated-text" })}

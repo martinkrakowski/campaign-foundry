@@ -18,6 +18,7 @@ import { MIN_DWELL_SEC } from "@campaignfoundry/CampaignOrchestration/copy-timel
 import type { SurfaceHost } from "@/components/campaign/PreviewDock";
 import * as messages from "@/components/campaign/messages";
 import type { TrackDiamond, UnplaceableTracks } from "@/components/campaign/track-diamonds";
+import { tAtSecond } from "@/components/campaign/track-diamonds";
 import type { SequenceVideoRow } from "@/components/campaign/layer-stack-props";
 import {
   BeatBoundaries,
@@ -63,8 +64,8 @@ import {
  * here, with its enable control, because filtering it would remove the only
  * thing that can turn it back on); the music bed is display-only (VT-D5);
  * nothing plays (VT-D6), so there is no play control at all — not a disabled
- * one — and video and bed clips say they cannot be trimmed rather than
- * offering a trim that would be a lie.
+ * one — and the bed still says it cannot be trimmed while a video clip now
+ * can (VT2b: the drag, the arrow-key nudge, and the two edge sliders).
  *
  * Wrapped in `memo` for the same reason the tape is: the rail re-renders on
  * keystrokes this component does not draw.
@@ -122,6 +123,12 @@ export interface SequenceTimelineProps {
   readonly onSetLayerEnabled: (id: string, enabled: boolean) => void;
   /** Reorder in the stack (z-order), never a time shift. */
   readonly onMoveLayer: (from: number, to: number) => void;
+  /**
+   * VT2b — the video span write: one call on release, from the clip drag, the
+   * arrow-key nudge, or one of the two edge sliders. Parents wire it; this
+   * component never names the action.
+   */
+  readonly onVideoSpanCommit: (layerId: string, startT: number, endT: number) => void;
   /** Add another video layer — legal and uncapped for this type. */
   readonly onAddVideo: () => void;
   /** VT-D4 — the text offer is present but disabled once the one layer exists. */
@@ -207,60 +214,289 @@ function TrackButton({
 
 /* ── The video lanes (VT2) ────────────────────────────────────────────────── */
 
+/** A normalised span — the value object this lane writes, never invents. */
+type VideoSpan = { readonly startT: number; readonly endT: number };
+
+/**
+ * Shift a span by a drag/keyboard delta (normalised `t`), clamping the moved
+ * start into `[0, 1 - length]`. When the clamp lands exactly on the origin
+ * start, the ORIGIN object is returned — a pointer that never moved is a
+ * click, not a move, and must not commit. Rebuilding the pair by value would
+ * treat a plain click as a move: `0.3 + (0.9 - 0.3)` is
+ * `0.9000000000000001`, so identity with `origin` is the test.
+ */
+function slidSpan(origin: VideoSpan, deltaT: number): VideoSpan {
+  if (deltaT === 0) return origin;
+  const length = origin.endT - origin.startT;
+  let startT = origin.startT + deltaT;
+  if (startT < 0) startT = 0;
+  if (startT > 1 - length) startT = 1 - length;
+  if (Math.abs(startT - origin.startT) < 1e-9) return origin;
+  return { startT, endT: Math.min(1, startT + length) };
+}
+
+/**
+ * One edge slider's committed seconds, converted back to a span. The moving
+ * edge is clamped against the other edge plus a one-frame `minGap`, so for any
+ * positive duration the pair always keeps `startT < endT` — the clamp makes a
+ * collapsed span unreachable (there is no null arm to test), and the reducer's
+ * `sameSpan` stays the backstop for a candidate the operator did not change.
+ */
+function resizedSpan(
+  which: "start" | "end",
+  seconds: number,
+  otherT: number,
+  durationSec: number,
+): VideoSpan {
+  const t = tAtSecond(seconds, durationSec);
+  const minGap = tAtSecond(1 / MOTION_FPS, durationSec);
+  if (which === "start") {
+    return { startT: Math.max(0, Math.min(t, otherT - minGap)), endT: otherT };
+  }
+  return { startT: otherT, endT: Math.min(1, Math.max(t, otherT + minGap)) };
+}
+
 /**
  * One video clip box: placed from the row's span — `left`/`width` are pixel
  * strings from `startT` / `endT`, the same happy-dom-safe form the text clips
  * use (`calc(...)` there, literal pixels here). `onSelectLayer` defined → a
- * `button`; undefined → a `div`, out of the tab order. The click still
- * selects. There is no trim handle.
+ * `button`; undefined → a focusable `div` group (non-selecting, and it stops
+ * its own click so the scrollport's canvas scrub never hears one). Both hosts
+ * take the clip drag, the ArrowLeft/ArrowRight nudge, and the two edge
+ * sliders; every write commits ONCE, on release (VT2b).
  */
 function VideoClip({
   name,
   selected,
   className,
   style,
+  startT,
+  endT,
+  position,
+  durationSec,
+  pxPerSec,
   onSelect,
+  onVideoSpanCommit,
 }: Readonly<{
   readonly name: string;
   readonly selected: boolean;
   readonly className: string;
   readonly style: CSSProperties;
+  readonly startT: number;
+  readonly endT: number;
+  readonly position: number;
+  readonly durationSec: number;
+  readonly pxPerSec: number;
   readonly onSelect?: () => void;
+  readonly onVideoSpanCommit: (startT: number, endT: number) => void;
 }>): ReactNode {
+  const origin = { startT, endT };
+  const [drag, setDrag] = useState<{
+    readonly pointerId: number;
+    readonly originX: number;
+    readonly origin: VideoSpan;
+    readonly clientX: number;
+  } | null>(null);
+  /** The in-flight drag, as a ref: the pointerup handler reads the last move. */
+  const dragRef = useRef<typeof drag>(null);
+  /** True once the last pointerup committed a move; the trailing click swallows it. */
+  const movedRef = useRef(false);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLElement>) => {
+    if (dragRef.current !== null) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    movedRef.current = false;
+    const next = { pointerId: e.pointerId, originX: e.clientX, origin, clientX: e.clientX };
+    dragRef.current = next;
+    setDrag(next);
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLElement>) => {
+    const current = dragRef.current;
+    if (current === null || e.pointerId !== current.pointerId) return;
+    const next = { ...current, clientX: e.clientX };
+    dragRef.current = next;
+    setDrag(next);
+  };
+  const onPointerUp = (e: React.PointerEvent<HTMLElement>) => {
+    const current = dragRef.current;
+    if (current === null || e.pointerId !== current.pointerId) return;
+    dragRef.current = null;
+    setDrag(null);
+    if (durationSec <= 0) return;
+    const deltaT = (e.clientX - current.originX) / pxPerSec / durationSec;
+    const span = slidSpan(current.origin, deltaT);
+    if (span !== current.origin) {
+      movedRef.current = true;
+      onVideoSpanCommit(span.startT, span.endT);
+    }
+  };
+  const onPointerCancel = (e: React.PointerEvent<HTMLElement>) => {
+    const current = dragRef.current;
+    if (current === null || e.pointerId !== current.pointerId) return;
+    dragRef.current = null;
+    setDrag(null);
+    movedRef.current = false;
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    if (e.repeat) return;
+    if (durationSec <= 0) return;
+    const deltaT = (e.key === "ArrowRight" ? 1 : -1) / durationSec;
+    const span = slidSpan(origin, deltaT);
+    if (span !== origin) onVideoSpanCommit(span.startT, span.endT);
+  };
+
+  // One live drag position per edge, the same local-mirror shape `Diamond`
+  // uses: the thumb shows the drag while it is moving, otherwise the committed
+  // span from the props. No state-sync effect is needed — after a commit the
+  // parent's props move the thumb on their own.
+  const [startDragSec, setStartDragSec] = useState<number | null>(null);
+  const [endDragSec, setEndDragSec] = useState<number | null>(null);
+  /** In-flight seconds for each slider: set in onChange, read and cleared on commit. */
+  const inFlightStartRef = useRef<number | null>(null);
+  const inFlightEndRef = useRef<number | null>(null);
+
+  /** An edge thumb's release: commit only when that slider's onChange fired
+   *  since the gesture began, reading and clearing the in-flight value. */
+  const commitSlider = (which: "start" | "end") => {
+    const inFlight = which === "start" ? inFlightStartRef : inFlightEndRef;
+    const seconds = inFlight.current;
+    inFlight.current = null;
+    if (seconds === null) return;
+    if (durationSec <= 0) return;
+    const displayed = which === "start" ? startT * durationSec : endT * durationSec;
+    if (Math.abs(seconds - displayed) < 1e-9) return;
+    const otherT = which === "start" ? endT : startT;
+    const span = resizedSpan(which, seconds, otherT, durationSec);
+    onVideoSpanCommit(span.startT, span.endT);
+  };
+
+  // The painted left follows the finger while a drag is live; the width (the
+  // span's length) never changes mid-gesture.
+  let liveSpan = origin;
+  let visualLeft = style.left;
+  if (drag !== null && durationSec > 0) {
+    const deltaT = (drag.clientX - drag.originX) / pxPerSec / durationSec;
+    liveSpan = slidSpan(drag.origin, deltaT);
+    visualLeft = `${liveSpan.startT * durationSec * pxPerSec}px`;
+  }
+  const clipStyle = { ...style, left: visualLeft };
+  const interactiveClass = cn(
+    className,
+    "cursor-grab touch-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary",
+  );
+  const sharedProps = {
+    "data-sequence-clip": "video",
+    "aria-label": name,
+    title: name,
+    className: interactiveClass,
+    style: clipStyle,
+    onPointerDown,
+    onPointerMove,
+    onPointerUp,
+    onPointerCancel,
+    onKeyDown,
+  };
+  const sliderClass =
+    "absolute top-1/2 z-10 h-6 -translate-y-1/2 cursor-ew-resize accent-brand-primary opacity-60 hover:opacity-100 hover:z-20 focus-visible:opacity-100 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary pointer-events-none [&::-webkit-slider-thumb]:pointer-events-auto [&::-moz-range-thumb]:pointer-events-auto";
+  const edgeSlider = (which: "start" | "end") => {
+    const isStart = which === "start";
+    const inFlight = isStart ? inFlightStartRef : inFlightEndRef;
+    const dragSec = isStart ? startDragSec : endDragSec;
+    const setDragSec = isStart ? setStartDragSec : setEndDragSec;
+    const baseSec = (isStart ? liveSpan.startT : liveSpan.endT) * durationSec;
+    const shown = dragSec ?? baseSec;
+    return (
+      <input
+        type="range"
+        aria-label={
+          isStart
+            ? messages.sequenceVideoSpanStart(position)
+            : messages.sequenceVideoSpanEnd(position)
+        }
+        aria-valuenow={shown}
+        min={0}
+        max={durationSec}
+        step={1 / MOTION_FPS}
+        value={shown}
+        onChange={(e) => {
+          const val = Number(e.target.value);
+          inFlight.current = val;
+          setDragSec(val);
+        }}
+        onPointerUp={() => {
+          setDragSec(null);
+          commitSlider(which);
+        }}
+        onKeyUp={() => {
+          setDragSec(null);
+          commitSlider(which);
+        }}
+        onPointerCancel={() => {
+          inFlight.current = null;
+          setDragSec(null);
+        }}
+        className={cn(sliderClass, "touch-none", dragSec !== null && "z-20 opacity-100")}
+        style={{
+          left: 0,
+          width: `${durationSec * pxPerSec}px`,
+        }}
+      />
+    );
+  };
+
   if (onSelect === undefined) {
     return (
-      <div
-        aria-label={name}
-        data-sequence-clip="video"
-        title={name}
-        className={className}
-        style={style}
-      >
-        <FilmPerforations />
-      </div>
+      <>
+        <div
+          role="group"
+          tabIndex={0}
+          {...sharedProps}
+          onClick={(e) => {
+            // This host selects nothing; the stop is about the scrub: a click
+            // here must never bubble to the scrollport's commitFromCanvas.
+            e.stopPropagation();
+            if (movedRef.current) movedRef.current = false;
+          }}
+        >
+          <FilmPerforations />
+        </div>
+        {edgeSlider("start")}
+        {edgeSlider("end")}
+      </>
     );
   }
   return (
-    <button
-      type="button"
-      aria-label={name}
-      aria-pressed={selected}
-      data-sequence-clip="video"
-      title={name}
-      className={className}
-      style={style}
-      onClick={onSelect}
-    >
-      <FilmPerforations />
-    </button>
+    <>
+      <button
+        type="button"
+        aria-pressed={selected}
+        {...sharedProps}
+        onClick={() => {
+          // A drag's trailing click is not a selection, and a click that never
+          // moved is still the pick (VT2b, the text clip's rule restated).
+          if (movedRef.current) {
+            movedRef.current = false;
+            return;
+          }
+          onSelect();
+        }}
+      >
+        <FilmPerforations />
+      </button>
+      {edgeSlider("start")}
+      {edgeSlider("end")}
+    </>
   );
 }
 
 /**
  * The video lane: one video layer, disabled ones included, its clip placed by
- * the layer's span (absent is the whole duration). No drag, no trim — this
- * lane offers stack order and enable in the header and nothing on the clip
- * itself.
+ * the layer's span (absent is the whole duration). The clip drags, nudges with
+ * the arrow keys, and trims from its two edge sliders — each writing ONCE on
+ * release — while the lane's header still offers stack order and enable.
  */
 function VideoLane({
   row,
@@ -271,6 +507,7 @@ function VideoLane({
   onSelectLayer,
   onSetLayerEnabled,
   onMoveLayer,
+  onVideoSpanCommit,
 }: Readonly<{
   readonly row: SequenceVideoRow;
   readonly ordinal: number;
@@ -280,6 +517,7 @@ function VideoLane({
   readonly onSelectLayer?: (id: string) => void;
   readonly onSetLayerEnabled: (id: string, enabled: boolean) => void;
   readonly onMoveLayer: (from: number, to: number) => void;
+  readonly onVideoSpanCommit: (id: string, startT: number, endT: number) => void;
 }>): ReactNode {
   const selected = selectedLayerId === row.id;
   const clipName = messages.sequenceVideoClip(
@@ -341,7 +579,13 @@ function VideoLane({
         selected={selected}
         className={clipClass}
         style={clipStyle}
+        startT={row.startT}
+        endT={row.endT}
+        position={ordinal + 1}
+        durationSec={durationSec}
+        pxPerSec={pxPerSec}
         onSelect={onSelectLayer === undefined ? undefined : () => onSelectLayer(row.id)}
+        onVideoSpanCommit={(startT, endT) => onVideoSpanCommit(row.id, startT, endT)}
       />
     </Lane>
   );
@@ -631,6 +875,7 @@ function SequenceTimelineImpl(props: SequenceTimelineProps): ReactNode {
               onSelectLayer={props.onSelectLayer}
               onSetLayerEnabled={props.onSetLayerEnabled}
               onMoveLayer={props.onMoveLayer}
+              onVideoSpanCommit={props.onVideoSpanCommit}
             />
           ))}
 
