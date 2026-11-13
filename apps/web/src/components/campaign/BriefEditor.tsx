@@ -27,7 +27,6 @@ import {
   listAssets,
   type AssetEntry,
   type BriefEntry,
-  type PlanVariant,
 } from "@/lib/briefs-api";
 import { campaignRoute } from "@/lib/campaign-route";
 import {

@@ -55,11 +55,14 @@ monorepo:
     globalDependencies:
       - '**/.env.*'
     pipeline:
+      # Package builds are `tsc` under tsconfig.base.json's `noEmit: true`: they
+      # type-check and write nothing, so there is no artefact to cache. The app
+      # builds that do emit (.next, .output/.nitro) are declared per package in
+      # turbo.json, which this generator leaves alone (root-protected).
       build:
         dependsOn:
           - ^build
-        outputs:
-          - dist/**
+        outputs: []
       lint:
         dependsOn:
           - ^build

@@ -1,31 +1,35 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
+    // Every package's `build` is `tsc` under tsconfig.base.json's `noEmit: true`:
+    // it type-checks and writes nothing, so it has no outputs to cache. Packages are
+    // consumed from `src/index.ts` through the `paths` mapping, never from a built
+    // `dist/`. The two apps below are the only tasks that emit artefacts.
     "build": {
-      "dependsOn": [
-        "^build"
-      ],
-      "outputs": [
-        "dist/**"
-      ]
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "@campaignfoundry/web#build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**"]
+    },
+    "@campaignfoundry/api#build": {
+      "dependsOn": ["^build"],
+      "outputs": [".output/**", ".nitro/**"]
     },
     "dev": {
       "cache": false,
       "persistent": true
     },
     "lint": {
-      "dependsOn": [
-        "^build"
-      ]
+      "dependsOn": ["^build"]
     },
     "typecheck": {
       "outputs": [],
       "cache": true
     },
     "test": {
-      "dependsOn": [
-        "^build"
-      ]
+      "dependsOn": ["^build"]
     }
   }
 }
