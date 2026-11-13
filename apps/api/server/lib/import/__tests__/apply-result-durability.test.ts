@@ -225,7 +225,7 @@ describe.skipIf(ON_A_REAL_TEST_SERVER)("failed result-file close (req 20 mirror)
       end: end as SqlClient["end"],
       transaction: realDb.transaction.bind(realDb),
     } as SqlClient);
-    const { out, err, deps } = io();
+    const { err, deps } = io();
     try {
       const code = await main(
         [

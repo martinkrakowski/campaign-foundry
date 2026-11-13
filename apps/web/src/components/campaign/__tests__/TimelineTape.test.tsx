@@ -2,7 +2,7 @@ import { describe, test, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { useState, type ReactNode } from "react";
-import { render, screen, fireEvent, act, within } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { resolveTimeline } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import {
   MOTION_FPS,

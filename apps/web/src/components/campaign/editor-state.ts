@@ -24,18 +24,15 @@ import {
   type LogoProps,
   type TextProps,
 } from "@campaignfoundry/CampaignOrchestration/brief-template";
-// The keyframe track vocabulary (K1, K5): the properties a track may name, the
-// clocks a stop may be measured in, which kinds may carry tracks at all, and
+// The keyframe track vocabulary (K1, K5): which kinds may carry tracks at all,
 // the one function that decides whether a tracks block is a shape the brief may
-// carry. Leaf subpaths, like every import above — `tracks.ts` reaches only
+// carry, and the types naming a track, its property and its stop clock. Leaf
+// subpaths, like every import above — `tracks.ts` reaches only
 // `easing.ts` and `layer-kinds.ts`, so none of the barrel's `node:fs`
 // hitchhikers come with it. `layerTracksProblem` is the ONLY refusal this file
 // makes about tracks: the reducer calls it, never restates it (TL5).
 import {
   TRACKABLE_LAYER_KINDS,
-  TEXT_LAYER_KINDS,
-  TRACK_PROPERTIES,
-  STOP_CLOCKS,
   layerTracksProblem,
   type Stop,
   type StopClock,

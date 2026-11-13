@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import { createHash } from "node:crypto";
 import type { CopyGeneratorError, CopyGeneratorPort } from "@campaignfoundry/CampaignOrchestration";
-import { resetProviderKeyStore, setProviderKeyStore } from "../../../../lib/ports/index.js";
+import { resetProviderKeyStore } from "../../../../lib/ports/index.js";
 
 const { copyGeneratorMock } = vi.hoisted(() => ({ copyGeneratorMock: vi.fn() }));
 
