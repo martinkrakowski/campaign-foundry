@@ -1,6 +1,11 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { fileURLToPath } from "node:url";
-import { main, type WorkerConsumer } from "../worker.js";
+import {
+  main,
+  preflightDependencies,
+  type PreflightDeps,
+  type WorkerConsumer,
+} from "../worker.js";
 import type { KafkaSettings } from "../../server/lib/config.js";
 
 /**
@@ -77,6 +82,8 @@ describe("worker bin main() (PT-6b2, D174d)", () => {
       () => mockConsumer,
       mockProcess as never,
       mockLogger,
+      undefined,
+      async () => {},
     );
 
     expect(consumer).toBe(mockConsumer);
@@ -128,6 +135,7 @@ describe("worker bin main() (PT-6b2, D174d)", () => {
       mockProcess as never,
       mockLogger,
       mockEndDb,
+      async () => {},
     );
 
     await listeners["SIGTERM"]!();
@@ -167,6 +175,7 @@ describe("worker bin main() (PT-6b2, D174d)", () => {
       mockProcess as never,
       mockLogger,
       mockEndDb,
+      async () => {},
     );
 
     await listeners["SIGTERM"]!();
@@ -204,6 +213,7 @@ describe("worker bin main() (PT-6b2, D174d)", () => {
       mockProcess as never,
       mockLogger,
       mockEndDb,
+      async () => {},
     );
 
     await listeners["SIGTERM"]!();
@@ -236,6 +246,8 @@ describe("worker bin main() (PT-6b2, D174d)", () => {
       () => mockConsumer,
       mockProcess as never,
       mockLogger,
+      undefined,
+      async () => {},
     );
 
     await listeners["SIGTERM"]!();
@@ -270,6 +282,8 @@ describe("worker bin main() (PT-6b2, D174d)", () => {
       () => mockConsumer,
       mockProcess as never,
       mockLogger,
+      undefined,
+      async () => {},
     );
 
     // Trigger SIGTERM
@@ -305,6 +319,8 @@ describe("worker bin main() (PT-6b2, D174d)", () => {
       () => mockConsumer,
       mockProcess as never,
       mockLogger,
+      undefined,
+      async () => {},
     );
 
     await listeners["SIGTERM"]!();
@@ -376,6 +392,7 @@ describe("worker main() — the object-store guard (PT-4d)", () => {
         mockProcess as never,
         console,
         async () => {},
+        async () => {},
       ),
     ).rejects.toThrow("S3_BUCKET is required when OBJECT_STORE=s3.");
     // Refused BEFORE the consumer is built: a worker that started would take runs
@@ -400,6 +417,7 @@ describe("worker main() — the object-store guard (PT-4d)", () => {
       mockProcess as never,
       console,
       async () => {},
+      async () => {},
     );
     expect(started).toBe(consumer);
     expect(consumer.start).toHaveBeenCalledTimes(1);
@@ -416,6 +434,7 @@ describe("worker main() — the object-store guard (PT-4d)", () => {
         mockProcess as never,
         console,
         async () => {},
+        async () => {},
       ),
     ).resolves.toBeDefined();
   });
@@ -424,14 +443,36 @@ describe("worker main() — the object-store guard (PT-4d)", () => {
 describe("worker CLI entrypoint execution guard", () => {
   const savedArgv = process.argv;
   const workerFile = fileURLToPath(new URL("../worker.ts", import.meta.url));
+  /** The admin `main()`'s default preflight uses, so the run stays offline. */
+  const offlineAdmin = () => ({
+    connect: vi.fn().mockResolvedValue(undefined),
+    fetchTopicMetadata: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+  });
+  let admin = offlineAdmin();
 
   beforeEach(() => {
     vi.resetModules();
+    admin = offlineAdmin();
+    // `main()` runs with all defaults here, including the real
+    // `preflightDependencies`, whose Kafka admin must come from a mock —
+    // otherwise `KAFKA_BROKERS = "broker1:9092"` invites a live connect.
+    vi.doMock("kafkajs", () => ({
+      Kafka: class {
+        constructor(_opts: unknown) {}
+        admin(_opts: unknown) {
+          return admin;
+        }
+      },
+      logLevel: { NOTHING: 0 },
+    }));
   });
 
   afterEach(() => {
     process.argv = savedArgv;
     process.exitCode = undefined;
+    vi.doUnmock("kafkajs");
+    vi.resetModules();
   });
 
   test("does not run main when process.argv[1] is not worker.ts", async () => {
@@ -501,5 +542,509 @@ describe("worker CLI entrypoint execution guard", () => {
     expect(process.exitCode).toBe(1);
     errorSpy.mockRestore();
     delete process.env.KAFKA_BROKERS;
+  });
+});
+
+describe("worker main() — preflight ordering", () => {
+  const kafkaSettings: KafkaSettings = {
+    brokers: ["broker1:9092"],
+    topic: "cf.run-requests",
+    groupId: "cf-workers",
+    consume: true,
+  };
+  const savedEnv = Object.fromEntries(
+    ["OBJECT_STORE", "STORE_BACKEND"].map((key) => [key, process.env[key]]),
+  );
+
+  beforeEach(() => {
+    delete process.env.OBJECT_STORE;
+    delete process.env.STORE_BACKEND;
+  });
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    vi.restoreAllMocks();
+  });
+
+  const validS3Env = (): void => {
+    process.env.OBJECT_STORE = "s3";
+    process.env.STORE_BACKEND = "postgres";
+    process.env.S3_ENDPOINT = "http://s3.example:8333";
+    process.env.S3_PUBLIC_ENDPOINT = "https://s3.example:8333";
+    process.env.S3_REGION = "us-east-1";
+    process.env.S3_BUCKET = "campaigns";
+    process.env.S3_ACCESS_KEY_ID = "key-id";
+    process.env.S3_SECRET_ACCESS_KEY = "secret-value";
+  };
+
+  const mockProcess = {
+    on: vi.fn(),
+    removeListener: vi.fn(),
+    exitCode: undefined as number | undefined,
+  };
+  const quietConsumer = (): WorkerConsumer => ({
+    start: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue(undefined),
+  });
+
+  test("preflight is not called when objectStoreSettings() throws", async () => {
+    validS3Env();
+    delete process.env.S3_BUCKET;
+    const preflight = vi.fn().mockResolvedValue(undefined);
+    const consumer = quietConsumer();
+    await expect(
+      main(
+        () => kafkaSettings,
+        () => consumer,
+        mockProcess as never,
+        console,
+        async () => {},
+        preflight,
+      ),
+    ).rejects.toThrow("S3_BUCKET is required when OBJECT_STORE=s3.");
+    expect(preflight).not.toHaveBeenCalled();
+    expect(consumer.start).not.toHaveBeenCalled();
+  });
+
+  test("preflight is not called when resolveSettings() returns undefined", async () => {
+    const preflight = vi.fn().mockResolvedValue(undefined);
+    await expect(
+      main(
+        () => undefined,
+        () => quietConsumer(),
+        mockProcess as never,
+        console,
+        async () => {},
+        preflight,
+      ),
+    ).rejects.toThrow("Cannot start worker: KAFKA_BROKERS is not set.");
+    expect(preflight).not.toHaveBeenCalled();
+  });
+
+  test("preflight receives settings and runs before consumerFactory and start", async () => {
+    const order: string[] = [];
+    const consumer = quietConsumer();
+    (consumer.start as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      order.push("consumer.start");
+      return Promise.resolve();
+    });
+    const preflight = vi.fn().mockImplementation((settings: KafkaSettings) => {
+      order.push("preflight");
+      expect(settings).toBe(kafkaSettings);
+      return Promise.resolve();
+    });
+    const logs: string[] = [];
+    const mockLogger = {
+      log: vi.fn().mockImplementation((m: string) => logs.push(m)),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    await main(
+      () => kafkaSettings,
+      () => {
+        order.push("consumerFactory");
+        return consumer;
+      },
+      mockProcess as never,
+      mockLogger,
+      async () => {},
+      preflight,
+    );
+    expect(order).toEqual(["preflight", "consumerFactory", "consumer.start"]);
+    expect(preflight).toHaveBeenCalledTimes(1);
+    expect(logs).toContain(
+      "[worker] Preflight: verifying Postgres, object store, and Kafka...",
+    );
+    expect(logs).toContain(
+      "[worker] Preflight passed; all configured dependencies are reachable.",
+    );
+  });
+
+  test("a rejecting preflight prevents the consumer from being built or started", async () => {
+    const preflight = vi
+      .fn()
+      .mockRejectedValue(new Error("Cannot start worker: Kafka preflight failed."));
+    let factoryCalled = false;
+    await expect(
+      main(
+        () => kafkaSettings,
+        () => {
+          factoryCalled = true;
+          return quietConsumer();
+        },
+        mockProcess as never,
+        console,
+        async () => {},
+        preflight,
+      ),
+    ).rejects.toThrow("Kafka preflight failed");
+    expect(factoryCalled).toBe(false);
+  });
+});
+
+describe("preflightDependencies()", () => {
+  const settings: KafkaSettings = {
+    brokers: ["broker1:9092"],
+    topic: "cf.run-requests",
+    groupId: "cf-workers",
+    consume: true,
+  };
+
+  const makeAdmin = () => ({
+    connect: vi.fn().mockResolvedValue(undefined),
+    fetchTopicMetadata: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+  });
+
+  const makeDeps = (over: Partial<PreflightDeps> = {}): PreflightDeps => ({
+    getStoreBackend: vi.fn().mockReturnValue("fs"),
+    getObjectStoreMode: vi.fn().mockReturnValue("fs"),
+    getDb: vi.fn().mockReturnValue({ query: vi.fn().mockResolvedValue({ rows: [] }) }),
+    getObjectStore: vi.fn().mockReturnValue({ list: vi.fn().mockResolvedValue([]) }),
+    createKafkaAdmin: vi.fn().mockReturnValue(makeAdmin()),
+    ...over,
+  });
+
+  test("postgres + s3 + Kafka: one operation per active dependency, in order", async () => {
+    const order: string[] = [];
+    const query = vi.fn().mockImplementation(async () => {
+      order.push("query");
+      return { rows: [] };
+    });
+    const list = vi.fn().mockImplementation(async () => {
+      order.push("list");
+      return [];
+    });
+    const admin = makeAdmin();
+    admin.connect.mockImplementation(async () => {
+      order.push("connect");
+    });
+    admin.fetchTopicMetadata.mockImplementation(async () => {
+      order.push("fetchTopicMetadata");
+      return {};
+    });
+    admin.disconnect.mockImplementation(async () => {
+      order.push("disconnect");
+    });
+    const deps = makeDeps({
+      getStoreBackend: vi.fn().mockReturnValue("postgres"),
+      getObjectStoreMode: vi.fn().mockReturnValue("s3"),
+      getDb: vi.fn().mockReturnValue({ query }),
+      getObjectStore: vi.fn().mockReturnValue({ list }),
+      createKafkaAdmin: vi.fn().mockReturnValue(admin),
+    });
+    await preflightDependencies(settings, deps);
+    expect(query).toHaveBeenCalledWith("SELECT 1");
+    expect(list).toHaveBeenCalledWith("_preflight");
+    expect(admin.connect).toHaveBeenCalledTimes(1);
+    expect(admin.fetchTopicMetadata).toHaveBeenCalledWith({ topics: [settings.topic] });
+    expect(admin.disconnect).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["query", "list", "connect", "fetchTopicMetadata", "disconnect"]);
+  });
+
+  test("fs + fs + Kafka: skips Postgres and the object store, checks Kafka only", async () => {
+    const deps = makeDeps();
+    await preflightDependencies(settings, deps);
+    expect(deps.getDb).not.toHaveBeenCalled();
+    expect(deps.getObjectStore).not.toHaveBeenCalled();
+    const admin = deps.createKafkaAdmin(settings) as unknown as ReturnType<typeof makeAdmin>;
+    expect(admin.connect).toHaveBeenCalledTimes(1);
+    expect(admin.fetchTopicMetadata).toHaveBeenCalledWith({ topics: [settings.topic] });
+    expect(admin.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  test("a Postgres failure names Postgres, cites network policy and credentials, and short-circuits", async () => {
+    const deps = makeDeps({
+      getStoreBackend: vi.fn().mockReturnValue("postgres"),
+      getDb: vi
+        .fn()
+        .mockReturnValue({ query: vi.fn().mockRejectedValue(Object.assign(new Error("x"), { code: "28P01" })) }),
+    });
+    await expect(preflightDependencies(settings, deps)).rejects.toThrow(
+      "Cannot start worker: Postgres preflight failed (code: 28P01); " +
+        "commonly caused by a network policy, TLS/ACL mismatch, or invalid credentials.",
+    );
+    expect(deps.getObjectStore).not.toHaveBeenCalled();
+    expect(deps.createKafkaAdmin).not.toHaveBeenCalled();
+  });
+
+  test("a Postgres failure without a safe token still names Postgres", async () => {
+    const deps = makeDeps({
+      getStoreBackend: vi.fn().mockReturnValue("postgres"),
+      getDb: vi.fn().mockReturnValue({ query: vi.fn().mockRejectedValue("not an Error") }),
+    });
+    await expect(preflightDependencies(settings, deps)).rejects.toThrow(
+      "Cannot start worker: Postgres preflight failed; commonly caused by a network policy",
+    );
+  });
+
+  test("an S3 failure names the S3 object store, keeps a safe type token, and short-circuits", async () => {
+    const err = Object.assign(new Error("boom"), { code: "urn:x:error", type: "NoSuchBucket" });
+    const deps = makeDeps({
+      getObjectStoreMode: vi.fn().mockReturnValue("s3"),
+      getObjectStore: vi.fn().mockReturnValue({ list: vi.fn().mockRejectedValue(err) }),
+    });
+    await expect(preflightDependencies(settings, deps)).rejects.toThrow(
+      "Cannot start worker: S3 object store preflight failed (code: NoSuchBucket); " +
+        "commonly caused by a network policy, TLS/ACL mismatch, or invalid credentials.",
+    );
+    expect(deps.createKafkaAdmin).not.toHaveBeenCalled();
+  });
+
+  test("an S3 non-Error failure without a token still names the S3 object store", async () => {
+    const deps = makeDeps({
+      getObjectStoreMode: vi.fn().mockReturnValue("s3"),
+      getObjectStore: vi.fn().mockReturnValue({ list: vi.fn().mockRejectedValue(42) }),
+    });
+    await expect(preflightDependencies(settings, deps)).rejects.toThrow(
+      "Cannot start worker: S3 object store preflight failed; commonly caused by a network policy",
+    );
+  });
+
+  test("a Kafka connect failure names Kafka and still disconnects in finally", async () => {
+    const admin = makeAdmin();
+    admin.connect.mockRejectedValue(Object.assign(new Error("x"), { code: "ECONNREFUSED" }));
+    const deps = makeDeps({ createKafkaAdmin: vi.fn().mockReturnValue(admin) });
+    await expect(preflightDependencies(settings, deps)).rejects.toThrow(
+      "Cannot start worker: Kafka preflight failed (code: ECONNREFUSED); " +
+        "commonly caused by a network policy, TLS/ACL mismatch, or invalid credentials.",
+    );
+    expect(admin.fetchTopicMetadata).not.toHaveBeenCalled();
+    expect(admin.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  test("a Kafka metadata failure names Kafka even without a safe token", async () => {
+    const admin = makeAdmin();
+    admin.fetchTopicMetadata.mockRejectedValue(
+      Object.assign(new Error("x"), { type: "spaces not allowed" }),
+    );
+    const deps = makeDeps({ createKafkaAdmin: vi.fn().mockReturnValue(admin) });
+    await expect(preflightDependencies(settings, deps)).rejects.toThrow(
+      "Cannot start worker: Kafka preflight failed; commonly caused by a network policy",
+    );
+    expect(admin.disconnect).toHaveBeenCalledTimes(1);
+  });
+
+  test("a Kafka admin construction failure names Kafka and never echoes the raw message", async () => {
+    const createKafkaAdmin = vi.fn().mockImplementation(() => {
+      throw new Error("certificate path /etc/ssl/private/worker.key not readable");
+    });
+    const deps = makeDeps({ createKafkaAdmin });
+    const err = await preflightDependencies(settings, deps).then(
+      () => {
+        throw new Error("expected preflightDependencies to reject");
+      },
+      (e: unknown) => e as Error,
+    );
+    expect(err.message).toBe(
+      "Cannot start worker: Kafka preflight failed; " +
+        "commonly caused by a network policy, TLS/ACL mismatch, or invalid credentials.",
+    );
+  });
+
+  test("a rejecting disconnect after a successful check resolves without throwing", async () => {
+    const admin = makeAdmin();
+    admin.disconnect.mockRejectedValue(new Error("disconnect failed"));
+    const deps = makeDeps({ createKafkaAdmin: vi.fn().mockReturnValue(admin) });
+    await expect(preflightDependencies(settings, deps)).resolves.toBeUndefined();
+    expect(admin.connect).toHaveBeenCalledTimes(1);
+    expect(admin.fetchTopicMetadata).toHaveBeenCalledTimes(1);
+  });
+
+  test("a rejecting disconnect during cleanup does not mask a primary Kafka failure", async () => {
+    const admin = makeAdmin();
+    admin.connect.mockRejectedValue(Object.assign(new Error("x"), { code: "ECONNREFUSED" }));
+    admin.disconnect.mockRejectedValue(new Error("disconnect also failed"));
+    const deps = makeDeps({ createKafkaAdmin: vi.fn().mockReturnValue(admin) });
+    await expect(preflightDependencies(settings, deps)).rejects.toThrow(
+      "Cannot start worker: Kafka preflight failed (code: ECONNREFUSED)",
+    );
+  });
+});
+
+describe("preflight error hygiene — never echo a secret", () => {
+  const settings: KafkaSettings = {
+    brokers: ["broker1:9092"],
+    topic: "cf.run-requests",
+    groupId: "cf-workers",
+    consume: true,
+  };
+  const CONNECTION_STRING = "postgres://cf_app:super-secret-pw@db:5432/cf";
+  const S3_SECRET = "wJalrXUtnFEMI-secret-access-key";
+  const PEM = "-----BEGIN PRIVATE KEY-----\nabc\n-----END CERTIFICATE-----";
+
+  const makeAdmin = (rejection: unknown) => ({
+    connect: vi.fn().mockRejectedValue(rejection),
+    fetchTopicMetadata: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+  });
+
+  const expectNoSecrets = async (promise: Promise<void>, deps: PreflightDeps): Promise<void> => {
+    const err = await promise.then(
+      () => {
+        throw new Error("expected preflightDependencies to reject");
+      },
+      (e: unknown) => e as Error,
+    );
+    expect((err as Error & { cause?: unknown }).cause).toBeUndefined();
+    for (const secret of [CONNECTION_STRING, S3_SECRET, "BEGIN PRIVATE KEY", "BEGIN CERTIFICATE"]) {
+      expect(err.message).not.toContain(secret);
+      expect(String(err)).not.toContain(secret);
+    }
+    expect(deps.createKafkaAdmin).not.toHaveBeenCalled();
+  };
+
+  test("a Postgres error leaking a connection string is reduced to a safe message", async () => {
+    const deps: PreflightDeps = {
+      getStoreBackend: vi.fn().mockReturnValue("postgres"),
+      getObjectStoreMode: vi.fn().mockReturnValue("fs"),
+      getDb: vi
+        .fn()
+        .mockReturnValue({ query: vi.fn().mockRejectedValue(new Error(CONNECTION_STRING)) }),
+      getObjectStore: vi.fn(),
+      createKafkaAdmin: vi.fn(),
+    };
+    await expectNoSecrets(preflightDependencies(settings, deps), deps);
+  });
+
+  test("an S3 error leaking a secret key and an unsafe code is reduced to a safe message", async () => {
+    const err = Object.assign(new Error(`${S3_SECRET} ${PEM}`), { code: CONNECTION_STRING });
+    const deps: PreflightDeps = {
+      getStoreBackend: vi.fn().mockReturnValue("fs"),
+      getObjectStoreMode: vi.fn().mockReturnValue("s3"),
+      getDb: vi.fn(),
+      getObjectStore: vi.fn().mockReturnValue({ list: vi.fn().mockRejectedValue(err) }),
+      createKafkaAdmin: vi.fn(),
+    };
+    await expectNoSecrets(preflightDependencies(settings, deps), deps);
+  });
+
+  test("a Kafka error leaking PEM text and an unsafe code is reduced to a safe message", async () => {
+    const err = Object.assign(new Error(PEM), { code: `key=${S3_SECRET}` });
+    const deps: PreflightDeps = {
+      getStoreBackend: vi.fn().mockReturnValue("fs"),
+      getObjectStoreMode: vi.fn().mockReturnValue("fs"),
+      getDb: vi.fn(),
+      getObjectStore: vi.fn(),
+      createKafkaAdmin: vi.fn().mockReturnValue(makeAdmin(err)),
+    };
+    const promise = preflightDependencies(settings, deps);
+    const err2 = (await promise.then(
+      () => {
+        throw new Error("expected preflightDependencies to reject");
+      },
+      (e: unknown) => e as Error,
+    )) as Error & { cause?: unknown };
+    expect(err2.cause).toBeUndefined();
+    for (const secret of [S3_SECRET, "BEGIN PRIVATE KEY", "BEGIN CERTIFICATE"]) {
+      expect(err2.message).not.toContain(secret);
+      expect(String(err2)).not.toContain(secret);
+    }
+    expect(err2.message).toContain("Kafka preflight failed");
+  });
+});
+
+describe("defaultKafkaAdmin & defaultPreflightDeps", () => {
+  const savedEnv = Object.fromEntries(
+    ["OBJECT_STORE", "STORE_BACKEND"].map((key) => [key, process.env[key]]),
+  );
+  const settings: KafkaSettings = {
+    brokers: ["broker1:9092"],
+    topic: "cf.run-requests",
+    groupId: "cf-workers",
+    consume: true,
+  };
+
+  let ctorOpts: Array<Record<string, unknown>> = [];
+  let adminOpts: Array<Record<string, unknown>> = [];
+  const admin = {
+    connect: vi.fn().mockResolvedValue(undefined),
+    fetchTopicMetadata: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
+  };
+
+  beforeEach(() => {
+    vi.resetModules();
+    ctorOpts = [];
+    adminOpts = [];
+    for (const key of Object.keys(savedEnv)) delete process.env[key];
+    vi.doMock("kafkajs", () => ({
+      Kafka: class {
+        constructor(opts: Record<string, unknown>) {
+          ctorOpts.push(opts);
+        }
+        admin(opts: Record<string, unknown>) {
+          adminOpts.push(opts);
+          return admin;
+        }
+      },
+      logLevel: { NOTHING: 0 },
+    }));
+  });
+
+  afterEach(async () => {
+    vi.doUnmock("kafkajs");
+    vi.resetModules();
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  const imported = async (): Promise<typeof import("../worker.js")> => import("../worker.js");
+
+  test("settings without ssl pass ssl: undefined and zero-retry timeouts", async () => {
+    const worker = await imported();
+    await worker.preflightDependencies(settings);
+    expect(ctorOpts).toHaveLength(1);
+    expect(ctorOpts[0]).toMatchObject({
+      clientId: "campaign-foundry-worker-preflight",
+      brokers: ["broker1:9092"],
+      ssl: undefined,
+      connectionTimeout: 5_000,
+      requestTimeout: 5_000,
+      retry: { retries: 0 },
+      logLevel: 0,
+    });
+    expect(adminOpts).toEqual([{ retry: { retries: 0 } }]);
+    expect(admin.fetchTopicMetadata).toHaveBeenCalledWith({ topics: [settings.topic] });
+  });
+
+  test("settings with ssl ca, cert, and key map to rejectUnauthorized with a ca array", async () => {
+    const worker = await imported();
+    await worker.preflightDependencies({
+      ...settings,
+      ssl: { ca: "CA-PEM", cert: "CERT-PEM", key: "KEY-PEM" },
+    });
+    expect(ctorOpts[0].ssl).toEqual({
+      rejectUnauthorized: true,
+      ca: ["CA-PEM"],
+      cert: "CERT-PEM",
+      key: "KEY-PEM",
+    });
+  });
+
+  test("settings with ssl cert and key but no ca map to a ca of undefined", async () => {
+    const worker = await imported();
+    await worker.preflightDependencies({ ...settings, ssl: { cert: "CERT-PEM", key: "KEY-PEM" } });
+    expect(ctorOpts[0].ssl).toEqual({
+      rejectUnauthorized: true,
+      ca: undefined,
+      cert: "CERT-PEM",
+      key: "KEY-PEM",
+    });
+  });
+
+  test("defaultKafkaAdmin is the createKafkaAdmin the default deps use", async () => {
+    const worker = await imported();
+    const direct = worker.defaultKafkaAdmin(settings);
+    expect(direct).toBe(admin);
+    expect(worker.defaultPreflightDeps.createKafkaAdmin).toBe(worker.defaultKafkaAdmin);
+    // `defaultPreflightDeps` wires the real module-scope collaborators, never
+    // calls at import: with fs/fs here only the (mocked) Kafka admin runs.
+    expect(ctorOpts).toHaveLength(1);
   });
 });
