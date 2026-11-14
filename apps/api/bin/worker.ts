@@ -116,17 +116,23 @@ export async function preflightDependencies(
       throw preflightError("S3 object store", err);
     }
   }
-  const admin = deps.createKafkaAdmin(settings);
+  let admin: Admin | undefined;
   try {
+    // Construction belongs under the same wrapper as connect/metadata: a
+    // `new Kafka({...})` rejecting a malformed PEM or an unreadable cert
+    // path must be sanitised and named, never leaked raw.
+    admin = deps.createKafkaAdmin(settings);
     await admin.connect();
     await admin.fetchTopicMetadata({ topics: [settings.topic] });
   } catch (err: unknown) {
     throw preflightError("Kafka", err);
   } finally {
-    try {
-      await admin.disconnect();
-    } catch {
-      // A failed disconnect must never mask a primary preflight failure.
+    if (admin) {
+      try {
+        await admin.disconnect();
+      } catch {
+        // A failed disconnect must never mask a primary preflight failure.
+      }
     }
   }
 }

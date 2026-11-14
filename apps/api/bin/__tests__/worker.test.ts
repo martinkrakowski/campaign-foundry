@@ -828,6 +828,23 @@ describe("preflightDependencies()", () => {
     expect(admin.disconnect).toHaveBeenCalledTimes(1);
   });
 
+  test("a Kafka admin construction failure names Kafka and never echoes the raw message", async () => {
+    const createKafkaAdmin = vi.fn().mockImplementation(() => {
+      throw new Error("certificate path /etc/ssl/private/worker.key not readable");
+    });
+    const deps = makeDeps({ createKafkaAdmin });
+    const err = await preflightDependencies(settings, deps).then(
+      () => {
+        throw new Error("expected preflightDependencies to reject");
+      },
+      (e: unknown) => e as Error,
+    );
+    expect(err.message).toBe(
+      "Cannot start worker: Kafka preflight failed; " +
+        "commonly caused by a network policy, TLS/ACL mismatch, or invalid credentials.",
+    );
+  });
+
   test("a rejecting disconnect after a successful check resolves without throwing", async () => {
     const admin = makeAdmin();
     admin.disconnect.mockRejectedValue(new Error("disconnect failed"));
