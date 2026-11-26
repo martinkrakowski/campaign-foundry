@@ -1,5 +1,7 @@
 # Staging (k3s on the LAN node)
 
+> **Retired:** This directory describes the retired staging deployment path. `deploy.sh` now refuses to run; staging is promoted through the platform repository (see `.github/workflows/build-image.yml`).
+
 Campaign Foundry's staging environment runs on the owner's k3s node `midnight`
 (`ssh m`), reachable only on the local network or the VPN, at
 **https://campaign-foundry.midnight.lan** (TLS from the cluster's own issuer,
