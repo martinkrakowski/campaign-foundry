@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts",
-      "before": "      ...(audio !== undefined ? { audio } : {}),",
-      "after": "      ...(false ? { audio } : {}),",
-      "because": "renderMotionVariant must spread the run's resolved music-bed bytes onto the compositor's request whenever audio was resolved, or a brief declaring `audio` would silently render with no music even though the interim refusal is gone. Forcing the conditional spread's guard to false drops the `audio` key from every compositeVideo request unconditionally, caught by the fixture asserting a brief with `audio` gets the resolved bytes on its motion request.",
+      "before": "      // The resolved music bed (VE3b2): absent → omitted, so an audio-free\n      // brief's motion request stays byte-identical to today's (VE-D3).\n      ...(audio !== undefined ? { audio } : {}),",
+      "after": "      // The resolved music bed (VE3b2): absent → omitted, so an audio-free\n      // brief's motion request stays byte-identical to today's (VE-D3).\n      ...(false ? { audio } : {}),",
+      "because": "renderMotionVariant must spread the run's resolved music-bed bytes onto the compositor's request whenever audio was resolved, or a brief declaring `audio` would silently render with no music even though the interim refusal is gone. Forcing the conditional spread's guard to false drops the `audio` key from every compositeVideo request unconditionally, caught by the fixture asserting a brief with `audio` gets the resolved bytes on its motion request. (Re-anchored by AR6: the html video-layer slot's own compositeVideo call carries the same conditional spread, so the anchor is pinned to renderMotionVariant's copy by its comment; the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",

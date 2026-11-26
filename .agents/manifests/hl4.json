@@ -49,9 +49,9 @@
     },
     {
       "file": "packages/Distribution/src/application/use-cases/PackageForPlatformUseCase.use-case.ts",
-      "before": "    if (destination !== undefined) {\n      const bundleText = new TextDecoder().decode(bundle);\n      if (!bundleText.includes(CLICK_TAG_VARIABLE)) {\n        throw new Error(\n          `HTML asset ${assetIdentity(asset)} has clickDestination but bundle is missing \"${CLICK_TAG_VARIABLE}\" variable declaration.`,\n        );\n      }\n    }",
-      "after": "    // clickTag verification omitted",
-      "because": "PackageForPlatformUseCase must refuse an HTML creative unit whose brief carried a clickDestination when its bundle lacks the required clickTag variable declaration.",
+      "before": "    const destination = asset.clickDestination ?? briefDestination;\n    if (destination !== undefined && !bundleText.includes(CLICK_TAG_VARIABLE)) {\n      throw new Error(\n        `HTML asset ${assetIdentity(asset)} has clickDestination but bundle is missing \"${CLICK_TAG_VARIABLE}\" variable declaration.`,\n      );\n    }",
+      "after": "    const destination = asset.clickDestination ?? briefDestination;\n    // clickTag verification omitted",
+      "because": "PackageForPlatformUseCase must refuse an HTML creative unit whose brief carried a clickDestination when its bundle lacks the required clickTag variable declaration. (Re-anchored by AR6: the refusal moved into `prepareHtml`, where the destination is the asset's own or the brief's; dropping the check is the same claim.)",
       "command": [
         "yarn",
         "vitest",
