@@ -449,6 +449,57 @@ describe("planInputFor / pooledPlanner", () => {
     }
   });
 
+  test("refuses an approved pool entry containing the video placeholder prefix without echoing entry text", async () => {
+    const { planInputFor, writePool } = await filesFor(dir);
+    await writePool(
+      LOCAL_TENANT,
+      pool({
+        entries: [
+          {
+            id: "h1",
+            text: "Buy now https://publish.invalid/shoe/1x1/v0.mp4 secret-copy",
+            status: "approved",
+          },
+        ],
+      }),
+    );
+    const result = await planInputFor(LOCAL_TENANT, brief());
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      // `filesFor` resets modules, so import the error class after it ran.
+      const { BriefPlaceholderPrefixError } =
+        await import("@campaignfoundry/CampaignOrchestration");
+      expect(result.error).toBeInstanceOf(BriefPlaceholderPrefixError);
+      expect(result.error.name).toBe("BriefPlaceholderPrefixError");
+      expect(result.error.message).toContain("entries[0].text");
+      expect(result.error.message).toContain('id "h1"');
+      expect(result.error.message).not.toContain("secret-copy");
+      expect(result.error.message).not.toContain("shoe/1x1");
+    }
+  });
+
+  test("ignores a rejected pool entry containing the video placeholder prefix", async () => {
+    const { planInputFor, writePool } = await filesFor(dir);
+    await writePool(
+      LOCAL_TENANT,
+      pool({
+        entries: [
+          {
+            id: "h1",
+            text: "Buy now https://publish.invalid/shoe/1x1/v0.mp4",
+            status: "rejected",
+            reason: "legal",
+          },
+          { id: "h2", text: "Stay wild", status: "approved" },
+        ],
+      }),
+    );
+    expect(await planInputFor(LOCAL_TENANT, brief())).toEqual({
+      success: true,
+      value: { headlines: ["Stay wild"] },
+    });
+  });
+
   test("pooledPlanner binds the input to plan and forwards replan", async () => {
     const { pooledPlanner } = await filesFor(dir);
     const planner = pooledPlanner({ headlines: ["Stay wild", "Go far"] });

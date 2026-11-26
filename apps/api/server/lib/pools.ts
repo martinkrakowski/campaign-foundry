@@ -1,11 +1,13 @@
 import {
   approvedTexts,
+  BriefPlaceholderPrefixError,
   HEADLINE_POOL_REF,
   PlanVariationsUseCase,
   type CampaignBrief,
   type CopyPool,
   type PlanInput,
   type VariationPlanner,
+  refusePlaceholderPrefix,
 } from "@campaignfoundry/CampaignOrchestration";
 import { nodeCryptoPolicyHasher } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import { err, ok, type Result } from "@campaignfoundry/shared";
@@ -106,10 +108,25 @@ export async function planInputFor(
   }
   try {
     const stored = await readPool(scope, brief.id);
+    if (stored) {
+      // Only approved entries are drawn by `approvedTexts`, so only those are
+      // refused at load; rejected entries are neither drawn nor refused here.
+      // The error names the entry, never its text.
+      for (let i = 0; i < stored.pool.entries.length; i++) {
+        const entry = stored.pool.entries[i];
+        if (entry.status === "approved") {
+          refusePlaceholderPrefix(
+            `Copy pool briefs/${brief.id}/pools.json entries[${i}].text (id "${entry.id}")`,
+            entry.text,
+          );
+        }
+      }
+    }
     const headlines = stored ? approvedTexts(stored.pool) : [];
     return ok({ ...ratios, headlines, ...motion });
   } catch (error) {
-    if (error instanceof InvalidCopyPoolError) return err(error);
+    if (error instanceof InvalidCopyPoolError || error instanceof BriefPlaceholderPrefixError)
+      return err(error);
     throw error;
   }
 }
