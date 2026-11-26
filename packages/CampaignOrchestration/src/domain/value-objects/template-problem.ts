@@ -70,12 +70,19 @@ type LayerProblem =
   | { field: string; must: string; value: unknown }
   | { path: string; must: string; value: unknown };
 
-/** Formats a `{ field | path, must, value }` problem under a `layers[i]` prefix. */
-function formatLayerProblem(index: number, problem: LayerProblem): string {
-  const where = "field" in problem ? problem.field : problem.path;
-  const suffix = where.replace(/^\./, "");
-  const subject = suffix.length === 0 ? `layers[${index}]` : `layers[${index}].${suffix}`;
-  return `${subject} must ${problem.must} (got ${gotText(problem.value)})`;
+/**
+ * Formats a `{ field | path, must, value }` problem under a `layers[i]`
+ * prefix. `section` is the layer property the validator inspected —
+ * `""` for the layer's own fields (enabled, link, the seconds keys),
+ * `".frame"`, `".props"`, `".tracks"` or `".span"` for the sub-objects —
+ * the same way the brief boundary builds `template.layers[${i}].tracks`
+ * plus the problem path in `apps/api/server/lib/load-brief.ts`. A `path`
+ * already carries its own leading `.` (or starts with `[`), so the two
+ * concatenate directly.
+ */
+function formatLayerProblem(index: number, section: string, problem: LayerProblem): string {
+  const where = "field" in problem ? `.${problem.field}` : problem.path;
+  return `layers[${index}]${section}${where} must ${problem.must} (got ${gotText(problem.value)})`;
 }
 
 /**
@@ -187,20 +194,20 @@ export function templateProblem(template: unknown): string | undefined {
 
       const enabledProblem = layerEnabledProblem(layerRec.enabled);
       if (enabledProblem !== undefined) {
-        return formatLayerProblem(i, enabledProblem);
+        return formatLayerProblem(i, "", enabledProblem);
       }
       const linkProblem = layerLinkProblem(layerRec.link);
       if (linkProblem !== undefined) {
-        return formatLayerProblem(i, linkProblem);
+        return formatLayerProblem(i, "", linkProblem);
       }
       const frameProblem = layerFrameProblem(layerRec.frame);
       if (frameProblem !== undefined) {
-        return formatLayerProblem(i, frameProblem);
+        return formatLayerProblem(i, ".frame", frameProblem);
       }
       if (layerRec.props !== undefined) {
         const propsProblem = layerPropsProblem(kind, layerRec.props);
         if (propsProblem !== undefined) {
-          return formatLayerProblem(i, propsProblem);
+          return formatLayerProblem(i, ".props", propsProblem);
         }
       }
       if (Object.hasOwn(layerRec, "elements")) {
@@ -208,15 +215,15 @@ export function templateProblem(template: unknown): string | undefined {
       }
       const tracksProblem = layerTracksProblem(kind, layerRec.tracks);
       if (tracksProblem !== undefined) {
-        return formatLayerProblem(i, tracksProblem);
+        return formatLayerProblem(i, ".tracks", tracksProblem);
       }
       const timeFieldProblem = layerTimeFieldProblem(layerRec);
       if (timeFieldProblem !== undefined) {
-        return formatLayerProblem(i, timeFieldProblem);
+        return formatLayerProblem(i, ".", timeFieldProblem);
       }
       const spanProblem = layerSpanProblem(kind, layerRec.span);
       if (spanProblem !== undefined) {
-        return formatLayerProblem(i, spanProblem);
+        return formatLayerProblem(i, ".span", spanProblem);
       }
 
       if (!(rules.accepts as readonly string[]).includes(kind)) {

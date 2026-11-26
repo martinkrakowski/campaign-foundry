@@ -213,23 +213,23 @@ describe("templateProblem (RW-22)", () => {
       'layers[0].link must be a boolean (got "https://x")',
     );
     expect(templateProblem(withLayer({ id: "a", kind: "image", frame: { x: 2 } }))).toBe(
-      "layers[0].x must be a number in [0, 1] (got 2)",
+      "layers[0].frame.x must be a number in [0, 1] (got 2)",
     );
     expect(templateProblem(withLayer({ id: "a", kind: "shade", props: {} }))).toBe(
-      'layers[0] must be absent for layer kind "shade" (got {})',
+      'layers[0].props must be absent for layer kind "shade" (got {})',
     );
     expect(templateProblem(withLayer({ id: "a", kind: "shade", tracks: [] }))).toBe(
-      'layers[0] must be absent for layer kind "shade" (got [])',
+      'layers[0].tracks must be absent for layer kind "shade" (got [])',
     );
     expect(templateProblem(withLayer({ id: "a", kind: "video", startSec: 1 }))).toBe(
       "layers[0].startSec must be absent; clip time is span.startT and span.endT as normalised t, never seconds (got 1)",
     );
     expect(
       templateProblem(withLayer({ id: "a", kind: "image", span: { startT: 0, endT: 1 } })),
-    ).toBe('layers[0] must be absent for layer kind "image" (got {"startT":0,"endT":1})');
+    ).toBe('layers[0].span must be absent for layer kind "image" (got {"startT":0,"endT":1})');
     expect(
       templateProblem(withLayer({ id: "a", kind: "video", span: { startT: 1, endT: 0 } })),
-    ).toBe('layers[0] must have startT < endT (got {"startT":1,"endT":0})');
+    ).toBe('layers[0].span must have startT < endT (got {"startT":1,"endT":0})');
   });
 
   test("formats values JSON.stringify cannot serialize via gotText fallbacks", () => {
@@ -241,7 +241,7 @@ describe("templateProblem (RW-22)", () => {
     // the `?? String(value)` branch of gotText runs.
     expect(
       templateProblem(withLayer({ id: "a", kind: "image", frame: { junk: undefined } })),
-    ).toMatch(/^layers\[0\]\.junk must be one of .* \(got undefined\)$/);
+    ).toMatch(/^layers\[0\]\.frame\.junk must be one of .* \(got undefined\)$/);
     // A BigInt throws under JSON.stringify, so the catch returns String(value).
     expect(templateProblem(withLayer({ id: "a", kind: "image", enabled: BigInt(1) }))).toBe(
       "layers[0].enabled must be a boolean (got 1)",
