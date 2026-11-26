@@ -4,8 +4,8 @@
   "mutations": [
     {
       "file": "apps/api/bin/purge.ts",
-      "before": "if (reconcileSwitch()) {",
-      "after": "if (true) {",
+      "before": "} else if (reconcileEnabled) {",
+      "after": "} else if (true) {",
       "because": "the env switch ignored: with PURGE_RECONCILE=off the sweep still deletes orphans unattended. The test turns the switch off with an old orphan prefix in the store and asserts the orphan is still there and the skip line was logged.",
       "command": [
         "yarn",
