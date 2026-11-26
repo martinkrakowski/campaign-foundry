@@ -2,8 +2,17 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { randomUUID } from "node:crypto";
 import type { SqlClient } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
-import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
-import { resetObjectStoreClient, setObjectStoreClient } from "../../object-store/index.js";
+import {
+  InMemoryObjectStore,
+  PublicAdMediaStore,
+} from "@campaignfoundry/CampaignOrchestration/infrastructure";
+import { PublicMediaNotConfiguredError } from "@campaignfoundry/CampaignOrchestration";
+import {
+  resetObjectStoreClient,
+  resetPublicAdMediaClient,
+  setObjectStoreClient,
+  setPublicAdMediaClient,
+} from "../../object-store/index.js";
 import { orgPrefix } from "../../object-store/object-keys.js";
 import { deleteOrgRows, purgeOrg, queueCampaignPurges, requestOrgDeletion } from "../purge-org.js";
 import {
@@ -409,6 +418,126 @@ describe("purgeOrg completion (PT-9m2, D241)", () => {
       expect(await objectSnapshot(store, "acme")).toEqual(beforeAcmeObj);
       expect(await snapshot(db, "beta")).toEqual(beforeBeta);
       expect(await objectSnapshot(store, "beta")).toEqual(beforeBetaObj);
+    });
+  });
+
+  // PT-4k: published clips tie the org to PUBLIC bucket bytes no org-prefix
+  // delete covers, so a purge with rows and no public media must refuse, and
+  // a configured purge must free the rows AND the public objects.
+  describe("purgeOrg and published clips (PT-4k)", () => {
+    /** Seed a published_clip row for acme on a BETA campaign (so acme's own
+     * campaign purges never hit the cascade-free FK). */
+    async function seedPublishedClip(betaCampaignId: string): Promise<void> {
+      await db.query(
+        `insert into published_clip (org_id, campaign_id, content_hash, key, url)
+           values ('acme', $1::uuid, $2, $3, $4)`,
+        [
+          betaCampaignId,
+          "0".repeat(64),
+          "acme/aaa/0123.mp4",
+          "https://media.test/acme/aaa/0123.mp4",
+        ],
+      );
+    }
+
+    afterEach(() => {
+      resetPublicAdMediaClient();
+    });
+
+    test("a configured purge removes acme's published_clip rows and public objects and leaves beta untouched", async () => {
+      await seedOrg(db, "acme", store);
+      await seedOrg(db, "beta", store);
+      const beforeBeta = await snapshot(db, "beta");
+      const beforeBetaObj = await objectSnapshot(store, "beta");
+
+      const { rows: betaCampaigns } = await db.query<{ id: string }>(
+        `select id::text as id from campaign where org_id = 'beta' order by id limit 1`,
+      );
+      const row = await drainPending("acme");
+      // Seeded AFTER the drain: a published_clip row present while public
+      // media is unconfigured would refuse the retry pass itself.
+      await seedPublishedClip(betaCampaigns[0]!.id);
+
+      const publicStore = new InMemoryObjectStore();
+      const publicMedia = new PublicAdMediaStore({
+        store: publicStore,
+        baseUrl: "https://media.test",
+      });
+      setPublicAdMediaClient(publicMedia);
+      await publicMedia.publish("acme", BYTES, "0".repeat(64));
+      await publicMedia.publish("beta", BYTES, "0".repeat(64));
+
+      const result = await purgeOrg(db, "acme", { id: row.id, requestedBy: row.requestedBy });
+      expect(result).toBe("purged");
+
+      const { rows: left } = await db.query<{ n: number }>(
+        `select count(*)::int as n from published_clip where org_id = 'acme'`,
+      );
+      expect(left[0]!.n).toBe(0);
+      expect(await publicStore.list("acme/")).toHaveLength(0);
+      expect(await publicStore.list("beta/")).toHaveLength(1);
+      expect(await snapshot(db, "beta")).toEqual(beforeBeta);
+      expect(await objectSnapshot(store, "beta")).toEqual(beforeBetaObj);
+    });
+
+    test("published_clip rows with unconfigured public media refuse before any delete", async () => {
+      await seedOrg(db, "acme", store);
+      await seedOrg(db, "beta", store);
+      const beforeBeta = await snapshot(db, "beta");
+
+      const { rows: betaCampaigns } = await db.query<{ id: string }>(
+        `select id::text as id from campaign where org_id = 'beta' order by id limit 1`,
+      );
+      const row = await drainPending("acme");
+      // Acme has no campaigns of its own left, so the count check no longer
+      // answers retry — only the published_clip refusal can stop the sweep.
+      await seedPublishedClip(betaCampaigns[0]!.id);
+      const beforeAcmeObj = await objectSnapshot(store, "acme");
+
+      await expect(
+        purgeOrg(db, "acme", { id: row.id, requestedBy: row.requestedBy }),
+      ).rejects.toBeInstanceOf(PublicMediaNotConfiguredError);
+
+      // Nothing was deleted: the ledger row AND the org row are intact.
+      const { rows: clips } = await db.query<{ n: number }>(
+        `select count(*)::int as n from published_clip where org_id = 'acme'`,
+      );
+      expect(clips[0]!.n).toBe(1);
+      const { rows: orgs } = await db.query<{ n: number }>(
+        `select count(*)::int as n from org where id = 'acme'`,
+      );
+      expect(orgs[0]!.n).toBe(1);
+      expect(await snapshot(db, "beta")).toEqual(beforeBeta);
+      // deleteOrgObjects never ran either.
+      expect(await objectSnapshot(store, "acme")).toEqual(beforeAcmeObj);
+    });
+
+    test("a partially configured public media client throws before any row or object is freed", async () => {
+      await seedOrg(db, "acme", store);
+      await seedOrg(db, "beta", store);
+
+      const row = await drainPending("acme");
+      const beforeAcme = await snapshot(db, "acme");
+      const beforeAcmeObj = await objectSnapshot(store, "acme");
+      // Partial configuration: PUBLIC_MEDIA_ACCESS_KEY_ID alone makes
+      // `publicAdMediaClient()` THROW (a stray variable), which must happen
+      // before the published_clip count, before deleteOrgRows and before
+      // deleteOrgObjects — acme has ZERO published_clip rows here.
+      const savedKey = process.env.PUBLIC_MEDIA_ACCESS_KEY_ID;
+      process.env.PUBLIC_MEDIA_ACCESS_KEY_ID = "AKIA-fake";
+      try {
+        await expect(
+          purgeOrg(db, "acme", { id: row.id, requestedBy: row.requestedBy }),
+        ).rejects.toThrow(/PUBLIC_MEDIA_ACCESS_KEY_ID/);
+      } finally {
+        if (savedKey === undefined) delete process.env.PUBLIC_MEDIA_ACCESS_KEY_ID;
+        else process.env.PUBLIC_MEDIA_ACCESS_KEY_ID = savedKey;
+      }
+
+      // No rows were deleted (usage, provider_key, deletion all intact) and
+      // no objects were freed.
+      expect(await snapshot(db, "acme")).toEqual(beforeAcme);
+      expect(await objectSnapshot(store, "acme")).toEqual(beforeAcmeObj);
     });
   });
 });

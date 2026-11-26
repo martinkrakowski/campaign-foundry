@@ -28,6 +28,8 @@ import { FsUsageStore } from "./fs-usage-store.js";
 import { PgUsageStore } from "./pg-usage-store.js";
 import { FsProviderKeyStore } from "./fs-provider-key-store.js";
 import { PgProviderKeyStore } from "./pg-provider-key-store.js";
+import { FsPublishedClipStore } from "./fs-published-clip-store.js";
+import { PgPublishedClipStore } from "./pg-published-clip-store.js";
 import type { BriefStorePort } from "./brief-store.port.js";
 import type { AssetStorePort } from "./asset-store.port.js";
 import type { PoolStorePort } from "./pool-store.port.js";
@@ -40,6 +42,7 @@ import type { DraftStorePort } from "./draft-store.port.js";
 import type { LastOpenedStorePort } from "./last-opened-store.port.js";
 import type { UsageStorePort } from "./usage-store.port.js";
 import type { ProviderKeyPort } from "./provider-key.port.js";
+import type { PublishedClipRecordPort } from "@campaignfoundry/CampaignOrchestration";
 
 export * from "./brief-store.port.js";
 export * from "./asset-store.port.js";
@@ -53,6 +56,8 @@ export * from "./draft-store.port.js";
 export * from "./last-opened-store.port.js";
 export * from "./usage-store.port.js";
 export * from "./provider-key.port.js";
+export * from "./fs-published-clip-store.js";
+export * from "./pg-published-clip-store.js";
 export * from "./run-delivery.port.js";
 export * from "./fs-brief-store.js";
 export * from "./pg-brief-store.js";
@@ -316,6 +321,16 @@ const providerKeys = new Registry<ProviderKeyPort>(
       : new FsProviderKeyStore(),
 );
 
+// Published-clip records (PT-4k): the public-media ledger, one store per
+// backend — its methods take `orgId` per call, like usage. The fs backend's
+// build is the same store for every tenant, and every one of its methods
+// answers "needs Postgres" rather than dropping a public-media fact on disk.
+const publishedClips = new Registry<PublishedClipRecordPort>(
+  () => storeBackend(),
+  (backend) =>
+    backend === "postgres" ? new PgPublishedClipStore(database()) : new FsPublishedClipStore(),
+);
+
 // `getRunDelivery`/`setRunDelivery`/`resetRunDelivery` live in
 // `run-delivery-registry.ts`, not here — see that file's docstring.
 
@@ -374,3 +389,9 @@ export const getProviderKeyStore = (scope: StorageScope): ProviderKeyPort =>
   providerKeys.get(scope);
 export const setProviderKeyStore = (store: ProviderKeyPort): void => providerKeys.set(store);
 export const resetProviderKeyStore = (): void => providerKeys.reset();
+
+export const getPublishedClipStore = (scope: StorageScope): PublishedClipRecordPort =>
+  publishedClips.get(scope);
+export const setPublishedClipStore = (store: PublishedClipRecordPort): void =>
+  publishedClips.set(store);
+export const resetPublishedClipStore = (): void => publishedClips.reset();

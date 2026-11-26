@@ -1,10 +1,11 @@
 import { rm } from "node:fs/promises";
 import type { SqlClient } from "../db/sql-client.js";
 import { objectStore } from "../config.js";
-import { objectStoreClient } from "../object-store/index.js";
+import { objectStoreClient, publicAdMediaClient } from "../object-store/index.js";
 import { orgPrefix } from "../object-store/object-keys.js";
 import { storageRoots } from "../run-environment.js";
 import { LOCAL_TENANT } from "../tenant.js";
+import { PublicMediaNotConfiguredError } from "@campaignfoundry/CampaignOrchestration";
 import { recordFailure, type DeletionRow } from "./deletion-store.js";
 import { markPurged } from "./purge-campaign.js";
 import { requestCampaignDeletion } from "./request.js";
@@ -25,6 +26,7 @@ const LEFTOVER_TABLES = [
   "draft",
   "last_opened",
   "template",
+  "published_clip",
 ] as const;
 
 function refuseLocal(orgId: string): void {
@@ -157,6 +159,10 @@ export async function deleteOrgRows(db: SqlClient, orgId: string): Promise<void>
  */
 export async function deleteOrgObjects(orgId: string): Promise<void> {
   refuseLocal(orgId);
+  // Public ad media (PT-4k) lives on the PUBLIC bucket, outside the org
+  // prefix `deletePrefix` covers, and exists in BOTH `s3` and `fs` modes —
+  // so it is purged here, before the `s3` early return, for every backend.
+  await publicAdMediaClient()?.removeOrg(orgId);
   if (objectStore() === "s3") {
     await objectStoreClient().deletePrefix(orgPrefix(orgId));
     return;
@@ -218,6 +224,21 @@ export async function purgeOrg(
     [orgId],
   );
   if (left[0]!.n > 0) return "retry";
+  // Resolve public media BEFORE anything is freed (PT-4k): a partially
+  // configured deployment throws here — `publicMediaSettings()` names the
+  // stray variable — leaving every row and object of the org intact.
+  const publicMedia = publicAdMediaClient();
+  // Published clips cannot be purged without the public bucket: the bytes
+  // behind `key` must be removed BEFORE `deleteOrgRows` drops the ledger
+  // (the FK to campaign is cascade-free on purpose). Rows present with no
+  // public media configured refuse here, not halfway through a purge.
+  const { rows: clips } = await db.query<{ n: number }>(
+    `select count(*)::int as n from published_clip where org_id = $1`,
+    [orgId],
+  );
+  if (clips[0]!.n > 0 && publicMedia === undefined) {
+    throw new PublicMediaNotConfiguredError();
+  }
   await deleteOrgRows(db, orgId);
   await deleteOrgObjects(orgId);
   // D241 step 6 (OD13): anonymise the org row in place. `slug` becomes `null`,
