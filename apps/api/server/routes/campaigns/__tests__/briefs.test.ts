@@ -2326,6 +2326,31 @@ describe("org template pins (RW-22)", () => {
     });
   });
 
+  // RW-22: a template-store failure is NOT a PinnedTemplateError — the route
+  // rethrows it and the server answers 500, never the 400 the resolver's own
+  // refusals (missing / cross-org / mismatched) get.
+  test("POST surfaces a template-store failure with 500, not a 400", async () => {
+    const findTemplate = vi.fn(() => Promise.reject(new Error("template store offline")));
+    const { create } = await api({ findTemplate });
+    const res = await create()(
+      jsonReq("http://x/campaigns/briefs", "POST", brief({ template: orgTemplate() })),
+    );
+    expect(res.status).toBe(500);
+    expect(existsSync(join(dir, "briefs", "camp.yaml"))).toBe(false);
+  });
+
+  test("PUT surfaces a template-store failure with 500, not a 400", async () => {
+    const findTemplate = vi.fn(() => Promise.reject(new Error("template store offline")));
+    const { create, update } = await api({ findTemplate });
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const original = readFileSync(join(dir, "briefs", "camp.yaml"));
+    const res = await update()(
+      jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ template: orgTemplate() })),
+    );
+    expect(res.status).toBe(500);
+    expect(readFileSync(join(dir, "briefs", "camp.yaml"))).toEqual(original);
+  });
+
   test("a canonical template passes with zero findTemplate lookups", async () => {
     const findTemplate = vi.fn(() => Promise.resolve(orgRecord));
     const { create } = await api({ findTemplate });
