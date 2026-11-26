@@ -79,12 +79,12 @@ describe.skipIf(!url)("PgPublishedClipStore.record under concurrency (CFAR6-reco
   const waitUntilRecordIsBlocked = async (): Promise<void> => {
     const deadline = Date.now() + 5_000;
     for (;;) {
-      const { rows } = await observer.query<{ n: number; holder: number | null }>(
-        `select count(*)::int as n,
-                (pg_blocking_pids(pid))[1] as holder
+      const { rows } = await observer.query<{ n: number }>(
+        `select count(*)::int as n
            from pg_stat_activity
           where cardinality(pg_blocking_pids(pid)) > 0
-            and query ilike '%published_clip%'`,
+            and query ilike '%published_clip%'
+            and pid <> pg_backend_pid()`,
       );
       if (rows[0]!.n > 0) return;
       if (Date.now() > deadline) {
