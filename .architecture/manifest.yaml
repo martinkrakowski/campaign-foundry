@@ -190,6 +190,8 @@ bounded_contexts:
           - GenerateCampaignUseCase
           - PlanVariationsUseCase
           - PreviewCreativeFrameUseCase
+          - PublishAdClipUseCase
+          - UnpublishAdClipUseCase
         ports:
           in:
             - CampaignPipelinePort
@@ -205,6 +207,7 @@ bounded_contexts:
             - ObjectStorePort
             - PlatformProfilePort
             - PublicAdMediaPort
+            - PublishedClipRecordPort
             - SceneAssetPort
             - VideoCompositorPort
       infrastructure:
