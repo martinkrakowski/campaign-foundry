@@ -22,6 +22,8 @@ export function databaseSettings(): DatabaseSettings {
     url: process.env.DATABASE_URL,
     caPath: process.env.DATABASE_CA_PATH,
     poolMax: process.env.DATABASE_POOL_MAX,
+    authPoolMax: process.env.AUTH_POOL_MAX,
+    poolCeiling: process.env.DATABASE_POOL_CEILING,
   };
 }
 
