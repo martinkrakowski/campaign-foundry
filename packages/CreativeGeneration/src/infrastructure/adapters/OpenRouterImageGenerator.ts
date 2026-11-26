@@ -26,6 +26,11 @@ const ASPECT_RATIO: Record<string, string> = {
   "16:9": "3:2",
 };
 
+/** Thrown when the requested ratio has no OpenRouter mapping and no fallback is configured. */
+export class UnsupportedAspectRatioError extends Error {
+  override readonly name = "UnsupportedAspectRatioError";
+}
+
 /** Minimal shape of the OpenAI-compatible chat-completion response we read. */
 interface OpenRouterResponse {
   choices?: Array<{
@@ -72,8 +77,13 @@ export class OpenRouterImageGenerator implements ImageGeneratorPort {
     signal?: AbortSignal,
   ): Promise<BackgroundResult> {
     const prompt = this.buildPrompt(product, context);
-    const aspect = ASPECT_RATIO[ratio.value] ?? "1:1";
     try {
+      const aspect = ASPECT_RATIO[ratio.value];
+      if (!aspect) {
+        throw new UnsupportedAspectRatioError(
+          `OpenRouterImageGenerator does not support aspect ratio "${ratio.value}"`,
+        );
+      }
       return await resolveCachedBackground(
         this.cache,
         context.seed,
@@ -105,6 +115,7 @@ export class OpenRouterImageGenerator implements ImageGeneratorPort {
         );
         return this.fallback.resolveBackground(product, ratio, context, signal);
       }
+      if (error instanceof UnsupportedAspectRatioError) throw error;
       throw new Error(message);
     }
   }

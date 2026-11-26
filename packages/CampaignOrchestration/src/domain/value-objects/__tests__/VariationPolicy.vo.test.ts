@@ -518,12 +518,12 @@ describe("VariationPolicy requested ratio subset", () => {
 
   test("a requested value that is not an AspectRatioValue is rejected naming the field", () => {
     const result = fromBrief(brief({ variation: { count: 4 } }), {
-      ratios: ["4:5"] as never,
+      ratios: ["4:3"] as never,
     });
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.message).toBe(
-        'Invalid variation.axes.ratio: "4:5" is not a supported aspect ratio (expected one of 1:1, 9:16, 16:9).',
+        'Invalid variation.axes.ratio: "4:3" is not a supported aspect ratio (expected one of 1:1, 9:16, 16:9, 4:5).',
       );
     }
   });
@@ -574,7 +574,7 @@ describe("VariationPolicy requested ratio subset", () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.message).toBe(
-        "Invalid variation.axes.ratio: select at least one aspect ratio (expected one of 1:1, 9:16, 16:9).",
+        "Invalid variation.axes.ratio: select at least one aspect ratio (expected one of 1:1, 9:16, 16:9, 4:5).",
       );
     }
   });

@@ -195,38 +195,59 @@ export function TemplateLibrary() {
   useEffect(() => {
     if (!templateLibraryOpen) return;
     let active = true;
-    setEntries(null);
-    setError(false);
-    setBriefs(null);
-    setSearch("");
-    setDetail(null);
-    setFrame(null);
-    setRendering(false);
-    setRenderFailed(false);
-    (async () => {
-      try {
-        const templates = await listTemplates();
-        /* istanbul ignore next -- `active` is the unmount-race guard; false only if the modal closes mid-fetch */
-        if (active) setEntries(templates);
-      } catch {
-        /* istanbul ignore next -- same unmount-race guard on the error path */
-        if (active) setError(true);
-      }
-    })();
-    // Provenance (T-D5) rides the same open. It is a brief-store read, not a
-    // composite: no GenAI credit is spent, which is why it may happen without
-    // being asked for where the render may not.
-    (async () => {
-      try {
-        const listed = await listBriefs();
-        /* istanbul ignore next -- unmount-race guard */
-        if (active) setBriefs(listed);
-      } catch {
-        /* provenance stays unknown; the detail view says so rather than claiming none */
-      }
-    })();
+    // CFRW22C — the load is a named function so the library can ALSO reload on
+    // the editor's "Save as template" success (it dispatches
+    // `cf:templates-changed`); a save from the editor is then visible without a
+    // close and a reopen. The listener rides the same effect as the open load,
+    // and its cleanup removes it exactly when the modal closes.
+    /**
+     * A save from the editor can fire `cf:templates-changed` while the open
+     * load is still in flight. The two fetches then race, and the older one
+     * can settle *last* — repainting the refreshed list with stale entries
+     * (or resurrecting the spinner with an old error). So each load takes a
+     * token, and a settle only paints if its token is still the newest one;
+     * `active` stays as the unmount guard. The same reasoning as
+     * `renderAbort` above: ordering is decided by identity, not by the abort.
+     */
+    let loadToken = 0;
+    const load = () => {
+      const token = ++loadToken;
+      setEntries(null);
+      setError(false);
+      setBriefs(null);
+      setSearch("");
+      setDetail(null);
+      setFrame(null);
+      setRendering(false);
+      setRenderFailed(false);
+      (async () => {
+        try {
+          const templates = await listTemplates();
+          /* istanbul ignore next -- `active`/`token` guard a stale settle; false only on close mid-fetch or a superseded load */
+          if (active && token === loadToken) setEntries(templates);
+        } catch {
+          /* istanbul ignore next -- same unmount-race guard on the error path */
+          if (active && token === loadToken) setError(true);
+        }
+      })();
+      // Provenance (T-D5) rides the same open. It is a brief-store read, not a
+      // composite: no GenAI credit is spent, which is why it may happen without
+      // being asked for where the render may not.
+      (async () => {
+        try {
+          const listed = await listBriefs();
+          /* istanbul ignore next -- unmount-race / superseded-load guard */
+          if (active && token === loadToken) setBriefs(listed);
+        } catch {
+          /* provenance stays unknown; the detail view says so rather than claiming none */
+        }
+      })();
+    };
+    load();
+    window.addEventListener("cf:templates-changed", load);
     return () => {
       active = false;
+      window.removeEventListener("cf:templates-changed", load);
       // A close (or an unmount) while a composite is in flight: abort it, and
       // drop the controller so its settle cannot set state on a gone component.
       renderAbort.current?.abort();
@@ -694,7 +715,7 @@ function TemplateDetail({
           */}
           {pinned === null ? (
             <p className="mr-auto text-[11px] text-text-muted">
-              This template cannot be used for a campaign yet — only the built-in ones can, for now.
+              This template cannot be used for a campaign yet.
             </p>
           ) : (
             <Button size="sm" onClick={() => onUseTemplate(pinned)}>

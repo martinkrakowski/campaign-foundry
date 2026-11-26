@@ -28,6 +28,7 @@ import {
   PublicMediaConfigError,
   publicMediaSettings,
   purgeGraceHours,
+  purgeReconcile,
   storeBackend,
 } from "../config.js";
 
@@ -55,7 +56,13 @@ describe("outputRoot", () => {
 });
 
 describe("databaseSettings (D174a)", () => {
-  const keys = ["DATABASE_URL", "DATABASE_CA_PATH", "DATABASE_POOL_MAX"] as const;
+  const keys = [
+    "DATABASE_URL",
+    "DATABASE_CA_PATH",
+    "DATABASE_POOL_MAX",
+    "AUTH_POOL_MAX",
+    "DATABASE_POOL_CEILING",
+  ] as const;
   const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
   afterEach(() => {
     for (const k of keys) {
@@ -64,15 +71,27 @@ describe("databaseSettings (D174a)", () => {
     }
   });
 
-  test("reads the three database variables, raw", () => {
+  test("reads the five database variables, raw", () => {
     process.env.DATABASE_URL = "postgres://me@localhost/cf";
     process.env.DATABASE_CA_PATH = "certs/ca.pem";
     process.env.DATABASE_POOL_MAX = "3";
+    process.env.AUTH_POOL_MAX = "4";
+    process.env.DATABASE_POOL_CEILING = "30";
     expect(databaseSettings()).toEqual({
       url: "postgres://me@localhost/cf",
       caPath: "certs/ca.pem",
       poolMax: "3",
+      authPoolMax: "4",
+      poolCeiling: "30",
     });
+  });
+
+  test("leaves the pool budget variables undefined when unset", () => {
+    delete process.env.AUTH_POOL_MAX;
+    delete process.env.DATABASE_POOL_CEILING;
+    const settings = databaseSettings();
+    expect(settings.authPoolMax).toBeUndefined();
+    expect(settings.poolCeiling).toBeUndefined();
   });
 });
 
@@ -94,6 +113,27 @@ describe("storeBackend (PT-3)", () => {
     expect(storeBackend()).toBe("postgres");
     process.env.STORE_BACKEND = "mysql";
     expect(() => storeBackend()).toThrow('STORE_BACKEND must be "fs" or "postgres", not "mysql".');
+  });
+});
+
+describe("purgeReconcile", () => {
+  const saved = process.env.PURGE_RECONCILE;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.PURGE_RECONCILE;
+    else process.env.PURGE_RECONCILE = saved;
+  });
+
+  test("is on unless PURGE_RECONCILE says off, and refuses anything else", () => {
+    delete process.env.PURGE_RECONCILE;
+    expect(purgeReconcile()).toBe(true);
+    for (const value of ["", "on"]) {
+      process.env.PURGE_RECONCILE = value;
+      expect(purgeReconcile()).toBe(true);
+    }
+    process.env.PURGE_RECONCILE = "off";
+    expect(purgeReconcile()).toBe(false);
+    process.env.PURGE_RECONCILE = "maybe";
+    expect(() => purgeReconcile()).toThrow('PURGE_RECONCILE must be "on" or "off".');
   });
 });
 
@@ -607,7 +647,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
     }
     const sentinelName = `operator-sentinel-${randomUUID()}.pem`;
     const sentinelPath = join(certsDir, sentinelName);
-    writeFileSync(sentinelPath, "AIVEN-DATABASE-CA-DO-NOT-DELETE");
+    writeFileSync(sentinelPath, "DATABASE-CA-SENTINEL-DO-NOT-DELETE");
 
     try {
       const id = randomUUID();
@@ -620,7 +660,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
 
       // Sentinel file was not removed
       expect(existsSync(sentinelPath)).toBe(true);
-      expect(readFileSync(sentinelPath, "utf8")).toBe("AIVEN-DATABASE-CA-DO-NOT-DELETE");
+      expect(readFileSync(sentinelPath, "utf8")).toBe("DATABASE-CA-SENTINEL-DO-NOT-DELETE");
     } finally {
       if (existsSync(sentinelPath)) {
         unlinkSync(sentinelPath);

@@ -9,6 +9,7 @@ import { isErrno, SYMLINK_WRITE_ERROR } from "../../../lib/brief-files.js";
 import { objectStore } from "../../../lib/config.js";
 import { assertSafeId, parseBrief } from "../../../lib/load-brief.js";
 import { getAssetStore, getBriefStore, TeamsNotSupportedError } from "../../../lib/ports/index.js";
+import { PinnedTemplateError, resolvePinnedOrgTemplate } from "../../../lib/pinned-template.js";
 import {
   CampaignNotFoundError,
   canAssignTeam,
@@ -64,6 +65,20 @@ export default defineEventHandler(async (event) => {
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: errorMessage(error) };
+  }
+
+  // RW-22: an org-saved template pin is resolved against the tenant's
+  // TemplateStorePort before anything is written. A PinnedTemplateError
+  // (missing / cross-org / version-mismatched / creativeType-mismatched) is a
+  // 400; a store failure rethrows as a 500.
+  try {
+    await resolvePinnedOrgTemplate(scope, brief.template);
+  } catch (error) {
+    if (error instanceof PinnedTemplateError) {
+      setResponseStatus(event, 400);
+      return { error: error.message };
+    }
+    throw error;
   }
 
   const store = getBriefStore(scope);

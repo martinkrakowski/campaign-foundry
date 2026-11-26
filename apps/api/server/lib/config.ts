@@ -22,6 +22,8 @@ export function databaseSettings(): DatabaseSettings {
     url: process.env.DATABASE_URL,
     caPath: process.env.DATABASE_CA_PATH,
     poolMax: process.env.DATABASE_POOL_MAX,
+    authPoolMax: process.env.AUTH_POOL_MAX,
+    poolCeiling: process.env.DATABASE_POOL_CEILING,
   };
 }
 
@@ -83,6 +85,21 @@ export function purgeGraceHours(): number {
     );
   }
   return parsed;
+}
+
+/**
+ * `PURGE_RECONCILE`: `off` turns the sweep's reconcile off; unset, empty or `on`
+ * leaves it on (the plan says the sweep runs it). Anything else is refused. The
+ * cache expiry has no switch.
+ */
+export function purgeReconcile(): boolean {
+  loadEnv();
+  const value = process.env.PURGE_RECONCILE;
+  if (value === undefined || value === "" || value === "on") return true;
+  if (value === "off") return false;
+  // The variable, never the value: an operator's typo should not become a log
+  // line, and the whole value of the message is which variable to fix.
+  throw new Error(`PURGE_RECONCILE must be "on" or "off".`);
 }
 
 /** The S3-compatible store's coordinates, read only when `OBJECT_STORE=s3` (D201). */

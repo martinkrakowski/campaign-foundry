@@ -128,6 +128,31 @@ describe("NodeCanvasCompositor", () => {
     expect(logo.y).toBe(margin);
   });
 
+  test("renders a 4:5 canvas at 1080x1350 with all layers inside the frame", async () => {
+    const out = await compositor.compositeAsset(request({ canvas: { ratio: "4:5" } }));
+    const img = await loadImage(Buffer.from(out.image));
+    expect(img.width).toBe(1080);
+    expect(img.height).toBe(1350);
+
+    const captured = await blit(request({ canvas: { ratio: "4:5" } }));
+    for (const box of captured.drawImage) {
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(1080);
+      expect(box.y + box.height).toBeLessThanOrEqual(1350);
+    }
+    for (const point of captured.fillText) {
+      expect(point.x).toBeGreaterThanOrEqual(0);
+      expect(point.x).toBeLessThanOrEqual(1080);
+      expect(point.y).toBeGreaterThanOrEqual(0);
+      expect(point.y).toBeLessThanOrEqual(1350);
+    }
+    // A standard message fits without ellipsis truncation, and the headline
+    // wrap width is the domain's 85% fraction of the canvas width.
+    expect(captured.fillText.some((p) => p.text.includes("…"))).toBe(false);
+    expect(captured.wrapWidths[0]).toBeCloseTo(1080 * 0.85);
+  });
+
   test("covers both layout edges and tones deterministically", async () => {
     const top = request({ layout: "headline-top", tone: "subtle" });
     const bottom = request({ layout: "headline-bottom", tone: "bold" });

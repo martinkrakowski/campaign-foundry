@@ -13,7 +13,7 @@ import { PgUsageStore } from "../pg-usage-store.js";
  * instant, which is the race condition D175's advisory lock exists to close.
  * This file is the proof against a real server, over an actual two-connection
  * pool — skipped unless `TEST_DATABASE_URL` is set (CI's `postgres:17` service;
- * `.github/workflows/ci.yml`), never against the owner's Aiven service.
+ * `.github/workflows/ci.yml`), never against the owner's real database.
  *
  * It owns a schema it creates and drops, so it can run beside every other
  * test's own database (or its own re-run) without clashing on `usage`, `org` or

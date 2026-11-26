@@ -1,9 +1,10 @@
-# Staging (k3s on the LAN node)
+# Staging
 
-Campaign Foundry's staging environment runs on the owner's k3s node `midnight`
-(`ssh m`), reachable only on the local network or the VPN, at
-**https://campaign-foundry.midnight.lan** (TLS from the cluster's own issuer,
-`midnight-ca`). Production hosting is still open
+> **Retired:** This directory describes the retired staging deployment path. `deploy.sh` now refuses to run; staging is promoted through the platform repository (see `.github/workflows/build-image.yml`).
+
+Campaign Foundry's staging environment runs on a k3s node reachable only on the
+local network or the VPN, over HTTPS (TLS from the cluster's own issuer).
+Production hosting is still open
 (`docs/planning/2026-09-24_platform-and-tenancy.md`, §7 "What the owner is deciding"); this is not it.
 
 ## What runs (namespace `campaign-foundry-staging`)
@@ -12,8 +13,8 @@ Campaign Foundry's staging environment runs on the owner's k3s node `midnight`
 | ------------ | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Web + API    | `app.yaml`: one Pod, two containers from one image                                                                | The web app proxies `/api/pipeline/*` to `127.0.0.1:3001`, fixed at build time; sharing the Pod keeps that right.                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Files        | PVC `campaign-foundry-data` (local-path, 20Gi) at `/data`                                                         | Fonts and the seed samples. The Kafka certificates are Secret mounts layered under `/data/certs`, not PVC data. Input assets and outputs written since PT-4j are in the object store's bucket instead; briefs are Postgres rows. Seeded from the image's samples on first start.                                                                                                                                                                                                                                  |
-| PostgreSQL   | CloudNativePG `Cluster` `cf-pg`                                                                                   | TLS; the app verifies against the operator's CA (`cf-pg-ca`). Migrated on every deploy. The app runs `STORE_BACKEND=postgres` and `AUTH_MODE=better-auth` (since 2026-09-26: staging is where the platform is proven), so it starts with empty tables until PT-8 imports the seeded file data. Separate from the Aiven database.                                                                                                                                                                                  |
-| Kafka        | Strimzi `Kafka` `cf-kafka`, KRaft, one node                                                                       | TLS listener with client-certificate auth, as on Aiven. `KafkaUser` `campaign-foundry`, with ACLs on topic `cf.run-requests` and group `cf-workers`. The API publishes queued runs there and consumes them itself (`KAFKA_CONSUME=true`, PT-6b2/PT-6b3); its client certificate and the cluster CA are mounted under `/data/certs`.                                                                                                                                                                               |
+| PostgreSQL   | Promoted through the platform repository onto a CloudNativePG `Cluster` `db`                                      | TLS; the app verifies against the cluster's CA. Migrated on every deploy. The app runs `STORE_BACKEND=postgres` and `AUTH_MODE=better-auth` (since 2026-09-26: staging is where the platform is proven), so it starts with empty tables until PT-8 imports the seeded file data. (`cf-pg` / `cf-pg-ca` belonged to the previous staging host and are not current.)                                                                                                                                               |
+| Kafka        | Strimzi `Kafka` `cf-kafka`, KRaft, one node                                                                       | TLS listener with client-certificate auth, matching managed Kafka. `KafkaUser` `campaign-foundry`, with ACLs on topic `cf.run-requests` and group `cf-workers`. The API publishes queued runs there and consumes them itself (`KAFKA_CONSUME=true`, PT-6b2/PT-6b3); its client certificate and the cluster CA are mounted under `/data/certs`.                                                                                                                                                                               |
 | Object store | `seaweedfs.yaml`: one SeaweedFS Pod (master, volume server, filer and S3 gateway), Service `seaweedfs-s3` on 8333 | In-cluster on `http://seaweedfs-s3:8333`, and from a browser on **https://s3.midnight.lan** (path-style, `midnight-ca`) so a presigned URL is the same URL on both sides. Bucket `campaign-foundry`, created by `jobs/s3-bootstrap.yaml` on every deploy. The `api` container runs `OBJECT_STORE=s3` on that bucket (PT-4j), with the app key from the `seaweedfs-s3` Secret rather than the admin key; `deploy.sh` proves that key round-trips an object before it rolls the app out (`jobs/s3-app-probe.yaml`). |
 
 No image-provider keys are configured, so renders are procedural and spend no
@@ -503,6 +504,20 @@ ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging rollout
 
 Afterwards: an imported brief starts at a new revision (the file's own revision is not kept),
 and packages are not imported; make them again from the campaign's export page.
+
+### Seeding the sample campaign (PT-8g)
+
+`yarn seed:sample --org <id> --switched-at <iso>` (the command behind
+`apps/api/bin/seed-sample.ts`) hydrates `briefs/sample-campaign.yaml`
+(`summer-hydration-2026`, with `assets/inputs/hydra-logo.png` and
+`assets/inputs/trail-logo.png`) into an empty Postgres + S3 target, by driving
+`yarn import`'s `plan` -> `apply` -> `verify` in sequence. `--org` and
+`--switched-at` are required. It refuses a non-empty org (any of campaigns,
+brief versions, reports or assets present) and writes nothing in that case.
+
+Run it inside the staging workload when the target org is empty — no hostnames,
+no ssh commands; the same working pattern as the import above. Running it
+against staging happens after merge.
 
 ## Known limits
 

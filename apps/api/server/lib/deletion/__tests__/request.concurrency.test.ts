@@ -15,7 +15,7 @@ import { requestCampaignDeletion } from "../request.js";
  * each transaction's logic, but it cannot prove a `for update` actually BLOCKS a
  * concurrent `for share`. This file is the proof over a real server, over an
  * actual two-connection pool — skipped unless `TEST_DATABASE_URL` is set (CI's
- * `postgres:17` service; never against the owner's Aiven service).
+ * `postgres:17` service; never against the owner's real database).
  *
  * It owns a schema it creates and drops, so it runs beside every other test's
  * own database without clashing on `campaign`, `job`, `deletion` or
