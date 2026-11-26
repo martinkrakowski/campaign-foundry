@@ -24,6 +24,7 @@ const LEFTOVER_TABLES = [
   "asset",
   "draft",
   "last_opened",
+  "template",
 ] as const;
 
 function refuseLocal(orgId: string): void {

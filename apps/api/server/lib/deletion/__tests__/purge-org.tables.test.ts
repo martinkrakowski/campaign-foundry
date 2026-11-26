@@ -101,4 +101,27 @@ describe("deleteOrgRows table coverage (FU-purge-org-hardening, W3)", () => {
       await db2.end();
     }
   });
+
+  test("deleteOrgRows deletes the target org's template rows and leaves another org's intact", async () => {
+    await seedOrg(db, "acme", undefined, { campaigns: 0 });
+    await db.query(`insert into org (id, name, slug) values ('other', 'Other', 'other')`);
+    for (const org of ["acme", "other"]) {
+      await db.query(
+        `insert into template (org_id, id, version, name, unit, creative_type, layers, created_by)
+           values ($1, 'tpl-' || $1, 1, 'T', 'standard-web', 'image-text', '[{"id":"image","kind":"image"}]'::jsonb, 'u')`,
+        [org],
+      );
+    }
+
+    await deleteOrgRows(db, "acme");
+
+    const { rows: acme } = await db.query<{ n: number }>(
+      `select count(*)::int as n from template where org_id = 'acme'`,
+    );
+    expect(acme[0]!.n).toBe(0);
+    const { rows: other } = await db.query<{ n: number }>(
+      `select count(*)::int as n from template where org_id = 'other'`,
+    );
+    expect(other[0]!.n).toBe(1);
+  });
 });

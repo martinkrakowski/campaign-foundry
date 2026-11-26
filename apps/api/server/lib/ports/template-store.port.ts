@@ -27,3 +27,20 @@ export interface TemplateStorePort {
    */
   exists(id: string, version?: number): Promise<boolean>;
 }
+
+/**
+ * The template store when writes exist for it. Canonical templates remain
+ * ownerless and never writable (D123): a store that answers this port's read
+ * methods from the canonical library alone is still a `TemplateStorePort`,
+ * and `asWritableTemplateStore` (lib/ports/index.ts) wraps any such store in
+ * a `saveTemplate` that throws `TemplateWriteUnsupportedError`.
+ */
+export interface WritableTemplateStorePort extends TemplateStorePort {
+  /**
+   * Create a new (org, id, version) template row. A version is never
+   * overwritten: a duplicate (id, version) throws `TemplateVersionExistsError`,
+   * a colliding canonical id throws `CanonicalTemplateCollisionError`, and a
+   * template `templateProblem` refuses throws `InvalidTemplateError`.
+   */
+  saveTemplate(template: CreativeTemplate, actor: string): Promise<void>;
+}
