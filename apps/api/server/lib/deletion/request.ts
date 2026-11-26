@@ -1,7 +1,7 @@
 import type { SqlClient } from "../db/sql-client.js";
 import { UUID_PATTERN } from "../object-store/object-keys.js";
 import { insertCampaignDeletion } from "./deletion-store.js";
-import { activeJobId } from "./purge-campaign.js";
+import { activeJobId, removeCampaignPublishedClips } from "./purge-campaign.js";
 
 export interface CampaignDeletionRequest {
   readonly orgId: string;
@@ -21,12 +21,31 @@ export type CampaignDeletionOutcome =
   | { readonly outcome: "active-job"; readonly jobId: string };
 
 /**
- * D235's tombstone transaction. Lock order: the campaign row `for update`, and
+ * D235's tombstone sequence. Lock order: the campaign row `for update`, and
  * nothing else locked (`pg-job-store.ts:121-146`, item iii); `job` is read
  * unlocked AFTER the lock, which is safe because every active `job` row is
- * written under the campaign row `for share`. Whichever of a claim and this
- * transaction commits first decides. One transaction: a failure at any step
- * leaves neither `deleted_at` nor a `deletion` row.
+ * written under the campaign row `for share`. Whichever of a claim and the
+ * check transaction commits first decides.
+ *
+ * Three phases (PT-4k):
+ *
+ *  1. A read-only check transaction: the campaign exists, is not tombstoned,
+ *     passes `mayDelete` and has no active job — so a forbidden caller, a
+ *     missing/cross-org/tombstoned campaign or an active-job refusal never
+ *     unpublishes a clip.
+ *  2. The published clips are unpublished OUTSIDE any transaction (D231: no
+ *     object-store call is made while a transaction is held —
+ *     `purge-campaign.ts`'s own purge path says the same). A public object
+ *     leaves first, then its `published_clip` row; a failure here throws
+ *     before the tombstone, leaving the request fully retryable.
+ *  3. The tombstone transaction: `deleted_at` and the `deletion` row, the
+ *     campaign row re-locked `for update` and re-checked live so two
+ *     concurrent requests still answer one `requested` and one `gone` (the
+ *     original single-transaction guarantee, kept).
+ *
+ * A failure at any step leaves neither `deleted_at` nor a `deletion` row.
+ * After the tombstone commits, one more unpublish pass closes the window
+ * where a concurrent export published a clip between phases 2 and 3.
  */
 export async function requestCampaignDeletion(
   db: SqlClient,
@@ -34,7 +53,7 @@ export async function requestCampaignDeletion(
 ): Promise<CampaignDeletionOutcome> {
   // The `::uuid` cast below would raise 22P02 on anything else.
   if (!UUID_PATTERN.test(request.campaignId)) return { outcome: "gone" };
-  return db.transaction(async (tx) => {
+  const checked = await db.transaction(async (tx) => {
     const { rows } = await tx.query<{
       id: string;
       slug: string;
@@ -46,10 +65,26 @@ export async function requestCampaignDeletion(
       [request.orgId, request.campaignId.toLowerCase()],
     );
     const row = rows[0];
-    if (row === undefined || row.deleted_at !== null) return { outcome: "gone" };
-    if (!request.mayDelete(row.team_id)) return { outcome: "forbidden" };
+    if (row === undefined || row.deleted_at !== null) return { outcome: "gone" } as const;
+    if (!request.mayDelete(row.team_id)) return { outcome: "forbidden" } as const;
     const jobId = await activeJobId(tx, request.orgId, row.slug, row.id);
-    if (jobId !== undefined) return { outcome: "active-job", jobId };
+    if (jobId !== undefined) return { outcome: "active-job", jobId } as const;
+    return { outcome: "checked" as const, campaignId: row.id };
+  });
+  if (checked.outcome !== "checked") return checked;
+
+  // Pass 1: the campaign's own public clips leave before anything is
+  // tombstoned, so a failed removal is a plain retry.
+  await removeCampaignPublishedClips(db, request.orgId, checked.campaignId);
+
+  const result = await db.transaction(async (tx) => {
+    const { rows } = await tx.query<{ id: string; deleted_at: Date | null }>(
+      `select id, deleted_at from campaign
+         where org_id = $1 and id = $2::uuid for update`,
+      [request.orgId, checked.campaignId],
+    );
+    const row = rows[0];
+    if (row === undefined || row.deleted_at !== null) return { outcome: "gone" } as const;
     await tx.query(
       `update campaign set deleted_at = now(), deleted_by = $3
          where org_id = $1 and id = $2::uuid`,
@@ -62,6 +97,12 @@ export async function requestCampaignDeletion(
       requestedBy: request.requestedBy,
       grace,
     });
-    return { outcome: "requested", deletionId };
+    return { outcome: "requested", deletionId } as const;
   });
+  if (result.outcome !== "requested") return result;
+
+  // Pass 2 (after the commit, `tx` long closed): a concurrent export may have
+  // published a clip between the two passes; this one closes that window.
+  await removeCampaignPublishedClips(db, request.orgId, checked.campaignId);
+  return result;
 }

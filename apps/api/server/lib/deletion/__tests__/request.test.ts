@@ -1,8 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { beforeEach, afterEach, describe, expect, test, vi } from "vitest";
+import {
+  InMemoryObjectStore,
+  PublicAdMediaStore,
+} from "@campaignfoundry/CampaignOrchestration/infrastructure";
+import {
+  PublicMediaNotConfiguredError,
+  type PublicAdMediaPort,
+} from "@campaignfoundry/CampaignOrchestration";
 import type { SqlClient } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import { QUEUED_TTL_MS } from "../../ports/job-store.port.js";
+import { setPublicAdMediaClient, resetPublicAdMediaClient } from "../../object-store/index.js";
+import { PgPublishedClipStore } from "../../ports/pg-published-clip-store.js";
 import { listDue } from "../deletion-store.js";
 import { requestCampaignDeletion, type CampaignDeletionOutcome } from "../request.js";
 
@@ -92,6 +102,86 @@ async function readDeletion(
     [deletionId],
   );
   return rows[0]!;
+}
+
+/** The bytes a seeded public object holds — content is irrelevant to these tests. */
+const CLIP_BYTES = new Uint8Array([9, 8, 7]);
+
+/** Delete every `PUBLIC_MEDIA_*` variable so `publicAdMediaClient()` is `undefined`. */
+function clearPublicMediaEnv(): void {
+  for (const name of [
+    "PUBLIC_MEDIA_BUCKET",
+    "PUBLIC_MEDIA_BASE_URL",
+    "PUBLIC_MEDIA_ACCESS_KEY_ID",
+    "PUBLIC_MEDIA_SECRET_ACCESS_KEY",
+    "PUBLIC_MEDIA_ENDPOINT",
+    "PUBLIC_MEDIA_REGION",
+  ]) {
+    delete process.env[name];
+  }
+}
+
+/** An in-memory public media double plus the store its bytes land in. */
+function configuredMedia(): { media: PublicAdMediaPort; store: InMemoryObjectStore } {
+  const store = new InMemoryObjectStore();
+  return { media: new PublicAdMediaStore({ store, baseUrl: "https://media.test" }), store };
+}
+
+/** A public media double whose every removal throws. */
+function failingMedia(): PublicAdMediaPort {
+  return {
+    publish: async () => {
+      throw new Error("not used here");
+    },
+    remove: async () => {
+      throw new Error("boom");
+    },
+    removeOrg: async () => {
+      throw new Error("boom");
+    },
+    urlFor: (key) => `https://media.test/${key}`,
+  };
+}
+
+/** Seed one published clip: the public object on `media` plus its ledger row. */
+async function seedClip(
+  db: SqlClient,
+  media: PublicAdMediaPort,
+  orgId: string,
+  campaignId: string,
+  hash: string,
+): Promise<void> {
+  const published = await media.publish(orgId, CLIP_BYTES, hash);
+  await new PgPublishedClipStore(db).record(orgId, campaignId, published.key, published.url, hash);
+}
+
+/** Seed a `published_clip` row without touching a real public bucket. */
+async function seedClipRow(
+  db: SqlClient,
+  orgId: string,
+  campaignId: string,
+  hash: string,
+): Promise<void> {
+  await db.query(
+    `insert into published_clip (org_id, campaign_id, content_hash, key, url)
+       values ($1, $2::uuid, $3, $4, $5)`,
+    [
+      orgId,
+      campaignId,
+      hash,
+      `${orgId}/${"a".repeat(32)}/${hash}.mp4`,
+      `https://media.test/${hash}.mp4`,
+    ],
+  );
+}
+
+/** Count a campaign's `published_clip` rows in one org. */
+async function clipCount(db: SqlClient, orgId: string, campaignId: string): Promise<number> {
+  const { rows } = await db.query<{ n: number }>(
+    `select count(*)::int as n from published_clip where org_id = $1 and campaign_id = $2::uuid`,
+    [orgId, campaignId],
+  );
+  return rows[0]!.n;
 }
 
 describe("request-campaign-deletion (D235, D234's tombstone half)", () => {
@@ -440,6 +530,184 @@ describe("request-campaign-deletion (D235, D234's tombstone half)", () => {
     }>(`select deleted_at, deleted_by from campaign where id = $1`, [campaignId]);
     expect(campaign[0]!.deleted_at).toBeNull();
 
+    const { rows: count } = await db.query<{ n: number }>(
+      `select count(*)::int as n from deletion`,
+    );
+    expect(count[0]!.n).toBe(0);
+  });
+
+  // PT-4k: the delete request itself unpublishes the campaign's public clips —
+  // outside any transaction (D231), once before the tombstone and once after
+  // it commits — while a refused request never touches them.
+  afterEach(() => {
+    resetPublicAdMediaClient();
+  });
+
+  test("a forbidden caller or an active-job refusal does not unpublish clips", async () => {
+    const { media, store } = configuredMedia();
+    setPublicAdMediaClient(media);
+    const slug = `camp-${randomUUID().slice(0, 8)}`;
+    const campaignId = await seedCampaign(db, "local", slug);
+    await seedClip(db, media, "local", campaignId, "a".repeat(64));
+
+    const forbiddenOutcome = await requestCampaignDeletion(db, {
+      orgId: "local",
+      campaignId,
+      requestedBy: "member-1",
+      mayDelete: () => false,
+      graceHours: 0,
+    });
+    expect(forbiddenOutcome).toEqual({ outcome: "forbidden" });
+    expect(await clipCount(db, "local", campaignId)).toBe(1);
+    expect(await store.list("local/")).toHaveLength(1);
+
+    await seedJob(db, {
+      id: "j-clip",
+      orgId: "local",
+      campaignId,
+      status: "running",
+      leaseOffsetMs: 60_000,
+    });
+    const activeOutcome = await requestCampaignDeletion(db, {
+      orgId: "local",
+      campaignId,
+      requestedBy: "actor-1",
+      mayDelete: () => true,
+      graceHours: 0,
+    });
+    expect(activeOutcome).toEqual({ outcome: "active-job", jobId: "j-clip" });
+    expect(await clipCount(db, "local", campaignId)).toBe(1);
+    expect(await store.list("local/")).toHaveLength(1);
+  });
+
+  test("a delete request removes the campaign's public objects and clip rows before any purge", async () => {
+    const { media, store } = configuredMedia();
+    setPublicAdMediaClient(media);
+    const campaignId = await seedCampaign(db, "local", `camp-${randomUUID().slice(0, 8)}`);
+    const otherCampaignId = await seedCampaign(db, "local", `camp-${randomUUID().slice(0, 8)}`);
+    await db.query("insert into org (id, name) values ($1, $2)", ["other", "Other"]);
+    const foreignId = await seedCampaign(db, "other", `camp-${randomUUID().slice(0, 8)}`);
+
+    await seedClip(db, media, "local", campaignId, "a".repeat(64));
+    await seedClip(db, media, "local", campaignId, "b".repeat(64));
+    await seedClip(db, media, "local", otherCampaignId, "c".repeat(64));
+    await seedClip(db, media, "other", foreignId, "d".repeat(64));
+
+    const outcome = await requestCampaignDeletion(db, {
+      orgId: "local",
+      campaignId,
+      requestedBy: "actor-1",
+      mayDelete: () => true,
+      graceHours: 0,
+    });
+    expect(outcome).toEqual({ outcome: "requested", deletionId: expect.any(String) });
+
+    // This campaign's clips are gone — both objects and rows.
+    expect(await clipCount(db, "local", campaignId)).toBe(0);
+    // Another campaign's and another org's clips are intact.
+    expect(await clipCount(db, "local", otherCampaignId)).toBe(1);
+    expect(await clipCount(db, "other", foreignId)).toBe(1);
+    expect(await store.list("local/")).toHaveLength(1);
+    expect(await store.list("other/")).toHaveLength(1);
+
+    // The tombstone itself still happened.
+    const { rows: campaign } = await db.query<{ deleted_at: Date | null }>(
+      `select deleted_at from campaign where id = $1`,
+      [campaignId],
+    );
+    expect(campaign[0]!.deleted_at).not.toBeNull();
+  });
+
+  test("a second pass after the commit removes a clip published between the two passes", async () => {
+    const { media, store } = configuredMedia();
+    setPublicAdMediaClient(media);
+    const campaignId = await seedCampaign(db, "local", `camp-${randomUUID().slice(0, 8)}`);
+    await seedClip(db, media, "local", campaignId, "a".repeat(64));
+
+    // Intercept the `listForCampaign` select: before answering its SECOND
+    // invocation (pass 2), a concurrent export publishes one more clip.
+    const LIST_SQL = "from published_clip where org_id = $1 and campaign_id = $2::uuid";
+    let listCalls = 0;
+    const wrapped: SqlClient = {
+      ...db,
+      query: async (text, params) => {
+        if (text.includes(LIST_SQL)) {
+          listCalls += 1;
+          if (listCalls === 2) {
+            await seedClip(db, media, "local", campaignId, "e".repeat(64));
+          }
+        }
+        return db.query(text, params);
+      },
+    };
+
+    const outcome = await requestCampaignDeletion(wrapped, {
+      orgId: "local",
+      campaignId,
+      requestedBy: "actor-1",
+      mayDelete: () => true,
+      graceHours: 0,
+    });
+    expect(outcome).toEqual({ outcome: "requested", deletionId: expect.any(String) });
+    expect(listCalls).toBe(2);
+
+    // BOTH clips — including the one published mid-request — are gone.
+    expect(await clipCount(db, "local", campaignId)).toBe(0);
+    expect(await store.list("local/")).toHaveLength(0);
+  });
+
+  test("refuses delete request with PublicMediaNotConfiguredError when clips exist and public media is unconfigured", async () => {
+    clearPublicMediaEnv();
+    resetPublicAdMediaClient();
+    const campaignId = await seedCampaign(db, "local", `camp-${randomUUID().slice(0, 8)}`);
+    await seedClipRow(db, "local", campaignId, "a".repeat(64));
+
+    await expect(
+      requestCampaignDeletion(db, {
+        orgId: "local",
+        campaignId,
+        requestedBy: "actor-1",
+        mayDelete: () => true,
+        graceHours: 0,
+      }),
+    ).rejects.toBeInstanceOf(PublicMediaNotConfiguredError);
+
+    // Nothing was written: the campaign, the ledger row, no deletion row.
+    const { rows: campaign } = await db.query<{ deleted_at: Date | null }>(
+      `select deleted_at from campaign where id = $1`,
+      [campaignId],
+    );
+    expect(campaign[0]!.deleted_at).toBeNull();
+    expect(await clipCount(db, "local", campaignId)).toBe(1);
+    const { rows: count } = await db.query<{ n: number }>(
+      `select count(*)::int as n from deletion`,
+    );
+    expect(count[0]!.n).toBe(0);
+  });
+
+  test("keeps clip record and rolls back delete request when public object removal fails", async () => {
+    setPublicAdMediaClient(failingMedia());
+    const campaignId = await seedCampaign(db, "local", `camp-${randomUUID().slice(0, 8)}`);
+    await seedClipRow(db, "local", campaignId, "a".repeat(64));
+
+    await expect(
+      requestCampaignDeletion(db, {
+        orgId: "local",
+        campaignId,
+        requestedBy: "actor-1",
+        mayDelete: () => true,
+        graceHours: 0,
+      }),
+    ).rejects.toThrow("boom");
+
+    // The ledger row stays, and neither the tombstone nor the deletion row
+    // was written — the whole request is retryable.
+    expect(await clipCount(db, "local", campaignId)).toBe(1);
+    const { rows: campaign } = await db.query<{ deleted_at: Date | null }>(
+      `select deleted_at from campaign where id = $1`,
+      [campaignId],
+    );
+    expect(campaign[0]!.deleted_at).toBeNull();
     const { rows: count } = await db.query<{ n: number }>(
       `select count(*)::int as n from deletion`,
     );
