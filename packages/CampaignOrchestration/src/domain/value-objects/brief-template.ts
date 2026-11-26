@@ -449,8 +449,27 @@ export function templateHasAnchorProp(layers: readonly CreativeTemplateLayer[]):
   );
 }
 
+/**
+ * An org-saved template id (RW-22): the store's own identifiers are `tpl-`
+ * followed by a lowercase uuid. Shape only — `isOrgTemplateId` proves the
+ * string LOOKS like a stored template's id, never that one exists (only the
+ * tenant's `TemplateStorePort` can answer that, and only online).
+ */
+export type OrgTemplateId = `tpl-${string}`;
+const ORG_TEMPLATE_ID_LENGTH = 40; // "tpl-" + a 36-char lowercase uuid
+const ORG_TEMPLATE_ID_PATTERN =
+  /^tpl-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+export function isOrgTemplateId(value: unknown): value is OrgTemplateId {
+  if (typeof value !== "string") return false;
+  // Length first: an id that fails the bound is refused before any regex
+  // work, so an enormous input costs a comparison, not a scan.
+  if (value.length !== ORG_TEMPLATE_ID_LENGTH) return false;
+  return ORG_TEMPLATE_ID_PATTERN.test(value);
+}
+
 export interface BriefTemplate {
-  readonly id: CanonicalTemplateId; // the pinned reference
+  readonly id: CanonicalTemplateId | OrgTemplateId; // the pinned reference
   readonly version: number; // pinned; a new version is a new record (D123)
   readonly creativeType: CreativeType;
   readonly unit: AdvertisingUnit;
@@ -574,30 +593,45 @@ export function satisfiesOrderConstraints(
 export function isBriefTemplate(value: unknown): value is BriefTemplate {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const raw = value as Record<string, unknown>;
-  if (
-    !(
-      typeof raw.id === "string" &&
-      (CANONICAL_TEMPLATE_IDS as readonly string[]).includes(raw.id) &&
-      typeof raw.version === "number" &&
-      Number.isInteger(raw.version) &&
-      raw.version > 0 &&
-      typeof raw.creativeType === "string" &&
-      (CREATIVE_TYPES as readonly string[]).includes(raw.creativeType) &&
-      typeof raw.unit === "string" &&
-      (ADVERTISING_UNITS as readonly string[]).includes(raw.unit) &&
-      Array.isArray(raw.layers) &&
-      raw.layers.length > 0 &&
-      raw.layers.every(isLayerEntry) &&
-      new Set(raw.layers.map((layer) => (layer as LayerEntry).id)).size === raw.layers.length
-    )
-  ) {
+  let isCanonical: boolean;
+  let id: string;
+  try {
+    // A throwing getter or a throwing `Proxy` trap must read as "not a
+    // template", not break the caller — every property access sits inside
+    // this guard (restored drafts cross an IPC boundary and are untrusted).
+    const idValue = raw.id;
+    isCanonical =
+      typeof idValue === "string" &&
+      (CANONICAL_TEMPLATE_IDS as readonly string[]).includes(idValue);
+    if (!(typeof idValue === "string" && (isCanonical || isOrgTemplateId(idValue)))) return false;
+    id = idValue;
+    if (
+      !(
+        typeof raw.version === "number" &&
+        Number.isInteger(raw.version) &&
+        raw.version > 0 &&
+        typeof raw.creativeType === "string" &&
+        (CREATIVE_TYPES as readonly string[]).includes(raw.creativeType) &&
+        typeof raw.unit === "string" &&
+        (ADVERTISING_UNITS as readonly string[]).includes(raw.unit) &&
+        Array.isArray(raw.layers) &&
+        raw.layers.length > 0 &&
+        raw.layers.every(isLayerEntry) &&
+        new Set(raw.layers.map((layer) => (layer as LayerEntry).id)).size === raw.layers.length
+      )
+    ) {
+      return false;
+    }
+    const creativeType = raw.creativeType as CreativeType;
+    // The id↔creativeType pairing only makes sense for the canonical table —
+    // an org template's own id never names a row in it.
+    if (isCanonical && CANONICAL_TEMPLATES[creativeType].id !== id) return false;
+    const layers = raw.layers as readonly LayerEntry[];
+    if (!satisfiesTypeRules(creativeType, layers)) return false;
+    return satisfiesOrderConstraints(creativeType, layers);
+  } catch {
     return false;
   }
-  const creativeType = raw.creativeType as CreativeType;
-  if (CANONICAL_TEMPLATES[creativeType].id !== raw.id) return false;
-  const layers = raw.layers as readonly LayerEntry[];
-  if (!satisfiesTypeRules(creativeType, layers)) return false;
-  return satisfiesOrderConstraints(creativeType, layers);
 }
 
 /**
