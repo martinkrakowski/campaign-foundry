@@ -1,11 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { fileURLToPath } from "node:url";
-import {
-  main,
-  preflightDependencies,
-  type PreflightDeps,
-  type WorkerConsumer,
-} from "../worker.js";
+import { main, preflightDependencies, type PreflightDeps, type WorkerConsumer } from "../worker.js";
 import type { KafkaSettings } from "../../server/lib/config.js";
 
 /**
@@ -655,12 +650,8 @@ describe("worker main() — preflight ordering", () => {
     );
     expect(order).toEqual(["preflight", "consumerFactory", "consumer.start"]);
     expect(preflight).toHaveBeenCalledTimes(1);
-    expect(logs).toContain(
-      "[worker] Preflight: verifying Postgres, object store, and Kafka...",
-    );
-    expect(logs).toContain(
-      "[worker] Preflight passed; all configured dependencies are reachable.",
-    );
+    expect(logs).toContain("[worker] Preflight: verifying Postgres, object store, and Kafka...");
+    expect(logs).toContain("[worker] Preflight passed; all configured dependencies are reachable.");
   });
 
   test("a rejecting preflight prevents the consumer from being built or started", async () => {
@@ -759,9 +750,9 @@ describe("preflightDependencies()", () => {
   test("a Postgres failure names Postgres, cites network policy and credentials, and short-circuits", async () => {
     const deps = makeDeps({
       getStoreBackend: vi.fn().mockReturnValue("postgres"),
-      getDb: vi
-        .fn()
-        .mockReturnValue({ query: vi.fn().mockRejectedValue(Object.assign(new Error("x"), { code: "28P01" })) }),
+      getDb: vi.fn().mockReturnValue({
+        query: vi.fn().mockRejectedValue(Object.assign(new Error("x"), { code: "28P01" })),
+      }),
     });
     await expect(preflightDependencies(settings, deps)).rejects.toThrow(
       "Cannot start worker: Postgres preflight failed (code: 28P01); " +
