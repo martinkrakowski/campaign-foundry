@@ -11,9 +11,16 @@ import { DISPLAY_SIZES, type DisplaySize } from "./display-sizes.js";
  * function that turns a `CanvasSpec` into pixels. `RATIO_VALUES` and
  * `RATIO_DIMENSIONS` stay the social family.
  */
-export const RATIO_VALUES = ["1:1", "9:16", "16:9"] as const;
+export const RATIO_VALUES = ["1:1", "9:16", "16:9", "4:5"] as const;
 
 export type AspectRatioValue = (typeof RATIO_VALUES)[number];
+
+/**
+ * The ratios an unpinned brief resolves to — frozen so `policyHash` and the
+ * classic campaign matrix stay byte-stable when the vocabulary grows. Only a
+ * brief that explicitly pins `axes.ratio` may name a ratio outside this list.
+ */
+export const DEFAULT_RATIO_VALUES: readonly AspectRatioValue[] = ["1:1", "9:16", "16:9"] as const;
 
 /** Canvas pixel dimensions per ratio (DeterministicLayerStacking contract). */
 export const RATIO_DIMENSIONS: Record<
@@ -23,6 +30,7 @@ export const RATIO_DIMENSIONS: Record<
   "1:1": { width: 1080, height: 1080 },
   "9:16": { width: 1080, height: 1920 },
   "16:9": { width: 1920, height: 1080 },
+  "4:5": { width: 1080, height: 1350 },
 };
 
 /** A canvas is either a social ratio or an IAB display size — never both, never a third family. */
@@ -108,13 +116,14 @@ export function scaleBasisPx(spec: CanvasSpec, sizeScale: number): number {
  * exactly the branch a framed ground must NOT take: its canvas is 1:1 and the
  * box it fills is not.
  *
- * It iterates `RATIO_VALUES`, so a ratio added to the vocabulary becomes a
- * candidate here with no change.
+ * It iterates `DEFAULT_RATIO_VALUES` — not `RATIO_VALUES` — so existing
+ * framed-ground background ratios and cache keys stay frozen when new ratios
+ * join `RATIO_VALUES`.
  */
 export function nearestRatioForAspect(aspect: number): AspectRatioValue {
-  let nearest: AspectRatioValue = RATIO_VALUES[0];
+  let nearest: AspectRatioValue = DEFAULT_RATIO_VALUES[0];
   let nearestDiff = Number.POSITIVE_INFINITY;
-  for (const ratio of RATIO_VALUES) {
+  for (const ratio of DEFAULT_RATIO_VALUES) {
     const { width: w, height: h } = RATIO_DIMENSIONS[ratio];
     const diff = Math.abs(aspect - w / h);
     if (diff < nearestDiff) {

@@ -297,7 +297,10 @@ export class VariationPolicy {
     if (!paletteShiftResult.success) return paletteShiftResult;
     const productIds = unique(brief.products.map((product) => product.id));
     const allRatios = AspectRatio.all().map((ratio) => ratio.value);
-    const motionRatios = unique(input.motionRatios ?? allRatios);
+    // Frozen defaults: an absent axis resolves to the pre-"4:5" vocabulary so
+    // `policyHash` and classic matrices stay stable when the vocabulary grows.
+    const defaultRatios = AspectRatio.defaults().map((ratio) => ratio.value);
+    const motionRatios = unique(input.motionRatios ?? defaultRatios);
     const ratiosResult = requireRatios(input.ratios, allRatios);
     if (!ratiosResult.success) return ratiosResult;
     // The author's selection narrows first, then the motion filter: a motion-only
@@ -306,7 +309,7 @@ export class VariationPolicy {
     // "stay a still" — a still the brief never asked for. A mixed plan keeps every
     // requested ratio, since its non-motion ratios are legitimately the stills
     // the static format requested.
-    const requested = unique(ratiosResult.value ?? allRatios);
+    const requested = unique(ratiosResult.value ?? defaultRatios);
     const ratios =
       motionEnabled && !mixStatic
         ? requested.filter((ratio) => motionRatios.includes(ratio))
@@ -560,6 +563,9 @@ function requireRatios(
   allRatios: readonly AspectRatioValue[],
 ): Result<readonly AspectRatioValue[] | undefined, Error> {
   if (values === undefined) return ok(undefined);
+  if (!Array.isArray(values)) {
+    return err(new Error("Invalid variation.axes.ratio: expected an array."));
+  }
   for (const value of values) {
     if (!(allRatios as readonly string[]).includes(value)) {
       return err(
