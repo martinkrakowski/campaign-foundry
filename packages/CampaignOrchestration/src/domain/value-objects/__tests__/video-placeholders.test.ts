@@ -136,6 +136,20 @@ describe("collectVideoPlaceholderSources", () => {
 });
 
 describe("findVideoPlaceholders", () => {
+  test("a video element whose src is not a placeholder URL is skipped, not refused", () => {
+    const html = `<video src="https://cdn.example/clip.mp4"></video>${videoSrc("shoe/1x1/v0.mp4")}`;
+    expect(findVideoPlaceholders(html)).toEqual(["shoe/1x1/v0.mp4"]);
+    expect(findVideoPlaceholders('<video src="https://cdn.example/clip.mp4"></video>')).toEqual([]);
+  });
+
+  test("refuses a non-string html argument rather than scanning its string form", () => {
+    for (const notHtml of [undefined, null, 42, { toString: () => videoSrc("shoe/1x1/v0.mp4") }]) {
+      expect(() => findVideoPlaceholders(notHtml as unknown as string)).toThrowError(
+        InvalidVideoPlaceholderError,
+      );
+    }
+  });
+
   test("returns an empty list when no prefix is present", () => {
     expect(findVideoPlaceholders('<html><body><img src="fallback.png" /></body></html>')).toEqual(
       [],

@@ -780,6 +780,49 @@ describe("request-campaign-deletion (D235, D234's tombstone half)", () => {
     expect(await store.list("local/")).toHaveLength(0);
   });
 
+  test.each([
+    ["tombstoned", `update campaign set deleted_at = now() where id = $1::uuid`],
+    ["removed outright", `delete from campaign where id = $1::uuid`],
+  ])(
+    "a campaign %s between the two steps answers gone and writes no deletion row",
+    async (_label, gapStatement) => {
+      const { media, store } = configuredMedia();
+      setPublicAdMediaClient(media);
+      const campaignId = await seedCampaign(db, "local", `camp-${randomUUID().slice(0, 8)}`);
+      await seedClip(db, media, "local", campaignId, "b".repeat(64));
+
+      // The first transaction (the check) passes; before the second one takes
+      // its lock, another actor removes the campaign.
+      let txCount = 0;
+      const wrapped: SqlClient = {
+        ...db,
+        transaction: (work) =>
+          db.transaction(async (tx) => {
+            txCount += 1;
+            if (txCount === 2) await tx.query(gapStatement, [campaignId]);
+            return work(tx);
+          }),
+      };
+
+      const outcome = await requestCampaignDeletion(wrapped, {
+        orgId: "local",
+        campaignId,
+        requestedBy: "actor-1",
+        mayDelete: () => true,
+        graceHours: 0,
+      });
+      expect(outcome).toEqual({ outcome: "gone" });
+
+      const { rows: count } = await db.query<{ n: number }>(
+        `select count(*)::int as n from deletion`,
+      );
+      expect(count[0]!.n).toBe(0);
+      // Pass 1 ran before the gap, so the clip is gone; pass 2 never ran.
+      expect(await clipCount(db, "local", campaignId)).toBe(0);
+      expect(await store.list("local/")).toHaveLength(0);
+    },
+  );
+
   test("refuses delete request with PublicMediaNotConfiguredError when clips exist and public media is unconfigured", async () => {
     clearPublicMediaEnv();
     resetPublicAdMediaClient();

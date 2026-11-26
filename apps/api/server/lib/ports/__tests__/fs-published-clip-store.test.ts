@@ -1,10 +1,14 @@
 import { describe, test, expect, afterEach } from "vitest";
-import { getPublishedClipStore, resetPublishedClipStore } from "../index.js";
+import { getPublishedClipStore, resetPublishedClipStore, setPublishedClipStore } from "../index.js";
+import type { PublishedClipRecordPort } from "@campaignfoundry/CampaignOrchestration";
 import {
   FsPublishedClipStore,
   PublishedClipStoreUnavailableError,
 } from "../fs-published-clip-store.js";
 import { LOCAL_TENANT } from "../../tenant.js";
+import { resetDatabase, setDatabase } from "../../db/database.js";
+import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
+import { PgPublishedClipStore } from "../pg-published-clip-store.js";
 
 describe("FsPublishedClipStore (PT-4k): the public-media ledger is Postgres-only", () => {
   const store = new FsPublishedClipStore();
@@ -72,5 +76,38 @@ describe("the registry builds FsPublishedClipStore when STORE_BACKEND is not pos
     delete process.env.STORE_BACKEND;
     resetPublishedClipStore();
     expect(getPublishedClipStore(LOCAL_TENANT)).toBeInstanceOf(FsPublishedClipStore);
+  });
+
+  test("a double installed with setPublishedClipStore answers every tenant until reset", () => {
+    delete process.env.STORE_BACKEND;
+    const double = {
+      record: async () => undefined,
+      find: async () => undefined,
+      listForCampaign: async () => [],
+      remove: async () => undefined,
+    } as unknown as PublishedClipRecordPort;
+    setPublishedClipStore(double);
+    expect(getPublishedClipStore(LOCAL_TENANT)).toBe(double);
+    expect(getPublishedClipStore({ ...LOCAL_TENANT, orgId: "acme" })).toBe(double);
+
+    resetPublishedClipStore();
+    expect(getPublishedClipStore(LOCAL_TENANT)).toBeInstanceOf(FsPublishedClipStore);
+  });
+
+  test("STORE_BACKEND=postgres builds the database-backed ledger, which answers where the fs store refuses", async () => {
+    const db = await migratedDatabase();
+    setDatabase(db);
+    process.env.STORE_BACKEND = "postgres";
+    try {
+      resetPublishedClipStore();
+      const store = getPublishedClipStore(LOCAL_TENANT);
+      expect(store).toBeInstanceOf(PgPublishedClipStore);
+      const campaignId = "00000000-0000-4000-8000-000000000000";
+      await expect(store.find("local", campaignId, "0123")).resolves.toBeUndefined();
+      await expect(store.listForCampaign("local", campaignId)).resolves.toEqual([]);
+    } finally {
+      resetDatabase();
+      await db.end();
+    }
   });
 });
