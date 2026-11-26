@@ -146,17 +146,27 @@ function expectRejection(bytes: unknown, reason: AdClipRejectionReason): void {
 // ---- tests -------------------------------------------------------------------
 
 describe("mp4-clip (ad clip validation)", () => {
-  test("refuses null, non-Uint8Array, and throwing byteLength getter as not-mp4", () => {
+  test("refuses null, wrong primitives, non-iterable, array holes, prototype-polluting keys, and throwing getters as not-mp4", () => {
     expectRejection(null, "not-mp4");
     expectRejection(undefined, "not-mp4");
     expectRejection("not bytes at all", "not-mp4");
     expectRejection(42, "not-mp4");
-    // Array-like with a length but no byte identity.
+    // Array-like with a length but no byte identity; also non-iterable (no
+    // Symbol.iterator), so neither iteration nor indexing can extract bytes.
     expectRejection({ length: 4, 0: 0, 1: 1, 2: 2, 3: 3 }, "not-mp4");
+    expectRejection({ length: 0 }, "not-mp4");
     // An array hole (a sparse array is not a Uint8Array).
     const withHoles: number[] = [0, 0, 0, 16];
     withHoles.length = 8;
     expectRejection(withHoles, "not-mp4");
+    // Prototype-polluting keys: still just a plain object, not a Uint8Array,
+    // and never assigned onto any output object.
+    const polluting: Record<string, unknown> = {};
+    polluting["__proto__"] = { polluted: true };
+    polluting.constructor = () => {};
+    polluting.prototype = { polluted: true };
+    expectRejection(polluting, "not-mp4");
+    expectRejection({ ["__proto__"]: { length: 8 } }, "not-mp4");
     // A getter that throws on read.
     const throwingGetter = new Proxy(new Uint8Array(8), {
       get(target, key, receiver) {
@@ -212,6 +222,39 @@ describe("mp4-clip (ad clip validation)", () => {
   test("refuses MP4 missing moov or mvhd as not-mp4", () => {
     expectRejection(concat(ftyp()), "not-mp4");
     expectRejection(concat(ftyp(), moov([videoTrak("avc1")])), "not-mp4");
+  });
+
+  test("refuses non-faststart clip with mdat before moov as not-faststart", () => {
+    expectRejection(
+      concat(ftyp(), box("mdat", []), moov([mvhd(600, 600), videoTrak("avc1")])),
+      "not-faststart",
+    );
+    // Multiple mdat boxes: the FIRST mdat is the one that must follow moov.
+    expectRejection(
+      concat(
+        ftyp(),
+        box("mdat", []),
+        moov([mvhd(600, 600), videoTrak("avc1")]),
+        box("mdat", [1, 2]),
+      ),
+      "not-faststart",
+    );
+  });
+
+  test("accepts a faststart clip with ftyp -> moov -> mdat and returns ValidatedAdClip", () => {
+    const bytes = concat(
+      ftyp(),
+      moov([mvhd(600, 600), videoTrak("avc1")]),
+      box("mdat", [1, 2, 3, 4]),
+    );
+    expect(validateAdClip(bytes)).toEqual({
+      sizeBytes: bytes.byteLength,
+      durationSeconds: 1,
+      timescale: 600,
+      durationUnits: 600,
+    });
+    // A clip with no mdat box at all keeps the pre-faststart outcome: accepted.
+    expect(validateAdClip(tinyClip()).durationUnits).toBe(600);
   });
 
   test("refuses input exceeding AD_CLIP_MAX_BOXES as not-mp4", () => {

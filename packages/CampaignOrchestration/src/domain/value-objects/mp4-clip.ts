@@ -35,7 +35,8 @@ export type AdClipRejectionReason =
   | "not-h264"
   | "too-large"
   | "too-long"
-  | "zero-duration";
+  | "zero-duration"
+  | "not-faststart";
 
 /** The only error `validateAdClip` ever throws. */
 export class InvalidAdClipError extends Error {
@@ -370,13 +371,28 @@ export function validateAdClip(bytes: Uint8Array): ValidatedAdClip {
     requireFtyp(view, end, state);
 
     let moov: BoxHeader | undefined;
+    let moovOffset: number | undefined;
+    let firstMdatOffset: number | undefined;
     let offset = 0;
     while (offset < end) {
       const header = readBoxHeader(view, offset, end, state);
-      if (header.type === "moov") moov = header;
+      if (header.type === "moov") {
+        moov = header;
+        moovOffset = offset;
+      }
+      if (header.type === "mdat" && firstMdatOffset === undefined) firstMdatOffset = offset;
       offset = header.boxEnd;
     }
     if (moov === undefined) throw new InvalidAdClipError("not-mp4", "no moov box");
+    // Faststart: the moov box must precede the first mdat, so a player can
+    // begin playback before the whole file has arrived. A clip with no mdat
+    // box keeps its existing outcome.
+    if (firstMdatOffset !== undefined && moovOffset !== undefined && firstMdatOffset < moovOffset) {
+      throw new InvalidAdClipError(
+        "not-faststart",
+        "moov box must precede mdat (faststart required)",
+      );
+    }
 
     const duration = readMvhd(view, moov, state);
 
