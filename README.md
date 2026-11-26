@@ -182,6 +182,29 @@ settles) makes the id 404 — the persisted report is still at
 `GET /campaigns/result?campaignId=<id>`. The CLI (`yarn generate`) is unchanged and
 runs in-process.
 
+### Database
+
+With `STORE_BACKEND=fs` (the default) nothing below is needed: the file stores keep
+every record and no database is touched. To run on PostgreSQL instead:
+
+- **Connection (developer tunnel).** Set `STORE_BACKEND=postgres` and
+  `DATABASE_URL` in `.env.local` (never committed). Once the production database
+  is provisioned, a developer reaches it through a tunnel with `DATABASE_URL`,
+  `DATABASE_CA_PATH` and `DATABASE_POOL_MAX` set in `.env.local`. No values or
+  hostnames live in this repository.
+- **CA certificate.** `DATABASE_CA_PATH` points at the server's CA certificate (PEM)
+  in a gitignored path (e.g. under `certs/`). It is required for any non-local host:
+  a remote database is reached only over TLS that verifies the server certificate
+  (`rejectUnauthorized: true`).
+- **Staging database.** Staging is promoted through the platform repository onto a
+  CloudNativePG cluster named `db`.
+- **CLI commands.** `yarn db:ping` verifies connectivity and prints the PostgreSQL
+  version; `yarn db:migrate` applies the numbered SQL migrations under an advisory
+  lock.
+- **Restore testing.** Testing a database restore is a **manual operator step**: the
+  repository provides `yarn db:ping`, `yarn db:migrate` and `yarn import` — not an
+  automated restore test.
+
 ### Authoring briefs via the API
 
 Local authoring tool — writes stay under `briefs/` and `assets/inputs/<briefId>/`.

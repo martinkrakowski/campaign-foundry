@@ -1,5 +1,5 @@
 /**
- * How the API reaches its database (D174a: PostgreSQL, hosted on Aiven).
+ * How the API reaches its database (D174a: PostgreSQL, hosted).
  *
  * Pure: the composition root reads the raw settings (`config.ts`) and the CA file,
  * and this turns them into a driver config or refuses. Nothing here is taken from
@@ -13,7 +13,7 @@
 export interface DatabaseSettings {
   /** `DATABASE_URL`: `postgres://user:password@host:port/database`. */
   readonly url?: string;
-  /** `DATABASE_CA_PATH`: the server's CA certificate (PEM), e.g. Aiven's `ca.pem`. */
+  /** `DATABASE_CA_PATH`: the server's CA certificate (PEM), e.g. your database provider's `ca.pem`. */
   readonly caPath?: string;
   /** `DATABASE_POOL_MAX`: connections this process may hold. */
   readonly poolMax?: string;
@@ -111,8 +111,8 @@ export function databaseConfig(
   } else if (!LOCAL_HOSTS.has(url.hostname)) {
     throw new Error(
       `DATABASE_CA_PATH is not set: a remote database (${url.hostname}) is reached only over TLS ` +
-        "that verifies its certificate. Download the service's CA certificate (Aiven: the service " +
-        "page, CA certificate) to a gitignored path and point DATABASE_CA_PATH at it.",
+        "that verifies its certificate. Download the server's CA certificate from your database " +
+        "provider to a gitignored path and point DATABASE_CA_PATH at it.",
     );
   }
 

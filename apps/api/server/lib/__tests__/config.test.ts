@@ -645,7 +645,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
     }
     const sentinelName = `operator-sentinel-${randomUUID()}.pem`;
     const sentinelPath = join(certsDir, sentinelName);
-    writeFileSync(sentinelPath, "AIVEN-DATABASE-CA-DO-NOT-DELETE");
+    writeFileSync(sentinelPath, "DATABASE-CA-SENTINEL-DO-NOT-DELETE");
 
     try {
       const id = randomUUID();
@@ -658,7 +658,7 @@ describe("kafkaSettings (PT-6b2, D174d)", () => {
 
       // Sentinel file was not removed
       expect(existsSync(sentinelPath)).toBe(true);
-      expect(readFileSync(sentinelPath, "utf8")).toBe("AIVEN-DATABASE-CA-DO-NOT-DELETE");
+      expect(readFileSync(sentinelPath, "utf8")).toBe("DATABASE-CA-SENTINEL-DO-NOT-DELETE");
     } finally {
       if (existsSync(sentinelPath)) {
         unlinkSync(sentinelPath);
