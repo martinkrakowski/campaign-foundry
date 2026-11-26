@@ -24,6 +24,7 @@ const COUNT_LINES: readonly (readonly [keyof EraseUserCounts, string])[] = [
   ["providerKeys", "provider keys re-attributed"],
   ["campaignsDeletedBy", "campaigns re-attributed"],
   ["deletionsRequestedBy", "deletion requests re-attributed"],
+  ["templatesCreatedBy", "templates re-attributed"],
   ["drafts", "drafts deleted"],
   ["lastOpened", "last-opened pointers deleted"],
   ["verifications", "verification rows deleted"],

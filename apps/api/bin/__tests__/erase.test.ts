@@ -59,6 +59,10 @@ async function insertSurvivors(db: SqlClient, world: World): Promise<void> {
     `insert into deletion (org_id, kind, subject, requested_by, not_before) values ('local', 'campaign', 'survivor-subject', $1, now())`,
     [TARGET.id],
   );
+  await db.query(
+    `insert into template (org_id, id, version, name, unit, creative_type, layers, created_by) values ('local', 'tpl-survivor', 1, 'Survivor Template', 'standard-web', 'image-text', '[{"id":"image","kind":"image"}]'::jsonb, $1)`,
+    [TARGET.id],
+  );
 }
 
 /** Proxy: after `transaction` resolves, insert surviving rows, then return. */
@@ -276,6 +280,7 @@ describe("erase CLI (bin/erase.ts)", () => {
       "  provider keys re-attributed: 1",
       "  campaigns re-attributed: 1",
       "  deletion requests re-attributed: 1",
+      "  templates re-attributed: 1",
       "  drafts deleted: 1",
       "  last-opened pointers deleted: 1",
       "  verification rows deleted: 2",
@@ -602,6 +607,7 @@ describe("erase CLI (bin/erase.ts)", () => {
       "  repaired after commit: 1 provider keys re-attributed",
       "  repaired after commit: 1 campaigns re-attributed",
       "  repaired after commit: 1 deletion requests re-attributed",
+      "  repaired after commit: 1 templates re-attributed",
     ]);
     expect(endSpy).toHaveBeenCalledTimes(1);
   });

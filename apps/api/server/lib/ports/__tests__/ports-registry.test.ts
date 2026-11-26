@@ -27,10 +27,10 @@ import {
   FsBriefStore,
   FsAssetStore,
   FsPoolStore,
-  FsTemplateStore,
   FsJobStore,
   FsDraftStore,
   FsLastOpenedStore,
+  PgTemplateStore,
 } from "../index.js";
 import type { BriefStorePort } from "../brief-store.port.js";
 import type { AssetStorePort } from "../asset-store.port.js";
@@ -41,6 +41,12 @@ import type { DraftStorePort } from "../draft-store.port.js";
 import type { LastOpenedStorePort } from "../last-opened-store.port.js";
 
 import { LOCAL_TENANT } from "../../tenant.js";
+import {
+  CANONICAL_TEMPLATES,
+  TemplateWriteUnsupportedError,
+} from "@campaignfoundry/CampaignOrchestration";
+import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
+import { setDatabase, resetDatabase } from "../../db/database.js";
 describe("ports registry", () => {
   afterEach(() => {
     resetBriefStore();
@@ -88,16 +94,32 @@ describe("ports registry", () => {
     expect(getPoolStore(LOCAL_TENANT)).toBeInstanceOf(FsPoolStore);
   });
 
-  test("getTemplateStore returns default FsTemplateStore and allows override", () => {
+  test("getTemplateStore reads the canonical library and wraps a read-only double so saveTemplate throws", async () => {
     const initial = getTemplateStore(LOCAL_TENANT);
-    expect(initial).toBeInstanceOf(FsTemplateStore);
+    // Read behaviour, not object identity: the registry wraps any store that
+    // lacks saveTemplate, so the default FsTemplateStore is reachable only
+    // through the read methods it delegates.
+    expect(await initial.listTemplates()).toEqual(Object.values(CANONICAL_TEMPLATES));
+    expect(await initial.exists("canonical-video")).toBe(true);
+    await expect(initial.saveTemplate(CANONICAL_TEMPLATES.video, "u")).rejects.toBeInstanceOf(
+      TemplateWriteUnsupportedError,
+    );
 
-    const mockStore = {} as TemplateStorePort;
+    const mockStore = {
+      listTemplates: async () => [],
+      findTemplate: async () => undefined,
+      exists: async () => false,
+    } as TemplateStorePort;
     setTemplateStore(mockStore);
-    expect(getTemplateStore(LOCAL_TENANT)).toBe(mockStore);
+    const wrapped = getTemplateStore(LOCAL_TENANT);
+    expect(await wrapped.listTemplates()).toEqual([]);
+    expect(await wrapped.exists("no-such-template")).toBe(false);
+    await expect(wrapped.saveTemplate(CANONICAL_TEMPLATES.video, "u")).rejects.toBeInstanceOf(
+      TemplateWriteUnsupportedError,
+    );
 
     resetTemplateStore();
-    expect(getTemplateStore(LOCAL_TENANT)).toBeInstanceOf(FsTemplateStore);
+    await expect(getTemplateStore(LOCAL_TENANT).listTemplates()).resolves.not.toEqual([]);
   });
 
   test("getJobStore returns default FsJobStore and allows override", () => {
@@ -140,5 +162,53 @@ describe("ports registry", () => {
 
     resetLastOpenedStore();
     expect(getLastOpenedStore(LOCAL_TENANT)).toBeInstanceOf(FsLastOpenedStore);
+  });
+});
+
+describe("the template registry under STORE_BACKEND=postgres (RW-22)", () => {
+  const saved = process.env.STORE_BACKEND;
+
+  afterEach(() => {
+    if (saved === undefined) delete process.env.STORE_BACKEND;
+    else process.env.STORE_BACKEND = saved;
+    resetTemplateStore();
+    resetDatabase();
+  });
+
+  test("postgres builds a database store per org; the same org shares one store", async () => {
+    const db = await migratedDatabase();
+    setDatabase(db);
+    process.env.STORE_BACKEND = "postgres";
+
+    const local = getTemplateStore(LOCAL_TENANT);
+    expect(local).toBeInstanceOf(PgTemplateStore);
+    expect(getTemplateStore(LOCAL_TENANT)).toBe(local);
+
+    const otherOrg = { ...LOCAL_TENANT, orgId: "acme" };
+    const other = getTemplateStore(otherOrg);
+    expect(other).toBeInstanceOf(PgTemplateStore);
+    expect(other).not.toBe(local);
+
+    await db.end();
+  });
+
+  test("a read-only double passed to setTemplateStore is wrapped so saveTemplate throws", async () => {
+    const db = await migratedDatabase();
+    setDatabase(db);
+    process.env.STORE_BACKEND = "postgres";
+
+    const mockStore = {
+      listTemplates: async () => [],
+      findTemplate: async () => undefined,
+      exists: async () => false,
+    } as TemplateStorePort;
+    setTemplateStore(mockStore);
+    const wrapped = getTemplateStore(LOCAL_TENANT);
+    expect(await wrapped.listTemplates()).toEqual([]);
+    await expect(wrapped.saveTemplate(CANONICAL_TEMPLATES.video, "u")).rejects.toBeInstanceOf(
+      TemplateWriteUnsupportedError,
+    );
+
+    await db.end();
   });
 });
