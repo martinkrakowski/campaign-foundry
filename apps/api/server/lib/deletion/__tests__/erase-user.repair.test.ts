@@ -41,6 +41,10 @@ async function insertSurvivors(db: SqlClient, world: World): Promise<void> {
     `insert into deletion (org_id, kind, subject, requested_by, not_before) values ('local', 'campaign', 'survivor-subject', $1, now())`,
     [TARGET.id],
   );
+  await db.query(
+    `insert into template (org_id, id, version, name, unit, creative_type, layers, created_by) values ('local', 'tpl-survivor', 1, 'Survivor Template', 'standard-web', 'image-text', '[{"id":"image","kind":"image"}]'::jsonb, $1)`,
+    [TARGET.id],
+  );
 }
 
 /** Proxy: after `transaction` resolves, insert surviving rows, then return. */
@@ -111,6 +115,7 @@ describe("eraseUser pass two (PT-9l3)", () => {
       providerKeys: 1,
       campaignsDeletedBy: 1,
       deletionsRequestedBy: 1,
+      templatesCreatedBy: 1,
     });
     expect(outcome.remaining).toEqual({
       briefVersions: 0,
@@ -118,6 +123,7 @@ describe("eraseUser pass two (PT-9l3)", () => {
       providerKeys: 0,
       campaignsDeletedBy: 0,
       deletionsRequestedBy: 0,
+      templatesCreatedBy: 0,
     });
 
     // Pass one and pass two use the same token: read a row repaired in pass one
@@ -133,6 +139,12 @@ describe("eraseUser pass two (PT-9l3)", () => {
     expect(passOne[0]!.actor).toBe(outcome.token);
     expect(passTwo[0]!.actor).toBe(outcome.token);
     expect(passOne[0]!.actor).toBe(passTwo[0]!.actor);
+
+    // The template survivor is repaired in pass two under the same token.
+    const { rows: survivorTemplate } = await db.query<{ created_by: string }>(
+      `select created_by from template where id = 'tpl-survivor'`,
+    );
+    expect(survivorTemplate[0]!.created_by).toBe(outcome.token);
   });
 
   test("pass two repairs each column alone for briefVersions", async () => {
@@ -156,6 +168,7 @@ describe("eraseUser pass two (PT-9l3)", () => {
       "providerKeys",
       "campaignsDeletedBy",
       "deletionsRequestedBy",
+      "templatesCreatedBy",
     ] as const) {
       expect(outcome.repaired[k]).toBe(0);
     }
@@ -180,6 +193,7 @@ describe("eraseUser pass two (PT-9l3)", () => {
     expect(outcome.repaired.providerKeys).toBe(0);
     expect(outcome.repaired.campaignsDeletedBy).toBe(0);
     expect(outcome.repaired.deletionsRequestedBy).toBe(0);
+    expect(outcome.repaired.templatesCreatedBy).toBe(0);
   });
 
   test("pass two repairs each column alone for providerKeys", async () => {
@@ -201,6 +215,7 @@ describe("eraseUser pass two (PT-9l3)", () => {
     expect(outcome.repaired.decisions).toBe(0);
     expect(outcome.repaired.campaignsDeletedBy).toBe(0);
     expect(outcome.repaired.deletionsRequestedBy).toBe(0);
+    expect(outcome.repaired.templatesCreatedBy).toBe(0);
   });
 
   test("pass two repairs each column alone for campaignsDeletedBy", async () => {
@@ -222,6 +237,7 @@ describe("eraseUser pass two (PT-9l3)", () => {
     expect(outcome.repaired.decisions).toBe(0);
     expect(outcome.repaired.providerKeys).toBe(0);
     expect(outcome.repaired.deletionsRequestedBy).toBe(0);
+    expect(outcome.repaired.templatesCreatedBy).toBe(0);
   });
 
   test("pass two repairs each column alone for deletionsRequestedBy", async () => {
@@ -243,6 +259,29 @@ describe("eraseUser pass two (PT-9l3)", () => {
     expect(outcome.repaired.decisions).toBe(0);
     expect(outcome.repaired.providerKeys).toBe(0);
     expect(outcome.repaired.campaignsDeletedBy).toBe(0);
+    expect(outcome.repaired.templatesCreatedBy).toBe(0);
+  });
+
+  test("pass two repairs each column alone for templatesCreatedBy", async () => {
+    const proxy = {
+      ...db,
+      transaction: async <T>(work: (tx: SqlQuery) => Promise<T>): Promise<T> => {
+        const result = await db.transaction(work);
+        await db.query(
+          `insert into template (org_id, id, version, name, unit, creative_type, layers, created_by) values ('local', 'tpl-survivor-2', 1, 'Survivor Two', 'standard-web', 'image-text', '[{"id":"image","kind":"image"}]'::jsonb, $1)`,
+          [TARGET.id],
+        );
+        return result;
+      },
+    };
+    const outcome = await eraseUser(proxy, { userId: TARGET.id }, { apply: true });
+    if (outcome.outcome !== "erased") throw new Error("expected erased");
+    expect(outcome.repaired.templatesCreatedBy).toBe(1);
+    expect(outcome.repaired.briefVersions).toBe(0);
+    expect(outcome.repaired.decisions).toBe(0);
+    expect(outcome.repaired.providerKeys).toBe(0);
+    expect(outcome.repaired.campaignsDeletedBy).toBe(0);
+    expect(outcome.repaired.deletionsRequestedBy).toBe(0);
   });
 
   test("a row written AFTER pass two is counted and reported, not repaired", async () => {
@@ -262,6 +301,7 @@ describe("eraseUser pass two (PT-9l3)", () => {
       providerKeys: 0,
       campaignsDeletedBy: 0,
       deletionsRequestedBy: 0,
+      templatesCreatedBy: 0,
     });
 
     // The surviving row still holds the raw id — pass two never saw it.
@@ -299,6 +339,7 @@ describe("eraseUser pass two (PT-9l3)", () => {
       providerKeys: 0,
       campaignsDeletedBy: 0,
       deletionsRequestedBy: 0,
+      templatesCreatedBy: 0,
     });
     expect(await dumpDatabase(db)).toEqual(before);
   });
@@ -347,6 +388,7 @@ describe("finishErasure (PT-9l3)", () => {
       providerKeys: 1,
       campaignsDeletedBy: 1,
       deletionsRequestedBy: 1,
+      templatesCreatedBy: 1,
     });
     expect(result.remaining).toEqual({
       briefVersions: 0,
@@ -354,6 +396,7 @@ describe("finishErasure (PT-9l3)", () => {
       providerKeys: 0,
       campaignsDeletedBy: 0,
       deletionsRequestedBy: 0,
+      templatesCreatedBy: 0,
     });
 
     const { rows } = await db.query<{ actor: string }>(
@@ -490,6 +533,7 @@ describe("repairErasedActor standalone (PT-9l3)", () => {
       providerKeys: 0,
       campaignsDeletedBy: 0,
       deletionsRequestedBy: 0,
+      templatesCreatedBy: 0,
     });
     expect(await dumpDatabase(db)).toEqual(before);
     await db.end();
@@ -508,6 +552,7 @@ describe("repairErasedActor standalone (PT-9l3)", () => {
       providerKeys: 0,
       campaignsDeletedBy: 0,
       deletionsRequestedBy: 0,
+      templatesCreatedBy: 0,
     });
     await db.end();
   }, 30_000);
@@ -566,6 +611,7 @@ describe("ErasePassTwoError (PT-9l3 finding 2)", () => {
       providerKeys: 0,
       campaignsDeletedBy: 0,
       deletionsRequestedBy: 0,
+      templatesCreatedBy: 0,
     });
 
     await db.end();

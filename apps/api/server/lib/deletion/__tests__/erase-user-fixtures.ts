@@ -138,6 +138,40 @@ export async function seedWorld(db: SqlClient): Promise<World> {
   );
 
   await db.query(
+    "insert into template (org_id, id, version, name, unit, creative_type, layers, created_by) values ('local', $1, 1, $2, $3, $4, $5::jsonb, $6)",
+    [
+      "tpl-target",
+      "Target Template",
+      "standard-web",
+      "image-text",
+      JSON.stringify([{ id: "image", kind: "image" }]),
+      TARGET.id,
+    ],
+  );
+  await db.query(
+    "insert into template (org_id, id, version, name, unit, creative_type, layers, created_by) values ('local', $1, 1, $2, $3, $4, $5::jsonb, $6)",
+    [
+      "tpl-bystander",
+      "Bystander Template",
+      "standard-web",
+      "image-text",
+      JSON.stringify([{ id: "image", kind: "image" }]),
+      BYSTANDER.id,
+    ],
+  );
+  await db.query(
+    "insert into template (org_id, id, version, name, unit, creative_type, layers, created_by) values ('acme', $1, 1, $2, $3, $4, $5::jsonb, $6)",
+    [
+      "tpl-acme",
+      "Acme Template",
+      "standard-web",
+      "image-text",
+      JSON.stringify([{ id: "image", kind: "image" }]),
+      ACME_OWNER.id,
+    ],
+  );
+
+  await db.query(
     "insert into draft (campaign_id, user_id, org_id, state) values ($1, $2, 'local', '{}')",
     [localCampaignId, TARGET.id],
   );

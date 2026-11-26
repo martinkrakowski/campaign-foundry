@@ -5,7 +5,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { resetProjectRoot } from "@campaignfoundry/shared";
 import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
-import { resetObjectStoreClient, setObjectStoreClient } from "../../object-store/index.js";
+import {
+  resetObjectStoreClient,
+  resetPublicAdMediaClient,
+  setObjectStoreClient,
+  setPublicAdMediaClient,
+} from "../../object-store/index.js";
+import { PublicAdMediaStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import { cachePrefix, campaignPrefix, orgPrefix } from "../../object-store/object-keys.js";
 import { deleteOrgObjects } from "../purge-org.js";
 import { BYTES, objectSnapshot } from "./purge-org-fixtures.js";
@@ -52,6 +58,7 @@ describe("deleteOrgObjects (PT-9m2, D241)", () => {
     afterEach(() => {
       rmSync(dir, { recursive: true, force: true });
       resetObjectStoreClient();
+      resetPublicAdMediaClient();
       restoreEnv();
     });
 
@@ -80,6 +87,24 @@ describe("deleteOrgObjects (PT-9m2, D241)", () => {
       await deleteOrgObjects("acme");
       expect(await store.list(orgPrefix("acme"))).toHaveLength(0);
     });
+
+    test("deleteOrgObjects purges the org's public ad media and no other org's (PT-4k)", async () => {
+      const publicStore = new InMemoryObjectStore();
+      const publicMedia = new PublicAdMediaStore({
+        store: publicStore,
+        baseUrl: "https://media.test",
+      });
+      setPublicAdMediaClient(publicMedia);
+      const hash = "0".repeat(64);
+      const { key: acmePublic } = await publicMedia.publish("acme", BYTES, hash);
+      const { key: betaPublic } = await publicMedia.publish("beta", BYTES, hash);
+
+      await deleteOrgObjects("acme");
+
+      // acme's published bytes are gone from the PUBLIC bucket; beta's remain.
+      expect(await publicStore.head(acmePublic)).toBeUndefined();
+      expect(await publicStore.head(betaPublic)).toBeDefined();
+    });
   });
 
   describe("fs", () => {
@@ -101,6 +126,7 @@ describe("deleteOrgObjects (PT-9m2, D241)", () => {
     afterEach(() => {
       rmSync(projectDir, { recursive: true, force: true });
       rmSync(outputDir, { recursive: true, force: true });
+      resetPublicAdMediaClient();
       restoreEnv();
     });
 
@@ -134,6 +160,24 @@ describe("deleteOrgObjects (PT-9m2, D241)", () => {
 
       expect(() => statSync(join(projectDir, "keep.txt"))).not.toThrow();
       expect(() => statSync(join(outputDir, "keep.txt"))).not.toThrow();
+    });
+
+    test("deleteOrgObjects purges the org's public ad media under fs too (PT-4k)", async () => {
+      const publicStore = new InMemoryObjectStore();
+      const publicMedia = new PublicAdMediaStore({
+        store: publicStore,
+        baseUrl: "https://media.test",
+      });
+      setPublicAdMediaClient(publicMedia);
+      const hash = "0".repeat(64);
+      const { key: acmePublic } = await publicMedia.publish("acme", BYTES, hash);
+      const { key: betaPublic } = await publicMedia.publish("beta", BYTES, hash);
+
+      await deleteOrgObjects("acme");
+
+      // The public bucket is backend-independent: it is purged under fs as well.
+      expect(await publicStore.head(acmePublic)).toBeUndefined();
+      expect(await publicStore.head(betaPublic)).toBeDefined();
     });
   });
 });

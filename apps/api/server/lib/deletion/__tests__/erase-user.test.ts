@@ -22,6 +22,7 @@ const EXPECTED_COUNTS: EraseUserCounts = {
   providerKeys: 1,
   campaignsDeletedBy: 1,
   deletionsRequestedBy: 1,
+  templatesCreatedBy: 1,
   drafts: 1,
   lastOpened: 1,
   verifications: 2,
@@ -188,6 +189,25 @@ describe("eraseUser (D240)", () => {
       ["openrouter"],
     );
     expect(other[0]!.created_by).toBe(BYSTANDER.id);
+  });
+
+  test("eraseUser replaces template created_by with the token and leaves another user untouched", async () => {
+    const token = await applyTarget();
+
+    const { rows: target } = await db.query<{ created_by: string }>(
+      `select created_by from template where id = 'tpl-target'`,
+    );
+    expect(target[0]!.created_by).toBe(token);
+
+    const { rows: bystander } = await db.query<{ created_by: string }>(
+      `select created_by from template where id = 'tpl-bystander'`,
+    );
+    expect(bystander[0]!.created_by).toBe(BYSTANDER.id);
+
+    const { rows: acme } = await db.query<{ created_by: string }>(
+      `select created_by from template where id = 'tpl-acme'`,
+    );
+    expect(acme[0]!.created_by).toBe(ACME_OWNER.id);
   });
 
   test("eraseUser replaces campaign deleted_by with the token and leaves another user untouched", async () => {

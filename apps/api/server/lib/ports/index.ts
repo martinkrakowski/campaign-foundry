@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { objectStore, storeBackend } from "../config.js";
 import { database } from "../db/database.js";
 import { objectStoreClient } from "../object-store/index.js";
+import { TemplateWriteUnsupportedError } from "@campaignfoundry/CampaignOrchestration";
 import { scopeRoots, scopeTenant, type StorageScope } from "../run-environment.js";
 import { FsBriefStore } from "./fs-brief-store.js";
 import { PgBriefStore } from "./pg-brief-store.js";
@@ -10,6 +11,7 @@ import { ObjectAssetStore } from "./object-asset-store.js";
 import { FsPoolStore } from "./fs-pool-store.js";
 import { PgPoolStore } from "./pg-pool-store.js";
 import { FsTemplateStore } from "./fs-template-store.js";
+import { PgTemplateStore } from "./pg-template-store.js";
 import { FsJobStore } from "./fs-job-store.js";
 import { PgJobStore } from "./pg-job-store.js";
 import { FsReportStore } from "./fs-report-store.js";
@@ -26,10 +28,12 @@ import { FsUsageStore } from "./fs-usage-store.js";
 import { PgUsageStore } from "./pg-usage-store.js";
 import { FsProviderKeyStore } from "./fs-provider-key-store.js";
 import { PgProviderKeyStore } from "./pg-provider-key-store.js";
+import { FsPublishedClipStore } from "./fs-published-clip-store.js";
+import { PgPublishedClipStore } from "./pg-published-clip-store.js";
 import type { BriefStorePort } from "./brief-store.port.js";
 import type { AssetStorePort } from "./asset-store.port.js";
 import type { PoolStorePort } from "./pool-store.port.js";
-import type { TemplateStorePort } from "./template-store.port.js";
+import type { TemplateStorePort, WritableTemplateStorePort } from "./template-store.port.js";
 import type { JobStorePort } from "./job-store.port.js";
 import type { ReportStorePort } from "./report-store.port.js";
 import type { OutputStorePort } from "./output-store.port.js";
@@ -38,6 +42,7 @@ import type { DraftStorePort } from "./draft-store.port.js";
 import type { LastOpenedStorePort } from "./last-opened-store.port.js";
 import type { UsageStorePort } from "./usage-store.port.js";
 import type { ProviderKeyPort } from "./provider-key.port.js";
+import type { PublishedClipRecordPort } from "@campaignfoundry/CampaignOrchestration";
 
 export * from "./brief-store.port.js";
 export * from "./asset-store.port.js";
@@ -51,6 +56,8 @@ export * from "./draft-store.port.js";
 export * from "./last-opened-store.port.js";
 export * from "./usage-store.port.js";
 export * from "./provider-key.port.js";
+export * from "./fs-published-clip-store.js";
+export * from "./pg-published-clip-store.js";
 export * from "./run-delivery.port.js";
 export * from "./fs-brief-store.js";
 export * from "./pg-brief-store.js";
@@ -59,6 +66,7 @@ export * from "./object-asset-store.js";
 export * from "./fs-pool-store.js";
 export * from "./pg-pool-store.js";
 export * from "./fs-template-store.js";
+export * from "./pg-template-store.js";
 export * from "./fs-job-store.js";
 export * from "./pg-job-store.js";
 export * from "./fs-report-store.js";
@@ -194,11 +202,27 @@ const pools = new Registry<PoolStorePort>(
       ? new PgPoolStore(database(), key.slice("postgres:".length))
       : new FsPoolStore(key),
 );
-// The canonical templates are platform-owned and in memory (M3): one store for
-// every tenant until org templates exist.
-const templates = new Registry<TemplateStorePort>(
-  () => "canonical",
-  () => new FsTemplateStore(),
+// The canonical templates are platform-owned and in memory (M3). Under
+// STORE_BACKEND=postgres the org layer adds writable, org-scoped templates in
+// Postgres (`template` table, RW-22); otherwise the registry is the read-only
+// canonical seed for every tenant, wrapped so a write refuses.
+const asWritableTemplateStore = (store: TemplateStorePort): WritableTemplateStorePort =>
+  "saveTemplate" in store && typeof store.saveTemplate === "function"
+    ? (store as WritableTemplateStorePort)
+    : {
+        listTemplates: () => store.listTemplates(),
+        findTemplate: (id, version) => store.findTemplate(id, version),
+        exists: (id, version) => store.exists(id, version),
+        saveTemplate: async () => {
+          throw new TemplateWriteUnsupportedError();
+        },
+      };
+const templates = new Registry<WritableTemplateStorePort>(
+  (t) => (storeBackend() === "postgres" ? PG + scopeTenant(t).orgId : "canonical"),
+  (key) =>
+    key.startsWith(PG)
+      ? new PgTemplateStore(database(), key.slice(PG.length))
+      : asWritableTemplateStore(new FsTemplateStore()),
 );
 // With STORE_BACKEND=postgres (PT-6a), one lease-backed store per org over the
 // process's database; otherwise one per output root, on files (unchanged).
@@ -297,6 +321,16 @@ const providerKeys = new Registry<ProviderKeyPort>(
       : new FsProviderKeyStore(),
 );
 
+// Published-clip records (PT-4k): the public-media ledger, one store per
+// backend — its methods take `orgId` per call, like usage. The fs backend's
+// build is the same store for every tenant, and every one of its methods
+// answers "needs Postgres" rather than dropping a public-media fact on disk.
+const publishedClips = new Registry<PublishedClipRecordPort>(
+  () => storeBackend(),
+  (backend) =>
+    backend === "postgres" ? new PgPublishedClipStore(database()) : new FsPublishedClipStore(),
+);
+
 // `getRunDelivery`/`setRunDelivery`/`resetRunDelivery` live in
 // `run-delivery-registry.ts`, not here — see that file's docstring.
 
@@ -312,8 +346,10 @@ export const getPoolStore = (scope: StorageScope): PoolStorePort => pools.get(sc
 export const setPoolStore = (store: PoolStorePort): void => pools.set(store);
 export const resetPoolStore = (): void => pools.reset();
 
-export const getTemplateStore = (scope: StorageScope): TemplateStorePort => templates.get(scope);
-export const setTemplateStore = (store: TemplateStorePort): void => templates.set(store);
+export const getTemplateStore = (scope: StorageScope): WritableTemplateStorePort =>
+  templates.get(scope);
+export const setTemplateStore = (store: TemplateStorePort): void =>
+  templates.set(asWritableTemplateStore(store));
 export const resetTemplateStore = (): void => templates.reset();
 
 export const getJobStore = (scope: StorageScope): JobStorePort => jobs.get(scope);
@@ -353,3 +389,9 @@ export const getProviderKeyStore = (scope: StorageScope): ProviderKeyPort =>
   providerKeys.get(scope);
 export const setProviderKeyStore = (store: ProviderKeyPort): void => providerKeys.set(store);
 export const resetProviderKeyStore = (): void => providerKeys.reset();
+
+export const getPublishedClipStore = (scope: StorageScope): PublishedClipRecordPort =>
+  publishedClips.get(scope);
+export const setPublishedClipStore = (store: PublishedClipRecordPort): void =>
+  publishedClips.set(store);
+export const resetPublishedClipStore = (): void => publishedClips.reset();
