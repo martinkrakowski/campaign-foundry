@@ -354,9 +354,8 @@ function publicKeyProblem(key: ObjectKey, orgId: string): string | undefined {
   if (!key.startsWith(`${orgId}/`)) {
     return "a listed key is outside the org's own prefix";
   }
-  if (objectKeyProblem(key) !== undefined) {
-    return "a listed key is outside the object key alphabet";
-  }
+  // The strict published-key shape below is narrower than the generic key rules
+  // (no traversal, empty or absolute segments can match it), so no separate check.
   if (!PUBLIC_MEDIA_KEY_PATTERN.test(key)) {
     return "a listed key is outside the published key shape";
   }

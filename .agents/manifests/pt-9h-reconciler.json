@@ -80,8 +80,8 @@
     },
     {
       "file": "apps/api/server/lib/deletion/reconcile.ts",
-      "before": "if (!options.apply) return {",
-      "after": "if (false) return {",
+      "before": "if (!options.apply) return { plans, applied: { prefixes",
+      "after": "if (false) return { plans, applied: { prefixes",
       "because": "the dry-run guard removed: reconcileOrgs deletes even though apply is false. The test asserts applied is all zeros and the store key list is unchanged after a dry run.",
       "command": [
         "yarn",

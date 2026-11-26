@@ -354,6 +354,22 @@ describe("POST /campaigns/package — publishClip (CFAR6C3)", () => {
     expect(await store.list(`org/local/campaign/${CAMPAIGN}/packages/`)).toEqual([]);
   });
 
+  test("answers 409 republish-needed, packaging nothing, when the published clip's object vanished before it was recorded", async () => {
+    await seedCampaign(harness.db);
+    await seedReport(harness.db);
+    await seedRenders();
+    // A reconcile pass removed the object during a pause: the record step's
+    // object check answers false, so no ledger row may be written.
+    media.exists = async () => false;
+
+    const res = await call({ campaignId: SLUG, platforms: [PLATFORM], publishClip: true });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("republish needed");
+    expect(await harness.db.query(`select 1 from published_clip`)).toMatchObject({ rows: [] });
+    expect(await store.list(`org/local/campaign/${CAMPAIGN}/packages/`)).toEqual([]);
+  });
+
   test("refuses non-faststart clip with 422 without publishing or writing packages", async () => {
     await seedCampaign(harness.db);
     await seedReport(harness.db);
