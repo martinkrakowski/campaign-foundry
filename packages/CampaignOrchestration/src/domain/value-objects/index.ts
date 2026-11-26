@@ -27,6 +27,7 @@ export * from "./palette-shift.js";
 export * from "./PipelineExecutionLog.vo.js";
 export * from "./PipelineResult.vo.js";
 export * from "./resolve-tracks.js";
+export * from "./template-problem.js";
 export * from "./tracks.js";
 export * from "./Treatment.vo.js";
 export * from "./variation-defaults.js";
