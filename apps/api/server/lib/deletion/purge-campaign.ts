@@ -1,9 +1,13 @@
 import { rm } from "node:fs/promises";
-import { isReservedCampaignId } from "@campaignfoundry/CampaignOrchestration";
+import {
+  isReservedCampaignId,
+  PublicMediaNotConfiguredError,
+} from "@campaignfoundry/CampaignOrchestration";
 import type { SqlClient, SqlQuery } from "../db/sql-client.js";
 import { resolveConfined } from "../confined-path.js";
 import { objectStore } from "../config.js";
-import { objectStoreClient } from "../object-store/index.js";
+import { objectStoreClient, publicAdMediaClient } from "../object-store/index.js";
+import { PgPublishedClipStore } from "../ports/pg-published-clip-store.js";
 import { UUID_PATTERN, campaignPrefix } from "../object-store/object-keys.js";
 import { scopeRoots } from "../run-environment.js";
 import { QUEUED_TTL_MS } from "../ports/job-store.port.js";
@@ -164,6 +168,38 @@ export async function deleteCampaignRows(
   });
 }
 
+/**
+ * One unpublish pass over a campaign's published clips (PT-4k): the PUBLIC
+ * object leaves first, then its `published_clip` row — the row is the only
+ * record of which bytes live on the public bucket, so a failed object removal
+ * must leave it in place for a retry, and a failed row removal after a
+ * successful object removal leaves at most an orphaned 404, never a public
+ * URL with no ledger row. Called OUTSIDE any transaction (D231: no
+ * object-store call is made while a transaction is held) by the delete
+ * request (twice: before the tombstone, and once more after it commits) and
+ * by `purgeCampaign` as the safety net before `deleteCampaignRows`.
+ *
+ * Clips exist and the deployment has no `PUBLIC_MEDIA_*` settings: throw
+ * `PublicMediaNotConfiguredError` BEFORE anything is removed — "no public
+ * media" is a supported deployment shape, but refusing is the only safe
+ * answer when the ledger says there are public bytes to free.
+ */
+export async function removeCampaignPublishedClips(
+  db: SqlClient,
+  orgId: string,
+  campaignId: string,
+): Promise<void> {
+  const clipRecords = new PgPublishedClipStore(db);
+  const clips = await clipRecords.listForCampaign(orgId, campaignId);
+  if (clips.length === 0) return;
+  const media = publicAdMediaClient();
+  if (media === undefined) throw new PublicMediaNotConfiguredError();
+  for (const clip of clips) {
+    await media.remove(clip.key);
+    await clipRecords.remove(orgId, clip.key);
+  }
+}
+
 /** D232 step 5. */
 export async function markPurged(db: SqlClient, deletionId: string): Promise<void> {
   await db.query(`update deletion set purged_at = now() where id = $1`, [deletionId]);
@@ -272,6 +308,13 @@ export async function purgeCampaign(
       `campaign ${campaign.id} shares a key with another campaign in its org; refusing to delete its rows`,
     );
   }
+  // PT-4k safety net: the published clips' public bytes and ledger rows leave
+  // BEFORE `deleteCampaignRows` — the FK from `published_clip` to `campaign` is
+  // cascade-free on purpose, so a bare campaign delete with rows left would be
+  // refused, and the rows are the only record of which public keys exist. A
+  // failure here propagates before any row is deleted: the sweep's caller
+  // records it via `recordFailure` and a retry re-runs this idempotent pass.
+  await removeCampaignPublishedClips(db, orgId, campaign.id);
   if (objectStore() === "s3") {
     // uuid-keyed: no other campaign can share the prefix, and no transaction is
     // ever held across an object-store call (D231).

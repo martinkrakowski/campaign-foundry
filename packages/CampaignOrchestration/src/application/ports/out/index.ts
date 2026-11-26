@@ -8,5 +8,7 @@ export * from "./ImageGeneratorPort.js";
 export * from "./InputAssetPort.js";
 export * from "./ObjectStorePort.js";
 export * from "./PlatformProfilePort.js";
+export * from "./PublicAdMediaPort.js";
+export * from "./PublishedClipRecordPort.js";
 export * from "./SceneAssetPort.js";
 export * from "./VideoCompositorPort.js";

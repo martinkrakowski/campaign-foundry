@@ -190,6 +190,8 @@ bounded_contexts:
           - GenerateCampaignUseCase
           - PlanVariationsUseCase
           - PreviewCreativeFrameUseCase
+          - PublishAdClipUseCase
+          - UnpublishAdClipUseCase
         ports:
           in:
             - CampaignPipelinePort
@@ -204,12 +206,15 @@ bounded_contexts:
             - InputAssetPort
             - ObjectStorePort
             - PlatformProfilePort
+            - PublicAdMediaPort
+            - PublishedClipRecordPort
             - SceneAssetPort
             - VideoCompositorPort
       infrastructure:
         adapters:
           - InMemoryObjectStore
           - NodeCryptoPolicyHasher
+          - PublicAdMediaStore
     generator:
       eslint:
         template: |

@@ -1,7 +1,11 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { CANONICAL_TEMPLATES, type CreativeTemplate } from "@campaignfoundry/CampaignOrchestration";
+import {
+  CANONICAL_TEMPLATES,
+  type CreativeTemplate,
+  TemplateWriteUnsupportedError,
+} from "@campaignfoundry/CampaignOrchestration";
 import { FsTemplateStore } from "../fs-template-store.js";
 import { getTemplateStore, resetTemplateStore, setTemplateStore } from "../index.js";
 
@@ -131,34 +135,64 @@ describe("FsTemplateStore", () => {
     );
   });
 
-  test("the store is registered as a lazily-created singleton", () => {
+  test("the store is registered as a lazily-created singleton", async () => {
     resetTemplateStore();
     try {
       const first = getTemplateStore(LOCAL_TENANT);
-      expect(first).toBeInstanceOf(FsTemplateStore);
+      // Read behaviour, not object identity: the registry wraps any store
+      // lacking saveTemplate, so the FsTemplateStore is reachable only
+      // through the read methods its wrapper delegates.
+      expect(await first.listTemplates()).toEqual(Object.values(CANONICAL_TEMPLATES));
+      expect(await first.exists("canonical-video")).toBe(true);
+      await expect(first.saveTemplate(CANONICAL_TEMPLATES.video, "u")).rejects.toBeInstanceOf(
+        TemplateWriteUnsupportedError,
+      );
       expect(getTemplateStore(LOCAL_TENANT)).toBe(first);
 
       const replacement = new FsTemplateStore();
       setTemplateStore(replacement);
-      expect(getTemplateStore(LOCAL_TENANT)).toBe(replacement);
+      const overridden = getTemplateStore(LOCAL_TENANT);
+      expect(overridden).not.toBe(first);
+      expect(await overridden.listTemplates()).toEqual(Object.values(CANONICAL_TEMPLATES));
+      await expect(overridden.saveTemplate(CANONICAL_TEMPLATES.video, "u")).rejects.toBeInstanceOf(
+        TemplateWriteUnsupportedError,
+      );
     } finally {
       resetTemplateStore();
     }
   });
 
-  test("the port is read-only by construction: no write-shaped methods declared", () => {
+  test("the registry's fs-backed store is wrapped so saveTemplate throws TemplateWriteUnsupportedError", async () => {
+    resetTemplateStore();
+    try {
+      const store = getTemplateStore(LOCAL_TENANT);
+      // Read behaviour, not identity: the wrapped store still serves the
+      // canonical library, but its saveTemplate refuses.
+      expect(await store.listTemplates()).toEqual(Object.values(CANONICAL_TEMPLATES));
+      await expect(
+        store.saveTemplate(CANONICAL_TEMPLATES["image-text"], "u"),
+      ).rejects.toBeInstanceOf(TemplateWriteUnsupportedError);
+    } finally {
+      resetTemplateStore();
+    }
+  });
+
+  test("the TemplateStorePort interface is read-only by construction: no write-shaped methods declared", () => {
     const source = readFileSync(
       fileURLToPath(new URL("../template-store.port.ts", import.meta.url)),
       "utf8",
     );
+    // Scope the scan to the TemplateStorePort interface block: the file also
+    // declares WritableTemplateStorePort (RW-22), which carries saveTemplate.
+    const block = source.slice(
+      source.indexOf("export interface TemplateStorePort"),
+      source.indexOf("export interface WritableTemplateStorePort"),
+    );
     const declared = Array.from(
-      source.matchAll(/^[ \t]*(\w+)\s*(?:<[^>]*>)?\s*\([^)]*\)[^;]*;/gm),
+      block.matchAll(/^[ \t]*(\w+)\s*(?:<[^>]*>)?\s*\([^)]*\)[^;]*;/gm),
       (m) => m[1] as string,
     );
-
     expect(declared).toEqual(["listTemplates", "findTemplate", "exists"]);
-    expect(
-      declared.filter((name) => /create|update|write|save|delete|put|patch/i.test(name)),
-    ).toEqual([]);
+    expect(declared.filter((name) => /create|save|put|delete|write/i.test(name))).toEqual([]);
   });
 });

@@ -4,13 +4,14 @@ import type { SqlClient, SqlQuery } from "../db/sql-client.js";
 /** A user is named by the address they signed up with or by their Better Auth id. */
 export type EraseUserRef = { readonly email: string } | { readonly userId: string };
 
-/** Row counts only for the five "actor" columns that carry the user id or token. */
+/** Row counts only for the six "actor" columns that carry the user id or token. */
 export interface ActorCounts {
   readonly briefVersions: number;
   readonly decisions: number;
   readonly providerKeys: number;
   readonly campaignsDeletedBy: number;
   readonly deletionsRequestedBy: number;
+  readonly templatesCreatedBy: number;
 }
 
 /**
@@ -29,6 +30,10 @@ const ACTOR_UPDATES: readonly {
   {
     key: "deletionsRequestedBy",
     sql: "update deletion set requested_by = $2 where requested_by = $1",
+  },
+  {
+    key: "templatesCreatedBy",
+    sql: "update template set created_by = $2 where created_by = $1",
   },
 ];
 
@@ -50,6 +55,7 @@ export async function repairErasedActor(
     providerKeys: 0,
     campaignsDeletedBy: 0,
     deletionsRequestedBy: 0,
+    templatesCreatedBy: 0,
   };
   for (const { key, sql } of ACTOR_UPDATES) {
     const { rows } = await db.query(`${sql} returning 1`, [userId, token]);
@@ -71,13 +77,15 @@ export async function countActorRows(db: SqlQuery, userId: string): Promise<Acto
     providerKeys: number;
     campaignsDeletedBy: number;
     deletionsRequestedBy: number;
+    templatesCreatedBy: number;
   }>(
     `select
       (select count(*) from brief_version where actor = $1)::int as "briefVersions",
       (select count(*) from decision where actor = $1)::int as "decisions",
       (select count(*) from provider_key where created_by = $1)::int as "providerKeys",
       (select count(*) from campaign where deleted_by = $1)::int as "campaignsDeletedBy",
-      (select count(*) from deletion where requested_by = $1)::int as "deletionsRequestedBy"`,
+      (select count(*) from deletion where requested_by = $1)::int as "deletionsRequestedBy",
+      (select count(*) from template where created_by = $1)::int as "templatesCreatedBy"`,
     [userId],
   );
   const r = rows[0]!;
@@ -87,6 +95,7 @@ export async function countActorRows(db: SqlQuery, userId: string): Promise<Acto
     providerKeys: r.providerKeys,
     campaignsDeletedBy: r.campaignsDeletedBy,
     deletionsRequestedBy: r.deletionsRequestedBy,
+    templatesCreatedBy: r.templatesCreatedBy,
   };
 }
 
@@ -161,6 +170,7 @@ export interface EraseUserCounts {
   readonly providerKeys: number;
   readonly campaignsDeletedBy: number;
   readonly deletionsRequestedBy: number;
+  readonly templatesCreatedBy: number;
   readonly drafts: number;
   readonly lastOpened: number;
   readonly verifications: number;
@@ -233,6 +243,7 @@ const COUNTS = `select
   (select count(*) from provider_key where created_by = $1)::int as "providerKeys",
   (select count(*) from campaign where deleted_by = $1)::int as "campaignsDeletedBy",
   (select count(*) from deletion where requested_by = $1)::int as "deletionsRequestedBy",
+  (select count(*) from template where created_by = $1)::int as "templatesCreatedBy",
   (select count(*) from draft where user_id = $1)::int as "drafts",
   (select count(*) from last_opened where user_id = $1)::int as "lastOpened",
   (select count(*) from invitation where inviter_id = $1)::int as "invitationsAsInviter",
