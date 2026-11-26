@@ -4,3 +4,5 @@ export * from "./GenerateCampaignUseCase.use-case.js";
 export * from "./PlanCapacity.js";
 export * from "./PlanVariationsUseCase.use-case.js";
 export * from "./PreviewCreativeFrameUseCase.use-case.js";
+export * from "./PublishAdClipUseCase.use-case.js";
+export * from "./UnpublishAdClipUseCase.use-case.js";
