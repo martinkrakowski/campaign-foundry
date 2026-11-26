@@ -584,6 +584,7 @@ output/city-backpack/
 | --- | --- |
 | `yarn install` | Install the workspace |
 | `yarn generate --brief <file>` | Run the pipeline from a brief (CLI) |
+| `yarn seed:sample --org <id> --switched-at <iso>` | Seed `briefs/sample-campaign.yaml` into an empty Postgres + S3 target. `--org` and `--switched-at` are required; it refuses a non-empty org and drives `plan` -> `apply` -> `verify` of `yarn import` in sequence. Optional `--project-root <dir>` sets the source checkout root. |
 | `yarn dev` | Start the Nitro API + Next.js UI together |
 | `yarn build` | Build every workspace |
 | `yarn typecheck` | Type-check every workspace |

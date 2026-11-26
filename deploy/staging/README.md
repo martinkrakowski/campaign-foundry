@@ -1,5 +1,7 @@
 # Staging
 
+> **Retired:** This directory describes the retired staging deployment path. `deploy.sh` now refuses to run; staging is promoted through the platform repository (see `.github/workflows/build-image.yml`).
+
 Campaign Foundry's staging environment runs on a k3s node reachable only on the
 local network or the VPN, over HTTPS (TLS from the cluster's own issuer).
 Production hosting is still open
@@ -495,6 +497,20 @@ ssh m 'KUBECONFIG=$HOME/.kube/config kubectl -n campaign-foundry-staging rollout
 
 Afterwards: an imported brief starts at a new revision (the file's own revision is not kept),
 and packages are not imported; make them again from the campaign's export page.
+
+### Seeding the sample campaign (PT-8g)
+
+`yarn seed:sample --org <id> --switched-at <iso>` (the command behind
+`apps/api/bin/seed-sample.ts`) hydrates `briefs/sample-campaign.yaml`
+(`summer-hydration-2026`, with `assets/inputs/hydra-logo.png` and
+`assets/inputs/trail-logo.png`) into an empty Postgres + S3 target, by driving
+`yarn import`'s `plan` -> `apply` -> `verify` in sequence. `--org` and
+`--switched-at` are required. It refuses a non-empty org (any of campaigns,
+brief versions, reports or assets present) and writes nothing in that case.
+
+Run it inside the staging workload when the target org is empty — no hostnames,
+no ssh commands; the same working pattern as the import above. Running it
+against staging happens after merge.
 
 ## Known limits
 
