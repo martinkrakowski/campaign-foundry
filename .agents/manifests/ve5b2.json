@@ -4,9 +4,9 @@
   "mutations": [
     {
       "file": "packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts",
-      "before": "      ...(backgrounds !== undefined ? { backgrounds } : {}),",
-      "after": "      ...(false ? { backgrounds } : {}),",
-      "because": "renderMotionVariant must spread the run's resolved scene backgrounds onto the compositor's request whenever any were resolved, or a timeline naming per-beat scenes silently renders with none. Forcing the conditional spread's guard to false drops the `backgrounds` key from every compositeVideo request unconditionally, caught by the fixture asserting a two-scene timeline's request carries both resolved keys.",
+      "before": "      // Per-scene grounds (VE5b1 renderer, VE5b2 generation wiring): absent →\n      // omitted, so a timeline naming no backgrounds renders byte-identically\n      // (VE-D3) — the same conditional-spread discipline `timeline` above uses.\n      ...(backgrounds !== undefined ? { backgrounds } : {}),",
+      "after": "      // Per-scene grounds (VE5b1 renderer, VE5b2 generation wiring): absent →\n      // omitted, so a timeline naming no backgrounds renders byte-identically\n      // (VE-D3) — the same conditional-spread discipline `timeline` above uses.\n      ...(false ? { backgrounds } : {}),",
+      "because": "renderMotionVariant must spread the run's resolved scene backgrounds onto the compositor's request whenever any were resolved, or a timeline naming per-beat scenes silently renders with none. Forcing the conditional spread's guard to false drops the `backgrounds` key from every compositeVideo request unconditionally, caught by the fixture asserting a two-scene timeline's request carries both resolved keys. (Re-anchored by AR6: the html video-layer slot's own compositeVideo call carries the same conditional spread, so the anchor is pinned to renderMotionVariant's copy by its comment; the mutation, its claim and its command are untouched.)",
       "command": [
         "yarn",
         "vitest",
@@ -19,9 +19,9 @@
     },
     {
       "file": "packages/CampaignOrchestration/src/application/use-cases/GenerateCampaignUseCase.use-case.ts",
-      "before": "      if (cell.variant.motion !== undefined && !motionRatios.has(cell.ratio.value)) {",
-      "after": "      if (cell.variant.motion !== undefined && motionRatios.size === 0) {",
-      "because": "executeVariation must resolve the timeline's scenes once per DISTINCT motion ratio, not once for the whole run — a fixed single ratio would silently cover-fit every scene to the wrong canvas the day a second motion-capable ratio exists (PlatformProfile.vo.ts has exactly one today, but nothing pins that). Forcing the ratio-collection guard to stop after the first ratio ever seen reproduces exactly that bug, caught by the fixture asserting two motion cells at different ratios each receive scene bytes fitted to their own canvas.",
+      "before": "        (cell.variant.motion !== undefined || hasEnabledVideoLayer(brief.template.layers)) &&\n        !motionRatios.has(cell.ratio.value)",
+      "after": "        (cell.variant.motion !== undefined || hasEnabledVideoLayer(brief.template.layers)) &&\n        motionRatios.size === 0",
+      "because": "executeVariation must resolve the timeline's scenes once per DISTINCT motion ratio, not once for the whole run — a fixed single ratio would silently cover-fit every scene to the wrong canvas the day a second motion-capable ratio exists (PlatformProfile.vo.ts has exactly one today, but nothing pins that). Forcing the ratio-collection guard to stop after the first ratio ever seen reproduces exactly that bug, caught by the fixture asserting two motion cells at different ratios each receive scene bytes fitted to their own canvas. (Re-anchored by AR6: the guard now also admits an html slot's enabled video layer and the seen-ratios set is a Map; gating on `size === 0` still stops collection after the first ratio ever seen — the same claim.)",
       "command": [
         "yarn",
         "vitest",

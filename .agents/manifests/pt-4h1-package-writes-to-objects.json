@@ -55,9 +55,9 @@
     },
     {
       "file": "apps/api/server/routes/campaigns/package.post.ts",
-      "before": "  if (objectStore() === \"fs\") return fsPackageStore(scope, slug);",
-      "after": "  if (objectStore() === \"fs\" || true) return fsPackageStore(scope, slug);",
-      "because": "the route never takes the s3 branch, so packaging under OBJECT_STORE=s3 resolves a target, then ignores it and writes the package to the output volume — while the RUN that produced the renders wrote them to objects, where the fs output store cannot see them. The request then fails with `Asset not found: …` on a render that exists, having also created an empty `output/packages/<slug>/` tree on a deployment that may have no such volume at all. Under `fs` nothing changes, which is why every fs route suite is blind to it, and the s3 route test is the only place the branch is observed: its assertion is that the keys the request ADDS all start with `org/<org>/campaign/<uuid>/packages/`, and a request that adds none while answering 422 cannot satisfy it.",
+      "before": "  const packageStore =\n    target === undefined ? fsPackageStore(scope, slug) : objectPackageStoreFor(scope, target);",
+      "after": "  const packageStore = fsPackageStore(scope, slug);",
+      "because": "the route never takes the s3 branch, so packaging under OBJECT_STORE=s3 resolves a target, then ignores it and writes the package to the output volume — while the RUN that produced the renders wrote them to objects, where the fs output store cannot see them. The request then fails with `Asset not found: …` on a render that exists, having also created an empty `output/packages/<slug>/` tree on a deployment that may have no such volume at all. Under `fs` nothing changes, which is why every fs route suite is blind to it, and the s3 route test is the only place the branch is observed: its assertion is that the keys the request ADDS all start with `org/<org>/campaign/<uuid>/packages/`, and a request that adds none while answering 422 cannot satisfy it. (Re-anchored by AR6: the branch is now the `packageStore` ternary on the resolved target; forcing the fs side is the same claim.)",
       "command": [
         "yarn",
         "vitest",

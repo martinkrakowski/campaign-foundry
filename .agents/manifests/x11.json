@@ -89,9 +89,9 @@
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
-      "before": "    if (!(rules.accepts as readonly string[]).includes(layer.kind)) {\n      return false;\n    }\n    counts.set(",
-      "after": "    counts.set(",
-      "because": "The guard checked kind against the global LAYER_KINDS while the API checks the type's accepts — the same shape of drift: a `video` layer inside an image-text template rides the guard in and the boundary table says the type cannot hold it.",
+      "before": "    if (!(rules.accepts as readonly string[]).includes(layer.kind)) {\n      return false;\n    }",
+      "after": "    // accepts-check omitted",
+      "because": "The guard checked kind against the global LAYER_KINDS while the API checks the type's accepts — the same shape of drift: a `video` layer inside an image-text template rides the guard in and the boundary table says the type cannot hold it. (Re-anchored by AR6: the D134 video-shape check now sits between the accepts check and the counter, so the anchor is the accepts check alone; dropping it is the same claim.)",
       "command": [
         "yarn",
         "vitest",

@@ -1427,6 +1427,78 @@ describe("parseBrief", () => {
         ),
       ).toThrow('Campaign brief field "clickDestination" must be an absolute URL; got "bad-url".');
     });
+
+    test("a clickDestination carrying the publish placeholder prefix is refused, naming the field (CFAR6 fix2)", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          clickDestination: "https://publish.invalid/shoe/1x1/v0.mp4",
+        }),
+      ).toThrow(
+        'Campaign brief field "clickDestination" must not contain the video placeholder prefix "https://publish.invalid/"; got "https://publish.invalid/shoe/1x1/v0.mp4".',
+      );
+    });
+  });
+
+  describe("publish placeholder prefix in brief text (CFAR6 fix2)", () => {
+    const PREFIX = "https://publish.invalid/";
+    const selector = "shoe/1x1/v0.mp4";
+
+    test("a campaignMessage carrying the prefix is refused, naming the field", () => {
+      expect(() => parseBrief({ ...valid, campaignMessage: `Shop ${PREFIX}${selector}` })).toThrow(
+        `Campaign brief field "campaignMessage" must not contain the video placeholder prefix "${PREFIX}"`,
+      );
+    });
+
+    test("a localizedMessage carrying the prefix is refused, naming the field", () => {
+      expect(() =>
+        parseBrief({ ...valid, localizedMessage: `Kaufen ${PREFIX}${selector}` }),
+      ).toThrow(
+        `Campaign brief field "localizedMessage" must not contain the video placeholder prefix "${PREFIX}"`,
+      );
+    });
+
+    test("a copy.timeline beat text carrying the prefix is refused, naming the field", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          mode: "variation",
+          variation: { count: 1, seed: 1 },
+          copy: {
+            timeline: {
+              transition: "cut",
+              beats: [{ text: PREFIX + selector, weight: 1 }],
+            },
+          },
+        }),
+      ).toThrow(
+        `Campaign brief field "copy.timeline.beats[0].text" must not contain the video placeholder prefix "${PREFIX}"`,
+      );
+    });
+
+    test("an image layer's alt carrying the prefix is refused, naming the field", () => {
+      const base = templateFromCanonical("social-post");
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: {
+            ...base,
+            layers: base.layers.map((layer) =>
+              layer.kind === "image" ? { ...layer, props: { alt: PREFIX + selector } } : layer,
+            ),
+          },
+        }),
+      ).toThrow(
+        `Campaign brief field "template.layers[0].props.alt" must not contain the video placeholder prefix "${PREFIX}"`,
+      );
+    });
+
+    test("prefix-free brief text parses without error", () => {
+      expect(
+        parseBrief({ ...valid, campaignMessage: "Shop https://publish.example.invalid/clip.mp4" })
+          .campaignMessage,
+      ).toBe("Shop https://publish.example.invalid/clip.mp4");
+    });
   });
 
   describe("audio (VE-D8)", () => {
