@@ -290,6 +290,12 @@ describe("EstimatePanel — the classic draft (W4.3)", () => {
     );
   });
 
+  test("the classic estimate stays on the frozen three-ratio default (pre-change figure)", () => {
+    // The vocabulary now holds four ratios, but an unpinned classic draft still
+    // divides by three — the same sentence it rendered before "4:5" joined.
+    expect(classicAdCount(1, 1)).toBe(3);
+  });
+
   test("classic derivation is shared with the CommandBar, so both spell the count alike", () => {
     // classicAdCount is the single formula the panel and the command bar both read.
     expect(classicAdCount(2, 4)).toBe(24);

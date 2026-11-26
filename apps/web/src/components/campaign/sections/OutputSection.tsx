@@ -2,6 +2,7 @@
 
 import type { Dispatch } from "react";
 import { FieldLine, Input, PlatformCard, DurationStrip } from "@/components/ui";
+import { DEFAULT_RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { MOTION_KINDS } from "@campaignfoundry/CampaignOrchestration/motion-kinds";
 import { CREATIVE_TYPE_RULES } from "@campaignfoundry/CampaignOrchestration/creative-types";
 import {
@@ -85,7 +86,12 @@ export function OutputSection({ state, dispatch, errors, compact = false }: Outp
   const motionOnly = state.formats.includes("motion") && !state.formats.includes("static");
   const packaged = motionPackagedRatios(state);
   const motionRatios = RATIO_OPTIONS.filter((ratio) => packaged.has(ratio));
-  const hasExcludedRatio = motionOnly && packaged.size < RATIO_OPTIONS.length;
+  // The warning compares `packaged` against the frozen defaults plus the
+  // selection: a motion-only brief that does not pin `"4:5"` is not missing a
+  // canvas no platform packages, so the line stays quiet for it — while a brief
+  // that selects `"4:5"` still hears that motion cannot draw it.
+  const expectedRatios = new Set([...DEFAULT_RATIO_VALUES, ...state.variation.ratio]);
+  const hasExcludedRatio = motionOnly && [...expectedRatios].some((ratio) => !packaged.has(ratio));
 
   const outputErrorCount = Object.keys(errors).filter((k) =>
     ["formats", "platforms", "motion", "duration", "clickDestination"].includes(k),

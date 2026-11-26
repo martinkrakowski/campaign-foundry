@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { cn } from "@/lib/cn";
 import { MODELS, labelFor } from "@/lib/models";
-import { ASPECT_RATIOS } from "@/lib/aspect-ratios";
+import { ASPECT_RATIOS, DEFAULT_ASPECT_RATIOS } from "@/lib/aspect-ratios";
 import { theme } from "@/styles/theme";
 
 describe("cn", () => {
@@ -34,8 +34,12 @@ describe("models", () => {
 });
 
 describe("aspect-ratios", () => {
-  test("lists the three ratios in display order", () => {
-    expect(ASPECT_RATIOS).toEqual(["1:1", "9:16", "16:9"]);
+  test("lists the four ratios in display order", () => {
+    expect(ASPECT_RATIOS).toEqual(["1:1", "9:16", "16:9", "4:5"]);
+  });
+
+  test("the frozen unpinned default stays the pre-4:5 three", () => {
+    expect(DEFAULT_ASPECT_RATIOS).toEqual(["1:1", "9:16", "16:9"]);
   });
 });
 

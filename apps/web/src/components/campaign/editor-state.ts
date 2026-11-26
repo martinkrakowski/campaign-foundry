@@ -108,7 +108,10 @@ export {
   MAX_WEIGHT,
   MIN_DWELL_SEC,
 };
-import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import {
+  DEFAULT_RATIO_VALUES,
+  RATIO_VALUES,
+} from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import {
   DISPLAY_SIZE_VALUES,
   type DisplaySize,
@@ -753,7 +756,7 @@ export function initialEditorState(mode: CampaignMode = "brief"): EditorState {
       layout: [...LAYOUT_OPTIONS],
       tone: [...TONE_OPTIONS],
       anchor: [...DERIVED_ANCHOR_OPTIONS],
-      ratio: [...RATIO_OPTIONS],
+      ratio: [...DEFAULT_RATIO_VALUES],
       background: [...DEFAULT_BACKGROUND_SOURCES],
       paletteShift: [...PALETTE_SHIFT_OPTIONS],
       headline: false,
@@ -2815,10 +2818,13 @@ export function toBrief(state: EditorState): CampaignBrief {
     // because this axis' absence is NOT its full vocabulary. A declared
     // `anchorExplicit` selection is preserved even when it equals the pair.
     ...(anchorAxisActive(state) ? { anchor: [...state.variation.anchor] } : {}),
-    // The ratio axis is written only when it constrains: absent means every
-    // ratio, so a full selection round-trips a brief without the key
-    // byte-identically instead of growing a redundant `ratio: [all]`.
-    ...(state.variation.ratio.length < RATIO_OPTIONS.length
+    // The ratio axis is written only when it says something the absent key does
+    // not: absent means the frozen three-ratio default, so a selection equal to
+    // `DEFAULT_RATIO_VALUES` in length and order round-trips a brief without the
+    // key byte-identically instead of growing a redundant `ratio: [defaults]`.
+    // Selecting `"4:5"` (a full four-ratio pool or a one-ratio pin) diverges from
+    // the default, so it is written even at the full vocabulary's length.
+    ...(differsFrom(state.variation.ratio, [...DEFAULT_RATIO_VALUES])
       ? { ratio: [...state.variation.ratio] }
       : {}),
     background: { source: [...state.variation.background] },
@@ -2933,7 +2939,9 @@ export function fromBrief(
 
   const derivedRatios = platformsToRatios(platforms);
   const storedRatios =
-    axes?.ratio !== undefined ? list(axes.ratio, [...RATIO_OPTIONS]) : [...RATIO_OPTIONS];
+    axes?.ratio !== undefined
+      ? list(axes.ratio, [...DEFAULT_RATIO_VALUES])
+      : [...DEFAULT_RATIO_VALUES];
   const ratioOverridden = differsFrom(storedRatios, derivedRatios);
 
   const motionList = list(axes?.motion, []);
