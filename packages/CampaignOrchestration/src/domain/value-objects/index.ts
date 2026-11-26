@@ -32,4 +32,5 @@ export * from "./Treatment.vo.js";
 export * from "./variation-defaults.js";
 export * from "./VariationPlan.vo.js";
 export * from "./VariationPolicy.vo.js";
+export * from "./video-placeholders.js";
 export * from "./video-span.js";
