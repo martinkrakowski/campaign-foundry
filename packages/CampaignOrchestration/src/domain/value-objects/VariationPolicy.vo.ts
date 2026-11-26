@@ -69,11 +69,13 @@ export const DISTANCE_AXES = [
  * - `headlines` are the approved texts of the brief's copy pool, loaded by
  *   the caller when `axes.headline` is `pool://copy`.
  * - `motionRatios` are the canvas ratios of the requested motion-capable
- *   platforms, resolved by the caller from `output.platforms`. Absent → every
- *   ratio may carry a clip; empty → none can be packaged, so none is drawn.
+ *   platforms, resolved by the caller from `output.platforms`. Absent →
+ *   default ratios (`1:1`, `9:16`, `16:9`) may carry a clip; empty → none can
+ *   be packaged, so none is drawn.
  * - `ratios` is the requested subset of the ratio axis, resolved by the caller
- *   from `variation.axes.ratio`. Absent → every ratio (the behaviour before
- *   the axis was authorable); empty → the author selected none.
+ *   from `variation.axes.ratio`. Absent → the default ratios (`1:1`, `9:16`,
+ *   `16:9`); `4:5` is available only when pinned in `variation.axes.ratio`.
+ *   Empty → the author selected none.
  */
 export interface PlanInput {
   readonly headlines?: readonly string[];
@@ -153,7 +155,7 @@ export class VariationPolicy {
     readonly motionEnabled: boolean,
     /** True iff `output.formats` also includes "static": the motion draw keeps a still slot. */
     readonly mixStatic: boolean,
-    /** Ratios a motion slot may be drawn for (every ratio unless `output.platforms` narrows it). */
+    /** Ratios a motion slot may be drawn for (default ratios — 1:1, 9:16, 16:9 — unless `output.platforms` narrows it). */
     readonly motionRatios: readonly AspectRatioValue[],
     /**
      * Which slots exist (SL-D2/SL-D3). Resolved, never optional here: a brief
@@ -338,14 +340,14 @@ export class VariationPolicy {
       );
     }
     // Slots one base combination yields, summed over the ratios — NOT a single
-    // motion factor multiplied across every ratio. `enumerateAxes` draws motion
+    // motion factor multiplied across each ratio. `enumerateAxes` draws motion
     // only where `motionRatios` says the requested platforms package it, so a
     // ratio outside that set carries exactly one still and nothing else: the
     // clip it would otherwise need can be packaged nowhere. A mixed plan adds
     // that one still per base combination at its motion ratios too — the still
     // carries no duration, so it is not multiplied by |duration|.
     //
-    // Multiplying across every ratio over-counted a mixed plan (SG-D7 measured
+    // Multiplying across all ratios over-counted a mixed plan (SG-D7 measured
     // 48 against the enumerator's 32 on a three-ratio brief whose platforms
     // package motion at one). `count` is clamped to this number, so the
     // over-count made the count slider's own maximum unplannable.

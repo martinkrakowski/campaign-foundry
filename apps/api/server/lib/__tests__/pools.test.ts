@@ -349,7 +349,9 @@ describe("planInputFor / pooledPlanner", () => {
       success: true,
       value: { ratios: ["1:1", "16:9"] },
     });
-    // absent → the key is absent, so the policy draws every ratio as before
+    // absent → the key is absent, so the policy resolves to the default
+    // ratios (1:1, 9:16, 16:9); 4:5 is available only when pinned in
+    // variation.axes.ratio
     expect(await planInputFor(LOCAL_TENANT, brief({ variation: { count: 2, axes: {} } }))).toEqual({
       success: true,
       value: {},

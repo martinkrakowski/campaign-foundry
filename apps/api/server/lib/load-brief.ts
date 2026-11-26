@@ -555,9 +555,10 @@ function validatePaletteShift(value: unknown): void {
 }
 
 /**
- * `ratio` requests a subset of the three canvases: a non-empty, de-duplicated
- * array of supported ratios. Absent means every ratio, so a brief without the
- * key parses exactly as before. A structural rule, not a capability one — the
+ * `ratio` requests a subset of `RATIO_VALUES`: a non-empty, de-duplicated
+ * array of supported ratios. When absent, the planner resolves to the default
+ * ratios (`1:1`, `9:16`, `16:9`); `4:5` is available only when a brief pins it
+ * in `variation.axes.ratio`. A structural rule, not a capability one — the
  * motion narrowing is applied by the planner, not the parser.
  */
 function validateRatioAxis(value: unknown): void {

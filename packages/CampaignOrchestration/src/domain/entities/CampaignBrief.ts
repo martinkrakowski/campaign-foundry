@@ -98,9 +98,10 @@ export interface CampaignBrief {
       readonly layout?: readonly string[];
       readonly tone?: readonly string[];
       /**
-       * The requested aspect-ratio subset (additive). Absent → every ratio,
-       * so briefs written before this axis existed are unchanged; the planner
-       * still applies its motion narrowing on top of the selection.
+       * The requested aspect-ratio subset (additive). Absent → default
+       * ratios (`1:1`, `9:16`, `16:9`); `4:5` is available only when pinned
+       * in `variation.axes.ratio`. The planner still applies its motion
+       * narrowing on top of the selection.
        */
       readonly ratio?: readonly string[];
       readonly background?: { readonly source?: readonly string[] };
