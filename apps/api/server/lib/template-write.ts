@@ -4,7 +4,7 @@ import {
   TemplateVersionExistsError,
   TemplateWriteUnsupportedError,
 } from "@campaignfoundry/CampaignOrchestration";
-import { readRawBody, type H3Event } from "h3";
+import type { H3Event } from "h3";
 import type { TenantContext } from "./tenant.js";
 
 /**
@@ -54,22 +54,100 @@ export interface TemplateWriteInput {
 const ALLOWED_KEYS = new Set(["name", "unit", "creativeType", "layers"]);
 
 /**
- * Read and shape a template write body. The raw string is read directly (not
- * `readBody`, which parses and bounds nothing): a body over the cap is refused
- * before it is ever parsed, and everything after is a deliberate shape check —
- * the JSON object must carry exactly the four template fields, and never
- * `id` or `version`, which the server mints and the store versions. The field
- * VALUES are left `unknown` on purpose: what makes them a template is
+ * Read and shape a template write body. The bytes are read straight off the
+ * request stream under a running byte cap (not `readBody`, which parses and
+ * bounds nothing): an honest oversized `Content-Length` is refused before a
+ * single body byte is read, and a lying one — or no header at all — is caught
+ * mid-stream, the moment the cap is crossed, so a hostile body is never
+ * buffered in full. Everything after is a deliberate shape check — the JSON
+ * object must carry exactly the four template fields, and never `id` or
+ * `version`, which the server mints and the store versions. The field VALUES
+ * are left `unknown` on purpose: what makes them a template is
  * `templateProblem`, run by the store, which the routes map through
  * `InvalidTemplateError`.
  */
 export async function parseTemplateWriteBody(event: H3Event): Promise<TemplateWriteInput> {
-  const raw = await readRawBody(event, "utf8");
-  if (raw === undefined || raw.trim() === "") {
+  // Fail fast on a declared length that trims to a non-negative integer over
+  // the cap. Absent, non-numeric, or understated headers fall through: the
+  // streaming read below counts actual bytes, so a lying header is still
+  // caught before the body is ever parsed.
+  const declared = getRequestHeader(event, "content-length");
+  if (declared !== undefined && /^\d+$/.test(declared.trim())) {
+    if (Number.parseInt(declared.trim(), 10) > MAX_TEMPLATE_BODY_BYTES) {
+      throw new TemplateBodyError(413, "Template body exceeds the 64 KiB size limit.");
+    }
+  }
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  if (event.web?.request) {
+    // Web path (Nitro's web compatibility layer): the body stream is nullable
+    // — a POST/PUT with no body has none at all.
+    const body = event.web.request.body;
+    if (!body) {
+      throw new TemplateBodyError(400, "Template body must be a JSON object.");
+    }
+    const reader = body.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        totalBytes += value.byteLength;
+        if (totalBytes > MAX_TEMPLATE_BODY_BYTES) {
+          chunks.length = 0;
+          await reader.cancel();
+          throw new TemplateBodyError(413, "Template body exceeds the 64 KiB size limit.");
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  } else {
+    // Node path: h3's `getRequestWebStream` wraps `req.on("data")` with no
+    // cancel or backpressure, so consume `event.node.req` directly and stop it
+    // ourselves on overflow — pause and unlisten, so no further chunk is
+    // buffered or throws, and the 413 response stays writable.
+    const req = event.node.req;
+    await new Promise<void>((resolve, reject) => {
+      const unlisten = (): void => {
+        req.off("data", onData);
+        req.off("end", onEnd);
+        req.off("error", onError);
+      };
+      const onData = (chunk: Buffer): void => {
+        totalBytes += chunk.byteLength;
+        if (totalBytes > MAX_TEMPLATE_BODY_BYTES) {
+          chunks.length = 0;
+          req.pause();
+          unlisten();
+          reject(new TemplateBodyError(413, "Template body exceeds the 64 KiB size limit."));
+          return;
+        }
+        chunks.push(chunk);
+      };
+      const onEnd = (): void => {
+        unlisten();
+        resolve();
+      };
+      const onError = (error: Error): void => {
+        unlisten();
+        reject(error);
+      };
+      req.on("data", onData);
+      req.once("end", onEnd);
+      req.once("error", onError);
+    });
+  }
+
+  if (totalBytes === 0) {
     throw new TemplateBodyError(400, "Template body must be a JSON object.");
   }
-  if (Buffer.byteLength(raw, "utf8") > MAX_TEMPLATE_BODY_BYTES) {
-    throw new TemplateBodyError(413, "Template body exceeds the 64 KiB size limit.");
+  // Multi-byte UTF-8 characters split across chunk boundaries survive: the
+  // bytes are concatenated before the single decode.
+  const raw = Buffer.concat(chunks, totalBytes).toString("utf8");
+  if (raw.trim() === "") {
+    throw new TemplateBodyError(400, "Template body must be a JSON object.");
   }
   let parsed: unknown;
   try {

@@ -4,6 +4,9 @@ import {
   type CreativeTemplate,
 } from "@campaignfoundry/CampaignOrchestration";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { createEvent } from "h3";
+import { IncomingMessage, ServerResponse } from "node:http";
+import { Readable } from "node:stream";
 import { FsTemplateStore } from "../../../lib/ports/fs-template-store.js";
 import { resetTemplateStore, setTemplateStore } from "../../../lib/ports/index.js";
 import type {
@@ -11,6 +14,7 @@ import type {
   WritableTemplateStorePort,
 } from "../../../lib/ports/template-store.port.js";
 import type { TenantContext } from "../../../lib/tenant.js";
+import { MAX_TEMPLATE_BODY_BYTES } from "../../../lib/template-write.js";
 import listHandler from "../templates.get.js";
 import postHandler from "../templates.post.js";
 import byRefHandler from "../templates/[ref].get.js";
@@ -94,6 +98,106 @@ interface RouteBody {
 }
 
 const bodyOf = async (res: Response): Promise<RouteBody> => (await res.json()) as RouteBody;
+
+/**
+ * A `ReadableStream` that records what the reader actually pulled from it:
+ * `highWaterMark: 0` so no chunk is enqueued before a `read()` asks for one,
+ * and a `cancel()` flag so an early abort is observable.
+ */
+interface StreamStats {
+  chunksPulled: number;
+  bytesPulled: number;
+  cancelled: boolean;
+}
+
+const countingStream = (
+  chunks: Uint8Array[],
+): { stream: ReadableStream<Uint8Array>; stats: StreamStats } => {
+  const stats: StreamStats = { chunksPulled: 0, bytesPulled: 0, cancelled: false };
+  let next = 0;
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        if (next >= chunks.length) {
+          controller.close();
+          return;
+        }
+        const chunk = chunks[next++]!;
+        stats.chunksPulled += 1;
+        stats.bytesPulled += chunk.byteLength;
+        controller.enqueue(chunk);
+      },
+      cancel() {
+        stats.cancelled = true;
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  return { stream, stats };
+};
+
+/** Split a string's UTF-8 bytes into fixed-size stream chunks. */
+const utf8Chunks = (raw: string, size: number): Uint8Array[] => {
+  const bytes = new TextEncoder().encode(raw);
+  const chunks: Uint8Array[] = [];
+  for (let i = 0; i < bytes.length; i += size) {
+    chunks.push(bytes.slice(i, i + size));
+  }
+  return chunks;
+};
+
+/** POST a streamed body to the template route, with optional extra headers. */
+const postStream = (
+  stream: ReadableStream<Uint8Array>,
+  headers?: Record<string, string>,
+): Promise<Response> =>
+  web(
+    new Request("http://x/campaigns/templates", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: stream,
+      duplex: "half",
+    } as RequestInit),
+  );
+
+/**
+ * A Node-path event (`createEvent(req, res)`, no `event.web`) whose request is
+ * a counting `Readable` pushing the given chunks — what Nitro `node-server`
+ * hands a handler, where `event.node.req` is the only body there is.
+ */
+const nodeEvent = (
+  chunks: Buffer[],
+  emitError?: Error,
+): { event: ReturnType<typeof createEvent>; req: Readable; stats: { bytesPulled: number } } => {
+  const stats = { bytesPulled: 0 };
+  let next = 0;
+  const req = new Readable({
+    highWaterMark: 0,
+    read() {
+      if (next < chunks.length) {
+        const chunk = chunks[next++]!;
+        stats.bytesPulled += chunk.byteLength;
+        this.push(chunk);
+      } else if (emitError) {
+        this.destroy(emitError);
+      } else {
+        this.push(null);
+      }
+    },
+  });
+  const incoming = Object.assign(req as unknown as IncomingMessage, {
+    method: "POST",
+    url: "/campaigns/templates",
+    headers: { "content-type": "application/json" },
+  });
+  const event = createEvent(incoming, new ServerResponse(incoming));
+  return { event, req, stats };
+};
+
+/** The handler function behind `defineEventHandler`, callable with a bare event. */
+const postRoute = postHandler as unknown as (
+  event: ReturnType<typeof createEvent>,
+) => Promise<RouteBody>;
 
 /** A read store with an optional write method, as `setTemplateStore` expects it. */
 const storeDouble = (overrides: Partial<WritableTemplateStorePort>): TemplateStorePort => ({
@@ -206,6 +310,148 @@ describe("template write routes (POST /campaigns/templates, PUT /campaigns/templ
     );
     expect(put.status).toBe(413);
     expect(await rowCount()).toBe(1);
+  });
+
+  test("aborts oversized chunked stream early with 413 without buffering full body", async () => {
+    // A valid-prefix JSON stream far over the cap: 1 MiB in 16 KiB chunks.
+    const raw = JSON.stringify({ ...VALID_BODY, name: "x".repeat(1024 * 1024) });
+    const { stream, stats } = countingStream(utf8Chunks(raw, 16 * 1024));
+    const posted = await postStream(stream);
+    expect(posted.status).toBe(413);
+    expect((await bodyOf(posted)).error).toBe("Template body exceeds the 64 KiB size limit.");
+    // The reader stopped early — the cap was crossed and the stream cancelled,
+    // never buffering the full 1 MiB.
+    expect(stats.cancelled).toBe(true);
+    expect(stats.bytesPulled).toBeLessThanOrEqual(MAX_TEMPLATE_BODY_BYTES + 16 * 1024);
+    expect(await rowCount()).toBe(0);
+  });
+
+  test("refuses lying Content-Length when streamed bytes exceed 64 KiB", async () => {
+    const raw = JSON.stringify({ ...VALID_BODY, name: "x".repeat(1024 * 1024) });
+    const { stream, stats } = countingStream(utf8Chunks(raw, 16 * 1024));
+    const posted = await postStream(stream, { "content-length": "100" });
+    expect(posted.status).toBe(413);
+    expect((await bodyOf(posted)).error).toBe("Template body exceeds the 64 KiB size limit.");
+    expect(stats.bytesPulled).toBeLessThanOrEqual(MAX_TEMPLATE_BODY_BYTES + 16 * 1024);
+    expect(await rowCount()).toBe(0);
+  });
+
+  test("refuses oversized Content-Length with 413 before reading any stream bytes", async () => {
+    const { stream, stats } = countingStream(utf8Chunks("{}", 16 * 1024));
+    const posted = await postStream(stream, {
+      "content-length": String(MAX_TEMPLATE_BODY_BYTES + 1),
+    });
+    expect(posted.status).toBe(413);
+    expect((await bodyOf(posted)).error).toBe("Template body exceeds the 64 KiB size limit.");
+    expect(stats.chunksPulled).toBe(0);
+    expect(stats.bytesPulled).toBe(0);
+    expect(await rowCount()).toBe(0);
+  });
+
+  test("accepts exact 64 KiB body and refuses 64 KiB + 1 byte", async () => {
+    // An uncapped layer `id` pads the body to an exact byte size while the
+    // template stays valid: the pad image layer sits below the logo (D128's
+    // `above`), and `image` carries no maxOf.
+    const exactCapBody = (targetBytes: number): Record<string, unknown> => {
+      const make = (pad: number): Record<string, unknown> => ({
+        ...VALID_BODY,
+        layers: [{ id: `pad-${"x".repeat(pad)}`, kind: "image" }, ...VALID_BODY.layers],
+      });
+      const base = Buffer.byteLength(JSON.stringify(make(0)), "utf8");
+      return make(targetBytes - base);
+    };
+    const exact = await postJson(exactCapBody(MAX_TEMPLATE_BODY_BYTES));
+    expect(exact.status).toBe(201);
+    expect(await rowCount()).toBe(1);
+
+    const over = await postJson(exactCapBody(MAX_TEMPLATE_BODY_BYTES + 1));
+    expect(over.status).toBe(413);
+    expect((await bodyOf(over)).error).toBe("Template body exceeds the 64 KiB size limit.");
+    expect(await rowCount()).toBe(1);
+  });
+
+  test("decodes multi-byte UTF-8 characters split across chunk boundaries", async () => {
+    const name = "Été ☀ 日 Café";
+    const bytes = Buffer.from(JSON.stringify({ ...VALID_BODY, name }), "utf8");
+    // Cut inside the multi-byte emoji, deliberately mid-character.
+    const cut = bytes.indexOf(Buffer.from("☀", "utf8")) + 1;
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        start(controller) {
+          controller.enqueue(new Uint8Array(bytes.subarray(0, cut)));
+          controller.enqueue(new Uint8Array(bytes.subarray(cut)));
+          controller.close();
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const posted = await postStream(stream);
+    expect(posted.status).toBe(201);
+    expect((await bodyOf(posted)).template?.name).toBe(name);
+    expect(await rowCount()).toBe(1);
+  });
+
+  test("refuses an empty stream and a bodyless POST with 400 and writes nothing", async () => {
+    // A 0-chunk stream (a POST/PUT carrying an empty body stream).
+    const empty = new ReadableStream<Uint8Array>(
+      {
+        start(controller) {
+          controller.close();
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const emptyRes = await postStream(empty);
+    expect(emptyRes.status).toBe(400);
+    expect((await bodyOf(emptyRes)).error).toBe("Template body must be a JSON object.");
+
+    // A bodyless POST: `event.web.request.body` is null, not an empty stream.
+    const bodyless = await web(
+      new Request("http://x/campaigns/templates", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    expect(bodyless.status).toBe(400);
+    expect((await bodyOf(bodyless)).error).toBe("Template body must be a JSON object.");
+    expect(await rowCount()).toBe(0);
+  });
+
+  test("pauses and unlistens oversized Node req stream early with 413", async () => {
+    // 1 MiB of 16 KiB chunks on `event.node.req` — no `event.web` at all.
+    const chunk = Buffer.alloc(16 * 1024, 0x78);
+    const { event, req, stats } = nodeEvent(Array.from({ length: 64 }, () => chunk));
+    const body = await postRoute(event);
+    expect(event.node.res.statusCode).toBe(413);
+    expect(body.error).toBe("Template body exceeds the 64 KiB size limit.");
+    expect(stats.bytesPulled).toBeLessThanOrEqual(MAX_TEMPLATE_BODY_BYTES + 16 * 1024);
+    // The request was paused and every attached listener removed, so no
+    // further chunk is buffered or throws and the 413 response stays writable.
+    expect(req.isPaused()).toBe(true);
+    expect(req.listenerCount("data")).toBe(0);
+    expect(req.listenerCount("end")).toBe(0);
+    expect(req.listenerCount("error")).toBe(0);
+    expect(await rowCount()).toBe(0);
+  });
+
+  test("accepts a small valid template on the Node path (event.node.req)", async () => {
+    const { event } = nodeEvent([Buffer.from(JSON.stringify(VALID_BODY), "utf8")]);
+    const body = await postRoute(event);
+    expect(event.node.res.statusCode).toBe(201);
+    expect(body.template?.version).toBe(1);
+    expect(await rowCount()).toBe(1);
+  });
+
+  test("maps a Node req stream failure to the fixed 500 message and writes nothing", async () => {
+    const { event, req } = nodeEvent(
+      [Buffer.from('{"name":"partial"')],
+      new Error("stream dropped"),
+    );
+    const body = await postRoute(event);
+    expect(event.node.res.statusCode).toBe(500);
+    expect(body.error).toBe("Could not save template.");
+    expect(req.listenerCount("error")).toBe(0);
+    expect(await rowCount()).toBe(0);
   });
 
   test("refuses empty, malformed, null, or array bodies with 400 and writes nothing", async () => {
