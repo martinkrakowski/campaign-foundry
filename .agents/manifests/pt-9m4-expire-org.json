@@ -156,7 +156,7 @@
     },
     {
       "file": "apps/api/bin/purge.ts",
-      "before": "if (process.env.PURGE_RECONCILE !== \"off\") {",
+      "before": "if (reconcileEnabled !== false) {",
       "after": "if (true) {",
       "because": "the switch-off branch is removed, so a setup failure with PURGE_RECONCILE=off counts two failed steps and logs 'reconcile failed' instead of the skip message. The switch-off test asserts failed is 1 and the log contains 'Reconcile skipped: PURGE_RECONCILE=off.'; under this mutant expect(failed).toBe(1) fails on that assertion line.",
       "command": [
