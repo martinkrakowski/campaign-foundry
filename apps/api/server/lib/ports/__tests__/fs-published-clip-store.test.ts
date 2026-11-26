@@ -1,5 +1,6 @@
 import { describe, test, expect, afterEach } from "vitest";
-import { getPublishedClipStore, resetPublishedClipStore } from "../index.js";
+import { getPublishedClipStore, resetPublishedClipStore, setPublishedClipStore } from "../index.js";
+import type { PublishedClipRecordPort } from "@campaignfoundry/CampaignOrchestration";
 import {
   FsPublishedClipStore,
   PublishedClipStoreUnavailableError,
@@ -70,6 +71,22 @@ describe("the registry builds FsPublishedClipStore when STORE_BACKEND is not pos
 
   test("the default (fs) backend answers with FsPublishedClipStore", () => {
     delete process.env.STORE_BACKEND;
+    resetPublishedClipStore();
+    expect(getPublishedClipStore(LOCAL_TENANT)).toBeInstanceOf(FsPublishedClipStore);
+  });
+
+  test("a double installed with setPublishedClipStore answers every tenant until reset", () => {
+    delete process.env.STORE_BACKEND;
+    const double = {
+      record: async () => undefined,
+      find: async () => undefined,
+      listForCampaign: async () => [],
+      remove: async () => undefined,
+    } as unknown as PublishedClipRecordPort;
+    setPublishedClipStore(double);
+    expect(getPublishedClipStore(LOCAL_TENANT)).toBe(double);
+    expect(getPublishedClipStore({ ...LOCAL_TENANT, orgId: "acme" })).toBe(double);
+
     resetPublishedClipStore();
     expect(getPublishedClipStore(LOCAL_TENANT)).toBeInstanceOf(FsPublishedClipStore);
   });

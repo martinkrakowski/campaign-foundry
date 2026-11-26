@@ -329,4 +329,121 @@ describe("mp4-clip (ad clip validation)", () => {
     expect(() => validateAdClip(new Uint8Array(64))).toThrowError(InvalidAdClipError);
     expect(validateAdClip(bytes).durationUnits).toBe(600);
   });
+
+  test("reads a 64-bit largesize box and refuses a bad largesize header", () => {
+    const sized = concat(ftyp(), box("moov", [mvhd(600, 600), videoTrak("avc1")].flat(), "large"));
+    expect(validateAdClip(sized).durationUnits).toBe(600);
+
+    const withLarge = (high: number, low: number, extra = 0): Uint8Array =>
+      new Uint8Array([
+        ...ftyp(),
+        ...u32(1),
+        ...type4("free"),
+        ...u32(high),
+        ...u32(low),
+        ...new Array<number>(extra).fill(0),
+      ]);
+    // High word set: the size cannot be a real in-budget size.
+    expectRejection(withLarge(1, 16), "too-large");
+    // Low word above the byte budget.
+    expectRejection(withLarge(0, AD_CLIP_MAX_BYTES + 1), "too-large");
+    // Smaller than its own 16-byte header.
+    expectRejection(withLarge(0, 15), "truncated");
+    // Claims more bytes than remain.
+    expectRejection(withLarge(0, 64, 8), "truncated");
+  });
+
+  test("refuses a normal box whose declared size is below 8 or above the byte budget", () => {
+    expectRejection(concat(ftyp(), [...u32(7), ...type4("free")]), "truncated");
+    expectRejection(concat(ftyp(), [...u32(AD_CLIP_MAX_BYTES + 1), ...type4("free")]), "too-large");
+  });
+
+  test("requires ftyp first, with a payload of at least 8 bytes", () => {
+    expectRejection(concat(moov([mvhd(600, 600), videoTrak("avc1")]), ftyp()), "not-mp4");
+    expectRejection(concat(box("ftyp", type4("isom"))), "truncated");
+  });
+
+  test("accepts a clip whose standard brand is only a compatible brand", () => {
+    const clip = concat(ftyp("xxxx", ["yyyy", "mp42"]), moov([mvhd(600, 600), videoTrak("avc1")]));
+    expect(validateAdClip(clip).durationSeconds).toBe(1);
+  });
+
+  test("refuses malformed mvhd boxes", () => {
+    const wrap = (mvhdBox: number[]): Uint8Array =>
+      concat(ftyp(), moov([mvhdBox, videoTrak("avc1")]));
+    // No payload at all, so no version byte.
+    expectRejection(wrap(box("mvhd", [])), "truncated");
+    // Version 0 payload shorter than 20 bytes.
+    expectRejection(wrap(box("mvhd", [0, 0, 0, 0, 0, 0, 0, 0])), "truncated");
+    // Version 1 payload shorter than 32 bytes.
+    expectRejection(wrap(box("mvhd", [1, 0, 0, 0, ...new Array<number>(20).fill(0)])), "truncated");
+    // Unknown version.
+    expectRejection(wrap(box("mvhd", [2, ...new Array<number>(39).fill(0)])), "not-mp4");
+  });
+
+  test("reads the high word of a version 1 mvhd duration", () => {
+    // duration = 2^32 units at timescale 2^31 -> 2 s, which only parses if the high word counts.
+    const body = [
+      1,
+      0,
+      0,
+      0,
+      ...new Array<number>(16).fill(0),
+      ...u32(2 ** 31),
+      ...u32(1),
+      ...u32(0),
+    ];
+    const clip = concat(ftyp(), moov([box("mvhd", body), videoTrak("avc1")]));
+    expect(validateAdClip(clip)).toMatchObject({ durationSeconds: 2, durationUnits: 2 ** 32 });
+  });
+
+  test("ignores non-video tracks and non-trak boxes inside moov, and needs at least one video track", () => {
+    const audio = trak([mdia([hdlr("soun")])]);
+    const clip = concat(ftyp(), moov([mvhd(600, 600), box("udta", []), audio, videoTrak("avc1")]));
+    expect(validateAdClip(clip).durationUnits).toBe(600);
+    expectRejection(concat(ftyp(), moov([mvhd(600, 600), audio])), "not-h264");
+  });
+
+  test("refuses a video track missing minf, stbl or stsd", () => {
+    const wrap = (mdiaChildren: number[][]): Uint8Array =>
+      concat(ftyp(), moov([mvhd(600, 600), trak([mdia(mdiaChildren)])]));
+    expectRejection(wrap([hdlr("vide")]), "not-mp4");
+    expectRejection(wrap([hdlr("vide"), minf([])]), "not-mp4");
+    expectRejection(wrap([hdlr("vide"), minf([stbl([])])]), "not-mp4");
+  });
+
+  test("refuses malformed stsd and sample entries", () => {
+    const wrapStsd = (stsdBox: number[]): Uint8Array =>
+      concat(ftyp(), moov([mvhd(600, 600), trak([mdia([hdlr("vide"), minf([stbl([stsdBox])])])])]));
+    // stsd payload below 16 bytes.
+    expectRejection(wrapStsd(box("stsd", [0, 0, 0, 0])), "truncated");
+    // Zero sample entries.
+    expectRejection(
+      wrapStsd(box("stsd", [0, 0, 0, 0, ...u32(0), 0, 0, 0, 0, 0, 0, 0, 0])),
+      "not-h264",
+    );
+    // Entry count promises one but no room for an entry header.
+    expectRejection(wrapStsd(box("stsd", [0, 0, 0, 0, ...u32(1), 0, 0, 0, 0])), "truncated");
+    // avc1 entry declared below 86 bytes.
+    expectRejection(wrapStsd(stsd(box("avc1", new Array<number>(20).fill(0)))), "truncated");
+    // avc1 entry declaring more bytes than the stsd holds.
+    const overrun = sampleEntry("avc1", [avcC()]);
+    overrun.splice(0, 4, ...u32(overrun.length + 100));
+    expectRejection(wrapStsd(stsd(overrun)), "truncated");
+  });
+
+  test("refuses hostile Uint8Array subclasses without leaking a non-InvalidAdClipError", () => {
+    class BadLength extends Uint8Array {
+      override get byteLength(): number {
+        return Number.NaN;
+      }
+    }
+    expectRejection(new BadLength(16), "not-mp4");
+    class BadBuffer extends Uint8Array {
+      override get buffer(): ArrayBuffer {
+        return {} as ArrayBuffer;
+      }
+    }
+    expectRejection(new BadBuffer(16), "not-mp4");
+  });
 });

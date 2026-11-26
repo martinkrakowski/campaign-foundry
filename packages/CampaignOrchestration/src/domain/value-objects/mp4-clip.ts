@@ -241,10 +241,8 @@ function readMvhd(
   if (timescale === 0 || duration === 0) {
     throw new InvalidAdClipError("zero-duration", "mvhd timescale or duration is zero");
   }
+  // Both operands are non-zero unsigned integers here, so the quotient is finite and positive.
   const durationSeconds = duration / timescale;
-  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
-    throw new InvalidAdClipError("zero-duration", "mvhd duration is not a positive span");
-  }
   if (durationSeconds > AD_CLIP_MAX_DURATION_SECONDS) {
     throw new InvalidAdClipError(
       "too-long",
