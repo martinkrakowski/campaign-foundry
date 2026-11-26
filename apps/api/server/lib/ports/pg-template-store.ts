@@ -39,6 +39,17 @@ function toTemplate(row: TemplateRow): CreativeTemplate {
   return template;
 }
 
+/** A fresh copy of a canonical template, so callers can never mutate the shared library. */
+function cloneCanonical(id: string): CreativeTemplate | undefined {
+  const canonical = Object.values(CANONICAL_TEMPLATES).find((t) => t.id === id);
+  return canonical === undefined ? undefined : structuredClone(canonical);
+}
+
+/** id asc, then version asc — the ordering the merged read is served in. */
+function byIdThenVersion(a: CreativeTemplate, b: CreativeTemplate): number {
+  return a.id.localeCompare(b.id) || a.version - b.version;
+}
+
 /**
  * Org-scoped templates as rows (RW-22, D123), one org's: the store is built
  * for an org, so every statement is scoped to it and another org's templates
@@ -65,13 +76,15 @@ export class PgTemplateStore implements WritableTemplateStorePort {
         order by id, version`,
       [this.orgId],
     );
-    return [...Object.values(CANONICAL_TEMPLATES), ...rows.map(toTemplate)];
+    return [...Object.values(CANONICAL_TEMPLATES), ...rows.map(toTemplate)]
+      .map((t) => cloneCanonical(t.id) ?? t)
+      .sort(byIdThenVersion);
   }
 
   async findTemplate(id: string, version?: number): Promise<CreativeTemplate | undefined> {
     // Canonical first: an org row cannot exist for a canonical id (writes
     // refuse one), so this ordering is a guarantee, not a tie-break.
-    const canonical = Object.values(CANONICAL_TEMPLATES).find((t) => t.id === id);
+    const canonical = cloneCanonical(id);
     if (canonical !== undefined) {
       if (version === undefined || canonical.version === version) return canonical;
       return undefined;

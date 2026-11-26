@@ -58,8 +58,8 @@ describe("PgTemplateStore (RW-22)", () => {
     const store = new PgTemplateStore(db, "local");
     const templates = await store.listTemplates();
     expect(templates.map((t) => `${t.id}:${t.version}`)).toEqual([
-      "canonical-image-text:1",
       "canonical-image-html:1",
+      "canonical-image-text:1",
       "canonical-video:1",
       "org-alpha:1",
       "org-banner:1",
@@ -67,10 +67,41 @@ describe("PgTemplateStore (RW-22)", () => {
     ]);
   });
 
+  test("listTemplates sorts the merged list by id then version, not canonical-before-org", async () => {
+    // an org id that sorts before every "canonical-..." id
+    await seedRow(db, "local", orgTemplate({ id: "aaa-first", version: 1 }));
+
+    const store = new PgTemplateStore(db, "local");
+    const templates = await store.listTemplates();
+    expect(templates.map((t) => `${t.id}:${t.version}`)).toEqual([
+      "aaa-first:1",
+      "canonical-image-html:1",
+      "canonical-image-text:1",
+      "canonical-video:1",
+    ]);
+  });
+
+  test("mutating a returned canonical template does not change a later read", async () => {
+    const store = new PgTemplateStore(db, "local");
+
+    // the return type is readonly; mutate through a local view to prove the clone holds
+    const listed = (await store.listTemplates()).find(
+      (t) => t.id === "canonical-video",
+    )! as unknown as { name: string; layers: unknown[] };
+    listed.name = "Mutated";
+    listed.layers.length = 0;
+
+    const found = await store.findTemplate("canonical-video");
+    expect(found).toEqual(CANONICAL_TEMPLATES.video);
+    expect((await store.listTemplates()).find((t) => t.id === "canonical-video")).toEqual(
+      CANONICAL_TEMPLATES.video,
+    );
+  });
+
   test("findTemplate answers a canonical template first, whatever the org's rows hold", async () => {
     const store = new PgTemplateStore(db, "local");
-    expect(await store.findTemplate("canonical-video")).toBe(CANONICAL_TEMPLATES.video);
-    expect(await store.findTemplate("canonical-video", 1)).toBe(CANONICAL_TEMPLATES.video);
+    expect(await store.findTemplate("canonical-video")).toEqual(CANONICAL_TEMPLATES.video);
+    expect(await store.findTemplate("canonical-video", 1)).toEqual(CANONICAL_TEMPLATES.video);
     expect(await store.findTemplate("canonical-video", 99)).toBeUndefined();
   });
 
@@ -130,7 +161,7 @@ describe("PgTemplateStore (RW-22)", () => {
 
     const { rows } = await db.query<{ n: number }>(`select count(*)::int as n from template`);
     expect(rows[0]!.n).toBe(0);
-    expect(await store.findTemplate("canonical-video")).toBe(CANONICAL_TEMPLATES.video);
+    expect(await store.findTemplate("canonical-video")).toEqual(CANONICAL_TEMPLATES.video);
   });
 
   test("saveTemplate refuses a duplicate (org, id, version) and the first row stays byte-identical", async () => {
