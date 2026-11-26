@@ -1,7 +1,10 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
 import { AspectRatio, type ImageGeneratorPort } from "@campaignfoundry/CampaignOrchestration";
-import { OpenRouterImageGenerator } from "../OpenRouterImageGenerator.js";
+import {
+  OpenRouterImageGenerator,
+  UnsupportedAspectRatioError,
+} from "../OpenRouterImageGenerator.js";
 
 const ratio = (v = "1:1") => {
   const r = AspectRatio.create(v);
@@ -167,14 +170,25 @@ describe("OpenRouterImageGenerator", () => {
     ).rejects.toThrow("network down");
   });
 
-  test("defaults an unmapped ratio to a 1:1 request", async () => {
-    fetchMock.mockResolvedValueOnce(
-      res({ json: messageWith({ images: [{ image_url: { url: pngDataUrl() } }] }) }),
-    );
+  test("refuses an unsupported ratio with UnsupportedAspectRatioError and zero fetch calls", async () => {
     const oddRatio = { value: "4:3", width: 100, height: 100 } as unknown as AspectRatio;
-    await new OpenRouterImageGenerator({ apiKey: "k" }).resolveBackground(product, oddRatio, ctx);
-    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
-    expect(body.image_config.aspect_ratio).toBe("1:1");
+    await expect(
+      new OpenRouterImageGenerator({ apiKey: "k" }).resolveBackground(product, oddRatio, ctx),
+    ).rejects.toThrow(UnsupportedAspectRatioError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("refuses 4:5 by delegating to the fallback generator, with zero fetch calls", async () => {
+    const fb = fallback();
+    const out = await new OpenRouterImageGenerator({ apiKey: "k", fallback: fb }).resolveBackground(
+      product,
+      ratio("4:5"),
+      ctx,
+    );
+    expect(out.source).toBe("procedural");
+    expect(fb.resolveBackground).toHaveBeenCalledTimes(1);
+    expect(fb.resolveBackground).toHaveBeenCalledWith(product, ratio("4:5"), ctx, undefined);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test("pins the prompt shape, including the campaign-type sentence", async () => {

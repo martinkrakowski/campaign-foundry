@@ -85,6 +85,20 @@ function mvhdDuration(bytes: Buffer): number {
     : bytes.readUInt32BE(mvhd.payload + 4 + 4 + 4 + 4);
 }
 
+/** Track display dimensions from the tkhd box (fixed-point 16.16 in the last 8 bytes). */
+function tkhdDimensions(bytes: Buffer): { readonly width: number; readonly height: number } {
+  const moov = parseMp4Boxes(bytes).find((b) => b.type === "moov");
+  if (!moov) throw new Error("no moov box");
+  const trak = parseMp4Boxes(bytes, moov.payload, moov.end).find((b) => b.type === "trak");
+  if (!trak) throw new Error("no trak box");
+  const tkhd = parseMp4Boxes(bytes, trak.payload, trak.end).find((b) => b.type === "tkhd");
+  if (!tkhd) throw new Error("no tkhd box");
+  return {
+    width: bytes.readUInt32BE(tkhd.end - 8) / 65536,
+    height: bytes.readUInt32BE(tkhd.end - 4) / 65536,
+  };
+}
+
 const background = (): Uint8Array => {
   const c = createCanvas(16, 16);
   c.getContext("2d").fillRect(0, 0, 16, 16);
@@ -898,6 +912,20 @@ describe("CanvasFfmpegVideoCompositor", () => {
         );
         expect(Buffer.from(out.poster).equals(Buffer.from(plain.poster))).toBe(true);
       }
+    },
+  );
+
+  test.skipIf(!ffmpegOk)(
+    skipReason ?? "renders a 4:5 canvas at its exact 1080x1350 dimensions in a REAL encode",
+    async () => {
+      const compositor = new CanvasFfmpegVideoCompositor({ inputs: fsInputs(projectRoot()) });
+      const result = await compositor.compositeVideo(
+        videoRequest({ canvas: { ratio: "4:5" }, pixelSize: undefined }),
+      );
+      expect(tkhdDimensions(Buffer.from(result.video))).toEqual({ width: 1080, height: 1350 });
+      const poster = await loadImage(Buffer.from(result.poster));
+      expect(poster.width).toBe(1080);
+      expect(poster.height).toBe(1350);
     },
   );
 });
