@@ -126,7 +126,9 @@ describe("UnpublishAdClipUseCase", () => {
     const { deps } = makeDeps();
     const probe = { ...deps, objectStore: writes } as unknown as Record<string, unknown>;
     expect(probe.objectStore).toBeDefined();
-    await new UnpublishAdClipUseCase(deps).execute({
+    // Pass the PROBE (with the spy store) to the use case, not `deps`, so any
+    // write through `probe.objectStore` is observed by the spies.
+    await new UnpublishAdClipUseCase(probe as never).execute({
       orgId: ORG,
       campaignId: CAMPAIGN,
       key: KEY,

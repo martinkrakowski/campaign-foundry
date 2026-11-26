@@ -127,28 +127,18 @@ export class PublishAdClipUseCase {
     if (existing !== undefined) return existing;
 
     const published = await publicAdMedia.publish(orgId, stored.bytes, contentHash);
+    // Only a `record` failure cleans up: remove the object this call created
+    // so no orphan is left, suppressing any cleanup failure, then rethrow.
+    let outcome: Awaited<ReturnType<typeof this.deps.publishedClipRecord.record>>;
     try {
-      const outcome = await this.deps.publishedClipRecord.record(
+      outcome = await this.deps.publishedClipRecord.record(
         orgId,
         campaignId,
         published.key,
         published.url,
         contentHash,
       );
-      if (outcome === "recorded") return { key: published.key, url: published.url };
-
-      // A concurrent caller recorded the same content hash first. The winner
-      // is whatever the ledger holds; this call's object is kept only when it
-      // IS the winner.
-      const winner = await this.deps.publishedClipRecord.find(orgId, campaignId, contentHash);
-      if (winner !== undefined && winner.key === published.key) return winner;
-      await publicAdMedia.remove(published.key);
-      if (winner !== undefined) return winner;
-      throw new PublishedClipRecordConflictError();
     } catch (error) {
-      if (error instanceof PublishedClipRecordConflictError) throw error;
-      // `record` itself failed: remove the object this call created so no
-      // orphan is left, suppressing any cleanup failure, then rethrow.
       try {
         await publicAdMedia.remove(published.key);
       } catch {
@@ -156,5 +146,16 @@ export class PublishAdClipUseCase {
       }
       throw error;
     }
+    if (outcome === "recorded") return { key: published.key, url: published.url };
+
+    // A concurrent caller recorded the same content hash first. The winner
+    // is whatever the ledger holds; this call's object is kept only when it
+    // IS the winner. A failed winner lookup must not remove an object the
+    // winner may share.
+    const winner = await this.deps.publishedClipRecord.find(orgId, campaignId, contentHash);
+    if (winner !== undefined && winner.key === published.key) return winner;
+    await publicAdMedia.remove(published.key);
+    if (winner !== undefined) return winner;
+    throw new PublishedClipRecordConflictError();
   }
 }
