@@ -90,5 +90,27 @@ describe("click-destination (HL2, HL-D3)", () => {
         });
       }
     });
+
+    test("refuses a destination carrying the publish placeholder prefix (CFAR6 fix2)", () => {
+      // The clickTag is brief-authored text; the placeholder prefix is the
+      // assembler's own token. A destination naming it is refused with the
+      // field named, never silently rewritten.
+      const destination = `https://publish.invalid/shoe/1x1/v0.mp4`;
+      expect(clickDestinationProblem(destination)).toEqual({
+        field: "clickDestination",
+        must: 'not contain the video placeholder prefix "https://publish.invalid/"',
+        value: destination,
+      });
+      // The prefix inside a longer URL is refused too — it is the constant,
+      // not the whole value, that is the assembler's token.
+      const nested = `https://example.com/?u=https://publish.invalid/shoe/1x1/v0.mp4`;
+      expect(clickDestinationProblem(nested)).toEqual({
+        field: "clickDestination",
+        must: 'not contain the video placeholder prefix "https://publish.invalid/"',
+        value: nested,
+      });
+      // A host that merely looks like the placeholder's is fine.
+      expect(clickDestinationProblem("https://publish.example.invalid/clip.mp4")).toBeUndefined();
+    });
   });
 });

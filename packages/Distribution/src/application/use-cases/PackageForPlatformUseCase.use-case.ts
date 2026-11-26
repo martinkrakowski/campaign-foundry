@@ -1,7 +1,9 @@
 import {
   assetIdentity,
   CLICK_TAG_VARIABLE,
+  findVideoPlaceholders,
   isExpired,
+  PUBLISH_PLACEHOLDER_URL_PREFIX,
   parseExpiresOnMs,
   type AudioRights,
 } from "@campaignfoundry/CampaignOrchestration";
@@ -44,6 +46,41 @@ export interface PackageableAsset {
   readonly audioRights?: AudioRights;
 }
 
+/**
+ * Publishes ONE video placeholder selector to the public bucket and answers the
+ * published `https://` URL. The composition root wires it to
+ * `PublishAdClipUseCase`; packaging knows nothing about how publication happens.
+ */
+export type ClipPublisher = (selector: string) => Promise<string>;
+
+/** The bundle carries video placeholders but the request did not ask to publish. */
+export class UnpublishedClipPlaceholderError extends Error {
+  constructor(assetDescription: string) {
+    super(
+      `${assetDescription} carries video clip placeholders but "publishClip" is not enabled — packaging would ship unresolvable placeholder URLs.`,
+    );
+    this.name = "UnpublishedClipPlaceholderError";
+  }
+}
+
+/** Publishing was requested but no `clipPublisher` was injected. */
+export class MissingClipPublisherError extends Error {
+  constructor() {
+    super('"publishClip" is enabled but no clip publisher was provided.');
+    this.name = "MissingClipPublisherError";
+  }
+}
+
+/** The publisher answered something that is not a safe `https://` URL. */
+export class InvalidPublishedClipUrlError extends Error {
+  constructor(selector: string) {
+    super(
+      `The clip publisher returned an unsafe URL for video placeholder ${JSON.stringify(selector)} — expected an absolute https URL with no whitespace, quotes, angle brackets or ampersands.`,
+    );
+    this.name = "InvalidPublishedClipUrlError";
+  }
+}
+
 export interface PackageForPlatformInput {
   readonly campaignId: string;
   readonly assets: readonly PackageableAsset[];
@@ -61,6 +98,14 @@ export interface PackageForPlatformInput {
   readonly capabilities?: PlatformCapabilities;
   /** The brief's click destination URL (HL2, HL-D3). */
   readonly clickDestination?: string;
+  /**
+   * Publish each video clip placeholder in stored HTML bundles (CFAR6C3) by
+   * substituting the published public URL. Default `false`: a bundle that still
+   * carries placeholders is refused rather than shipped unresolvable.
+   */
+  readonly publishClip?: boolean;
+  /** Publishes one placeholder selector to the public bucket; required when `publishClip` is true. */
+  readonly clipPublisher?: ClipPublisher;
 }
 
 export interface PackagedPlatform {
@@ -80,6 +125,28 @@ export interface PackageForPlatformResult {
 export function withoutAbsolutePaths(message: string): string {
   return message.replace(/(^|[\s'"])(?:[A-Za-z]:)?(?:\/|\\)[^\s'"]+/g, "$1<path>");
 }
+
+/**
+ * Everything the write phase needs for one asset: its bytes are read, its clip
+ * placeholders are resolved, its validations have passed — only the packaged
+ * writes remain. The prepare phase resolves this for every asset of every
+ * platform before the write phase touches the store, so a refusal anywhere
+ * leaves zero packaged files and zero manifests behind.
+ */
+type PreparedItem =
+  | { kind: "static"; asset: PackageableAsset; bytes: Uint8Array }
+  | {
+      kind: "motion";
+      asset: PackageableAsset & { videoPath: string };
+      video: Uint8Array;
+      poster: Uint8Array;
+    }
+  | {
+      kind: "html";
+      asset: PackageableAsset & { htmlBundlePath: string; htmlFallbackPath: string };
+      bundle: Uint8Array;
+      fallback: Uint8Array;
+    };
 
 /** Motion rows carry an mp4; anything else (classic rows have no `format`) is a static. */
 const isMotionAsset = (
@@ -104,6 +171,13 @@ const isHtmlAsset = (
  * size assets fails loudly — a successful empty manifest is the D8 dead end, not
  * a result. Store failures are caught per platform and returned as err; they
  * never throw.
+ *
+ * Packaging runs in two phases: every read, clip publication and validation
+ * for ALL platforms happens first (prepare), and only once every platform has
+ * been prepared does the write phase emit a single packaged file or manifest.
+ * A refusal anywhere — an unpublished placeholder, an unsafe URL, a publisher
+ * failure, an unreadable asset, on the first asset or the last platform —
+ * therefore leaves zero packaged files and zero manifests behind.
  */
 export class PackageForPlatformUseCase {
   constructor(
@@ -246,29 +320,64 @@ export class PackageForPlatformUseCase {
     }
 
     const skipped = input.skipped ?? 0;
-    const platforms: PackagedPlatform[] = [];
+    // One publish per DISTINCT selector per export (CFAR6C3): the same clip used
+    // by several bundles, sizes or platforms is published once, and a second
+    // execute() call starts a fresh export and publishes again.
+    const publishedUrls = new Map<string, string>();
+    // Prepare phase: resolve every asset of every platform — all reads, clip
+    // publications and validations — without writing anything. Any refusal here
+    // returns err before a single packaged file or manifest exists.
+    const preparedPlatforms: Array<{
+      platformId: string;
+      profile: PlatformProfile;
+      included: number;
+      excluded: number;
+      items: PreparedItem[];
+    }> = [];
     for (const { platformId, profile, eligible, selected } of selections) {
       try {
         const included = selected.length;
         const excluded = eligible.length - selected.length;
-        const items: PackageManifestItem[] = [];
+        const items: PreparedItem[] = [];
         for (const asset of selected) {
           items.push(
             isMotionAsset(asset)
-              ? await this.packageMotion(platformId, profile, asset)
+              ? await this.prepareMotion(asset)
               : isHtmlAsset(asset) && profile.formats.includes("html")
-                ? await this.packageHtml(platformId, profile, asset, input.clickDestination)
+                ? await this.prepareHtml(
+                    asset,
+                    input.clickDestination,
+                    input.publishClip ?? false,
+                    input.clipPublisher,
+                    publishedUrls,
+                  )
                 : isHtmlAsset(asset) &&
                     profile.formats.includes("static") &&
                     profile.sizes !== undefined
-                  ? await this.packageStatic(platformId, profile, {
+                  ? await this.prepareStatic({
                       ...asset,
                       outputPath: asset.htmlFallbackPath,
                     })
-                  : await this.packageStatic(platformId, profile, asset),
+                  : await this.prepareStatic(asset),
           );
         }
+        preparedPlatforms.push({ platformId, profile, included, excluded, items });
+      } catch (error) {
+        return err(
+          new Error(`Platform "${platformId}": ${withoutAbsolutePaths(errorMessage(error))}`),
+        );
+      }
+    }
 
+    // Write phase: every platform prepared, so every refusal has already passed —
+    // writes happen only now, and a later platform can no longer refuse.
+    const platforms: PackagedPlatform[] = [];
+    for (const { platformId, profile, included, excluded, items } of preparedPlatforms) {
+      try {
+        const manifestItems: PackageManifestItem[] = [];
+        for (const prepared of items) {
+          manifestItems.push(await this.writePrepared(platformId, profile, prepared));
+        }
         const manifestPath = await this.store.writeManifest(platformId, {
           campaignId: input.campaignId,
           platformId,
@@ -277,9 +386,16 @@ export class PackageForPlatformUseCase {
           included,
           excluded,
           profile,
-          items,
+          items: manifestItems,
         });
-        platforms.push({ platformId, manifestPath, items, skipped, included, excluded });
+        platforms.push({
+          platformId,
+          manifestPath,
+          items: manifestItems,
+          skipped,
+          included,
+          excluded,
+        });
       } catch (error) {
         return err(
           new Error(`Platform "${platformId}": ${withoutAbsolutePaths(errorMessage(error))}`),
@@ -290,103 +406,164 @@ export class PackageForPlatformUseCase {
     return ok({ platforms });
   }
 
-  private async packageStatic(
-    platformId: string,
-    profile: PlatformProfile,
-    asset: PackageableAsset,
-  ): Promise<PackageManifestItem> {
-    const bytes = await this.store.readAsset(asset.outputPath);
-    const packagedPath = await this.store.writePackaged(platformId, asset.outputPath, bytes);
-    return {
-      productId: asset.productId,
-      // Exactly one of the two is defined on any real row (D113); undefined keys
-      // drop from the serialized manifest, so each item names its own family.
-      aspectRatio: asset.aspectRatio,
-      size: asset.size,
-      treatment: asset.treatment,
-      format: "static",
-      source: asset.outputPath,
-      packagedPath,
-      bytes: bytes.length,
-      checks: { size: bytes.length <= profile.maxBytes ? "pass" : "fail" },
-    };
+  /**
+   * Prepare phase, static: read the PNG. Nothing is written yet.
+   */
+  private async prepareStatic(asset: PackageableAsset): Promise<PreparedItem> {
+    return { kind: "static", asset, bytes: await this.store.readAsset(asset.outputPath) };
   }
 
   /**
-   * The mp4 is the item (size + duration checks); its poster rides along.
+   * Prepare phase, motion: read the mp4 and its poster. Nothing is written yet.
    */
-  private async packageMotion(
-    platformId: string,
-    profile: PlatformProfile,
+  private async prepareMotion(
     asset: PackageableAsset & { videoPath: string },
-  ): Promise<PackageManifestItem> {
+  ): Promise<PreparedItem> {
     const video = await this.store.readAsset(asset.videoPath);
     const poster = await this.store.readAsset(asset.outputPath);
-    const packagedPath = await this.store.writePackaged(platformId, asset.videoPath, video);
-    const posterPath = await this.store.writePackaged(platformId, asset.outputPath, poster);
-    const duration =
-      asset.durationSec !== undefined &&
-      (profile.maxDurationSec === undefined || asset.durationSec <= profile.maxDurationSec)
-        ? "pass"
-        : "fail";
-    return {
-      productId: asset.productId,
-      aspectRatio: asset.aspectRatio,
-      size: asset.size,
-      treatment: asset.treatment,
-      format: "motion",
-      source: asset.videoPath,
-      packagedPath,
-      posterPath,
-      ...(asset.durationSec !== undefined ? { durationSec: asset.durationSec } : {}),
-      bytes: video.length,
-      checks: { size: video.length <= profile.maxBytes ? "pass" : "fail", duration },
-    };
+    return { kind: "motion", asset, video, poster };
   }
 
   /**
-   * The bundle is the item (size check); its raster fallback rides along (D122).
+   * Prepare phase, html: read the bundle, run every validation, publish each
+   * placeholder selector and substitute the published URLs — all without
+   * writing anything.
+   *
    * Markup is never rasterised, so no pixel hash is recorded for it — verification
    * is structural (the bundle parses, references resolve, the fallback exists).
+   *
+   * Video placeholders (CFAR6C2) are resolved here — never at assemble time — so
+   * the stored bundle stays the source of truth and publication happens once per
+   * export. Every refusal below happens BEFORE any packaged write: placeholders
+   * the request did not ask to publish, a missing publisher, and an unsafe URL
+   * each leave zero package files and zero manifests behind.
    */
-  private async packageHtml(
-    platformId: string,
-    profile: PlatformProfile,
+  private async prepareHtml(
     asset: PackageableAsset & { htmlBundlePath: string; htmlFallbackPath: string },
-    briefDestination?: string,
-  ): Promise<PackageManifestItem> {
+    briefDestination: string | undefined,
+    publishClip: boolean,
+    clipPublisher: ClipPublisher | undefined,
+    publishedUrls: Map<string, string>,
+  ): Promise<PreparedItem> {
     const bundle = await this.store.readAsset(asset.htmlBundlePath);
+    const bundleText = new TextDecoder().decode(bundle);
     const destination = asset.clickDestination ?? briefDestination;
-    if (destination !== undefined) {
-      const bundleText = new TextDecoder().decode(bundle);
-      if (!bundleText.includes(CLICK_TAG_VARIABLE)) {
-        throw new Error(
-          `HTML asset ${assetIdentity(asset)} has clickDestination but bundle is missing "${CLICK_TAG_VARIABLE}" variable declaration.`,
-        );
+    if (destination !== undefined && !bundleText.includes(CLICK_TAG_VARIABLE)) {
+      throw new Error(
+        `HTML asset ${assetIdentity(asset)} has clickDestination but bundle is missing "${CLICK_TAG_VARIABLE}" variable declaration.`,
+      );
+    }
+    // Malformed placeholder tokens throw here (CFAR6C2), before anything is written.
+    const placeholders = findVideoPlaceholders(bundleText);
+    let updatedBundle = bundle;
+    if (placeholders.length > 0) {
+      if (!publishClip) {
+        throw new UnpublishedClipPlaceholderError(`HTML asset ${assetIdentity(asset)}`);
       }
+      if (clipPublisher === undefined) throw new MissingClipPublisherError();
+      let updatedHtml = bundleText;
+      for (const selector of placeholders) {
+        let url = publishedUrls.get(selector);
+        if (url === undefined) {
+          url = await clipPublisher(selector);
+          // Unescaped substitution means the URL is the one thing standing
+          // between a placeholder and the markup, so anything carrying a
+          // delimiter, a scheme other than https, or non-string nonsense is
+          // refused rather than escaped around.
+          if (typeof url !== "string" || !/^https:\/\/[^\s"'<>&]+$/.test(url)) {
+            throw new InvalidPublishedClipUrlError(selector);
+          }
+          publishedUrls.set(selector, url);
+        }
+        // Unescaped, byte-for-byte token replacement — no HTML re-assembly.
+        updatedHtml = updatedHtml.replaceAll(`${PUBLISH_PLACEHOLDER_URL_PREFIX}${selector}`, url);
+      }
+      updatedBundle = new TextEncoder().encode(updatedHtml);
     }
     const fallback = await this.store.readAsset(asset.htmlFallbackPath);
-    const packagedPath = await this.store.writePackaged(platformId, asset.htmlBundlePath, bundle);
-    const fallbackPath = await this.store.writePackaged(
-      platformId,
-      asset.htmlFallbackPath,
-      fallback,
-    );
-    // The budget is the unit's, and the unit a network measures is the package it
-    // uploads: `index.html` *and* its raster fallback. Counting the bundle alone
-    // would pass a unit whose fallback pushes it over (X14).
-    const unitBytes = bundle.length + fallback.length;
-    return {
-      productId: asset.productId,
-      aspectRatio: asset.aspectRatio,
-      size: asset.size,
-      treatment: asset.treatment,
-      format: "html",
-      source: asset.htmlBundlePath,
-      packagedPath,
-      fallbackPath,
-      bytes: bundle.length,
-      checks: { size: unitBytes <= profile.maxBytes ? "pass" : "fail" },
-    };
+    return { kind: "html", asset, bundle: updatedBundle, fallback };
+  }
+
+  /**
+   * Write phase: the writes for one prepared item — the only place the store
+   * is asked to write. Reached only after every platform has been prepared,
+   * so no refusal can leave a partially written package behind.
+   */
+  private async writePrepared(
+    platformId: string,
+    profile: PlatformProfile,
+    prepared: PreparedItem,
+  ): Promise<PackageManifestItem> {
+    switch (prepared.kind) {
+      case "static": {
+        const { asset, bytes } = prepared;
+        const packagedPath = await this.store.writePackaged(platformId, asset.outputPath, bytes);
+        return {
+          productId: asset.productId,
+          // Exactly one of the two is defined on any real row (D113); undefined keys
+          // drop from the serialized manifest, so each item names its own family.
+          aspectRatio: asset.aspectRatio,
+          size: asset.size,
+          treatment: asset.treatment,
+          format: "static",
+          source: asset.outputPath,
+          packagedPath,
+          bytes: bytes.length,
+          checks: { size: bytes.length <= profile.maxBytes ? "pass" : "fail" },
+        };
+      }
+      case "motion": {
+        const { asset, video, poster } = prepared;
+        const packagedPath = await this.store.writePackaged(platformId, asset.videoPath, video);
+        const posterPath = await this.store.writePackaged(platformId, asset.outputPath, poster);
+        const duration =
+          asset.durationSec !== undefined &&
+          (profile.maxDurationSec === undefined || asset.durationSec <= profile.maxDurationSec)
+            ? "pass"
+            : "fail";
+        return {
+          productId: asset.productId,
+          aspectRatio: asset.aspectRatio,
+          size: asset.size,
+          treatment: asset.treatment,
+          format: "motion",
+          source: asset.videoPath,
+          packagedPath,
+          posterPath,
+          ...(asset.durationSec !== undefined ? { durationSec: asset.durationSec } : {}),
+          bytes: video.length,
+          checks: { size: video.length <= profile.maxBytes ? "pass" : "fail", duration },
+        };
+      }
+      case "html": {
+        const { asset, bundle, fallback } = prepared;
+        const packagedPath = await this.store.writePackaged(
+          platformId,
+          asset.htmlBundlePath,
+          bundle,
+        );
+        const fallbackPath = await this.store.writePackaged(
+          platformId,
+          asset.htmlFallbackPath,
+          fallback,
+        );
+        // The budget is the unit's, and the unit a network measures is the package it
+        // uploads: `index.html` *and* its raster fallback. Counting the bundle alone
+        // would pass a unit whose fallback pushes it over (X14).
+        const unitBytes = bundle.length + fallback.length;
+        return {
+          productId: asset.productId,
+          aspectRatio: asset.aspectRatio,
+          size: asset.size,
+          treatment: asset.treatment,
+          format: "html",
+          source: asset.htmlBundlePath,
+          packagedPath,
+          fallbackPath,
+          bytes: bundle.length,
+          checks: { size: unitBytes <= profile.maxBytes ? "pass" : "fail" },
+        };
+      }
+    }
   }
 }

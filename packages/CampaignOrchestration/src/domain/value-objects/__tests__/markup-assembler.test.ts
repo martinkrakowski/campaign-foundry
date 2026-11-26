@@ -2,6 +2,10 @@ import { describe, expect, test } from "vitest";
 import { defaultLayerRect } from "../creative-geometry.js";
 import type { CreativeTemplateLayer } from "../creative-templates.js";
 import { assembleHtml, type AssembleHtmlOptions } from "../markup-assembler.js";
+import {
+  BriefPlaceholderPrefixError,
+  PUBLISH_PLACEHOLDER_URL_PREFIX,
+} from "../video-placeholders.js";
 
 const base = (over: Partial<AssembleHtmlOptions> = {}): AssembleHtmlOptions => ({
   layers: [],
@@ -106,6 +110,50 @@ describe("assembleHtml", () => {
     const declaration = /var clickTag = (".*");/.exec(result.html);
     expect(declaration).not.toBeNull();
     expect(JSON.parse(declaration![1] as string)).toBe(destination);
+  });
+
+  test("a headline carrying the publish placeholder prefix is refused, naming the field (CFAR6 fix2)", () => {
+    expect(() =>
+      assembleHtml(base({ headline: `Shop ${PUBLISH_PLACEHOLDER_URL_PREFIX}shoe/1x1/v0.mp4` })),
+    ).toThrow(BriefPlaceholderPrefixError);
+    expect(() =>
+      assembleHtml(base({ headline: `Shop ${PUBLISH_PLACEHOLDER_URL_PREFIX}shoe/1x1/v0.mp4` })),
+    ).toThrowError(/headline/);
+  });
+
+  test("an image layer's alt carrying the publish placeholder prefix is refused, naming the field", () => {
+    expect(() =>
+      assembleHtml(
+        base({
+          layers: [
+            layer({
+              id: "picture",
+              kind: "image",
+              props: { alt: PUBLISH_PLACEHOLDER_URL_PREFIX + "shoe/1x1/v0.mp4" },
+            }),
+          ],
+        }),
+      ),
+    ).toThrow(BriefPlaceholderPrefixError);
+    expect(() =>
+      assembleHtml(
+        base({
+          layers: [
+            layer({
+              id: "picture",
+              kind: "image",
+              props: { alt: PUBLISH_PLACEHOLDER_URL_PREFIX + "shoe/1x1/v0.mp4" },
+            }),
+          ],
+        }),
+      ),
+    ).toThrowError(/alt/);
+  });
+
+  test("a headline that merely mentions the prefix host without the constant is accepted", () => {
+    expect(() =>
+      assembleHtml(base({ headline: "Shop https://publish.example.invalid/clip.mp4" })),
+    ).not.toThrow();
   });
 
   test("an over-budget bundle names the budget and the overage", () => {
@@ -385,5 +433,150 @@ describe("assembleHtml", () => {
     const result = assembleHtml(base({ profile: { maxBytes: 1024 * 1024 } }));
     expect(result.bytes.length).toBe(result.byteLength);
     expect(result.byteLength).toBeLessThanOrEqual(1024 * 1024);
+  });
+});
+
+describe("assembleHtml video layer (D134's video half)", () => {
+  const videoLayer = (over: Partial<CreativeTemplateLayer> = {}): CreativeTemplateLayer =>
+    layer({
+      id: "video",
+      kind: "video",
+      props: { render: "hero/1x1/v1.mp4" },
+      ...over,
+    });
+
+  test("a video layer emits a muted autoplaying video with the poster fallback", () => {
+    const result = assembleHtml(
+      base({
+        layers: [videoLayer()],
+        videoSources: { "hero/1x1/v1.mp4": "https://cdn.example.com/hero/1x1/v1.mp4" },
+      }),
+    );
+    expect(result.html).toContain(
+      '<video src="https://cdn.example.com/hero/1x1/v1.mp4" muted autoplay playsinline poster="fallback.png"></video>',
+    );
+    expect(result.html).toContain("left: 0px; top: 0px; width: 1080px; height: 1080px;");
+  });
+
+  test("a loop prop emits the loop attribute", () => {
+    const result = assembleHtml(
+      base({
+        layers: [videoLayer({ props: { render: "hero/1x1/v1.mp4", loop: true } })],
+        videoSources: { "hero/1x1/v1.mp4": "https://cdn.example.com/hero/1x1/v1.mp4" },
+      }),
+    );
+    expect(result.html).toContain("muted autoplay playsinline loop");
+  });
+
+  test("a loop prop that is not exactly true emits no loop attribute", () => {
+    const result = assembleHtml(
+      base({
+        layers: [videoLayer({ props: { render: "hero/1x1/v1.mp4", loop: false } })],
+        videoSources: { "hero/1x1/v1.mp4": "https://cdn.example.com/hero/1x1/v1.mp4" },
+      }),
+    );
+    expect(result.html).toContain("muted autoplay playsinline poster=");
+  });
+
+  test("videoPreview emits nothing and requires neither render nor videoSources", () => {
+    const result = assembleHtml(
+      base({
+        layers: [videoLayer({ props: undefined }), videoLayer({ id: "video-2", props: undefined })],
+        videoPreview: true,
+      }),
+    );
+    expect(result.html).not.toContain("<video");
+  });
+
+  test("a video layer with no render selector is refused", () => {
+    expect(() =>
+      assembleHtml(
+        base({
+          layers: [videoLayer({ props: undefined })],
+          videoSources: { "hero/1x1/v1.mp4": "https://cdn.example.com/hero/1x1/v1.mp4" },
+        }),
+      ),
+    ).toThrow('assembleHtml: video layer "video" is missing a render selector');
+    expect(() =>
+      assembleHtml(
+        base({
+          layers: [videoLayer({ props: { render: "" } })],
+          videoSources: { "hero/1x1/v1.mp4": "https://cdn.example.com/hero/1x1/v1.mp4" },
+        }),
+      ),
+    ).toThrow('assembleHtml: video layer "video" is missing a render selector');
+  });
+
+  test("a video layer with no videoSources entry for its render is refused", () => {
+    expect(() =>
+      assembleHtml(
+        base({
+          layers: [videoLayer()],
+        }),
+      ),
+    ).toThrow(
+      'assembleHtml: video layer "video" has no entry in videoSources for "hero/1x1/v1.mp4"',
+    );
+    expect(() =>
+      assembleHtml(
+        base({
+          layers: [videoLayer()],
+          videoSources: { "other/1x1/v1.mp4": "https://cdn.example.com/other/1x1/v1.mp4" },
+        }),
+      ),
+    ).toThrow(
+      'assembleHtml: video layer "video" has no entry in videoSources for "hero/1x1/v1.mp4"',
+    );
+  });
+
+  test("a videoSources entry that is not an absolute http(s) URL is refused", () => {
+    for (const url of ["javascript:alert(1)", "data:video/mp4;base64,AAAA", "/hero/1x1/v1.mp4"]) {
+      expect(
+        () =>
+          assembleHtml(
+            base({
+              layers: [videoLayer()],
+              videoSources: { "hero/1x1/v1.mp4": url },
+            }),
+          ),
+        url,
+      ).toThrow(
+        `assembleHtml: videoSources["hero/1x1/v1.mp4"] must be an absolute http(s) URL, got ${JSON.stringify(url)}`,
+      );
+    }
+  });
+
+  test("a quote in a videoSources URL is escaped in the markup", () => {
+    const result = assembleHtml(
+      base({
+        layers: [videoLayer()],
+        videoSources: {
+          "hero/1x1/v1.mp4": 'https://cdn.example.com/hero/1x1/v1.mp4?token="x"',
+        },
+      }),
+    );
+    expect(result.html).toContain(
+      '<video src="https://cdn.example.com/hero/1x1/v1.mp4?token=&quot;x&quot;"',
+    );
+  });
+
+  test("a video layer is measured against the byte budget exactly like any other markup", () => {
+    const options = base({
+      layers: [videoLayer()],
+      videoSources: {
+        "hero/1x1/v1.mp4":
+          "https://cdn.example.com/creatives/renditions/hero/1x1/v1.mp4?token=abc123&sig=deadbeefdeadbeef",
+      },
+    });
+    const result = assembleHtml(options);
+    expect(result.byteLength).toBeLessThanOrEqual(150 * 1024);
+    expect(() =>
+      assembleHtml({ ...options, profile: { maxBytes: result.byteLength - 1 } }),
+    ).toThrow(
+      `HTML bundle weight (${result.byteLength} bytes) exceeds profile.maxBytes budget (${result.byteLength - 1} bytes) with overage of 1 bytes`,
+    );
+    expect(() =>
+      assembleHtml({ ...options, profile: { maxBytes: result.byteLength } }),
+    ).not.toThrow();
   });
 });

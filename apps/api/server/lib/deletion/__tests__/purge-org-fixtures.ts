@@ -34,6 +34,7 @@ export interface OrgSnapshot {
   readonly last_opened: readonly string[];
   readonly provider_key: readonly string[];
   readonly usage: readonly string[];
+  readonly published_clip: readonly string[];
   readonly team: readonly string[];
   readonly member: readonly string[];
   readonly invitation: readonly string[];
@@ -74,14 +75,20 @@ export async function snapshot(db: SqlClient, orgId: string): Promise<OrgSnapsho
       q(`select to_jsonb(t)::text as row from draft t where org_id = $1 order by 1`, [orgId]),
       q(`select to_jsonb(t)::text as row from last_opened t where org_id = $1 order by 1`, [orgId]),
     ]);
-  const [provider_key, usage, team, member, invitation, deletion] = await Promise.all([
-    q(`select to_jsonb(t)::text as row from provider_key t where org_id = $1 order by 1`, [orgId]),
-    q(`select to_jsonb(t)::text as row from usage t where org_id = $1 order by 1`, [orgId]),
-    q(`select to_jsonb(t)::text as row from team t where org_id = $1 order by 1`, [orgId]),
-    q(`select to_jsonb(t)::text as row from member t where org_id = $1 order by 1`, [orgId]),
-    q(`select to_jsonb(t)::text as row from invitation t where org_id = $1 order by 1`, [orgId]),
-    q(`select to_jsonb(t)::text as row from deletion t where org_id = $1 order by 1`, [orgId]),
-  ]);
+  const [provider_key, usage, published_clip, team, member, invitation, deletion] =
+    await Promise.all([
+      q(`select to_jsonb(t)::text as row from provider_key t where org_id = $1 order by 1`, [
+        orgId,
+      ]),
+      q(`select to_jsonb(t)::text as row from usage t where org_id = $1 order by 1`, [orgId]),
+      q(`select to_jsonb(t)::text as row from published_clip t where org_id = $1 order by 1`, [
+        orgId,
+      ]),
+      q(`select to_jsonb(t)::text as row from team t where org_id = $1 order by 1`, [orgId]),
+      q(`select to_jsonb(t)::text as row from member t where org_id = $1 order by 1`, [orgId]),
+      q(`select to_jsonb(t)::text as row from invitation t where org_id = $1 order by 1`, [orgId]),
+      q(`select to_jsonb(t)::text as row from deletion t where org_id = $1 order by 1`, [orgId]),
+    ]);
   const [brief_version, team_member] = await Promise.all([
     q(
       `select to_jsonb(t)::text as row from brief_version t
@@ -107,6 +114,7 @@ export async function snapshot(db: SqlClient, orgId: string): Promise<OrgSnapsho
     last_opened,
     provider_key,
     usage,
+    published_clip,
     team,
     member,
     invitation,

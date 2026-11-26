@@ -4,9 +4,19 @@ import type { ImageGeneratorPort } from "../../ports/out/ImageGeneratorPort.js";
 import { err, ok } from "@campaignfoundry/shared";
 import {
   GenerateCampaignUseCase,
+  CLASSIC_VIDEO_LAYER_ERROR,
   unionSafeInsets,
   unionSizeInsets,
 } from "../GenerateCampaignUseCase.use-case.js";
+import { assembleHtml } from "../../../domain/value-objects/markup-assembler.js";
+import { PUBLISH_PLACEHOLDER_URL_PREFIX } from "../../../domain/value-objects/video-placeholders.js";
+import {
+  AD_CLIP_MAX_BYTES,
+  AD_CLIP_MAX_DURATION_SECONDS,
+  InvalidAdClipError,
+  validateAdClip,
+} from "../../../domain/value-objects/mp4-clip.js";
+import type { VideoCompositorPort } from "../../ports/out/VideoCompositorPort.js";
 import type {
   GenerateCampaignDeps,
   VariationPlanner,
@@ -40,6 +50,8 @@ import {
   fakeImageGenerator,
   fakePlan,
   fakePlanner,
+  fakePublicAdMedia,
+  fakePublishedClipRecord,
   fakeSceneAssets,
   fakeVariant,
   fakeVideoCompositor,
@@ -2652,5 +2664,557 @@ describe("GenerateCampaignUseCase — the creative-type gate (D136's baseline lo
     if (result.success) return;
     expect(result.error.message).toContain("collage");
     expect(result.error.message).toContain("image-text");
+  });
+});
+
+describe("GenerateCampaignUseCase — video placeholder bundles (CFAR6C2)", () => {
+  /** An image-html template with extra `video` layers materialised in. */
+  const videoTemplate = (videoLayers: BriefTemplate["layers"]): BriefTemplate => ({
+    ...CANONICAL_TEMPLATES["image-html"],
+    id: "canonical-image-html",
+    layers: [...CANONICAL_TEMPLATES["image-html"].layers, ...videoLayers],
+  });
+
+  /**
+   * Records every `saveToDirectory` payload (the shared recording exporter
+   * keeps only lengths, and these tests assert on bytes).
+   */
+  const captureSaved = (d: GenerateCampaignDeps) => {
+    const captures: Array<{ path: string; data: Uint8Array }> = [];
+    const inner = d.exporter.saveToDirectory.bind(d.exporter);
+    d.exporter.saveToDirectory = vi.fn(async (buf: Uint8Array, path: string) => {
+      captures.push({ path, data: buf });
+      await inner(buf, path);
+    });
+    return captures;
+  };
+
+  const indexHtmlOf = (captures: Array<{ path: string; data: Uint8Array }>) => {
+    const bundle = captures.find((c) => c.path.endsWith("index.html"));
+    expect(bundle).toBeDefined();
+    return bundle as { path: string; data: Uint8Array };
+  };
+
+  test("a classic brief with a video-type creative carrying an enabled video layer is NOT refused by the video gate", async () => {
+    // The canonical video template's first layer is an enabled `video` layer;
+    // the refusal is scoped to `image-html` classics, so this run proceeds.
+    const d = deps();
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({ template: templateFromCanonical("short-video") }),
+    );
+    const message = result.success ? "" : result.error.message;
+    expect(message).not.toBe(CLASSIC_VIDEO_LAYER_ERROR);
+  });
+
+  test("a classic image-html brief with an enabled video layer is refused before any port runs", async () => {
+    const d = deps();
+    const result = await new GenerateCampaignUseCase(d).execute(
+      baseBrief({ template: videoTemplate([{ id: "video-1", kind: "video" }]) }),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.message).toBe(CLASSIC_VIDEO_LAYER_ERROR);
+    expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+    expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
+    expect(d.exporter.saveToDirectory).not.toHaveBeenCalled();
+  });
+
+  test("a variation image-html brief with one enabled video layer emits the SLOT's own placeholder URL in index.html", async () => {
+    // CFAR6E: the video-layer path now validates the clip bytes, so the fake
+    // port hands back a tiny well-formed H.264 clip instead of opaque bytes.
+    const d = deps({
+      planner: fakePlanner(fakePlan([fakeVariant()])),
+      videoCompositor: validClipVideoCompositor(),
+    });
+    const captures = captureSaved(d);
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({
+        template: videoTemplate([
+          { id: "video-1", kind: "video", props: { render: "shoe/1x1/v0.mp4" } },
+        ]),
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.assets.length).toBeGreaterThan(0);
+    const bundle = indexHtmlOf(captures);
+    const html = new TextDecoder().decode(bundle.data);
+    expect(html).toContain("<video");
+    // CFAR6-slot: the placeholder is the slot's own clip key (alpha @ 1:1,
+    // variant 0) — the same key the clip was saved at, campaign segment off —
+    // never the brief-authored render selector, whatever it names.
+    expect(html).toContain(`src="${PUBLISH_PLACEHOLDER_URL_PREFIX}alpha/1x1/v0.mp4"`);
+    expect(html).not.toContain(`${PUBLISH_PLACEHOLDER_URL_PREFIX}shoe/`);
+    // HL-D6: the bundle must fit a realistic profile weight budget.
+    expect(bundle.data.byteLength).toBeLessThan(100_000);
+  });
+
+  test("a variation image-html brief with two enabled video layers maps every selector to the SLOT's own placeholder", async () => {
+    const d = deps({
+      planner: fakePlanner(fakePlan([fakeVariant()])),
+      videoCompositor: validClipVideoCompositor(),
+    });
+    const captures = captureSaved(d);
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({
+        template: videoTemplate([
+          { id: "video-1", kind: "video", props: { render: "shoe/1x1/v0.mp4" } },
+          { id: "video-2", kind: "video", props: { render: "shoe/9x16/v1.mp4" } },
+        ]),
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const html = new TextDecoder().decode(indexHtmlOf(captures).data);
+    // CFAR6-slot: the render selectors key the layers, but every placeholder
+    // URL is this slot's own clip — one clip per slot, never a brief path.
+    expect(html).toContain(`src="${PUBLISH_PLACEHOLDER_URL_PREFIX}alpha/1x1/v0.mp4"`);
+    expect(html).not.toContain(`${PUBLISH_PLACEHOLDER_URL_PREFIX}shoe/`);
+  });
+
+  test("a brief whose render points at another mp4 of the campaign cannot make the bundle reference that other clip", async () => {
+    // The slot is alpha @ 1:1 variant 0; the render names the 9:16 variant-1
+    // clip — a well-formed selector, so brief validation accepts it. The
+    // placeholder must still carry the slot's own key (CFAR6-slot).
+    const d = deps({
+      planner: fakePlanner(fakePlan([fakeVariant()])),
+      videoCompositor: validClipVideoCompositor(),
+    });
+    const captures = captureSaved(d);
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({
+        template: videoTemplate([
+          { id: "video-1", kind: "video", props: { render: "beta/9x16/v1.mp4" } },
+        ]),
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const html = new TextDecoder().decode(indexHtmlOf(captures).data);
+    expect(html).toContain(`src="${PUBLISH_PLACEHOLDER_URL_PREFIX}alpha/1x1/v0.mp4"`);
+    expect(html).not.toContain(`${PUBLISH_PLACEHOLDER_URL_PREFIX}beta/`);
+    // And the clip was composited and saved at the slot's own path.
+    expect(captures.some((c) => c.path === "camp/alpha/1x1/v0.mp4")).toBe(true);
+  });
+
+  test("a variation image-html brief with no video layer produces index.html byte-identical to a direct assembleHtml without videoSources", async () => {
+    const d = deps({ planner: fakePlanner(fakePlan([fakeVariant()])) });
+    const captures = captureSaved(d);
+    const template: BriefTemplate = {
+      ...CANONICAL_TEMPLATES["image-html"],
+      id: "canonical-image-html",
+    };
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ template }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const bundle = indexHtmlOf(captures);
+    // The variant reads: ratio 1:1, tone bold, no headline override, no
+    // style, no clickDestination — the same inputs the run assembled with.
+    const direct = assembleHtml({
+      layers: template.layers,
+      headline: "Hello",
+      canvas: { ratio: "1:1" },
+      brandColor: "#1473E6",
+      tone: "bold",
+    });
+    expect(new Uint8Array(bundle.data)).toEqual(direct.bytes);
+  });
+
+  test("a variation image-html brief with a DISABLED video layer renders no video markup and skips the video gate", async () => {
+    const d = deps({ planner: fakePlanner(fakePlan([fakeVariant()])) });
+    const captures = captureSaved(d);
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({
+        template: videoTemplate([
+          { id: "video-off", kind: "video", enabled: false, props: { render: "shoe/1x1/v0.mov" } },
+        ]),
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const html = new TextDecoder().decode(indexHtmlOf(captures).data);
+    expect(html).not.toContain("<video");
+    expect(html).not.toContain(PUBLISH_PLACEHOLDER_URL_PREFIX);
+  });
+
+  const invalidVideoLayers: Array<[string, BriefTemplate["layers"][number]]> = [
+    ["a missing render selector", { id: "video-1", kind: "video" }],
+    [
+      "a null render selector",
+      { id: "video-1", kind: "video", props: { render: null as unknown as string } },
+    ],
+    [
+      "a non-string render selector",
+      { id: "video-1", kind: "video", props: { render: 7 as unknown as string } },
+    ],
+    [
+      "an invalid render selector",
+      { id: "video-1", kind: "video", props: { render: "shoe/1x1/v0.mov" } },
+    ],
+  ];
+  test.each(invalidVideoLayers)(
+    "a variation image-html brief with %s is refused before any port runs",
+    async (_label, videoLayer) => {
+      const d = deps({ planner: fakePlanner(fakePlan([fakeVariant()])) });
+      const result = await new GenerateCampaignUseCase(d).execute(
+        variationBrief({ template: videoTemplate([videoLayer]) }),
+      );
+      expect(result.success).toBe(false);
+      expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
+      expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
+      expect(d.exporter.saveToDirectory).not.toHaveBeenCalled();
+    },
+  );
+});
+
+// ---- CFAR6E clip-byte fixtures ------------------------------------------------
+// Copied box builders from `mp4-clip.test.ts` (CFAR6B1): the html video-layer
+// path validates the composited bytes, so the fake port must hand back a clip
+// that actually passes `validateAdClip`.
+
+/** Big-endian uint32 bytes. */
+function u32(n: number): number[] {
+  return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+}
+
+/** 4-byte ASCII field, space-padded (box types and FourCCs). */
+function type4(value: string): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < 4; i++) out.push(i < value.length ? value.charCodeAt(i) : 0x20);
+  return out;
+}
+
+/** ISO BMFF box: header + payload. */
+function box(type: string, payload: number[]): number[] {
+  return [...u32(payload.length + 8), ...type4(type), ...payload];
+}
+
+function ftyp(): number[] {
+  return box("ftyp", [...type4("isom"), ...u32(0), ...["isom", "mp41"].map(type4).flat()]);
+}
+
+/** `mvhd` FullBox payload, version 0: version+flags, creation, modification, timescale, duration. */
+function mvhd(timescale: number, duration: number): number[] {
+  return box("mvhd", [
+    0,
+    0,
+    0,
+    0, // version 0 + flags
+    0,
+    0,
+    0,
+    0, // creation
+    0,
+    0,
+    0,
+    0, // modification
+    ...u32(timescale),
+    ...u32(duration),
+  ]);
+}
+
+function hdlr(handler: string): number[] {
+  return box("hdlr", [0, 0, 0, 0, 0, 0, 0, 0, ...type4(handler), ...new Array<number>(12).fill(0)]);
+}
+
+/** Visual sample entry (`avc1`/`avc3`/`hvc1`): 78 fixed bytes + child boxes. */
+function sampleEntry(type: string, children: number[][]): number[] {
+  return box(type, [...new Array<number>(78).fill(0), ...children.flat()]);
+}
+
+function avcC(): number[] {
+  // Minimal plausible AVCDecoderConfigurationRecord; the validator only
+  // requires the box type to be present.
+  return box("avcC", [1, 100, 0, 28, 255, 225, 0, 24, 103, 100, 0, 40, 172, 52, 193]);
+}
+
+function stsd(entry: number[]): number[] {
+  return box("stsd", [0, 0, 0, 0, ...u32(1), ...entry]);
+}
+
+function stbl(children: number[][]): number[] {
+  return box("stbl", children.flat());
+}
+
+function minf(children: number[][]): number[] {
+  return box("minf", children.flat());
+}
+
+function mdia(children: number[][]): number[] {
+  return box("mdia", children.flat());
+}
+
+function trak(children: number[][]): number[] {
+  return box("trak", children.flat());
+}
+
+function videoTrak(entryType: string): number[] {
+  return trak([
+    mdia([
+      hdlr("vide"),
+      minf([stbl([stsd(sampleEntry(entryType, entryType.startsWith("avc") ? [avcC()] : []))])]),
+    ]),
+  ]);
+}
+
+function moov(children: number[][]): number[] {
+  return box("moov", children.flat());
+}
+
+/** ftyp + moov(mvhd + one `<entryType>` video trak). */
+function clipBytes(
+  entryType: string,
+  opts?: { timescale?: number; duration?: number },
+): Uint8Array {
+  return new Uint8Array([
+    ...ftyp(),
+    ...moov([mvhd(opts?.timescale ?? 600, opts?.duration ?? 600), videoTrak(entryType)]),
+  ]);
+}
+
+/** A tiny well-formed H.264 clip — passes `validateAdClip`. */
+function tinyClip(opts?: { timescale?: number; duration?: number }): Uint8Array {
+  return clipBytes("avc1", opts);
+}
+
+/**
+ * A video-port fake whose `compositeVideo` returns the given clip bytes — by
+ * default a valid H.264 clip, since the html video-layer path validates them.
+ */
+function validClipVideoCompositor(video: Uint8Array = tinyClip()): VideoCompositorPort {
+  return {
+    ...fakeVideoCompositor(),
+    compositeVideo: vi.fn(async () => ({
+      video,
+      poster: new Uint8Array([4, 5, 6]),
+      sampledFrames: [new Uint8Array([1]), new Uint8Array([2])],
+      logoApplied: true,
+    })),
+  };
+}
+
+describe("GenerateCampaignUseCase — video-layer clips in image-html slots (CFAR6E)", () => {
+  /** An image-html template with one enabled `video` layer materialised in. */
+  const htmlVideoTemplate = (): BriefTemplate => ({
+    ...CANONICAL_TEMPLATES["image-html"],
+    id: "canonical-image-html",
+    layers: [
+      ...CANONICAL_TEMPLATES["image-html"].layers,
+      { id: "video-1", kind: "video", props: { render: "shoe/1x1/v0.mp4" } },
+    ],
+  });
+
+  const run = async (
+    briefOver: Partial<CampaignBrief> = {},
+    depOver: Partial<GenerateCampaignDeps> = {},
+  ) => {
+    const d = deps({
+      planner: fakePlanner(fakePlan([fakeVariant()])),
+      videoCompositor: validClipVideoCompositor(),
+      ...depOver,
+    });
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({ template: htmlVideoTemplate(), ...briefOver }),
+    );
+    return { d, result };
+  };
+
+  const savedPaths = (d: GenerateCampaignDeps) =>
+    (d.exporter as RecordingExporter).saved.map((s) => s.path);
+
+  test("the fixture clip passes validateAdClip, so the fake port hands back real evidence", () => {
+    expect(() => validateAdClip(tinyClip())).not.toThrow();
+    expect(tinyClip({ duration: 31 * 600 }).byteLength).toBeLessThan(AD_CLIP_MAX_BYTES);
+  });
+
+  test("an enabled video layer composites the clip once at the slot's ratio, validates it, and saves it at videoPath without removing it", async () => {
+    const { d, result } = await run();
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(d.videoCompositor.compositeVideo).toHaveBeenCalledTimes(1);
+    const request = vi.mocked(d.videoCompositor.compositeVideo).mock.calls[0][0];
+    expect(request).toMatchObject({
+      canvas: { ratio: "1:1" },
+      durationSec: DEFAULT_DURATION_SEC,
+      fps: 30,
+      motion: "ken-burns-in",
+      sampleAt: [0, 0.25, 0.5, 0.75, 1],
+    });
+    expect("timeline" in request).toBe(false);
+    expect("backgrounds" in request).toBe(false);
+    expect("audio" in request).toBe(false);
+
+    const videoPath = "camp/alpha/1x1/v0.mp4";
+    expect(savedPaths(d)).toContain(videoPath);
+    // The video-layer slot keeps its clip; nothing removes it.
+    expect((d.exporter as RecordingExporter).removed).toEqual([]);
+    expect(result.value.assets[0]).toMatchObject({
+      format: "html",
+      outputPath: "camp/alpha/1x1/v0.png",
+      videoPath,
+    });
+  });
+
+  test("a video-layer slot's ratio joins motionRatios, so its beat scenes resolve (and its music bed resolves) at the slot's canvas", async () => {
+    const SCENE = "assets/inputs/camp/scene-cfar6e.png";
+    const AUDIO = "assets/inputs/camp/bed-cfar6e.mp3";
+    const timeline: CopyTimeline = {
+      transition: "cut",
+      keyBeat: 1,
+      beats: [{ text: "Alpha", weight: 1, background: SCENE }],
+    };
+    const sceneAssets = {
+      resolveScene: vi.fn(
+        async (path: string, ratio: AspectRatio) =>
+          new Uint8Array(Buffer.from(`${path}::${ratio.value}`, "utf8")),
+      ),
+    };
+    const audioAssets = fakeAudioAssets();
+    const { d, result } = await run(
+      {
+        copy: { timeline },
+        audio: { path: AUDIO, rights: { licenceId: "lic-1", source: "acme" } },
+      },
+      { sceneAssets, audioAssets },
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    // The slot's ratio was in motionRatios: the scene cover-fits at 1:1, not
+    // at some ground frame, and the audio resolved once for the run.
+    expect(sceneAssets.resolveScene).toHaveBeenCalledTimes(1);
+    expect(sceneAssets.resolveScene).toHaveBeenCalledWith(
+      SCENE,
+      expect.objectContaining({ value: "1:1" }),
+    );
+    expect(audioAssets.resolveAudio).toHaveBeenCalledWith(AUDIO);
+
+    const request = vi.mocked(d.videoCompositor.compositeVideo).mock.calls[0][0];
+    expect(request.timeline).toEqual(timeline);
+    expect(request.backgrounds).toEqual({
+      [SCENE]: new Uint8Array(Buffer.from(`${SCENE}::1:1`, "utf8")),
+    });
+    expect(request.audio).toEqual(new Uint8Array(Buffer.from(AUDIO, "utf8")));
+  });
+
+  test("an image-html slot WITHOUT a video layer does not join motionRatios — no scene resolves for its ratio", async () => {
+    const SCENE = "assets/inputs/camp/scene-cfar6e.png";
+    const timeline: CopyTimeline = {
+      transition: "cut",
+      keyBeat: 1,
+      beats: [{ text: "Alpha", weight: 1, background: SCENE }],
+    };
+    const sceneAssets = fakeSceneAssets();
+    const d = deps({ planner: fakePlanner(fakePlan([fakeVariant()])), sceneAssets });
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({ copy: { timeline } }),
+    );
+    expect(result.success).toBe(true);
+    expect(sceneAssets.resolveScene).not.toHaveBeenCalled();
+  });
+
+  test("durationSec is capped at the 30 s ad-clip cap when the variant asks for longer", async () => {
+    const { d, result } = await run(
+      {},
+      { planner: fakePlanner(fakePlan([fakeVariant({ durationSec: 45 })])) },
+    );
+    expect(result.success).toBe(true);
+    const request = vi.mocked(d.videoCompositor.compositeVideo).mock.calls[0][0];
+    expect(request.durationSec).toBe(AD_CLIP_MAX_DURATION_SECONDS);
+    expect(request.durationSec).not.toBe(45);
+  });
+
+  test("an image-html slot without a video layer composites no clip, removes any stale mp4, and omits videoPath", async () => {
+    const d = deps({ planner: fakePlanner(fakePlan([fakeVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({
+        template: { ...CANONICAL_TEMPLATES["image-html"], id: "canonical-image-html" },
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(d.videoCompositor.compositeVideo).not.toHaveBeenCalled();
+    expect((d.exporter as RecordingExporter).removed).toEqual(["camp/alpha/1x1/v0.mp4"]);
+    expect(result.value.assets[0]).not.toHaveProperty("videoPath");
+    expect(result.value.assets[0].format).toBe("html");
+  });
+
+  test("a DISABLED video layer renders no clip and the row stays videoPath-free", async () => {
+    const template: BriefTemplate = {
+      ...htmlVideoTemplate(),
+      layers: [
+        ...CANONICAL_TEMPLATES["image-html"].layers,
+        { id: "video-off", kind: "video", enabled: false, props: { render: "shoe/1x1/v0.mp4" } },
+      ],
+    };
+    const d = deps({ planner: fakePlanner(fakePlan([fakeVariant()])) });
+    const result = await new GenerateCampaignUseCase(d).execute(variationBrief({ template }));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(d.videoCompositor.compositeVideo).not.toHaveBeenCalled();
+    expect((d.exporter as RecordingExporter).removed).toEqual(["camp/alpha/1x1/v0.mp4"]);
+    expect(result.value.assets[0]).not.toHaveProperty("videoPath");
+  });
+
+  test("a re-roll of a former video-layer slot into a video-layer-free template clears the stale mp4", async () => {
+    const first = deps({
+      planner: fakePlanner(fakePlan([fakeVariant()])),
+      videoCompositor: validClipVideoCompositor(),
+    });
+    const firstRun = await new GenerateCampaignUseCase(first).execute(
+      variationBrief({ template: htmlVideoTemplate() }),
+    );
+    expect(firstRun.success).toBe(true);
+    if (!firstRun.success) return;
+    expect(firstRun.value.assets[0].videoPath).toBe("camp/alpha/1x1/v0.mp4");
+
+    const second = deps({ planner: fakePlanner(fakePlan([fakeVariant()])) });
+    const secondRun = await new GenerateCampaignUseCase(second).execute(variationBrief());
+    expect(secondRun.success).toBe(true);
+    if (!secondRun.success) return;
+    expect((second.exporter as RecordingExporter).removed).toContain("camp/alpha/1x1/v0.mp4");
+    expect(secondRun.value.assets[0]).not.toHaveProperty("videoPath");
+  });
+
+  test("rejects with InvalidAdClipError on HEVC clip and saves nothing for videoPath", async () => {
+    const d = deps({
+      planner: fakePlanner(fakePlan([fakeVariant()])),
+      videoCompositor: validClipVideoCompositor(clipBytes("hvc1")),
+    });
+    await expect(
+      new GenerateCampaignUseCase(d).execute(variationBrief({ template: htmlVideoTemplate() })),
+    ).rejects.toThrow(InvalidAdClipError);
+    // The rejection happened before anything was written for the clip.
+    expect(savedPaths(d)).not.toContain("camp/alpha/1x1/v0.mp4");
+  });
+
+  test("rejects with InvalidAdClipError on oversize clip and saves nothing for videoPath", async () => {
+    const oversize = new Uint8Array(AD_CLIP_MAX_BYTES + 1);
+    const d = deps({
+      planner: fakePlanner(fakePlan([fakeVariant()])),
+      videoCompositor: validClipVideoCompositor(oversize),
+    });
+    await expect(
+      new GenerateCampaignUseCase(d).execute(variationBrief({ template: htmlVideoTemplate() })),
+    ).rejects.toThrow(InvalidAdClipError);
+    expect(savedPaths(d)).not.toContain("camp/alpha/1x1/v0.mp4");
+  });
+
+  test("propagates compositeVideo rejection without saving videoPath", async () => {
+    const compositor: VideoCompositorPort = {
+      ...fakeVideoCompositor(),
+      compositeVideo: vi.fn(async () => {
+        throw new Error("compositor exploded");
+      }),
+    };
+    const d = deps({
+      planner: fakePlanner(fakePlan([fakeVariant()])),
+      videoCompositor: compositor,
+    });
+    await expect(
+      new GenerateCampaignUseCase(d).execute(variationBrief({ template: htmlVideoTemplate() })),
+    ).rejects.toThrow("compositor exploded");
+    expect(savedPaths(d)).not.toContain("camp/alpha/1x1/v0.mp4");
   });
 });

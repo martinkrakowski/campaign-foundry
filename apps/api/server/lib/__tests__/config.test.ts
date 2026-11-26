@@ -25,6 +25,8 @@ import {
   objectStore,
   objectStoreSettings,
   outputRoot,
+  PublicMediaConfigError,
+  publicMediaSettings,
   purgeGraceHours,
   purgeReconcile,
   storeBackend,
@@ -1078,5 +1080,155 @@ describe("objectStoreSettings (PT-4a, D201)", () => {
     // refusal above is the shape under test and not simply the only outcome.
     setAll({ S3_SECRET_ACCESS_KEY: secret, S3_ACCESS_KEY_ID: "MARKER-KEYID-7f3a" });
     expect(capture(() => objectStoreSettings())).toBeUndefined();
+  });
+});
+
+describe("publicMediaSettings (PT-4k)", () => {
+  const VARS = [
+    "S3_ENDPOINT",
+    "S3_REGION",
+    "S3_BUCKET",
+    "PUBLIC_MEDIA_BUCKET",
+    "PUBLIC_MEDIA_BASE_URL",
+    "PUBLIC_MEDIA_ACCESS_KEY_ID",
+    "PUBLIC_MEDIA_SECRET_ACCESS_KEY",
+    "PUBLIC_MEDIA_ENDPOINT",
+    "PUBLIC_MEDIA_REGION",
+  ] as const;
+  const saved = Object.fromEntries(VARS.map((name) => [name, process.env[name]]));
+
+  const setAll = (
+    overrides: Partial<Record<(typeof VARS)[number], string | undefined>> = {},
+  ): void => {
+    const values: Record<string, string | undefined> = {
+      S3_ENDPOINT: "http://seaweedfs-s3:8333",
+      S3_REGION: "us-east-1",
+      S3_BUCKET: "campaign-foundry-staging",
+      PUBLIC_MEDIA_BUCKET: "campaign-foundry-public",
+      PUBLIC_MEDIA_BASE_URL: "https://media.example",
+      PUBLIC_MEDIA_ACCESS_KEY_ID: "public-key",
+      PUBLIC_MEDIA_SECRET_ACCESS_KEY: "public-secret",
+      PUBLIC_MEDIA_ENDPOINT: undefined,
+      PUBLIC_MEDIA_REGION: undefined,
+      ...overrides,
+    };
+    for (const name of VARS) {
+      const value = values[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  };
+
+  afterEach(() => {
+    for (const name of VARS) {
+      if (saved[name] === undefined) delete process.env[name];
+      else process.env[name] = saved[name];
+    }
+  });
+
+  test("reads all six, falling back to S3_ENDPOINT and S3_REGION", () => {
+    setAll();
+    expect(publicMediaSettings()).toEqual({
+      endpoint: "http://seaweedfs-s3:8333",
+      region: "us-east-1",
+      bucket: "campaign-foundry-public",
+      baseUrl: "https://media.example",
+      accessKeyId: "public-key",
+      secretAccessKey: "public-secret",
+    });
+    setAll({ PUBLIC_MEDIA_ENDPOINT: "http://media-s3:8333/", PUBLIC_MEDIA_REGION: "eu-west-1" });
+    expect(publicMediaSettings()?.endpoint).toBe("http://media-s3:8333");
+    expect(publicMediaSettings()?.region).toBe("eu-west-1");
+  });
+
+  test("is undefined when both bucket and base URL are unset or blank", () => {
+    setAll({
+      PUBLIC_MEDIA_BUCKET: undefined,
+      PUBLIC_MEDIA_BASE_URL: undefined,
+      PUBLIC_MEDIA_ACCESS_KEY_ID: undefined,
+      PUBLIC_MEDIA_SECRET_ACCESS_KEY: undefined,
+    });
+    expect(publicMediaSettings()).toBeUndefined();
+    setAll({
+      PUBLIC_MEDIA_BUCKET: "   ",
+      PUBLIC_MEDIA_BASE_URL: "",
+      PUBLIC_MEDIA_ACCESS_KEY_ID: undefined,
+      PUBLIC_MEDIA_SECRET_ACCESS_KEY: undefined,
+    });
+    expect(publicMediaSettings()).toBeUndefined();
+  });
+
+  test("a stray variable with the feature off names it rather than half-configuring", () => {
+    setAll({ PUBLIC_MEDIA_BUCKET: undefined, PUBLIC_MEDIA_BASE_URL: undefined });
+    process.env.PUBLIC_MEDIA_ACCESS_KEY_ID = "public-key";
+    expect(() => publicMediaSettings()).toThrow("PUBLIC_MEDIA_ACCESS_KEY_ID is set");
+  });
+
+  test("partial configuration names the missing variable", () => {
+    setAll({ PUBLIC_MEDIA_BUCKET: undefined });
+    expect(() => publicMediaSettings()).toThrow("PUBLIC_MEDIA_BUCKET is required");
+    setAll({ PUBLIC_MEDIA_BASE_URL: undefined });
+    expect(() => publicMediaSettings()).toThrow("PUBLIC_MEDIA_BASE_URL is required");
+  });
+
+  test("sharing the private bucket is refused by name", () => {
+    setAll({ PUBLIC_MEDIA_BUCKET: "campaign-foundry-staging" });
+    expect(() => publicMediaSettings()).toThrow(
+      "PUBLIC_MEDIA_BUCKET must be a dedicated public-read bucket, not S3_BUCKET.",
+    );
+  });
+
+  test("credentials are required, with no fallback to the private key pair", () => {
+    setAll({ PUBLIC_MEDIA_ACCESS_KEY_ID: undefined });
+    expect(() => publicMediaSettings()).toThrow("PUBLIC_MEDIA_ACCESS_KEY_ID is required");
+    setAll({ PUBLIC_MEDIA_SECRET_ACCESS_KEY: undefined });
+    expect(() => publicMediaSettings()).toThrow("PUBLIC_MEDIA_SECRET_ACCESS_KEY is required");
+  });
+
+  test("endpoint and region are required when neither the PUBLIC_MEDIA_ nor the S3_ one is set", () => {
+    setAll({ S3_ENDPOINT: undefined });
+    expect(() => publicMediaSettings()).toThrow("PUBLIC_MEDIA_ENDPOINT is required");
+    setAll({ S3_REGION: undefined });
+    expect(() => publicMediaSettings()).toThrow("PUBLIC_MEDIA_REGION is required");
+  });
+
+  test("a malformed base URL or endpoint is refused without echoing the value", () => {
+    for (const [name, value] of [
+      ["PUBLIC_MEDIA_BASE_URL", "media.example"],
+      ["PUBLIC_MEDIA_BASE_URL", "ftp://media.example"],
+      ["PUBLIC_MEDIA_BASE_URL", "https://media.example?a=1"],
+      ["PUBLIC_MEDIA_BASE_URL", "https://user:secret@media.example"],
+      ["PUBLIC_MEDIA_ENDPOINT", "http://media-s3:8333?x=1"],
+      ["S3_ENDPOINT", "not-a-url"],
+    ] as const) {
+      setAll({ [name]: value });
+      let thrown: unknown;
+      try {
+        publicMediaSettings();
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(PublicMediaConfigError);
+      expect((thrown as Error).message).not.toContain("secret");
+      expect((thrown as Error).message).not.toContain(String(value));
+    }
+  });
+
+  test("an http base URL is refused and an https one accepted (CFAR6-https)", () => {
+    setAll({ PUBLIC_MEDIA_BASE_URL: "http://media.example" });
+    let thrown: unknown;
+    try {
+      publicMediaSettings();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PublicMediaConfigError);
+    expect((thrown as Error).message).toContain("PUBLIC_MEDIA_BASE_URL must be an https origin");
+    // The value is never echoed, for the same reason every message here quotes
+    // no value: a base URL carries a hostname.
+    expect((thrown as Error).message).not.toContain("media.example");
+
+    setAll({ PUBLIC_MEDIA_BASE_URL: "https://media.example" });
+    expect(publicMediaSettings()?.baseUrl).toBe("https://media.example");
   });
 });

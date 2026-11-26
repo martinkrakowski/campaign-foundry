@@ -692,6 +692,27 @@ describe("derive.ts", () => {
         expect(after?.bytes).toBeGreaterThan(before?.bytes ?? 0);
       });
 
+      test("a video layer is measured in preview mode without a render selector or videoSources", () => {
+        const layers = [
+          picture(),
+          copy(),
+          { id: "shade", kind: "shade" as const },
+          { id: "logo", kind: "logo" as const },
+          { id: "video", kind: "video" as const },
+        ];
+        const state = meterState({ template: htmlTemplate(layers) });
+        const expected = assembleHtml({
+          layers,
+          headline: "Stay wild",
+          canvas: { size: "300x250" },
+          brandColor: "#1473E6",
+          style: state.style,
+          videoPreview: true,
+        }).byteLength;
+        expect(() => htmlWeightReading(state)).not.toThrow();
+        expect(htmlWeightReading(state)?.bytes).toBe(expected);
+      });
+
       test("the figure is the LARGEST across the selected sizes", () => {
         const layers = htmlTemplate().layers;
         const state = meterState({ sizes: ["320x50", "300x600"] });

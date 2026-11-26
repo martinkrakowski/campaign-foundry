@@ -207,6 +207,161 @@ export function objectStoreSettings(): S3Settings | undefined {
 }
 
 /** Who a request is authenticated by (PT-1a, D174b). */
+/**
+ * The public ad-media store's coordinates (PT-4k), or `undefined` when public
+ * media is not configured.
+ *
+ * These settings describe a SECOND bucket, separate from `S3_BUCKET`: the
+ * public-read one published ad media is served from. Sharing the private
+ * bucket would turn every published key into a world-readable copy of a
+ * campaign asset, so the equality is refused by name. The credentials are the
+ * public bucket's own — an app key scoped to it — and there is no fallback to
+ * `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`, because a key scoped to the
+ * private bucket silently mis-scoped on the public one is worse than a boot
+ * failure that names the variable.
+ */
+export class PublicMediaConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PublicMediaConfigError";
+  }
+}
+
+/** The public ad-media bucket's coordinates, all six read from `PUBLIC_MEDIA_*`. */
+export interface PublicMediaSettings {
+  /** `PUBLIC_MEDIA_ENDPOINT` (falling back to `S3_ENDPOINT`): where requests are signed. */
+  readonly endpoint: string;
+  /** `PUBLIC_MEDIA_REGION` (falling back to `S3_REGION`): the SigV4 region. */
+  readonly region: string;
+  /** `PUBLIC_MEDIA_BUCKET`: the dedicated public-read bucket. */
+  readonly bucket: string;
+  /** `PUBLIC_MEDIA_BASE_URL`: the origin published URLs are joined onto. */
+  readonly baseUrl: string;
+  /** `PUBLIC_MEDIA_ACCESS_KEY_ID`: the public bucket's own app key. */
+  readonly accessKeyId: string;
+  /** `PUBLIC_MEDIA_SECRET_ACCESS_KEY`: that key's secret. Never logged, never echoed. */
+  readonly secretAccessKey: string;
+}
+
+/** Every `PUBLIC_MEDIA_*` variable, in the order a problem is reported in. */
+const PUBLIC_MEDIA_VARIABLES = [
+  "PUBLIC_MEDIA_BUCKET",
+  "PUBLIC_MEDIA_BASE_URL",
+  "PUBLIC_MEDIA_ACCESS_KEY_ID",
+  "PUBLIC_MEDIA_SECRET_ACCESS_KEY",
+  "PUBLIC_MEDIA_ENDPOINT",
+  "PUBLIC_MEDIA_REGION",
+] as const;
+
+/** A variable's value, or undefined when it is unset or blank. */
+function publicMediaValue(name: string): string | undefined {
+  const value = process.env[name];
+  if (value === undefined || value.trim() === "") return undefined;
+  return value;
+}
+
+/**
+ * The public media settings, or `undefined` when the feature is off.
+ *
+ * Off means BOTH `PUBLIC_MEDIA_BUCKET` and `PUBLIC_MEDIA_BASE_URL` are
+ * absent — and when only one of them is set, or a credential is missing while
+ * the bucket is named, the refusal names the VARIABLE and never a value: a
+ * base URL carries a hostname and a key pair is a credential, for the same
+ * reason `objectStoreSettings()` quotes nothing.
+ */
+export function publicMediaSettings(): PublicMediaSettings | undefined {
+  loadEnv();
+  const bucket = publicMediaValue("PUBLIC_MEDIA_BUCKET");
+  const baseUrl = publicMediaValue("PUBLIC_MEDIA_BASE_URL");
+  const accessKeyId = publicMediaValue("PUBLIC_MEDIA_ACCESS_KEY_ID");
+  const secretAccessKey = publicMediaValue("PUBLIC_MEDIA_SECRET_ACCESS_KEY");
+  const endpoint = publicMediaValue("PUBLIC_MEDIA_ENDPOINT");
+  const region = publicMediaValue("PUBLIC_MEDIA_REGION");
+
+  if (bucket === undefined && baseUrl === undefined) {
+    for (const name of [
+      "PUBLIC_MEDIA_ACCESS_KEY_ID",
+      "PUBLIC_MEDIA_SECRET_ACCESS_KEY",
+      "PUBLIC_MEDIA_ENDPOINT",
+      "PUBLIC_MEDIA_REGION",
+    ] as const) {
+      if (publicMediaValue(name) !== undefined) {
+        throw new PublicMediaConfigError(
+          `${name} is set but the public media feature is off: set PUBLIC_MEDIA_BUCKET and PUBLIC_MEDIA_BASE_URL too, or remove the stray variable.`,
+        );
+      }
+    }
+    return undefined;
+  }
+  if (bucket === undefined) {
+    throw new PublicMediaConfigError(
+      "PUBLIC_MEDIA_BUCKET is required when PUBLIC_MEDIA_BASE_URL is set.",
+    );
+  }
+  if (baseUrl === undefined) {
+    throw new PublicMediaConfigError(
+      "PUBLIC_MEDIA_BASE_URL is required when PUBLIC_MEDIA_BUCKET is set.",
+    );
+  }
+  if (bucket === process.env.S3_BUCKET) {
+    throw new PublicMediaConfigError(
+      "PUBLIC_MEDIA_BUCKET must be a dedicated public-read bucket, not S3_BUCKET.",
+    );
+  }
+  if (accessKeyId === undefined) {
+    throw new PublicMediaConfigError(
+      "PUBLIC_MEDIA_ACCESS_KEY_ID is required when PUBLIC_MEDIA_BUCKET is set.",
+    );
+  }
+  if (secretAccessKey === undefined) {
+    throw new PublicMediaConfigError(
+      "PUBLIC_MEDIA_SECRET_ACCESS_KEY is required when PUBLIC_MEDIA_BUCKET is set.",
+    );
+  }
+  const resolvedEndpoint = endpoint ?? publicMediaValue("S3_ENDPOINT");
+  if (resolvedEndpoint === undefined) {
+    throw new PublicMediaConfigError(
+      "PUBLIC_MEDIA_ENDPOINT is required when PUBLIC_MEDIA_BUCKET is set and S3_ENDPOINT is not.",
+    );
+  }
+  const resolvedRegion = region ?? publicMediaValue("S3_REGION");
+  if (resolvedRegion === undefined) {
+    throw new PublicMediaConfigError(
+      "PUBLIC_MEDIA_REGION is required when PUBLIC_MEDIA_BUCKET is set and S3_REGION is not.",
+    );
+  }
+  const plainBase = plainEndpoint(baseUrl);
+  if (plainBase === undefined) {
+    throw new PublicMediaConfigError(
+      "PUBLIC_MEDIA_BASE_URL must be a plain https origin with no query, fragment or credentials.",
+    );
+  }
+  // CFAR6-https: the base URL is what published clip URLs are joined onto, and
+  // published clips are fetched by browsers on mixed-content-strict origins —
+  // an http base URL would make every published ad media URL insecure. The
+  // refusal is at config time, before anything is published.
+  if (!plainBase.startsWith("https://")) {
+    throw new PublicMediaConfigError(
+      "PUBLIC_MEDIA_BASE_URL must be an https origin: published clip URLs are served to browsers and http is refused.",
+    );
+  }
+  const plainEndpointValue = plainEndpoint(resolvedEndpoint);
+  if (plainEndpointValue === undefined) {
+    const name = endpoint === undefined ? "S3_ENDPOINT" : "PUBLIC_MEDIA_ENDPOINT";
+    throw new PublicMediaConfigError(
+      `${name} must be a plain http(s) origin with no query, fragment or credentials.`,
+    );
+  }
+  return {
+    endpoint: plainEndpointValue,
+    region: resolvedRegion,
+    bucket,
+    baseUrl: plainBase,
+    accessKeyId,
+    secretAccessKey,
+  };
+}
+
 export type AuthMode = "local" | "better-auth";
 
 /**

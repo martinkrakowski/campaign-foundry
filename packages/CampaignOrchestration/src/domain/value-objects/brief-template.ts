@@ -122,7 +122,26 @@ export interface FillProps {
   readonly role?: FillRole;
 }
 
-export type LayerProps = AccentProps | LogoProps | TextProps | ImageProps | FillProps;
+/**
+ * The render selector and loop flag a `video` layer carries inside an
+ * `image-html` creative (D134's video half). `render` names a packaged
+ * rendition — `<product>/<ratio>/v<n>.mp4` — which `assembleHtml` resolves
+ * against its `videoSources` map.
+ */
+export interface VideoProps {
+  readonly render: string;
+  readonly loop?: boolean;
+}
+
+/**
+ * The render selector a `video` layer's `render` prop must match: a product
+ * slug (lowercase alphanumerics and hyphens, 1–64 chars), one of the three
+ * packaged ratios, and a versioned `.mp4` rendition — e.g.
+ * `hero/9x16/v1.mp4`. No traversal, no other extension, no empty segments.
+ */
+export const VIDEO_RENDER_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}\/(1x1|9x16|16x9)\/v\d+\.mp4$/;
+
+export type LayerProps = AccentProps | LogoProps | TextProps | ImageProps | FillProps | VideoProps;
 
 /**
  * The props vocabulary per layer kind (D134), in `LayerProps`' declaration
@@ -432,6 +451,67 @@ export function layerPropsProblem(kind: LayerKind, props: unknown): LayerPropsPr
 }
 
 /**
+ * The one `video`-props decision both boundaries read (D134's video half):
+ * `isBriefTemplate` refuses on a defined problem (via `satisfiesTypeRules`,
+ * which carries the creative type this decision needs) and the API's
+ * `validateTemplate` formats the same problem into its message shape — the
+ * two cannot drift, the way `layerPropsProblem` is shared.
+ *
+ * Only a `video` layer has a creative-type-dependent props shape, so this
+ * decision — unlike `layerPropsProblem` — takes the creative type:
+ * - `video` creatives never take layer props at all (the tone axis and the
+ *   headline are variation inputs, never pinned per layer).
+ * - `image-html` creatives take exactly `render` (a `VIDEO_RENDER_PATTERN`
+ *   selector naming the packaged rendition) and an optional boolean `loop`.
+ * - Any other creative type never reaches here: its `rules.accepts` already
+ *   refused the kind, so the problem is `undefined` and the caller's kind
+ *   check throws first.
+ */
+export function videoLayerProblem(
+  creativeType: CreativeType,
+  kind: LayerKind,
+  props: unknown,
+): LayerPropsProblem | undefined {
+  if (kind !== "video") return undefined;
+  if (creativeType === "video") {
+    if (props !== undefined) {
+      return { path: "", must: 'be absent for layer kind "video"', value: props };
+    }
+    return undefined;
+  }
+  if (creativeType !== "image-html") return undefined;
+  if (props === undefined) {
+    return { path: ".render", must: "be a render selector string", value: undefined };
+  }
+  if (typeof props !== "object" || props === null || Array.isArray(props)) {
+    return { path: "", must: "be an object", value: props };
+  }
+  const record = props as Record<string, unknown>;
+  for (const field of Object.keys(record)) {
+    if (field !== "render" && field !== "loop") {
+      return {
+        path: `.${field}`,
+        must: 'be one of "render", "loop" for layer kind "video"',
+        value: record[field],
+      };
+    }
+  }
+  const render = record.render;
+  if (typeof render !== "string" || !VIDEO_RENDER_PATTERN.test(render)) {
+    return {
+      path: ".render",
+      must: "match <product>/<1x1|9x16|16x9>/v<n>.mp4",
+      value: render,
+    };
+  }
+  const loop = record.loop;
+  if (loop !== undefined && typeof loop !== "boolean") {
+    return { path: ".loop", must: "be a boolean", value: loop };
+  }
+  return undefined;
+}
+
+/**
  * Whether any text layer (`static-text` / `animated-text`) in `layers` carries
  * an `anchor` prop (R-D4) — the domain half of the boundary refusal for a
  * brief that pins a layer's anchor while a variation axis also decides it.
@@ -650,6 +730,10 @@ function satisfiesTypeRules(creativeType: CreativeType, layers: readonly LayerEn
     if (!(rules.accepts as readonly string[]).includes(layer.kind)) {
       return false;
     }
+    // D134's video half: the `video` kind's props shape depends on the
+    // creative type, so `isLayerEntry` skips it and this — the only pass that
+    // knows the type — refuses a bad shape.
+    if (videoLayerProblem(creativeType, layer.kind, layer.props) !== undefined) return false;
     counts.set(layer.kind, (counts.get(layer.kind) ?? 0) + 1);
     if (layer.enabled !== false) {
       enabledKinds.add(layer.kind);
@@ -721,6 +805,7 @@ function isLayerEntry(layer: unknown): layer is LayerEntry {
   if (layerFrameProblem(rec.frame) !== undefined) return false;
   if (
     rec.props !== undefined &&
+    rec.kind !== "video" &&
     layerPropsProblem(rec.kind as LayerKind, rec.props) !== undefined
   ) {
     return false;

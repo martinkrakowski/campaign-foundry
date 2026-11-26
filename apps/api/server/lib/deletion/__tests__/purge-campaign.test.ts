@@ -1,14 +1,26 @@
 import { randomUUID } from "node:crypto";
 import { beforeEach, afterEach, describe, expect, test } from "vitest";
+import {
+  InMemoryObjectStore,
+  PublicAdMediaStore,
+} from "@campaignfoundry/CampaignOrchestration/infrastructure";
+import {
+  PublicMediaNotConfiguredError,
+  type PublicAdMediaPort,
+} from "@campaignfoundry/CampaignOrchestration";
 import type { SqlClient } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import {
   deleteCampaignRows,
   hasActiveJob,
   markPurged,
+  purgeCampaign,
   resolveCampaignForPurge,
 } from "../purge-campaign.js";
 import { QUEUED_TTL_MS } from "../../ports/job-store.port.js";
+import { setPublicAdMediaClient, resetPublicAdMediaClient } from "../../object-store/index.js";
+import { setObjectStoreClient, resetObjectStoreClient } from "../../object-store/index.js";
+import { PgPublishedClipStore } from "../../ports/pg-published-clip-store.js";
 
 /** Plant a campaign row, optionally tombstoned, returning its uuid id. */
 async function seedCampaign(
@@ -463,6 +475,217 @@ describe("purge-campaign (D232, D246)", () => {
       expect(one[0]!.purged_at).not.toBeNull();
 
       await markPurged(db, id); // idempotent: no throw
+    });
+  });
+
+  // PT-4k: the purge's safety net — any `published_clip` rows a crash or a
+  // concurrent publish left behind have their public bytes and ledger rows
+  // freed BEFORE `deleteCampaignRows`, which the cascade-free FK would
+  // otherwise refuse.
+  describe("purgeCampaign and published clips (PT-4k)", () => {
+    const CLIP_BYTES = new Uint8Array([5, 6, 7]);
+    const PUBLIC_MEDIA_VARS = [
+      "PUBLIC_MEDIA_BUCKET",
+      "PUBLIC_MEDIA_BASE_URL",
+      "PUBLIC_MEDIA_ACCESS_KEY_ID",
+      "PUBLIC_MEDIA_SECRET_ACCESS_KEY",
+      "PUBLIC_MEDIA_ENDPOINT",
+      "PUBLIC_MEDIA_REGION",
+    ] as const;
+    let store: InMemoryObjectStore;
+    let savedObjectStore: string | undefined;
+    let savedPublicMediaEnv: Array<[string, string | undefined]> = [];
+
+    beforeEach(() => {
+      // `s3` with an in-memory client: the private-object steps must never
+      // reach a real filesystem in these tests.
+      savedObjectStore = process.env.OBJECT_STORE;
+      process.env.OBJECT_STORE = "s3";
+      savedPublicMediaEnv = PUBLIC_MEDIA_VARS.map(
+        (name) => [name, process.env[name]] as [string, string | undefined],
+      );
+      store = new InMemoryObjectStore();
+      setObjectStoreClient(store);
+    });
+    afterEach(() => {
+      resetPublicAdMediaClient();
+      resetObjectStoreClient();
+      if (savedObjectStore === undefined) delete process.env.OBJECT_STORE;
+      else process.env.OBJECT_STORE = savedObjectStore;
+      for (const [name, value] of savedPublicMediaEnv) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    });
+
+    /** Seed a `published_clip` row without touching a real public bucket. */
+    async function seedClipRow(orgId: string, campaignId: string, hash: string): Promise<void> {
+      await db.query(
+        `insert into published_clip (org_id, campaign_id, content_hash, key, url)
+           values ($1, $2::uuid, $3, $4, $5)`,
+        [
+          orgId,
+          campaignId,
+          hash,
+          `${orgId}/${"a".repeat(32)}/${hash}.mp4`,
+          `https://media.test/${hash}.mp4`,
+        ],
+      );
+    }
+
+    /**
+     * Seed a tombstoned campaign, its deletion row, and one published clip.
+     * The clip is recorded while the campaign is LIVE, then the tombstone
+     * lands (CFAR6-record): `record()` refuses a non-live campaign, so the
+     * ledger row must be seeded in the order an export that raced the deletion
+     * would have produced — publish first, tombstone after.
+     */
+    async function seedPurgeSubject(
+      media: PublicAdMediaPort,
+      orgId: string,
+      slug: string,
+      hash: string,
+    ): Promise<{ campaignId: string; deletionId: string }> {
+      const campaignId = await seedCampaign(db, orgId, slug);
+      const published = await media.publish(orgId, CLIP_BYTES, hash);
+      await new PgPublishedClipStore(db).record(
+        orgId,
+        campaignId,
+        published.key,
+        published.url,
+        hash,
+      );
+      await db.query(`update campaign set deleted_at = now() where id = $1::uuid`, [campaignId]);
+      const { rows } = await db.query<{ id: string }>(
+        `insert into deletion (org_id, kind, subject, requested_by, not_before)
+           values ($1, 'campaign', $2, 'tester', now()) returning id`,
+        [orgId, campaignId],
+      );
+      return { campaignId, deletionId: rows[0]!.id };
+    }
+
+    async function clipCount(orgId: string, campaignId: string): Promise<number> {
+      const { rows } = await db.query<{ n: number }>(
+        `select count(*)::int as n from published_clip where org_id = $1 and campaign_id = $2::uuid`,
+        [orgId, campaignId],
+      );
+      return rows[0]!.n;
+    }
+
+    test("purge removes leftover published_clip public objects and records before deleteCampaignRows and leaves other campaigns' clips untouched", async () => {
+      const publicStore = new InMemoryObjectStore();
+      const media = new PublicAdMediaStore({
+        store: publicStore,
+        baseUrl: "https://media.test",
+      });
+      setPublicAdMediaClient(media);
+      const subject = await seedPurgeSubject(
+        media,
+        "local",
+        `camp-${randomUUID().slice(0, 8)}`,
+        "a".repeat(64),
+      );
+      // A second campaign in the org (also tombstoned, not being purged) whose
+      // clip must survive, and one in another org entirely.
+      await db.query("insert into org (id, name) values ($1, $2)", ["other", "Other"]);
+      const survivorId = await seedCampaign(db, "local", `camp-${randomUUID().slice(0, 8)}`, {
+        tombstoned: true,
+      });
+      await seedClipRow("local", survivorId, "b".repeat(64));
+      const foreignId = await seedCampaign(db, "other", `camp-${randomUUID().slice(0, 8)}`, {
+        tombstoned: true,
+      });
+      await seedClipRow("other", foreignId, "c".repeat(64));
+      await media.publish("local", CLIP_BYTES, "b".repeat(64));
+      await media.publish("other", CLIP_BYTES, "c".repeat(64));
+
+      const result = await purgeCampaign(db, "local", {
+        id: subject.deletionId,
+        subject: subject.campaignId,
+      });
+      expect(result).toBe("purged");
+
+      // The subject's clip is gone — object and row — and the campaign rows too.
+      expect(await clipCount("local", subject.campaignId)).toBe(0);
+      const { rows: campaignLeft } = await db.query<{ n: number }>(
+        `select count(*)::int as n from campaign where id = $1`,
+        [subject.campaignId],
+      );
+      expect(campaignLeft[0]!.n).toBe(0);
+      // The survivor's and the foreign org's clips are intact — and the
+      // subject's own public object is gone from the public store.
+      expect(await clipCount("local", survivorId)).toBe(1);
+      expect(await clipCount("other", foreignId)).toBe(1);
+      const localKeys = await publicStore.list("local/");
+      expect(localKeys).toHaveLength(1);
+      expect(localKeys[0]!.key.includes("a".repeat(64))).toBe(false);
+      expect(await publicStore.list("other/")).toHaveLength(1);
+    });
+
+    test("refuses purge with PublicMediaNotConfiguredError when leftover clips exist and public media is unconfigured", async () => {
+      for (const name of PUBLIC_MEDIA_VARS) {
+        delete process.env[name];
+      }
+      resetPublicAdMediaClient();
+      const { campaignId, deletionId } = await seedPurgeSubject(
+        // The seed needs A bucket to publish into; a private one not installed
+        // as the public client keeps `publicAdMediaClient()` undefined.
+        new PublicAdMediaStore({ store: new InMemoryObjectStore(), baseUrl: "https://media.test" }),
+        "local",
+        `camp-${randomUUID().slice(0, 8)}`,
+        "d".repeat(64),
+      );
+
+      await expect(
+        purgeCampaign(db, "local", { id: deletionId, subject: campaignId }),
+      ).rejects.toBeInstanceOf(PublicMediaNotConfiguredError);
+
+      // No campaign rows were deleted.
+      const { rows: campaignLeft } = await db.query<{ n: number }>(
+        `select count(*)::int as n from campaign where id = $1`,
+        [campaignId],
+      );
+      expect(campaignLeft[0]!.n).toBe(1);
+      expect(await clipCount("local", campaignId)).toBe(1);
+    });
+
+    test("keeps clip record and campaign rows when public object removal fails", async () => {
+      const failing: PublicAdMediaPort = {
+        publish: async () => {
+          throw new Error("not used here");
+        },
+        remove: async () => {
+          throw new Error("boom");
+        },
+        removeOrg: async () => {
+          throw new Error("boom");
+        },
+        urlFor: (key) => `https://media.test/${key}`,
+      };
+      setPublicAdMediaClient(failing);
+      const { campaignId, deletionId } = await seedPurgeSubject(
+        new PublicAdMediaStore({ store: new InMemoryObjectStore(), baseUrl: "https://media.test" }),
+        "local",
+        `camp-${randomUUID().slice(0, 8)}`,
+        "e".repeat(64),
+      );
+
+      await expect(
+        purgeCampaign(db, "local", { id: deletionId, subject: campaignId }),
+      ).rejects.toThrow("boom");
+
+      // Both the ledger row and the campaign rows survive for the sweep's retry.
+      expect(await clipCount("local", campaignId)).toBe(1);
+      const { rows: campaignLeft } = await db.query<{ n: number }>(
+        `select count(*)::int as n from campaign where id = $1`,
+        [campaignId],
+      );
+      expect(campaignLeft[0]!.n).toBe(1);
+      const { rows: deletionRow } = await db.query<{ purged_at: Date | null }>(
+        `select purged_at from deletion where id = $1`,
+        [deletionId],
+      );
+      expect(deletionRow[0]!.purged_at).toBeNull();
     });
   });
 });

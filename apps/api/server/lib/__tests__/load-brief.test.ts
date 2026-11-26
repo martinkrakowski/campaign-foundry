@@ -682,6 +682,123 @@ describe("parseBrief", () => {
         'Campaign brief field "template.layers[1].props" must be absent for layer kind "shade"; got {"alpha":1.4}.',
       );
     });
+
+    describe("video layer props (D134's video half)", () => {
+      /** The canonical display-ad template with a `video` layer appended (or its video layer swapped). */
+      const withVideo = (props: unknown, type: "display-ad" | "short-video" = "display-ad") => {
+        const base = templateFromCanonical(type);
+        const layer =
+          type === "short-video" ? base.layers.find((l) => l.kind === "video") : undefined;
+        return {
+          ...base,
+          layers:
+            layer === undefined
+              ? [...base.layers, { id: "video", kind: "video", props }]
+              : base.layers.map((l) => (l.kind === "video" ? { ...l, props } : l)),
+        };
+      };
+
+      test("a video layer with a valid render and loop parses", () => {
+        const parsed = parseBrief({
+          ...valid,
+          type: "display-ad",
+          output: {
+            formats: ["html"],
+            platforms: ["google-display-html", "display-web-html"],
+          },
+          template: withVideo({ render: "hero/1x1/v1.mp4", loop: true }),
+        });
+        expect(parsed.template.layers.find((layer) => layer.kind === "video")?.props).toEqual({
+          render: "hero/1x1/v1.mp4",
+          loop: true,
+        });
+      });
+
+      test("a video layer in image-html requires props with a render selector", () => {
+        expect(() =>
+          parseBrief({ ...valid, type: "display-ad", template: withVideo(undefined) }),
+        ).toThrow(
+          'Campaign brief field "template.layers[5].props.render" must be a render selector string; got undefined.',
+        );
+        expect(() => parseBrief({ ...valid, type: "display-ad", template: withVideo({}) })).toThrow(
+          'Campaign brief field "template.layers[5].props.render" must match <product>/<1x1|9x16|16x9>/v<n>.mp4; got undefined.',
+        );
+      });
+
+      test("a video layer's render must match <product>/<1x1|9x16|16x9>/v<n>.mp4", () => {
+        expect(() =>
+          parseBrief({
+            ...valid,
+            type: "display-ad",
+            template: withVideo({ render: "hero/4x3/v1.mp4" }),
+          }),
+        ).toThrow(
+          'Campaign brief field "template.layers[5].props.render" must match <product>/<1x1|9x16|16x9>/v<n>.mp4; got "hero/4x3/v1.mp4".',
+        );
+        expect(() =>
+          parseBrief({
+            ...valid,
+            type: "display-ad",
+            template: withVideo({ render: "hero/1x1/v1.mov" }),
+          }),
+        ).toThrow(
+          'Campaign brief field "template.layers[5].props.render" must match <product>/<1x1|9x16|16x9>/v<n>.mp4; got "hero/1x1/v1.mov".',
+        );
+      });
+
+      test("a video layer's loop must be a boolean", () => {
+        expect(() =>
+          parseBrief({
+            ...valid,
+            type: "display-ad",
+            template: withVideo({ render: "hero/1x1/v1.mp4", loop: "yes" }),
+          }),
+        ).toThrow(
+          'Campaign brief field "template.layers[5].props.loop" must be a boolean; got "yes".',
+        );
+      });
+
+      test("a video layer's props refuse src and poster", () => {
+        expect(() =>
+          parseBrief({ ...valid, type: "display-ad", template: withVideo({ src: "x.mp4" }) }),
+        ).toThrow(
+          'Campaign brief field "template.layers[5].props.src" must be one of "render", "loop" for layer kind "video"; got "x.mp4".',
+        );
+        expect(() =>
+          parseBrief({
+            ...valid,
+            type: "display-ad",
+            template: withVideo({ poster: "fallback.png" }),
+          }),
+        ).toThrow(
+          'Campaign brief field "template.layers[5].props.poster" must be one of "render", "loop" for layer kind "video"; got "fallback.png".',
+        );
+      });
+
+      test("a video layer in a video creative never carries props", () => {
+        expect(() =>
+          parseBrief({
+            ...valid,
+            type: "short-video",
+            template: withVideo({ render: "hero/1x1/v1.mp4" }, "short-video"),
+          }),
+        ).toThrow(
+          'Campaign brief field "template.layers[0].props" must be absent for layer kind "video"; got {"render":"hero/1x1/v1.mp4"}.',
+        );
+      });
+
+      test("a video layer is refused on image-text", () => {
+        const base = templateFromCanonical(DEFAULT_CAMPAIGN_TYPE);
+        expect(() =>
+          parseBrief({
+            ...valid,
+            template: { ...base, layers: [...base.layers, { id: "video", kind: "video" }] },
+          }),
+        ).toThrow(
+          'Campaign brief field "template.layers[5].kind" must be one of ["image", "fill", "shade", "accent", "static-text", "animated-text", "logo"]; got "video".',
+        );
+      });
+    });
   });
 
   describe("layer frame (D130)", () => {
@@ -1309,6 +1426,78 @@ describe("parseBrief", () => {
           { enforceCapabilities: false },
         ),
       ).toThrow('Campaign brief field "clickDestination" must be an absolute URL; got "bad-url".');
+    });
+
+    test("a clickDestination carrying the publish placeholder prefix is refused, naming the field (CFAR6 fix2)", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          clickDestination: "https://publish.invalid/shoe/1x1/v0.mp4",
+        }),
+      ).toThrow(
+        'Campaign brief field "clickDestination" must not contain the video placeholder prefix "https://publish.invalid/"; got "https://publish.invalid/shoe/1x1/v0.mp4".',
+      );
+    });
+  });
+
+  describe("publish placeholder prefix in brief text (CFAR6 fix2)", () => {
+    const PREFIX = "https://publish.invalid/";
+    const selector = "shoe/1x1/v0.mp4";
+
+    test("a campaignMessage carrying the prefix is refused, naming the field", () => {
+      expect(() => parseBrief({ ...valid, campaignMessage: `Shop ${PREFIX}${selector}` })).toThrow(
+        `Campaign brief field "campaignMessage" must not contain the video placeholder prefix "${PREFIX}"`,
+      );
+    });
+
+    test("a localizedMessage carrying the prefix is refused, naming the field", () => {
+      expect(() =>
+        parseBrief({ ...valid, localizedMessage: `Kaufen ${PREFIX}${selector}` }),
+      ).toThrow(
+        `Campaign brief field "localizedMessage" must not contain the video placeholder prefix "${PREFIX}"`,
+      );
+    });
+
+    test("a copy.timeline beat text carrying the prefix is refused, naming the field", () => {
+      expect(() =>
+        parseBrief({
+          ...valid,
+          mode: "variation",
+          variation: { count: 1, seed: 1 },
+          copy: {
+            timeline: {
+              transition: "cut",
+              beats: [{ text: PREFIX + selector, weight: 1 }],
+            },
+          },
+        }),
+      ).toThrow(
+        `Campaign brief field "copy.timeline.beats[0].text" must not contain the video placeholder prefix "${PREFIX}"`,
+      );
+    });
+
+    test("an image layer's alt carrying the prefix is refused, naming the field", () => {
+      const base = templateFromCanonical("social-post");
+      expect(() =>
+        parseBrief({
+          ...valid,
+          template: {
+            ...base,
+            layers: base.layers.map((layer) =>
+              layer.kind === "image" ? { ...layer, props: { alt: PREFIX + selector } } : layer,
+            ),
+          },
+        }),
+      ).toThrow(
+        `Campaign brief field "template.layers[0].props.alt" must not contain the video placeholder prefix "${PREFIX}"`,
+      );
+    });
+
+    test("prefix-free brief text parses without error", () => {
+      expect(
+        parseBrief({ ...valid, campaignMessage: "Shop https://publish.example.invalid/clip.mp4" })
+          .campaignMessage,
+      ).toBe("Shop https://publish.example.invalid/clip.mp4");
     });
   });
 

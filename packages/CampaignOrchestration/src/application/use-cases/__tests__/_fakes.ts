@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 import { err, ok } from "@campaignfoundry/shared";
 import type { Variant } from "../../../domain/entities/Variant.js";
 import type { VariationPlan } from "../../../domain/value-objects/VariationPlan.vo.js";
@@ -9,6 +9,8 @@ import type {
   CompositorPort,
   ExportPort,
   ImageGeneratorPort,
+  PublicAdMediaPort,
+  PublishedClipRecordPort,
   SceneAssetPort,
   VideoCompositorPort,
 } from "../../../index.js";
@@ -171,6 +173,99 @@ export const recordingExporter = (): RecordingExporter => {
     }),
     remove: vi.fn(async (path: string) => {
       removed.push(path);
+    }),
+  };
+};
+
+export interface FakePublicAdMediaOptions {
+  /** `publish` rejects instead of returning a published object. */
+  publishFails?: Error;
+  /** `remove` rejects instead of resolving (cleanup failures, unpublish failures). */
+  removeFails?: Error;
+}
+
+export type FakePublicAdMedia = PublicAdMediaPort & {
+  readonly publish: Mock;
+  readonly remove: Mock;
+  readonly removeOrg: Mock;
+  readonly urlFor: Mock;
+  readonly removed: string[];
+};
+
+/**
+ * Public ad-media fake (PT-4k): `publish` mints an unguessable public key of
+ * the real shape — `org/<orgId>/<32-hex-random>/<hash>.mp4` — and `remove`
+ * records what it was asked to remove, so a test can assert no orphan is left
+ * behind and no object is removed twice.
+ */
+export const fakePublicAdMedia = (opts: FakePublicAdMediaOptions = {}): FakePublicAdMedia => {
+  const removed: string[] = [];
+  let seq = 0;
+  const port = {
+    publish: vi.fn(async (orgId: string, _bytes: Uint8Array, contentHash: string) => {
+      if (opts.publishFails) throw opts.publishFails;
+      seq += 1;
+      const key = `org/${orgId}/${String(seq).padStart(32, "0")}/${contentHash}.mp4`;
+      return { key, url: `https://media.example.invalid/${key}` };
+    }),
+    remove: vi.fn(async (key: string) => {
+      if (opts.removeFails) throw opts.removeFails;
+      removed.push(key);
+    }),
+    removeOrg: vi.fn(async (orgId: string) => {
+      removed.push(`org/${orgId}/*`);
+    }),
+    urlFor: vi.fn((key: string) => `https://media.example.invalid/${key}`),
+  } satisfies PublicAdMediaPort;
+  return Object.assign(port, { removed });
+};
+
+export type FakePublishedClipRecordPort = PublishedClipRecordPort & {
+  readonly record: Mock;
+  readonly find: Mock;
+  readonly listForCampaign: Mock;
+  readonly remove: Mock;
+};
+
+/**
+ * In-memory published-clip ledger fake: content-addressed per
+ * `(orgId, campaignId, contentHash)`, with every method a `vi.fn()` so tests
+ * can assert call order and refusal paths observed zero writes.
+ */
+export const fakePublishedClipRecord = (
+  seed: ReadonlyArray<{
+    orgId: string;
+    campaignId: string;
+    contentHash: string;
+    record: { key: string; url: string };
+  }> = [],
+): FakePublishedClipRecordPort => {
+  const byHash = new Map<string, { key: string; url: string }>();
+  for (const entry of seed) {
+    byHash.set(`${entry.orgId}/${entry.campaignId}/${entry.contentHash}`, entry.record);
+  }
+  return {
+    record: vi.fn(
+      async (orgId: string, campaignId: string, key: string, url: string, contentHash: string) => {
+        const id = `${orgId}/${campaignId}/${contentHash}`;
+        if (byHash.has(id)) return "exists" as const;
+        byHash.set(id, { key, url });
+        return "recorded" as const;
+      },
+    ),
+    find: vi.fn(async (orgId: string, campaignId: string, contentHash: string) =>
+      byHash.get(`${orgId}/${campaignId}/${contentHash}`),
+    ),
+    listForCampaign: vi.fn(async (orgId: string, campaignId: string) => {
+      const prefix = `${orgId}/${campaignId}/`;
+      return [...byHash.entries()]
+        .filter(([id]) => id.startsWith(prefix))
+        .map(([, record]) => record);
+    }),
+    remove: vi.fn(async (orgId: string, key: string) => {
+      for (const [id, record] of byHash) {
+        if (record.key === key && id.startsWith(`${orgId}/`)) byHash.delete(id);
+      }
     }),
   };
 };

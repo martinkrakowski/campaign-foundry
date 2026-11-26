@@ -158,6 +158,12 @@ export function addableKinds(state: EditorState): readonly LayerKind[] {
   const rules = CREATIVE_TYPE_RULES[state.template.creativeType];
   const counts = countKinds(state.template.layers);
   return rules.accepts.filter((kind) => {
+    // A `video` layer is never offered for authoring in `image-html`: it
+    // carries a render selector the editor cannot invent (D134's video half),
+    // so a video layer there only ever arrives with a brief that already
+    // carries it. The `video` creative type takes no props, so its own video
+    // layer stays addable.
+    if (kind === "video" && state.template.creativeType === "image-html") return false;
     if ((counts.get(kind) ?? 0) >= (rules.maxOf[kind] ?? Infinity)) return false;
     for (const budget of rules.sharedBudgets) {
       if (!budget.kinds.includes(kind)) continue;
@@ -468,6 +474,9 @@ export function htmlWeightReading(
       brandColor,
       style: state.style,
       clickDestination,
+      // Preview: a `video` layer emits nothing here — the editor shows the
+      // poster raster — so no render selector or videoSources is needed.
+      videoPreview: true,
     });
     bytes = Math.max(bytes, assembled.byteLength);
   }

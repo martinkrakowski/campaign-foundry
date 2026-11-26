@@ -15,6 +15,7 @@ import {
   satisfiesOrderConstraints,
   templateFromCanonical,
   templateHasAnchorProp,
+  videoLayerProblem,
   type BriefTemplate,
 } from "../brief-template.js";
 
@@ -1438,6 +1439,137 @@ describe("layerSpanProblem and isBriefTemplate layer span (VT2)", () => {
         layers,
       }),
     ).toBe(true);
+  });
+});
+
+describe("the video layer's props (D134's video half)", () => {
+  /**
+   * The same replacement rule the props describe's `withLayer` applies, local
+   * here because the video layer joins a template's layer list rather than
+   * replacing a canonical layer of its kind.
+   */
+  const withVideoLayer = (layer: unknown, creativeType: CreativeType = "image-html"): boolean => {
+    const kind = (layer as { kind?: unknown } | null)?.kind;
+    const canonical = CANONICAL_TEMPLATES[creativeType].layers;
+    return isBriefTemplate({
+      id: CANONICAL_TEMPLATES[creativeType].id,
+      version: 1,
+      creativeType,
+      unit: "standard-web",
+      layers:
+        typeof kind === "string" && canonical.some((l) => l.kind === kind)
+          ? canonical.map((l) => (l.kind === kind ? layer : l))
+          : [...canonical, layer],
+    });
+  };
+
+  test("a video layer in image-html carries render and an optional boolean loop", () => {
+    expect(
+      withVideoLayer({ id: "video", kind: "video", props: { render: "hero/1x1/v1.mp4" } }),
+    ).toBe(true);
+    expect(
+      withVideoLayer({
+        id: "video",
+        kind: "video",
+        props: { render: "hero/9x16/v2.mp4", loop: true },
+      }),
+    ).toBe(true);
+    expect(videoLayerProblem("image-html", "video", { render: "hero/1x1/v1.mp4" })).toBeUndefined();
+    expect(
+      videoLayerProblem("image-html", "video", { render: "hero/16x9/v3.mp4", loop: false }),
+    ).toBeUndefined();
+  });
+
+  test("a video layer in image-html requires props with a render selector", () => {
+    expect(withVideoLayer({ id: "video", kind: "video" })).toBe(false);
+    expect(videoLayerProblem("image-html", "video", undefined)).toEqual({
+      path: ".render",
+      must: "be a render selector string",
+      value: undefined,
+    });
+    expect(withVideoLayer({ id: "video", kind: "video", props: {} })).toBe(false);
+  });
+
+  test("a video layer's render must match <product>/<1x1|9x16|16x9>/v<n>.mp4", () => {
+    for (const render of [
+      "hero/4x3/v1.mp4",
+      "hero/1x1/v1.mov",
+      "hero/1x1/v1",
+      "../hero/1x1/v1.mp4",
+      "hero/1x1/v.mp4",
+      "",
+      "hero/1x1/V1.mp4",
+      "/hero/1x1/v1.mp4",
+    ]) {
+      expect(videoLayerProblem("image-html", "video", { render }), render).toEqual({
+        path: ".render",
+        must: "match <product>/<1x1|9x16|16x9>/v<n>.mp4",
+        value: render,
+      });
+    }
+    expect(
+      withVideoLayer({ id: "video", kind: "video", props: { render: "hero/4x3/v1.mp4" } }),
+    ).toBe(false);
+  });
+
+  test("a video layer's loop, when present, must be a boolean", () => {
+    expect(
+      videoLayerProblem("image-html", "video", { render: "hero/1x1/v1.mp4", loop: "yes" }),
+    ).toEqual({
+      path: ".loop",
+      must: "be a boolean",
+      value: "yes",
+    });
+    expect(
+      withVideoLayer({
+        id: "video",
+        kind: "video",
+        props: { render: "hero/1x1/v1.mp4", loop: "yes" },
+      }),
+    ).toBe(false);
+  });
+
+  test("a video layer's props must be an object", () => {
+    for (const props of [null, "hero/1x1/v1.mp4", 7, ["hero/1x1/v1.mp4"]]) {
+      expect(videoLayerProblem("image-html", "video", props), JSON.stringify(props)).toEqual({
+        path: "",
+        must: "be an object",
+        value: props,
+      });
+    }
+  });
+
+  test("a video layer's props refuse src, poster, and any other key", () => {
+    for (const field of ["src", "poster", "muted", "renderx"]) {
+      const props = { render: "hero/1x1/v1.mp4", [field]: "x" };
+      expect(videoLayerProblem("image-html", "video", props), field).toEqual({
+        path: `.${field}`,
+        must: 'be one of "render", "loop" for layer kind "video"',
+        value: "x",
+      });
+    }
+    expect(withVideoLayer({ id: "video", kind: "video", props: { src: "x.mp4" } })).toBe(false);
+    expect(withVideoLayer({ id: "video", kind: "video", props: { poster: "fallback.png" } })).toBe(
+      false,
+    );
+  });
+
+  test("a video layer in a video creative never carries props", () => {
+    expect(withVideoLayer({ id: "video", kind: "video", props: {} }, "video")).toBe(false);
+    expect(
+      withVideoLayer({ id: "video", kind: "video", props: { render: "hero/1x1/v1.mp4" } }, "video"),
+    ).toBe(false);
+    expect(videoLayerProblem("video", "video", { render: "hero/1x1/v1.mp4" })).toEqual({
+      path: "",
+      must: 'be absent for layer kind "video"',
+      value: { render: "hero/1x1/v1.mp4" },
+    });
+  });
+
+  test("a video layer is refused on creative types that do not accept it", () => {
+    expect(withVideoLayer({ id: "video", kind: "video" })).toBe(false);
+    expect(videoLayerProblem("image-text", "video", undefined)).toBeUndefined();
+    expect(videoLayerProblem("image-text", "video", { render: "hero/1x1/v1.mp4" })).toBeUndefined();
   });
 });
 
