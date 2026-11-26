@@ -422,6 +422,12 @@ export function describePublicMediaStep(step: PublicMediaReconcileStep): string 
  * Delete what the public-media plan names, re-checking each candidate's ledger
  * row first: a row that appeared between the plan and the apply — a publish
  * that finished while the reconciler ran — is skipped, never deleted.
+ *
+ * The gap between that re-check and the store's `remove` is a window no query
+ * of ours covers, so the ledger is read AGAIN after the removal: a row that
+ * landed in the window means a publish committed for an object that no longer
+ * exists, and the run refuses loudly instead of reporting success — the
+ * operator learns which key the ledger may now name in vain and can republish.
  * `onStep` hears each outcome AFTER it happened, so an interrupted run leaves a
  * record of exactly what was removed.
  */
@@ -444,6 +450,18 @@ export async function applyPublicMediaReconcilePlan(
       continue;
     }
     await media.remove(key);
+    // Post-removal verification: a row that committed while `remove` ran means
+    // the ledger now names a deleted object. Refuse — never report success for
+    // a state the reconciler cannot vouch for.
+    const { rows: after } = await db.query(
+      `select 1 from published_clip where org_id = $1 and key = $2`,
+      [plan.orgId, key],
+    );
+    if (after.length > 0) {
+      throw new Error(
+        `public-media reconcile stopped: a published_clip row appeared for a key while it was being removed; the ledger may reference a deleted object.`,
+      );
+    }
     deleted++;
     onStep?.({ kind: "public-clip", key, outcome: "deleted" });
   }

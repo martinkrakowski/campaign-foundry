@@ -869,6 +869,39 @@ describe("public-media reconcile (D239)", () => {
     expect(await publicStore.get(published.key)).toBeDefined();
   });
 
+  test("refuses when a published_clip row lands during the removal itself", async () => {
+    clock = NOW - 5 * 3_600_000;
+    const published = await media.publish(ORG, new Uint8Array([1]), HASH);
+    clock = NOW;
+
+    const plan = await planPublicMediaReconcile(db, media, ORG, NOW);
+    expect(plan.keys).toEqual([published.key]);
+
+    // The interrupted record() lands while remove() runs — inside the window
+    // the pre-delete re-check cannot cover. The object really goes, but the
+    // run must refuse instead of reporting success.
+    const C1 = "c1c1c1c1-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+    const racing: PublicAdMediaPort = {
+      publish: (...args) => media.publish(...args),
+      remove: async (key) => {
+        await publicStore.delete(key);
+        await seedClipRow(ORG, C1, key);
+      },
+      removeOrg: (orgId) => media.removeOrg(orgId),
+      listPages: (orgId) => media.listPages(orgId),
+      urlFor: (key) => media.urlFor(key),
+    };
+
+    const steps: PublicMediaReconcileStep[] = [];
+    await expect(
+      applyPublicMediaReconcilePlan(db, racing, plan, (s) => steps.push(s)),
+    ).rejects.toThrow(
+      "public-media reconcile stopped: a published_clip row appeared for a key while it was being removed",
+    );
+    expect(steps).toEqual([]);
+    expect(await publicStore.get(published.key)).toBeUndefined();
+  });
+
   test("aborts without deleting on a malformed or cross-org key", async () => {
     for (const badKey of [
       `${ORG}/${"a".repeat(32)}/not-a-hash.mp4`,
