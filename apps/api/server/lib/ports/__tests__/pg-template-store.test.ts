@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { SqlClient } from "../../db/sql-client.js";
+import type { SqlClient, SqlRows } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import {
   CANONICAL_TEMPLATES,
@@ -42,6 +42,94 @@ async function seedRow(
       createdBy,
     ],
   );
+}
+
+/** A row the fake client keeps in memory, mirroring one `template` row. */
+interface FakeTemplateRow {
+  readonly org: string;
+  readonly id: string;
+  readonly version: number;
+}
+
+/** The gate a test parks the first writer on while a second writer commits. */
+interface TestGate {
+  /** Resolves when the parked writer reaches the gate. */
+  readonly arrived: Promise<void>;
+  /** Resolves when the test releases the parked writer. */
+  readonly released: Promise<void>;
+  /** Resolves `arrived`. */
+  arrive(): void;
+  /** Resolves `released`. */
+  release(): void;
+}
+
+/** A one-shot gate: the writer signals `arrived` and parks until `release`. */
+function oneShotGate(): TestGate {
+  let arrive: () => void = () => undefined;
+  let release: () => void = () => undefined;
+  const arrived = new Promise<void>((resolve) => {
+    arrive = resolve;
+  });
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { arrived, released, arrive, release };
+}
+
+/**
+ * A `SqlClient` double that keeps rows in memory and evaluates the two
+ * statements `saveTemplate` runs: the advisory lock and the capped
+ * `INSERT ... SELECT`. Each statement is evaluated against a snapshot taken
+ * when the statement STARTS — READ COMMITTED's semantics — so a statement
+ * that parks on the gate still counts the rows its snapshot held, and a
+ * statement issued after the gate releases counts what committed since.
+ * `transaction` runs `work` against the same in-memory client, the way the
+ * pg and PGlite adapters hold one connection for the transaction's statements.
+ */
+function fakeTemplateDb(rows: FakeTemplateRow[], gate?: TestGate): SqlClient {
+  let gated = false;
+  const client: SqlClient = {
+    async query<R = Record<string, unknown>>(
+      text: string,
+      params?: readonly unknown[],
+    ): Promise<SqlRows<R>> {
+      // READ COMMITTED takes a statement's snapshot when the statement
+      // starts, before it can park on the gate — so capture first, park after.
+      const snapshot = [...rows];
+      if (gate && !gated) {
+        gated = true;
+        gate.arrive();
+        await gate.released;
+      }
+      if (text.includes("pg_advisory_xact_lock")) {
+        return { rows: [] as R[] };
+      }
+      if (text.includes("insert into template")) {
+        const [org, id, version] = params as [string, string, number];
+        const distinctIds = new Set(snapshot.filter((r) => r.org === org).map((r) => r.id)).size;
+        const idVersions = snapshot.filter((r) => r.org === org && r.id === id).length;
+        if (
+          (idVersions > 0 || distinctIds < MAX_TEMPLATES_PER_ORG) &&
+          idVersions < MAX_VERSIONS_PER_TEMPLATE
+        ) {
+          rows.push({ org, id, version });
+          return { rows: [{ id }] as R[] };
+        }
+        return { rows: [] as R[] };
+      }
+      throw new Error(`fakeTemplateDb cannot execute: ${text}`);
+    },
+    async transaction<T>(work: (tx: SqlClient) => Promise<T>) {
+      return work(client);
+    },
+    async exec() {
+      throw new Error("fakeTemplateDb cannot exec");
+    },
+    async end() {
+      /* nothing to close */
+    },
+  };
+  return client;
 }
 
 describe("PgTemplateStore (RW-22)", () => {
@@ -190,13 +278,35 @@ describe("PgTemplateStore (RW-22)", () => {
     const store = new PgTemplateStore(db, "local");
     // A real pg failure the primary key does not describe — e.g. a lost
     // connection (SQLSTATE 08006). Only 23505 means "the first row already
-    // exists"; everything else must reach the caller as itself.
+    // exists"; everything else must reach the caller as itself, out of the
+    // advisory-locked transaction the save runs in.
     const failure = Object.assign(new Error("connection refused"), { code: "08006" });
-    const spy = vi.spyOn(db, "query").mockRejectedValueOnce(failure);
+    const originalTransaction = db.transaction.bind(db);
+    const seenSql: string[] = [];
+    const spy = vi.spyOn(db, "transaction").mockImplementation((work) =>
+      originalTransaction((tx) => {
+        let calls = 0;
+        const wrapped: typeof tx = {
+          ...tx,
+          query: (<R>(text: string, params?: readonly unknown[]) => {
+            seenSql.push(text);
+            calls += 1;
+            if (calls === 1) return Promise.reject(failure);
+            return tx.query<R>(text, params);
+          }) as typeof tx.query,
+        };
+        return work(wrapped);
+      }),
+    );
 
-    await expect(store.saveTemplate(orgTemplate(), "u1")).rejects.toBe(failure);
-    expect(spy).toHaveBeenCalledOnce();
-    spy.mockRestore();
+    try {
+      await expect(store.saveTemplate(orgTemplate(), "u1")).rejects.toBe(failure);
+    } finally {
+      spy.mockRestore();
+    }
+    // The first statement inside the transaction failed, and nothing else
+    // ran: one statement issued, none of them an insert that committed.
+    expect(seenSql).toHaveLength(1);
   });
 
   test("saveTemplate maps every 23505 error shape to TemplateVersionExistsError and rethrows the rest unchanged", async () => {
@@ -361,6 +471,52 @@ describe("PgTemplateStore (RW-22)", () => {
     const acme = new PgTemplateStore(db, "acme");
     await acme.saveTemplate(orgTemplate({ name: "Acme Banner" }), "u2");
     expect(await acme.exists("org-banner")).toBe(true);
+  });
+
+  test("concurrent saves of different versions of the same id cannot overshoot the version cap", async () => {
+    // Two writers saving DIFFERENT versions of the SAME id at cap - 1 do not
+    // race the primary key (each inserts a distinct (org, id, version) row),
+    // so only the per-template advisory lock closes this: the second writer's
+    // capped INSERT runs as its own statement AFTER the incumbent committed,
+    // recounts on a fresh statement snapshot, and refuses.
+    const rows: FakeTemplateRow[] = [];
+    for (let v = 1; v < MAX_VERSIONS_PER_TEMPLATE; v += 1) {
+      rows.push({ org: "local", id: "org-banner", version: v });
+    }
+    const gate = oneShotGate();
+    const db = fakeTemplateDb(rows, gate);
+    const store = new PgTemplateStore(db, "local");
+
+    // The first writer enters, takes the lock, and parks inside its
+    // transaction; the second writer saves a different version to completion
+    // under the parked lock, exactly the interleaving READ COMMITTED allows.
+    const first = store.saveTemplate(orgTemplate({ version: MAX_VERSIONS_PER_TEMPLATE }), "u1");
+    await gate.arrived;
+    await store.saveTemplate(orgTemplate({ version: MAX_VERSIONS_PER_TEMPLATE + 1 }), "u1");
+    gate.release();
+
+    await expect(first).rejects.toBeInstanceOf(TemplateLimitExceededError);
+    expect(rows.filter((r) => r.id === "org-banner")).toHaveLength(MAX_VERSIONS_PER_TEMPLATE);
+  });
+
+  test("two concurrent saves of different versions on PGlite admit exactly one at cap - 1", async () => {
+    const store = new PgTemplateStore(db, "local");
+    for (let v = 1; v < MAX_VERSIONS_PER_TEMPLATE; v += 1) {
+      await seedRow(db, "local", orgTemplate({ version: v }));
+    }
+
+    const [ok, refused] = await Promise.allSettled([
+      store.saveTemplate(orgTemplate({ version: MAX_VERSIONS_PER_TEMPLATE }), "u1"),
+      store.saveTemplate(orgTemplate({ version: MAX_VERSIONS_PER_TEMPLATE + 1 }), "u1"),
+    ]);
+    expect(ok.status).toBe("fulfilled");
+    expect(refused.status).toBe("rejected");
+    expect((refused as PromiseRejectedResult).reason).toBeInstanceOf(TemplateLimitExceededError);
+
+    const { rows } = await db.query<{ n: number }>(
+      `select count(*)::int as n from template where org_id = 'local' and id = 'org-banner'`,
+    );
+    expect(rows[0]!.n).toBe(MAX_VERSIONS_PER_TEMPLATE);
   });
 
   test("canonical templates do not count against the per-org cap", async () => {

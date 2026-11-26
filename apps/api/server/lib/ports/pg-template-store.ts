@@ -6,7 +6,7 @@ import {
   TemplateVersionExistsError,
   templateProblem,
 } from "@campaignfoundry/CampaignOrchestration";
-import type { SqlClient } from "../db/sql-client.js";
+import type { SqlClient, SqlQuery } from "../db/sql-client.js";
 import {
   MAX_TEMPLATES_PER_ORG,
   MAX_VERSIONS_PER_TEMPLATE,
@@ -140,48 +140,68 @@ export class PgTemplateStore implements WritableTemplateStorePort, PaginatedTemp
       );
     }
     try {
-      // The caps are enforced by the INSERT itself, in ONE statement: the
-      // counts are read and the row is written under the same statement, so
-      // the minimal `SqlClient` (a bare `query`, no `transaction`) still
-      // works. Under READ COMMITTED two concurrent writers at `cap - 1` can
-      // both observe `cap - 1` — the overshoot is bounded by the concurrent
-      // in-flight writers at the boundary — while concurrent writes to the
-      // same (org_id, id, version) still race the primary key (23505 below).
-      // A new id counts against the distinct-id cap only when it is one
-      // (`distinct_ids < cap`); a further version of an existing id counts
-      // against the per-template version cap (`id_versions < cap`), and the
-      // canonical library — ownerless, not rows here — counts for neither.
-      const { rows } = await this.db.query(
-        `insert into template
-           (org_id, id, version, name, unit, creative_type, layers, created_by)
-         select $1, $2, $3::int, $4, $5, $6, $7::jsonb, $8
-           from (
-             select count(distinct id)::int as distinct_ids,
-                    count(*) filter (where id = $2)::int as id_versions
-               from template
-              where org_id = $1
-           ) counts
-          where (id_versions > 0 or distinct_ids < $9::int)
-            and id_versions < $10::int
-         returning id`,
-        [
-          this.orgId,
-          template.id,
-          template.version,
-          template.name,
-          template.unit,
-          template.creativeType,
-          JSON.stringify(template.layers),
-          actor,
-          MAX_TEMPLATES_PER_ORG,
-          MAX_VERSIONS_PER_TEMPLATE,
-        ],
-      );
-      // No RETURNING row means the cap predicate selected nothing to insert:
-      // an admission refusal, not a data error — the template itself is
-      // valid, the library is just full. The message is fixed and neutral;
-      // no row data travels with it.
-      if (rows.length === 0) throw new TemplateLimitExceededError();
+      // The caps are enforced by the INSERT itself, in ONE statement, and the
+      // statement runs inside an advisory-locked transaction (the same shape
+      // as `PgJobStore.lockOrg`): `pg_advisory_xact_lock` keyed on the org
+      // AND template id serializes concurrent writers to the SAME template,
+      // so the writer that queues second recounts on its own statement
+      // snapshot — taken after the incumbent committed — and refuses instead
+      // of overshooting `MAX_VERSIONS_PER_TEMPLATE` by one. Without the lock
+      // two concurrent saves of DIFFERENT versions of the same id at
+      // `cap - 1` both observe `cap - 1` (neither conflicts on the primary
+      // key, so neither is saved by it) and both admit. The lock is scoped
+      // per (org, id): writes to different templates never queue behind each
+      // other, and `hashtext` collisions only over-serialize. The lock is
+      // transaction-scoped, released at commit or rollback, so a save that
+      // throws never leaves it held. The overshoot that remains under READ
+      // COMMITTED is bounded by concurrent writers to DIFFERENT ids at the
+      // distinct-id boundary. A client without `transaction` (a minimal test
+      // double) falls back to the bare statement: the caps are still
+      // enforced, only the same-id serialization is lost.
+      const insert = async (q: SqlQuery): Promise<void> => {
+        const { rows } = await q.query(
+          `insert into template
+             (org_id, id, version, name, unit, creative_type, layers, created_by)
+           select $1, $2, $3::int, $4, $5, $6, $7::jsonb, $8
+             from (
+               select count(distinct id)::int as distinct_ids,
+                      count(*) filter (where id = $2)::int as id_versions
+                 from template
+                where org_id = $1
+             ) counts
+            where (id_versions > 0 or distinct_ids < $9::int)
+              and id_versions < $10::int
+           returning id`,
+          [
+            this.orgId,
+            template.id,
+            template.version,
+            template.name,
+            template.unit,
+            template.creativeType,
+            JSON.stringify(template.layers),
+            actor,
+            MAX_TEMPLATES_PER_ORG,
+            MAX_VERSIONS_PER_TEMPLATE,
+          ],
+        );
+        // No RETURNING row means the cap predicate selected nothing to insert:
+        // an admission refusal, not a data error — the template itself is
+        // valid, the library is just full. The message is fixed and neutral;
+        // no row data travels with it.
+        if (rows.length === 0) throw new TemplateLimitExceededError();
+      };
+      if (typeof this.db.transaction === "function") {
+        await this.db.transaction(async (tx) => {
+          await tx.query("select pg_advisory_xact_lock(hashtext('template:' || $1 || ':' || $2))", [
+            this.orgId,
+            template.id,
+          ]);
+          await insert(tx);
+        });
+      } else {
+        await insert(this.db);
+      }
     } catch (error) {
       // Two writers saving the same (org, id, version) race the primary key;
       // the loser sees a constraint violation, not a reason to 500 — the
