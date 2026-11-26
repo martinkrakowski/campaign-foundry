@@ -28,6 +28,11 @@ import {
   type ReconcilePlan,
   type ReconcileStep,
 } from "../reconcile.js";
+import { PublishedClipObjectMissingError } from "@campaignfoundry/CampaignOrchestration";
+import {
+  PgPublishedClipStore,
+  publishedClipLockName,
+} from "../../ports/pg-published-clip-store.js";
 
 const uuidN = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
 
@@ -869,37 +874,108 @@ describe("public-media reconcile (D239)", () => {
     expect(await publicStore.get(published.key)).toBeDefined();
   });
 
-  test("refuses when a published_clip row lands during the removal itself", async () => {
+  test("a publisher paused past the grace window cannot record the object reconcile removed", async () => {
+    clock = NOW - 5 * 3_600_000;
+    const published = await media.publish(ORG, new Uint8Array([1]), HASH);
+    clock = NOW;
+
+    // The publisher stalls between publish() and record(); reconcile runs to
+    // completion in the meantime and removes the then-unrecorded object.
+    const result = await reconcilePublicMediaOrgs(db, media, [ORG], {
+      apply: true,
+      now: () => NOW,
+    });
+    expect(result.applied).toEqual({ deleted: 1, skipped: 0 });
+    expect(await publicStore.get(published.key)).toBeUndefined();
+
+    // The publisher wakes and records, re-checking the object under the lock.
+    const campaignId = "c1c1c1c1-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+    await db.query(`insert into campaign (id, org_id, slug) values ($1::uuid, $2, 'camp-race')`, [
+      campaignId,
+      ORG,
+    ]);
+    const ledger = new PgPublishedClipStore(db);
+    await expect(
+      ledger.record(ORG, campaignId, published.key, published.url, HASH, () =>
+        media.exists(published.key),
+      ),
+    ).rejects.toBeInstanceOf(PublishedClipObjectMissingError);
+
+    // No ledger row names the removed object.
+    expect(await ledger.listForCampaign(ORG, campaignId)).toEqual([]);
+  });
+
+  test("a record that commits before the apply wins: reconcile skips the key and the object stays", async () => {
     clock = NOW - 5 * 3_600_000;
     const published = await media.publish(ORG, new Uint8Array([1]), HASH);
     clock = NOW;
 
     const plan = await planPublicMediaReconcile(db, media, ORG, NOW);
-    expect(plan.keys).toEqual([published.key]);
+    const campaignId = "c1c1c1c1-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+    await db.query(`insert into campaign (id, org_id, slug) values ($1::uuid, $2, 'camp-race')`, [
+      campaignId,
+      ORG,
+    ]);
+    await expect(
+      new PgPublishedClipStore(db).record(ORG, campaignId, published.key, published.url, HASH, () =>
+        media.exists(published.key),
+      ),
+    ).resolves.toBe("recorded");
 
-    // The interrupted record() lands while remove() runs — inside the window
-    // the pre-delete re-check cannot cover. The object really goes, but the
-    // run must refuse instead of reporting success.
-    const C1 = "c1c1c1c1-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
-    const racing: PublicAdMediaPort = {
+    await expect(applyPublicMediaReconcilePlan(db, media, plan)).resolves.toEqual({
+      deleted: 0,
+      skipped: 1,
+    });
+    expect(await publicStore.get(published.key)).toBeDefined();
+  });
+
+  test("the removal happens inside one transaction that first takes the key's advisory lock", async () => {
+    clock = NOW - 5 * 3_600_000;
+    const published = await media.publish(ORG, new Uint8Array([1]), HASH);
+    clock = NOW;
+    const plan = await planPublicMediaReconcile(db, media, ORG, NOW);
+
+    const events: string[] = [];
+    const watched: SqlClient = {
+      ...db,
+      transaction: (work) =>
+        db.transaction(async (tx) => {
+          events.push("begin");
+          const result = await work({
+            query: async (text: string, params?: readonly unknown[]) => {
+              if (text.includes("pg_advisory_xact_lock")) {
+                events.push(`lock:${String(params?.[0])}`);
+              } else if (text.includes("from published_clip")) {
+                events.push("check");
+              }
+              return tx.query(text, params);
+            },
+            exec: (text: string) => tx.exec(text),
+          });
+          events.push("commit");
+          return result;
+        }),
+    };
+    const removing: PublicAdMediaPort = {
       publish: (...args) => media.publish(...args),
       remove: async (key) => {
-        await publicStore.delete(key);
-        await seedClipRow(ORG, C1, key);
+        events.push("remove");
+        await media.remove(key);
       },
       removeOrg: (orgId) => media.removeOrg(orgId),
       listPages: (orgId) => media.listPages(orgId),
+      exists: (key) => media.exists(key),
       urlFor: (key) => media.urlFor(key),
     };
 
-    const steps: PublicMediaReconcileStep[] = [];
-    await expect(
-      applyPublicMediaReconcilePlan(db, racing, plan, (s) => steps.push(s)),
-    ).rejects.toThrow(
-      "public-media reconcile stopped: a published_clip row appeared for a key while it was being removed",
-    );
-    expect(steps).toEqual([]);
-    expect(await publicStore.get(published.key)).toBeUndefined();
+    await applyPublicMediaReconcilePlan(watched, removing, plan);
+    expect(events).toEqual([
+      "begin",
+      `lock:${publishedClipLockName(ORG, published.key)}`,
+      "check",
+      "remove",
+      "commit",
+    ]);
   });
 
   test("aborts without deleting on a malformed or cross-org key", async () => {

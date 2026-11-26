@@ -74,6 +74,13 @@ export interface PublicAdMediaPort {
    */
   listPages(orgId: string): AsyncIterable<readonly ListedObject[]>;
 
+  /**
+   * Whether the object at `key` is still in the public bucket. The publish
+   * path asks this under the ledger's per-key lock, so an object a reconcile
+   * pass removed during a long pause is never recorded as published.
+   */
+  exists(key: ObjectKey): Promise<boolean>;
+
   /** The public URL for `key`, on the configured base URL. */
   urlFor(key: ObjectKey): string;
 }

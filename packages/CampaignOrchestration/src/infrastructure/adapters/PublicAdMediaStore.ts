@@ -94,6 +94,11 @@ export class PublicAdMediaStore implements PublicAdMediaPort {
     yield* this.store.listPages(`${orgId}/`);
   }
 
+  async exists(key: ObjectKey): Promise<boolean> {
+    this.assertPublishedKey(key);
+    return (await this.store.head(key)) !== undefined;
+  }
+
   urlFor(key: ObjectKey): string {
     this.assertPublishedKey(key);
     return `${this.baseUrl}/${key}`;

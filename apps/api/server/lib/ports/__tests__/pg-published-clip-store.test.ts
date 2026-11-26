@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import { PublishedClipObjectMissingError } from "@campaignfoundry/CampaignOrchestration";
 import type { SqlClient } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import {
@@ -138,6 +139,46 @@ describe("PgPublishedClipStore (PT-4k)", () => {
     expect(await store.find("beta", betaCampaign, "0123")).toEqual({
       key: "beta/bbb/0123.mp4",
       url: "https://pub/bbb.mp4",
+    });
+  });
+
+  describe("PgPublishedClipStore object precondition", () => {
+    test("writes nothing and refuses when the object is gone, records when it is present", async () => {
+      const db = await migratedDatabase();
+      try {
+        await db.query("insert into org (id, name) values ($1, $2)", ["acme", "Acme"]);
+        const campaign = randomUUID();
+        await db.query(
+          `insert into campaign (id, org_id, slug) values ($1::uuid, 'acme', 'acme-one')`,
+          [campaign],
+        );
+        const store = new PgPublishedClipStore(db);
+        await expect(
+          store.record(
+            "acme",
+            campaign,
+            "acme/aaa/0123.mp4",
+            "https://pub/a.mp4",
+            "0123",
+            async () => false,
+          ),
+        ).rejects.toBeInstanceOf(PublishedClipObjectMissingError);
+        expect(await store.find("acme", campaign, "0123")).toBeUndefined();
+
+        await expect(
+          store.record(
+            "acme",
+            campaign,
+            "acme/aaa/0123.mp4",
+            "https://pub/a.mp4",
+            "0123",
+            async () => true,
+          ),
+        ).resolves.toBe("recorded");
+        expect(await store.find("acme", campaign, "0123")).toBeDefined();
+      } finally {
+        await db.end();
+      }
     });
   });
 });

@@ -137,6 +137,9 @@ export class PublishAdClipUseCase {
         published.key,
         published.url,
         contentHash,
+        // Evaluated under the ledger's per-key lock: a pause longer than the
+        // reconcile grace may have cost this object its life.
+        () => publicAdMedia.exists(published.key),
       );
     } catch (error) {
       try {

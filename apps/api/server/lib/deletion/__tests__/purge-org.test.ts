@@ -546,6 +546,7 @@ describe("purgeOrg completion (PT-9m2, D241)", () => {
         },
         urlFor: publicMedia.urlFor.bind(publicMedia),
         listPages: async function* () {},
+        exists: async () => true,
       } satisfies PublicAdMediaPort);
 
       const beforeAcme = await snapshot(db, "acme");

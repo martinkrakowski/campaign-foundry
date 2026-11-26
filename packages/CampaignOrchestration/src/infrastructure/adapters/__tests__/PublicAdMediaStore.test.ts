@@ -196,4 +196,12 @@ describe("PublicAdMediaStore", () => {
       }).rejects.toBeInstanceOf(InvalidPublicAdMediaInputError);
     }
   });
+
+  test("exists reports whether a published object is still in the bucket", async () => {
+    const { media } = store();
+    const a = await media.publish(ORG, BYTES, HASH);
+    expect(await media.exists(a.key)).toBe(true);
+    await media.remove(a.key);
+    expect(await media.exists(a.key)).toBe(false);
+  });
 });

@@ -592,6 +592,7 @@ describe("purge CLI (PT-9g3, D231)", () => {
         remove: async () => {},
         removeOrg: async () => {},
         urlFor: (key: string) => `https://media.test/${key}`,
+        exists: async () => true,
         listPages: async function* () {
           throw new Error("public bucket down");
         },

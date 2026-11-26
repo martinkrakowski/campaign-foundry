@@ -221,6 +221,7 @@ export const fakePublicAdMedia = (opts: FakePublicAdMediaOptions = {}): FakePubl
         if (owner === orgId) published.delete(key);
       }
     }),
+    exists: vi.fn(async (key: string) => published.has(key)),
     urlFor: vi.fn((key: string) => `https://media.example.invalid/${key}`),
     listPages: vi.fn(async function* (orgId: string) {
       for (const [key, owner] of published) {

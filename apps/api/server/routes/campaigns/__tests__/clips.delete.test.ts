@@ -252,6 +252,7 @@ describe("DELETE /campaigns/:id/clips/:hash (PT-4k)", () => {
         },
         urlFor: (key) => `https://media.test/${key}`,
         listPages: async function* () {},
+        exists: async () => true,
       };
       setPublicAdMediaClient(failing);
       const failingRes = await del(mount(), campaign.id, hash);

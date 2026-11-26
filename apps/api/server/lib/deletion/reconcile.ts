@@ -5,7 +5,8 @@ import {
   type ObjectStorePort,
   type PublicAdMediaPort,
 } from "@campaignfoundry/CampaignOrchestration";
-import type { SqlQuery } from "../db/sql-client.js";
+import type { SqlClient, SqlQuery } from "../db/sql-client.js";
+import { publishedClipLockName } from "../ports/pg-published-clip-store.js";
 import { campaignPrefix, inputKey, orgCampaignsPrefix } from "../object-store/object-keys.js";
 
 /**
@@ -419,20 +420,20 @@ export function describePublicMediaStep(step: PublicMediaReconcileStep): string 
 }
 
 /**
- * Delete what the public-media plan names, re-checking each candidate's ledger
- * row first: a row that appeared between the plan and the apply — a publish
- * that finished while the reconciler ran — is skipped, never deleted.
- *
- * The gap between that re-check and the store's `remove` is a window no query
- * of ours covers, so the ledger is read AGAIN after the removal: a row that
- * landed in the window means a publish committed for an object that no longer
- * exists, and the run refuses loudly instead of reporting success — the
- * operator learns which key the ledger may now name in vain and can republish.
+ * Delete what the public-media plan names. Each key is handled in its own
+ * transaction under the per-key advisory lock the ledger's `record` also takes:
+ * the ledger row is re-read and, only if none exists, the object is removed
+ * before the lock is released. A publisher that pauses after `publish()` for
+ * longer than the grace period therefore meets one of two outcomes: its row
+ * committed first, so this pass skips the key; or this pass removed the object
+ * first, and the publisher's `record` (which re-checks the object under the
+ * same lock) refuses instead of writing a row for a missing object. There is
+ * no interleaving in which a row names a removed object.
  * `onStep` hears each outcome AFTER it happened, so an interrupted run leaves a
  * record of exactly what was removed.
  */
 export async function applyPublicMediaReconcilePlan(
-  db: SqlQuery,
+  db: SqlClient,
   media: PublicAdMediaPort,
   plan: PublicMediaReconcilePlan,
   onStep?: (step: PublicMediaReconcileStep) => void,
@@ -440,30 +441,21 @@ export async function applyPublicMediaReconcilePlan(
   let deleted = 0;
   let skipped = 0;
   for (const key of plan.keys) {
-    const { rows } = await db.query(`select 1 from published_clip where org_id = $1 and key = $2`, [
-      plan.orgId,
-      key,
-    ]);
-    if (rows.length > 0) {
-      skipped++;
-      onStep?.({ kind: "public-clip", key, outcome: "skipped" });
-      continue;
-    }
-    await media.remove(key);
-    // Post-removal verification: a row that committed while `remove` ran means
-    // the ledger now names a deleted object. Refuse — never report success for
-    // a state the reconciler cannot vouch for.
-    const { rows: after } = await db.query(
-      `select 1 from published_clip where org_id = $1 and key = $2`,
-      [plan.orgId, key],
-    );
-    if (after.length > 0) {
-      throw new Error(
-        `public-media reconcile stopped: a published_clip row appeared for a key while it was being removed; the ledger may reference a deleted object.`,
+    const outcome = await db.transaction(async (tx) => {
+      await tx.query(`select pg_advisory_xact_lock(hashtextextended($1, 0))`, [
+        publishedClipLockName(plan.orgId, key),
+      ]);
+      const { rows } = await tx.query(
+        `select 1 from published_clip where org_id = $1 and key = $2`,
+        [plan.orgId, key],
       );
-    }
-    deleted++;
-    onStep?.({ kind: "public-clip", key, outcome: "deleted" });
+      if (rows.length > 0) return "skipped" as const;
+      await media.remove(key);
+      return "deleted" as const;
+    });
+    if (outcome === "skipped") skipped++;
+    else deleted++;
+    onStep?.({ kind: "public-clip", key, outcome });
   }
   return { deleted, skipped };
 }
@@ -475,7 +467,7 @@ export async function applyPublicMediaReconcilePlan(
  * is deleted unless `apply` is the literal `true`.
  */
 export async function reconcilePublicMediaOrgs(
-  db: SqlQuery,
+  db: SqlClient,
   media: PublicAdMediaPort,
   orgIds: readonly string[],
   options: PublicMediaReconcileOptions,

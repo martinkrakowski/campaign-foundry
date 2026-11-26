@@ -1233,6 +1233,7 @@ describe("sweep housekeeping (bin/purge.ts)", () => {
       remove: async () => {},
       removeOrg: async () => {},
       urlFor: (key: string) => `https://media.test/${key}`,
+      exists: async () => true,
       listPages: async function* () {
         throw new Error("public bucket down");
       },
