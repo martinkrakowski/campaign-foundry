@@ -107,17 +107,28 @@ async function readDeletion(
 /** The bytes a seeded public object holds — content is irrelevant to these tests. */
 const CLIP_BYTES = new Uint8Array([9, 8, 7]);
 
+/** The `PUBLIC_MEDIA_*` variables that gate `publicAdMediaClient()`. */
+const PUBLIC_MEDIA_VARS = [
+  "PUBLIC_MEDIA_BUCKET",
+  "PUBLIC_MEDIA_BASE_URL",
+  "PUBLIC_MEDIA_ACCESS_KEY_ID",
+  "PUBLIC_MEDIA_SECRET_ACCESS_KEY",
+  "PUBLIC_MEDIA_ENDPOINT",
+  "PUBLIC_MEDIA_REGION",
+] as const;
+
 /** Delete every `PUBLIC_MEDIA_*` variable so `publicAdMediaClient()` is `undefined`. */
 function clearPublicMediaEnv(): void {
-  for (const name of [
-    "PUBLIC_MEDIA_BUCKET",
-    "PUBLIC_MEDIA_BASE_URL",
-    "PUBLIC_MEDIA_ACCESS_KEY_ID",
-    "PUBLIC_MEDIA_SECRET_ACCESS_KEY",
-    "PUBLIC_MEDIA_ENDPOINT",
-    "PUBLIC_MEDIA_REGION",
-  ]) {
+  for (const name of PUBLIC_MEDIA_VARS) {
     delete process.env[name];
+  }
+}
+
+/** Restore the `PUBLIC_MEDIA_*` variables a test deleted via `clearPublicMediaEnv`. */
+function restorePublicMediaEnv(saved: ReadonlyArray<[string, string | undefined]>): void {
+  for (const [name, value] of saved) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
   }
 }
 
@@ -186,11 +197,14 @@ async function clipCount(db: SqlClient, orgId: string, campaignId: string): Prom
 
 describe("request-campaign-deletion (D235, D234's tombstone half)", () => {
   let db: SqlClient;
+  let savedPublicMediaEnv: Array<[string, string | undefined]> = [];
 
   beforeEach(async () => {
     db = await migratedDatabase();
+    savedPublicMediaEnv = PUBLIC_MEDIA_VARS.map((name) => [name, process.env[name]]);
   });
   afterEach(async () => {
+    restorePublicMediaEnv(savedPublicMediaEnv);
     await db.end();
   });
 
@@ -656,10 +670,51 @@ describe("request-campaign-deletion (D235, D234's tombstone half)", () => {
     expect(await store.list("local/")).toHaveLength(0);
   });
 
-  test("a job that becomes active between the two steps is refused at the tombstone, and nothing is unpublished or tombstoned", async () => {
+  test("an active-job refusal at the precheck leaves every published clip in place", async () => {
     const { media, store } = configuredMedia();
     setPublicAdMediaClient(media);
     const campaignId = await seedCampaign(db, "local", `camp-${randomUUID().slice(0, 8)}`);
+    // The job is already active BEFORE the request, so the read-only precheck
+    // itself refuses — pass 1 must never run, let alone unpublish anything.
+    await seedJob(db, {
+      id: "j-live",
+      orgId: "local",
+      campaignId,
+      status: "running",
+      leaseOffsetMs: 60_000,
+    });
+    await seedClip(db, media, "local", campaignId, "a".repeat(64));
+
+    const outcome = await requestCampaignDeletion(db, {
+      orgId: "local",
+      campaignId,
+      requestedBy: "actor-1",
+      mayDelete: () => true,
+      graceHours: 0,
+    });
+    expect(outcome).toEqual({ outcome: "active-job", jobId: "j-live" });
+
+    // Nothing was tombstoned and no deletion row was written.
+    const { rows: campaign } = await db.query<{ deleted_at: Date | null }>(
+      `select deleted_at from campaign where id = $1`,
+      [campaignId],
+    );
+    expect(campaign[0]!.deleted_at).toBeNull();
+    const { rows: count } = await db.query<{ n: number }>(
+      `select count(*)::int as n from deletion`,
+    );
+    expect(count[0]!.n).toBe(0);
+
+    // Every clip row and every public object is still in place.
+    expect(await clipCount(db, "local", campaignId)).toBe(1);
+    expect(await store.list("local/")).toHaveLength(1);
+  });
+
+  test("a job that becomes active between the two steps is refused at the tombstone; clips pass 1 already removed stay removed", async () => {
+    const { media, store } = configuredMedia();
+    setPublicAdMediaClient(media);
+    const campaignId = await seedCampaign(db, "local", `camp-${randomUUID().slice(0, 8)}`);
+    await seedClip(db, media, "local", campaignId, "a".repeat(64));
 
     // The check transaction (the first) passes, then — its lock released — a
     // job claims the campaign in the gap. The tombstone transaction (the
@@ -704,7 +759,9 @@ describe("request-campaign-deletion (D235, D234's tombstone half)", () => {
     );
     expect(count[0]!.n).toBe(0);
 
-    // And no unpublish pass ran after the refusal: nothing was ever removed.
+    // Pass 1 already removed the clip before the refusal — that is accepted:
+    // the removed object and ledger row stay removed and are re-created on
+    // the next explicit export.
     expect(await clipCount(db, "local", campaignId)).toBe(0);
     expect(await store.list("local/")).toHaveLength(0);
   });

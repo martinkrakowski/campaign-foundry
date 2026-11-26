@@ -96,7 +96,9 @@ export async function requestCampaignDeletion(
     // campaign in the gap. Re-run the refusal under the re-taken `for update`
     // (same check/claim ordering as the first transaction): a campaign with
     // an active job is refused here — no tombstone, no `deletion` row, and
-    // the pass-2 unpublish below never runs.
+    // the pass-2 unpublish below never runs. Pass 1 has already removed this
+    // campaign's clips by then; that is accepted — the clip objects and rows
+    // stay removed and are simply re-created on the next explicit export.
     const jobId = await activeJobId(tx, request.orgId, row.slug, row.id);
     if (jobId !== undefined) return { outcome: "active-job", jobId } as const;
     await tx.query(

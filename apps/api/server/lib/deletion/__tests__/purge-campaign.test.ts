@@ -484,14 +484,24 @@ describe("purge-campaign (D232, D246)", () => {
   // otherwise refuse.
   describe("purgeCampaign and published clips (PT-4k)", () => {
     const CLIP_BYTES = new Uint8Array([5, 6, 7]);
+    const PUBLIC_MEDIA_VARS = [
+      "PUBLIC_MEDIA_BUCKET",
+      "PUBLIC_MEDIA_BASE_URL",
+      "PUBLIC_MEDIA_ACCESS_KEY_ID",
+      "PUBLIC_MEDIA_SECRET_ACCESS_KEY",
+      "PUBLIC_MEDIA_ENDPOINT",
+      "PUBLIC_MEDIA_REGION",
+    ] as const;
     let store: InMemoryObjectStore;
     let savedObjectStore: string | undefined;
+    let savedPublicMediaEnv: Array<[string, string | undefined]> = [];
 
     beforeEach(() => {
       // `s3` with an in-memory client: the private-object steps must never
       // reach a real filesystem in these tests.
       savedObjectStore = process.env.OBJECT_STORE;
       process.env.OBJECT_STORE = "s3";
+      savedPublicMediaEnv = PUBLIC_MEDIA_VARS.map((name) => [name, process.env[name]] as const);
       store = new InMemoryObjectStore();
       setObjectStoreClient(store);
     });
@@ -500,6 +510,10 @@ describe("purge-campaign (D232, D246)", () => {
       resetObjectStoreClient();
       if (savedObjectStore === undefined) delete process.env.OBJECT_STORE;
       else process.env.OBJECT_STORE = savedObjectStore;
+      for (const [name, value] of savedPublicMediaEnv) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
     });
 
     /** Seed a `published_clip` row without touching a real public bucket. */
@@ -600,14 +614,7 @@ describe("purge-campaign (D232, D246)", () => {
     });
 
     test("refuses purge with PublicMediaNotConfiguredError when leftover clips exist and public media is unconfigured", async () => {
-      for (const name of [
-        "PUBLIC_MEDIA_BUCKET",
-        "PUBLIC_MEDIA_BASE_URL",
-        "PUBLIC_MEDIA_ACCESS_KEY_ID",
-        "PUBLIC_MEDIA_SECRET_ACCESS_KEY",
-        "PUBLIC_MEDIA_ENDPOINT",
-        "PUBLIC_MEDIA_REGION",
-      ]) {
+      for (const name of PUBLIC_MEDIA_VARS) {
         delete process.env[name];
       }
       resetPublicAdMediaClient();
