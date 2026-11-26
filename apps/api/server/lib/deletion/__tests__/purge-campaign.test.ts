@@ -501,7 +501,9 @@ describe("purge-campaign (D232, D246)", () => {
       // reach a real filesystem in these tests.
       savedObjectStore = process.env.OBJECT_STORE;
       process.env.OBJECT_STORE = "s3";
-      savedPublicMediaEnv = PUBLIC_MEDIA_VARS.map((name) => [name, process.env[name]] as const);
+      savedPublicMediaEnv = PUBLIC_MEDIA_VARS.map(
+        (name) => [name, process.env[name]] as [string, string | undefined],
+      );
       store = new InMemoryObjectStore();
       setObjectStoreClient(store);
     });
