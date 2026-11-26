@@ -73,7 +73,21 @@ import {
 import {
   DEFAULT_DURATION,
   DEFAULT_DURATION_SEC,
+  DEFAULT_MOTION,
 } from "../../domain/value-objects/variation-defaults.js";
+import {
+  AD_CLIP_MAX_DURATION_SECONDS,
+  validateAdClip,
+} from "../../domain/value-objects/mp4-clip.js";
+
+/**
+ * An enabled `video` layer (CFAR6E): the layer kind the variation path renders
+ * a real clip for. `enabled !== false` — a layer without the key is enabled,
+ * the same default every other layer kind follows.
+ */
+function hasEnabledVideoLayer(layers: CampaignBrief["template"]["layers"]): boolean {
+  return layers.some((layer) => layer.kind === "video" && layer.enabled !== false);
+}
 
 /**
  * A single subject is a legitimate campaign (a conference, a hiring drive), so
@@ -769,7 +783,15 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     // is already narrowed to the targeted set above.
     const motionRatios = new Map<string, AspectRatio>();
     for (const cell of cells) {
-      if (cell.variant.motion !== undefined && !motionRatios.has(cell.ratio.value)) {
+      // CFAR6E: an image-html slot whose template carries an enabled `video`
+      // layer composites its clip from the same brief-level timeline at its
+      // own ratio, so its ratio joins motion's here — otherwise a beat's
+      // scene would cover-fit to the ground's frame instead of the canvas the
+      // clip is actually drawn at.
+      if (
+        (cell.variant.motion !== undefined || hasEnabledVideoLayer(brief.template.layers)) &&
+        !motionRatios.has(cell.ratio.value)
+      ) {
         motionRatios.set(cell.ratio.value, cell.ratio);
       }
     }
@@ -988,11 +1010,44 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
     );
 
     await this.deps.exporter.saveToDirectory(composite.image, outputPath);
-    // A re-roll of a former motion slot must not leave its clip behind: the grid,
-    // export and packaging key on the row, and a stale mp4 would still be served.
-    await this.deps.exporter.remove(videoPath);
 
     const isHtml = template.creativeType === "image-html";
+    // CFAR6E: an enabled `video` layer renders a real clip for this html slot.
+    const hasVideoLayer = isHtml && hasEnabledVideoLayer(template.layers);
+
+    if (hasVideoLayer) {
+      // The slot's own clip length, capped like every clip: a variation slot
+      // may carry a duration axis value, but no ad clip runs past the cap.
+      const durationSec = Math.min(
+        variant.durationSec ?? DEFAULT_DURATION_SEC,
+        AD_CLIP_MAX_DURATION_SECONDS,
+      );
+      const video = await this.deps.videoCompositor.compositeVideo({
+        ...request,
+        durationSec,
+        fps: MOTION_FPS,
+        motion: DEFAULT_MOTION[0],
+        sampleAt: motionSampleAt(timeline, durationSec),
+        // Absent → omitted, keeping the legacy single-message path byte-identical (D10).
+        ...(timeline !== undefined ? { timeline } : {}),
+        // Per-scene grounds (VE5b2): this slot's ratio was added to
+        // `motionRatios` exactly so `backgrounds` arrives cover-fitted here.
+        ...(backgrounds !== undefined ? { backgrounds } : {}),
+        // The resolved music bed (VE3b2): absent → omitted (VE-D3).
+        ...(audio !== undefined ? { audio } : {}),
+      });
+      // Invalid/HEVC/oversize bytes never reach the exporter: validation
+      // throws `InvalidAdClipError` before `saveToDirectory`, so a rejected
+      // slot saves nothing for `videoPath`.
+      validateAdClip(video.video);
+      await this.deps.exporter.saveToDirectory(video.video, videoPath);
+    } else {
+      // A re-roll of a former motion slot (or video-layer html slot) must not
+      // leave its clip behind: the grid, export and packaging key on the row,
+      // and a stale mp4 would still be served.
+      await this.deps.exporter.remove(videoPath);
+    }
+
     let htmlBundlePath: string | undefined;
     let htmlFallbackPath: string | undefined;
     if (isHtml) {
@@ -1035,6 +1090,9 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
             htmlBundlePath,
             htmlFallbackPath,
             ...(clickDestination !== undefined ? { clickDestination } : {}),
+            // CFAR6E: only a video-layer slot keeps its clip; a video-layer-free
+            // html row keeps its exact pre-video key shape (no `videoPath` key).
+            ...(hasVideoLayer ? { videoPath } : {}),
           }
         : {}),
     };
