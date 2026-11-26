@@ -255,6 +255,28 @@ describe("PublishAdClipUseCase", () => {
     expect(publicAdMedia.remove).toHaveBeenCalledTimes(1);
   });
 
+  it("removes the object and reports the refusal when the record is refused for a tombstoned campaign (CFAR6-record)", async () => {
+    // The Postgres ledger refuses `record` for a campaign whose `deleted_at`
+    // is set (CFAR6-record) — from this use case's side the refusal is any
+    // record error, and the duty is the same: no clip fact, no orphan bytes,
+    // and the refusal reported to the caller.
+    const refusal = new Error(
+      "Refusing to record a published clip for a campaign that is not live.",
+    );
+    refusal.name = "PublishedClipRecordRefusedError";
+    const publicAdMedia = fakePublicAdMedia();
+    const publishedClipRecord = {
+      ...fakePublishedClipRecord(),
+      record: vi.fn(async () => {
+        throw refusal;
+      }),
+    };
+    const { deps } = makeDeps({ publicAdMedia, publishedClipRecord });
+
+    await expect(execute(deps)).rejects.toBe(refusal);
+    expect(publicAdMedia.remove).toHaveBeenCalledTimes(1);
+  });
+
   it("when cleanup remove fails, the original record error is rethrown", async () => {
     const recordError = new Error("ledger write failed");
     const cleanupError = new Error("public bucket unavailable");

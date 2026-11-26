@@ -37,39 +37,74 @@ describe("videoPlaceholderUrl", () => {
 });
 
 describe("collectVideoPlaceholderSources", () => {
-  test("maps every enabled video layer's render selector to its placeholder URL", () => {
-    const sources = collectVideoPlaceholderSources([
-      videoLayer({ id: "v-1" }),
-      videoLayer({ id: "v-2", props: { render: "shoe/9x16/v1.mp4" } }),
-    ]);
+  test("keys each enabled video layer's render selector to the SLOT's own placeholder URL", () => {
+    // CFAR6-slot: the URL carries the slot's clip key (passed by the caller),
+    // never the brief's render — both layers here resolve to the same slot.
+    const sources = collectVideoPlaceholderSources(
+      [videoLayer({ id: "v-1" }), videoLayer({ id: "v-2", props: { render: "shoe/9x16/v1.mp4" } })],
+      "shoe/1x1/v0.mp4",
+    );
     expect(sources).toEqual({
       "shoe/1x1/v0.mp4": "https://publish.invalid/shoe/1x1/v0.mp4",
-      "shoe/9x16/v1.mp4": "https://publish.invalid/shoe/9x16/v1.mp4",
+      "shoe/9x16/v1.mp4": "https://publish.invalid/shoe/1x1/v0.mp4",
     });
+  });
+
+  test("the render selector never influences the URL, however path-like it is", () => {
+    // A brief pointing at another mp4 of the same campaign cannot make the
+    // bundle reference that other clip: only the slot's own key is embedded.
+    const sources = collectVideoPlaceholderSources(
+      [videoLayer({ props: { render: "other/9x16/v7.mp4" } })],
+      "shoe/1x1/v0.mp4",
+    );
+    expect(sources).toEqual({
+      "other/9x16/v7.mp4": "https://publish.invalid/shoe/1x1/v0.mp4",
+    });
+  });
+
+  test("refuses a slot selector the render pattern does not accept", () => {
+    for (const slotSelector of ["", "shoe/1x1/v0.mov", "shoe/1x1/v.mp4", "../etc/passwd.mp4"]) {
+      expect(() => collectVideoPlaceholderSources([videoLayer()], slotSelector)).toThrow(
+        InvalidVideoSelectorError,
+      );
+    }
+  });
+
+  test("refuses a non-string slot selector", () => {
+    expect(() => collectVideoPlaceholderSources([videoLayer()], 42 as unknown as string)).toThrow(
+      InvalidVideoSelectorError,
+    );
   });
 
   test("returns undefined when no layer is a video layer", () => {
     expect(
-      collectVideoPlaceholderSources([
-        { id: "image", kind: "image" },
-        { id: "shade", kind: "shade" },
-      ]),
+      collectVideoPlaceholderSources(
+        [
+          { id: "image", kind: "image" },
+          { id: "shade", kind: "shade" },
+        ],
+        "shoe/1x1/v0.mp4",
+      ),
     ).toBeUndefined();
   });
 
   test("returns undefined when every video layer is disabled — a disabled layer is skipped, not collected", () => {
-    expect(collectVideoPlaceholderSources([videoLayer({ enabled: false })])).toBeUndefined();
+    expect(
+      collectVideoPlaceholderSources([videoLayer({ enabled: false })], "shoe/1x1/v0.mp4"),
+    ).toBeUndefined();
   });
 
   test("skips disabled video layers but keeps the enabled ones", () => {
-    const sources = collectVideoPlaceholderSources([
-      videoLayer({ id: "off", enabled: false }),
-      videoLayer({ id: "on", props: { render: "shoe/16x9/v2.mp4" } }),
-    ]);
+    const sources = collectVideoPlaceholderSources(
+      [
+        videoLayer({ id: "off", enabled: false }),
+        videoLayer({ id: "on", props: { render: "shoe/16x9/v2.mp4" } }),
+      ],
+      "shoe/1x1/v0.mp4",
+    );
     expect(sources).toEqual({
-      "shoe/16x9/v2.mp4": "https://publish.invalid/shoe/16x9/v2.mp4",
+      "shoe/16x9/v2.mp4": "https://publish.invalid/shoe/1x1/v0.mp4",
     });
-    expect(Object.keys(sources ?? {})).not.toContain("shoe/1x1/v0.mp4");
   });
 
   test("propagates a throwing props getter rather than returning a partial map", () => {
@@ -79,12 +114,17 @@ describe("collectVideoPlaceholderSources", () => {
         throw new Error("props getter exploded");
       },
     });
-    expect(() => collectVideoPlaceholderSources([hostile])).toThrow("props getter exploded");
+    expect(() => collectVideoPlaceholderSources([hostile], "shoe/1x1/v0.mp4")).toThrow(
+      "props getter exploded",
+    );
   });
 
   test("throws InvalidVideoSelectorError on an invalid render rather than returning undefined", () => {
     expect(() =>
-      collectVideoPlaceholderSources([videoLayer({ props: { render: "shoe/1x1/v0.mov" } })]),
+      collectVideoPlaceholderSources(
+        [videoLayer({ props: { render: "shoe/1x1/v0.mov" } })],
+        "shoe/1x1/v0.mp4",
+      ),
     ).toThrow(InvalidVideoSelectorError);
   });
 });
