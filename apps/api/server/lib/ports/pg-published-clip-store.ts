@@ -43,6 +43,18 @@ export function publishedClipLockName(orgId: string, key: string): string {
  * decides between `"exists"` and the `PublishedClipRecordRefusedError`
  * refusal. A bare delete with rows is refused by the schema's FK anyway —
  * this closes the soft-delete gap the FK does not see.
+ *
+ * The liveness check is not a bare subquery: it is a CTE that takes a
+ * `for share` lock on the live `campaign` row (scoped by `org_id = $1`, so a
+ * cross-org record never sees — nor locks — another org's campaign) in the
+ * same statement that inserts. That lock serialises with
+ * `requestCampaignDeletion`'s phase-3 `for update` tombstone transaction
+ * (D235 lock order): whichever commits first decides — an export that
+ * reaches the row first records against a live campaign and the deletion's
+ * pass-2 unpublishes it; a tombstone that commits first makes the CTE yield
+ * no row and the record is refused. Without the lock, both could read the
+ * same pre-tombstone snapshot and the export could commit a published-clip
+ * fact for a campaign whose deletion has already begun.
  */
 export class PgPublishedClipStore implements PublishedClipRecordPort {
   constructor(private readonly db: SqlClient) {}
@@ -65,11 +77,14 @@ export class PgPublishedClipStore implements PublishedClipRecordPort {
         throw new PublishedClipObjectMissingError();
       }
       return tx.query<{ key: string }>(
-        `insert into published_clip (org_id, campaign_id, content_hash, key, url)
-         select $1, $2::uuid, $3, $4, $5
-         where exists (
-           select 1 from campaign where id = $2::uuid and deleted_at is null
+        `with live as (
+           select 1 from campaign
+           where org_id = $1 and id = $2::uuid and deleted_at is null
+           for share
          )
+         insert into published_clip (org_id, campaign_id, content_hash, key, url)
+         select $1, $2::uuid, $3, $4, $5
+         where exists (select 1 from live)
          on conflict (org_id, campaign_id, content_hash) do nothing
          returning key`,
         [orgId, campaignId, contentHash, key, url],
