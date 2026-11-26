@@ -18,7 +18,7 @@ import { PgJobStore } from "../pg-job-store.js";
  * is the proof over a real server, `poolMax: "2"`, where the tombstone and the
  * claim each take a connection and the `for share` / `for update` conflict is
  * real. Skipped unless `TEST_DATABASE_URL` is set (CI's `postgres:17` service) —
- * never against the owner's Aiven service, and never against `TEST_PG_URL`
+ * never against the owner's real database, and never against `TEST_PG_URL`
  * (that names the per-test clone harness, which has no CREATE on a shared
  * database the way `create schema` here needs).
  *

@@ -7,8 +7,7 @@ import {
   poolBudget,
 } from "../database-config.js";
 
-const remote =
-  "postgres://avnadmin:s3cr%40t@db.example.aivencloud.com:12194/defaultdb?sslmode=require";
+const remote = "postgres://app_user:s3cr%40t@db.example.test:12194/defaultdb?sslmode=require";
 const noCa = (): string => {
   throw new Error("no CA should be read");
 };
@@ -17,9 +16,9 @@ describe("databaseConfig (D174a)", () => {
   test("a remote database is reached over TLS that verifies its certificate against the given CA", () => {
     const readCa = vi.fn(() => "-----BEGIN CERTIFICATE-----");
     expect(databaseConfig({ url: remote, caPath: "certs/ca.pem" }, readCa)).toEqual({
-      host: "db.example.aivencloud.com",
+      host: "db.example.test",
       port: 12194,
-      user: "avnadmin",
+      user: "app_user",
       password: "s3cr@t",
       database: "defaultdb",
       ssl: { ca: "-----BEGIN CERTIFICATE-----", rejectUnauthorized: true },
@@ -31,7 +30,7 @@ describe("databaseConfig (D174a)", () => {
   test("a remote database without a CA is refused, naming the setting and never the password", () => {
     const run = () => databaseConfig({ url: remote }, noCa);
     expect(run).toThrow(/DATABASE_CA_PATH is not set/);
-    expect(run).toThrow(/db\.example\.aivencloud\.com/);
+    expect(run).toThrow(/db\.example\.test/);
     expect(run).not.toThrow(/s3cr/);
   });
 
