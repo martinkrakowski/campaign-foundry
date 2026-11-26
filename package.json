@@ -21,6 +21,7 @@
     "report:colliding-pairs": "tsx apps/api/bin/colliding-pairs.ts",
     "auth:bootstrap": "tsx apps/api/bin/auth-cli.ts",
     "import": "tsx apps/api/bin/import.ts",
+    "seed:sample": "tsx apps/api/bin/seed-sample.ts",
     "deploy:staging": "sh deploy/staging/deploy.sh",
     "gate": "sh scripts/gate.sh",
     "wave:status": "tsx tools/wave-status/bin.ts",
