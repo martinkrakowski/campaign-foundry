@@ -103,6 +103,40 @@
         "requestCampaignDeletion tombstones the campaign and queues one deletion row"
       ],
       "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/request.ts",
+      "before": "    // Phase 1 released the campaign lock, so a job may have claimed the\n    // campaign in the gap. Re-run the refusal under the re-taken `for update`\n    // (same check/claim ordering as the first transaction): a campaign with\n    // an active job is refused here — no tombstone, no `deletion` row, and\n    // the pass-2 unpublish below never runs. Pass 1 has already removed this\n    // campaign's clips by then; that is accepted — the clip objects and rows\n    // stay removed and are simply re-created on the next explicit export.\n    const jobId = await activeJobId(tx, request.orgId, row.slug, row.id);",
+      "after": "    // Phase 1 released the campaign lock, so a job may have claimed the\n    // campaign in the gap. Re-run the refusal under the re-taken `for update`\n    // (same check/claim ordering as the first transaction): a campaign with\n    // an active job is refused here — no tombstone, no `deletion` row, and\n    // the pass-2 unpublish below never runs. Pass 1 has already removed this\n    // campaign's clips by then; that is accepted — the clip objects and rows\n    // stay removed and are simply re-created on the next explicit export.\n    const jobId: string | undefined = undefined;",
+      "because": "skipping the phase-3 active-job read lets the tombstone commit over a job that claimed the campaign in the gap between phase 1 and phase 3. The witness test plants a running job row inside the second transaction and asserts outcome active-job with that job id, deleted_at still null and no deletion row; under this mutant the guard is gone, the tombstone commits and the outcome equals requested — the toEqual assertion fails. Unlike mutations 0 and 1 this anchor covers only the phase-3 copy, isolating the re-check that runs under the re-taken for update lock.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/request.test.ts",
+        "-t",
+        "requestCampaignDeletion refuses a job claimed only in the phase-3 gap at the tombstone"
+      ],
+      "verdict": "caught"
+    },
+    {
+      "file": "apps/api/server/lib/deletion/request.ts",
+      "before": "  const result = await db.transaction(async (tx) => {\n    const { rows } = await tx.query<{ id: string; slug: string; deleted_at: Date | null }>(\n      `select id, slug, deleted_at from campaign\n         where org_id = $1 and id = $2::uuid for update`,\n      [request.orgId, checked.campaignId],\n    );\n    const row = rows[0];\n    if (row === undefined || row.deleted_at !== null) return { outcome: \"gone\" } as const;",
+      "after": "  const result = await db.transaction(async (tx) => {\n    const { rows } = await tx.query<{ id: string; slug: string; deleted_at: Date | null }>(\n      `select id, slug, deleted_at from campaign\n         where org_id = $1 and id = $2::uuid for update`,\n      [request.orgId, checked.campaignId],\n    );\n    const row = rows[0];\n    if (row === undefined) return { outcome: \"gone\" } as const;",
+      "because": "dropping the phase-3 tombstone read lets a second deletion proceed over a campaign a concurrent request tombstoned in the gap between phase 1 and phase 3. The witness test tombstones the campaign and inserts one deletion row inside the second transaction and asserts outcome gone with exactly one deletion row; under this mutant the tombstone runs again and a second row is inserted — the outcome is requested and both assertions fail. Unlike mutation 2 this anchor covers only the phase-3 copy, isolating the re-check under the re-taken for update lock.",
+      "command": [
+        "yarn",
+        "vitest",
+        "run",
+        "--project",
+        "api",
+        "apps/api/server/lib/deletion/__tests__/request.test.ts",
+        "-t",
+        "requestCampaignDeletion answers gone for a concurrent tombstone in the phase-3 gap and leaves one deletion row"
+      ],
+      "verdict": "caught"
     }
   ]
 }

@@ -823,6 +823,98 @@ describe("request-campaign-deletion (D235, D234's tombstone half)", () => {
     },
   );
 
+  test("requestCampaignDeletion refuses a job claimed only in the phase-3 gap at the tombstone", async () => {
+    const campaignId = await seedCampaign(db, "local", `camp-${randomUUID().slice(0, 8)}`);
+
+    // The phase-1 check transaction passes with no active job; its lock
+    // released, a job claims the campaign in the gap. The tombstone
+    // transaction (the second) must re-run the refusal against that claim.
+    // The job row is planted inside the intercepted transaction the same way
+    // a claim writes it: under the campaign row's own lock.
+    let txCount = 0;
+    const wrapped: SqlClient = {
+      ...db,
+      transaction: (work) =>
+        db.transaction(async (tx) => {
+          txCount += 1;
+          if (txCount === 2) {
+            await tx.query(
+              `insert into job (id, org_id, campaign_id, status, lease_expires_at, created_at)
+                 values ('j-phase3', 'local', $1::uuid, 'running', now() + interval '60 seconds', now())`,
+              [campaignId],
+            );
+          }
+          return work(tx);
+        }),
+    };
+
+    const outcome = await requestCampaignDeletion(wrapped, {
+      orgId: "local",
+      campaignId,
+      requestedBy: "actor-1",
+      mayDelete: () => true,
+      graceHours: 0,
+    });
+    // The race's loser answers `active-job`, never `requested`.
+    expect(outcome).toEqual({ outcome: "active-job", jobId: "j-phase3" });
+
+    // Nothing was tombstoned and no deletion row was written.
+    const { rows: campaign } = await db.query<{ deleted_at: Date | null }>(
+      `select deleted_at from campaign where id = $1`,
+      [campaignId],
+    );
+    expect(campaign[0]!.deleted_at).toBeNull();
+    const { rows: count } = await db.query<{ n: number }>(
+      `select count(*)::int as n from deletion`,
+    );
+    expect(count[0]!.n).toBe(0);
+  });
+
+  test("requestCampaignDeletion answers gone for a concurrent tombstone in the phase-3 gap and leaves one deletion row", async () => {
+    const campaignId = await seedCampaign(db, "local", `camp-${randomUUID().slice(0, 8)}`);
+
+    // The phase-1 check transaction passes; its lock released, a concurrent
+    // request completes its whole deletion in the gap — tombstone plus its
+    // own `deletion` row. The tombstone transaction (the second) must notice
+    // the tombstone and answer `gone` without writing a second row.
+    let txCount = 0;
+    const wrapped: SqlClient = {
+      ...db,
+      transaction: (work) =>
+        db.transaction(async (tx) => {
+          txCount += 1;
+          if (txCount === 2) {
+            await tx.query(
+              `update campaign set deleted_at = now(), deleted_by = 'concurrent-actor'
+                 where id = $1::uuid`,
+              [campaignId],
+            );
+            await tx.query(
+              `insert into deletion (org_id, kind, subject, requested_by, not_before)
+                 values ('local', 'campaign', $1::uuid, 'concurrent-actor', now())`,
+              [campaignId],
+            );
+          }
+          return work(tx);
+        }),
+    };
+
+    const outcome = await requestCampaignDeletion(wrapped, {
+      orgId: "local",
+      campaignId,
+      requestedBy: "actor-1",
+      mayDelete: () => true,
+      graceHours: 0,
+    });
+    expect(outcome).toEqual({ outcome: "gone" });
+
+    // Exactly the concurrent request's row: no second deletion was written.
+    const { rows: count } = await db.query<{ n: number }>(
+      `select count(*)::int as n from deletion`,
+    );
+    expect(count[0]!.n).toBe(1);
+  });
+
   test("refuses delete request with PublicMediaNotConfiguredError when clips exist and public media is unconfigured", async () => {
     clearPublicMediaEnv();
     resetPublicAdMediaClient();
