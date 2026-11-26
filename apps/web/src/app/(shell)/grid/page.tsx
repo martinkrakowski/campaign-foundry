@@ -47,7 +47,11 @@ function AssetUnavailable({ asset }: { asset: Asset }) {
   );
 }
 
-const isMotion = (a: Asset): a is Asset & { videoPath: string } => typeof a.videoPath === "string";
+// Format, not the presence of `videoPath`: an `image-html` slot with an enabled
+// `video` layer carries a clip path (CFAR6E) but is still a static/html tile —
+// the poster is the creative the reviewer reviews, never a `<video>`.
+const isMotion = (a: Asset): a is Asset & { videoPath: string } =>
+  a.format === "motion" && typeof a.videoPath === "string";
 
 /**
  * Start playback; resolves true once the browser has actually started playing and

@@ -137,6 +137,10 @@ export function isPersistedAsset(a: unknown): a is PersistedAsset {
   if (rec.format === "html") {
     if (typeof rec.htmlBundlePath !== "string") return false;
     if (typeof rec.htmlFallbackPath !== "string") return false;
+    // CFAR6E: an html slot whose template has an enabled `video` layer carries
+    // the clip path the motion rows carry — but only ever as a string. A
+    // malformed value cannot be signed or purged by path, so the row is skipped.
+    if (rec.videoPath !== undefined && typeof rec.videoPath !== "string") return false;
   }
   if (rec.variantIndex === undefined) return true;
   return isNonNegInt(rec.variantIndex) && isNonNegInt(rec.attempt);

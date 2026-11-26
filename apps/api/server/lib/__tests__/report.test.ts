@@ -538,6 +538,24 @@ describe("report persistence", () => {
     expect(isPersistedAsset({ ...htmlRow, htmlFallbackPath: null })).toBe(false);
   });
 
+  test("isPersistedAsset accepts an html row with a string videoPath and rejects a non-string one (CFAR6E)", () => {
+    const htmlRow = {
+      productId: "alpha",
+      aspectRatio: "1:1",
+      treatment: "default",
+      outputPath: "alpha/1x1.png",
+      format: "html",
+      htmlBundlePath: "alpha/1x1/index.html",
+      htmlFallbackPath: "alpha/1x1/fallback.png",
+    };
+    // A video-layer html slot carries its clip path like a motion row does.
+    expect(isPersistedAsset({ ...htmlRow, videoPath: "alpha/1x1/v0.mp4" })).toBe(true);
+    expect(isPersistedAsset(htmlRow)).toBe(true);
+    // A malformed value cannot be signed or purged by path — the row is skipped.
+    expect(isPersistedAsset({ ...htmlRow, videoPath: 123 })).toBe(false);
+    expect(isPersistedAsset({ ...htmlRow, videoPath: null })).toBe(false);
+  });
+
   test("isPersistedAsset refuses a present, non-string clickDestination (X12)", () => {
     const row = {
       productId: "alpha",

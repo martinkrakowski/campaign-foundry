@@ -188,7 +188,7 @@ export default function ExportPage() {
             </h3>
             <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
               {approved.map((asset) =>
-                asset.videoPath !== undefined ? (
+                asset.format === "motion" && asset.videoPath !== undefined ? (
                   <Row
                     key={assetKey(asset)}
                     label={`${assetLabel(asset)}${asset.durationSec !== undefined ? ` · ${formatDuration(asset.durationSec)}` : ""}`}
