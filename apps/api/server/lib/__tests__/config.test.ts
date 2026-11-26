@@ -53,7 +53,13 @@ describe("outputRoot", () => {
 });
 
 describe("databaseSettings (D174a)", () => {
-  const keys = ["DATABASE_URL", "DATABASE_CA_PATH", "DATABASE_POOL_MAX"] as const;
+  const keys = [
+    "DATABASE_URL",
+    "DATABASE_CA_PATH",
+    "DATABASE_POOL_MAX",
+    "AUTH_POOL_MAX",
+    "DATABASE_POOL_CEILING",
+  ] as const;
   const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
   afterEach(() => {
     for (const k of keys) {
@@ -62,15 +68,27 @@ describe("databaseSettings (D174a)", () => {
     }
   });
 
-  test("reads the three database variables, raw", () => {
+  test("reads the five database variables, raw", () => {
     process.env.DATABASE_URL = "postgres://me@localhost/cf";
     process.env.DATABASE_CA_PATH = "certs/ca.pem";
     process.env.DATABASE_POOL_MAX = "3";
+    process.env.AUTH_POOL_MAX = "4";
+    process.env.DATABASE_POOL_CEILING = "30";
     expect(databaseSettings()).toEqual({
       url: "postgres://me@localhost/cf",
       caPath: "certs/ca.pem",
       poolMax: "3",
+      authPoolMax: "4",
+      poolCeiling: "30",
     });
+  });
+
+  test("leaves the pool budget variables undefined when unset", () => {
+    delete process.env.AUTH_POOL_MAX;
+    delete process.env.DATABASE_POOL_CEILING;
+    const settings = databaseSettings();
+    expect(settings.authPoolMax).toBeUndefined();
+    expect(settings.poolCeiling).toBeUndefined();
   });
 });
 

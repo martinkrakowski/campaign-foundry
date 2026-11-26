@@ -213,23 +213,70 @@ describe("templateProblem (RW-22)", () => {
       'layers[0].link must be a boolean (got "https://x")',
     );
     expect(templateProblem(withLayer({ id: "a", kind: "image", frame: { x: 2 } }))).toBe(
-      "layers[0].x must be a number in [0, 1] (got 2)",
+      "layers[0].frame.x must be a number in [0, 1] (got 2)",
     );
     expect(templateProblem(withLayer({ id: "a", kind: "shade", props: {} }))).toBe(
-      'layers[0] must be absent for layer kind "shade" (got {})',
+      'layers[0].props must be absent for layer kind "shade" (got {})',
     );
     expect(templateProblem(withLayer({ id: "a", kind: "shade", tracks: [] }))).toBe(
-      'layers[0] must be absent for layer kind "shade" (got [])',
+      'layers[0].tracks must be absent for layer kind "shade" (got [])',
     );
     expect(templateProblem(withLayer({ id: "a", kind: "video", startSec: 1 }))).toBe(
       "layers[0].startSec must be absent; clip time is span.startT and span.endT as normalised t, never seconds (got 1)",
     );
     expect(
       templateProblem(withLayer({ id: "a", kind: "image", span: { startT: 0, endT: 1 } })),
-    ).toBe('layers[0] must be absent for layer kind "image" (got {"startT":0,"endT":1})');
+    ).toBe('layers[0].span must be absent for layer kind "image" (got {"startT":0,"endT":1})');
     expect(
       templateProblem(withLayer({ id: "a", kind: "video", span: { startT: 1, endT: 0 } })),
-    ).toBe('layers[0] must have startT < endT (got {"startT":1,"endT":0})');
+    ).toBe('layers[0].span must have startT < endT (got {"startT":1,"endT":0})');
+  });
+
+  test("formats values JSON.stringify cannot serialize via gotText fallbacks", () => {
+    const withLayer = (layer: Record<string, unknown>): Record<string, unknown> => ({
+      ...validTemplate(),
+      layers: [layer],
+    });
+    // A frame field whose value is `undefined` stringifies to `undefined`, so
+    // the `?? String(value)` branch of gotText runs.
+    expect(
+      templateProblem(withLayer({ id: "a", kind: "image", frame: { junk: undefined } })),
+    ).toMatch(/^layers\[0\]\.frame\.junk must be one of .* \(got undefined\)$/);
+    // A BigInt throws under JSON.stringify, so the catch returns String(value).
+    expect(templateProblem(withLayer({ id: "a", kind: "image", enabled: BigInt(1) }))).toBe(
+      "layers[0].enabled must be a boolean (got 1)",
+    );
+  });
+
+  test("accepts a minimal template whose layers omit every capped kind", () => {
+    // No logo/shade/accent layer means `counts.get(kind)` is undefined for each
+    // capped kind, so the maxOf loop reads its `?? 0` default.
+    expect(
+      templateProblem({
+        ...validTemplate(),
+        layers: [
+          { id: "image", kind: "image" },
+          { id: "static-text", kind: "static-text" },
+        ],
+      }),
+    ).toBe(undefined);
+  });
+
+  test("accepts a fill layer whose props pass layerPropsProblem", () => {
+    expect(
+      templateProblem({
+        ...validTemplate(),
+        layers: [
+          ...CANONICAL_TEMPLATES["image-text"].layers,
+          {
+            id: "fill-1",
+            kind: "fill",
+            frame: { x: 0, y: 0, w: 1, h: 1, anchor: "top" },
+            props: { role: "primary" },
+          },
+        ],
+      }),
+    ).toBe(undefined);
   });
 
   test("rejects layers violating CREATIVE_TYPE_RULES or order constraints", () => {
