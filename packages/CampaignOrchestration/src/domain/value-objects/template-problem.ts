@@ -60,12 +60,19 @@ function gotText(value: unknown): string {
   }
 }
 
+/**
+ * The problem shape the layer validators return: one names a `field`
+ * (`layerEnabledProblem`, `layerLinkProblem`), one names a `path` (every
+ * other member of the `layer*Problem` family). One of the two is always
+ * present, so the formatter needs no defensive fallback.
+ */
+type LayerProblem =
+  | { field: string; must: string; value: unknown }
+  | { path: string; must: string; value: unknown };
+
 /** Formats a `{ field | path, must, value }` problem under a `layers[i]` prefix. */
-function formatLayerProblem(
-  index: number,
-  problem: { field?: string; path?: string; must: string; value: unknown },
-): string {
-  const where = problem.field ?? problem.path ?? "";
+function formatLayerProblem(index: number, problem: LayerProblem): string {
+  const where = "field" in problem ? problem.field : problem.path;
   const suffix = where.replace(/^\./, "");
   const subject = suffix.length === 0 ? `layers[${index}]` : `layers[${index}].${suffix}`;
   return `${subject} must ${problem.must} (got ${gotText(problem.value)})`;
