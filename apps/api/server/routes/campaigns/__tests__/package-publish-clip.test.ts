@@ -271,6 +271,24 @@ describe("POST /campaigns/package — publishClip (CFAR6C3)", () => {
     expect(html).not.toContain("publish.invalid");
   });
 
+  test("a tombstoned campaign has no render target, so its export is refused before any publish (CFAR6-record)", async () => {
+    // The soft-delete gate in `renderTarget` closes the route-level race; the
+    // deeper one — a tombstone landing between target resolution and the
+    // ledger insert — is refused by the published-clip store itself (see
+    // `pg-published-clip-store.test.ts`), and the publisher removes the
+    // object it published when the record is refused (see
+    // `PublishAdClipUseCase.use-case.test.ts`).
+    await seedCampaign(harness.db);
+    await seedReport(harness.db);
+    await seedRenders();
+    await harness.db.query(`update campaign set deleted_at = now() where id = $1`, [CAMPAIGN]);
+
+    const res = await call({ campaignId: SLUG, platforms: [PLATFORM], publishClip: true });
+    expect(res.status).toBe(404);
+    expect(media.publish).not.toHaveBeenCalled();
+    expect(await store.list(`org/local/campaign/${CAMPAIGN}/packages/`)).toEqual([]);
+  });
+
   test("keys the publish by the authenticated tenant's orgId, never the body's", async () => {
     await seedCampaign(harness.db);
     await seedReport(harness.db);

@@ -316,7 +316,16 @@ export function publicMediaSettings(): PublicMediaSettings | undefined {
   const plainBase = plainEndpoint(baseUrl);
   if (plainBase === undefined) {
     throw new PublicMediaConfigError(
-      "PUBLIC_MEDIA_BASE_URL must be a plain http(s) origin with no query, fragment or credentials.",
+      "PUBLIC_MEDIA_BASE_URL must be a plain https origin with no query, fragment or credentials.",
+    );
+  }
+  // CFAR6-https: the base URL is what published clip URLs are joined onto, and
+  // published clips are fetched by browsers on mixed-content-strict origins —
+  // an http base URL would make every published ad media URL insecure. The
+  // refusal is at config time, before anything is published.
+  if (!plainBase.startsWith("https://")) {
+    throw new PublicMediaConfigError(
+      "PUBLIC_MEDIA_BASE_URL must be an https origin: published clip URLs are served to browsers and http is refused.",
     );
   }
   const plainEndpointValue = plainEndpoint(resolvedEndpoint);

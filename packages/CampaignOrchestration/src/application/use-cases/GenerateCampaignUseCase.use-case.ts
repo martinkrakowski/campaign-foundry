@@ -1054,11 +1054,13 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       htmlFallbackPath = `${basePath}/fallback.png`;
       htmlBundlePath = `${basePath}/index.html`;
       await this.deps.exporter.saveToDirectory(composite.image, htmlFallbackPath);
-      // The variation path resolves every enabled `video` layer's `render`
-      // selector to its deterministic placeholder URL (CFAR6C2). Absent when
-      // the template has no enabled `video` layer, so non-video bundles stay
-      // byte-identical to the pre-video assembler.
-      const videoSources = collectVideoPlaceholderSources(template.layers);
+      // The variation path resolves every enabled `video` layer's placeholder
+      // to THIS slot's own clip URL (CFAR6-slot). The selector is derived from
+      // the slot — product, ratio, variant — matching the `videoPath` the clip
+      // is saved at, campaign segment excluded. The brief's `render` only
+      // selects which layer is the video; it never becomes a storage path.
+      const slotSelector = `${product.id}/${ratio.slug}/v${variant.index}.mp4`;
+      const videoSources = collectVideoPlaceholderSources(template.layers, slotSelector);
       const assembled = assembleHtml({
         layers: template.layers,
         headline: variant.headline ?? copy,

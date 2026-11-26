@@ -1173,4 +1173,22 @@ describe("publicMediaSettings (PT-4k)", () => {
       expect((thrown as Error).message).not.toContain(String(value));
     }
   });
+
+  test("an http base URL is refused and an https one accepted (CFAR6-https)", () => {
+    setAll({ PUBLIC_MEDIA_BASE_URL: "http://media.example" });
+    let thrown: unknown;
+    try {
+      publicMediaSettings();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PublicMediaConfigError);
+    expect((thrown as Error).message).toContain("PUBLIC_MEDIA_BASE_URL must be an https origin");
+    // The value is never echoed, for the same reason every message here quotes
+    // no value: a base URL carries a hostname.
+    expect((thrown as Error).message).not.toContain("media.example");
+
+    setAll({ PUBLIC_MEDIA_BASE_URL: "https://media.example" });
+    expect(publicMediaSettings()?.baseUrl).toBe("https://media.example");
+  });
 });

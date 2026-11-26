@@ -2,7 +2,10 @@ import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import type { SqlClient } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
-import { PgPublishedClipStore } from "../pg-published-clip-store.js";
+import {
+  PgPublishedClipStore,
+  PublishedClipRecordRefusedError,
+} from "../pg-published-clip-store.js";
 
 /**
  * A published-clip record round trip on a real (PGlite) Postgres: idempotent
@@ -110,5 +113,31 @@ describe("PgPublishedClipStore (PT-4k)", () => {
       db.query(`delete from campaign where id = $1`, [acmeCampaign]),
     ).rejects.toMatchObject({ code: "23503" });
     expect(await store.find("acme", acmeCampaign, "0123")).toBeDefined();
+  });
+
+  test("a tombstoned campaign's record is refused, recording nothing (CFAR6-record)", async () => {
+    const store = new PgPublishedClipStore(db);
+    await db.query(`update campaign set deleted_at = now() where id = $1`, [acmeCampaign]);
+
+    await expect(
+      store.record("acme", acmeCampaign, "acme/aaa/0123.mp4", "https://pub/aaa.mp4", "0123"),
+    ).rejects.toBeInstanceOf(PublishedClipRecordRefusedError);
+    // Nothing was recorded: the tombstoned campaign gained no published-clip
+    // fact, even though the insert itself would have succeeded.
+    expect(await store.find("acme", acmeCampaign, "0123")).toBeUndefined();
+    expect(await store.listForCampaign("acme", acmeCampaign)).toEqual([]);
+  });
+
+  test("a live campaign still records after a sibling campaign was tombstoned", async () => {
+    const store = new PgPublishedClipStore(db);
+    await db.query(`update campaign set deleted_at = now() where id = $1`, [acmeCampaign]);
+
+    expect(
+      await store.record("beta", betaCampaign, "beta/bbb/0123.mp4", "https://pub/bbb.mp4", "0123"),
+    ).toBe("recorded");
+    expect(await store.find("beta", betaCampaign, "0123")).toEqual({
+      key: "beta/bbb/0123.mp4",
+      url: "https://pub/bbb.mp4",
+    });
   });
 });

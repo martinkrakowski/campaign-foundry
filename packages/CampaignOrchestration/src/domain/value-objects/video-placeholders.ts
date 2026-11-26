@@ -54,8 +54,21 @@ export function videoPlaceholderUrl(selector: string): string {
 
 /**
  * The `videoSources` map for the enabled `video` layers of a template: each
- * enabled layer's `render` selector mapped to its placeholder URL. Absent —
- * `undefined` — when no enabled `video` layer is present, so callers spread
+ * enabled layer's `render` selector keyed to the SLOT's own placeholder URL.
+ *
+ * **The URL never derives from the brief's `render` (CFAR6-slot).** Every
+ * slot renders exactly one clip of its own — `<product>/<ratio>/v<n>.mp4` —
+ * and that is what `slotSelector` carries, derived by the caller from the
+ * slot itself. The brief's `render` only selects WHICH layer is the video:
+ * it keys the map (the assembler looks each layer up by it) but is validated
+ * and otherwise ignored, so a render pointing at another mp4 of the campaign
+ * cannot make the bundle reference — and export cannot publish — anything
+ * but this slot's own clip.
+ *
+ * `slotSelector` must itself match the render pattern: `findVideoPlaceholders`
+ * reads the URL back out of the generated HTML, so a malformed one is a
+ * refusal here, never a bundle that publish-time tooling cannot parse. Absent
+ * — `undefined` — when no enabled `video` layer is present, so callers spread
  * it conditionally and non-video bundles stay byte-identical to the
  * pre-video assembler. A disabled `video` layer contributes nothing (the
  * assembler skips it too). Invalid selectors throw — a bad render is a
@@ -63,7 +76,9 @@ export function videoPlaceholderUrl(selector: string): string {
  */
 export function collectVideoPlaceholderSources(
   layers: readonly CreativeTemplateLayer[],
+  slotSelector: string,
 ): Readonly<Record<string, string>> | undefined {
+  const url = videoPlaceholderUrl(slotSelector);
   const sources: Record<string, string> = {};
   let sawVideo = false;
   for (const layer of layers) {
@@ -71,9 +86,14 @@ export function collectVideoPlaceholderSources(
     sawVideo = true;
     const render = (layer.props as VideoProps | undefined)?.render;
     // `render` is typed `string` but a programmatic layer can carry anything;
-    // videoPlaceholderUrl refuses it rather than trusting the type.
-    const url = videoPlaceholderUrl(render as string);
-    sources[render as string] = url;
+    // the pattern check refuses it rather than trusting the type. It keys the
+    // map only — the URL above carries the slot's own clip key (CFAR6-slot).
+    if (typeof render !== "string" || !VIDEO_RENDER_PATTERN.test(render)) {
+      throw new InvalidVideoSelectorError(
+        `collectVideoPlaceholderSources: video layer render must match <product>/<ratio>/v<n>.mp4 (e.g. "shoe/1x1/v0.mp4"), got ${JSON.stringify(render)}`,
+      );
+    }
+    sources[render] = url;
   }
   if (!sawVideo) return undefined;
   return sources;
