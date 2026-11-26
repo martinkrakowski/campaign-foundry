@@ -186,7 +186,37 @@ describe("parseBrief", () => {
         id: "unknown-template-id",
       };
       expect(() => parseBrief({ ...valid, template })).toThrow(
-        `Campaign brief field "template.id" must be one of ${CANONICAL_TEMPLATE_IDS.map((t) => `"${t}"`).join(", ")}; got "unknown-template-id".`,
+        `Campaign brief field "template.id" must be one of ${CANONICAL_TEMPLATE_IDS.map((t) => `"${t}"`).join(", ")} or an org template id ("tpl-<uuid>"); got "unknown-template-id".`,
+      );
+    });
+
+    test("a brief pinned to a valid org template parses and keeps the org id", () => {
+      const id = "tpl-123e4567-e89b-42d3-a456-426614174000";
+      const template = {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        id,
+      };
+      const parsed = parseBrief({ ...valid, template });
+      expect(parsed.template.id).toBe(id);
+    });
+
+    test("a malformed org id is refused", () => {
+      for (const id of ["tpl-", "tpl-123E4567-e89b-42d3-a456-426614174000"]) {
+        const template = {
+          ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+          id,
+        };
+        expect(() => parseBrief({ ...valid, template })).toThrow(/"template.id" must be one of/);
+      }
+    });
+
+    test("an id of neither shape is refused", () => {
+      const template = {
+        ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE),
+        id: "unknown-id",
+      };
+      expect(() => parseBrief({ ...valid, template })).toThrow(
+        /or an org template id \("tpl-<uuid>"\); got "unknown-id"\./,
       );
     });
 

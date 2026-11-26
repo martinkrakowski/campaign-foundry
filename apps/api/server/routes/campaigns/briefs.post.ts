@@ -8,6 +8,7 @@ import {
 import { isExistsError, isErrno, SYMLINK_WRITE_ERROR } from "../../lib/brief-files.js";
 import { parseBrief } from "../../lib/load-brief.js";
 import { getAssetStore, getBriefStore, TeamsNotSupportedError } from "../../lib/ports/index.js";
+import { PinnedTemplateError, resolvePinnedOrgTemplate } from "../../lib/pinned-template.js";
 import { CampaignNotFoundError, canAssignTeam } from "../../lib/ownership.js";
 
 import { requestTenant } from "../../lib/tenant.js";
@@ -82,6 +83,20 @@ export default defineEventHandler(async (event) => {
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: errorMessage(error) };
+  }
+
+  // RW-22: an org-saved template pin is resolved against the tenant's
+  // TemplateStorePort before anything is written or reserved. A
+  // PinnedTemplateError (missing / cross-org / version-mismatched /
+  // creativeType-mismatched) is a 400; a store failure rethrows as a 500.
+  try {
+    await resolvePinnedOrgTemplate(scope, brief.template);
+  } catch (error) {
+    if (error instanceof PinnedTemplateError) {
+      setResponseStatus(event, 400);
+      return { error: error.message };
+    }
+    throw error;
   }
 
   // D181 fix round 2 (S2): kept OUT of the body-parse try/catch above, which

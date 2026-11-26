@@ -14,11 +14,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import {
+  CANONICAL_TEMPLATES,
   DEFAULT_CAMPAIGN_TYPE,
   templateFromCanonical,
   type CampaignType,
+  type CreativeTemplate,
 } from "@campaignfoundry/CampaignOrchestration";
 import { loadBrief } from "../../../lib/load-brief.js";
+import type { TemplateStorePort } from "../../../lib/ports/template-store.port.js";
 
 import { LOCAL_TENANT } from "../../../lib/tenant.js";
 import { getBriefStore } from "../../../lib/ports/index.js";
@@ -2177,4 +2180,157 @@ describe("the briefs routes and a tombstone (PT-9a2, D233 r2)", () => {
       await harness.cleanup();
     }
   }, 15000);
+});
+
+describe("org template pins (RW-22)", () => {
+  const ORG_ID = "tpl-123e4567-e89b-42d3-a456-426614174000";
+  const orgRecord: CreativeTemplate = {
+    ...CANONICAL_TEMPLATES["image-text"],
+    id: ORG_ID,
+    name: "Org Saved Image & Text",
+  };
+  const orgTemplate = () => ({ ...templateFromCanonical(DEFAULT_CAMPAIGN_TYPE), id: ORG_ID });
+
+  let dir: string;
+  const origRoot = process.env.PROJECT_ROOT;
+  let resetStore: (() => void) | undefined;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "cf-briefs-pins-"));
+    resetStore = undefined;
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    if (origRoot === undefined) delete process.env.PROJECT_ROOT;
+    else process.env.PROJECT_ROOT = origRoot;
+    vi.restoreAllMocks();
+    resetStore?.();
+  });
+
+  const api = async (store?: Partial<TemplateStorePort>) => {
+    const h = await handlersFor(dir);
+    // The SAME fresh module registry `handlersFor` just built — a static
+    // top-of-file import of the store would be a different `Map`.
+    const ports = await import("../../../lib/ports/index.js");
+    const { LOCAL_TENANT: tenant } = await import("../../../lib/tenant.js");
+    if (store) {
+      ports.setTemplateStore({
+        listTemplates: () => Promise.resolve([]),
+        exists: () => Promise.resolve(false),
+        ...store,
+      } as TemplateStorePort);
+      resetStore = () => ports.resetTemplateStore();
+    }
+    // PT-5c2: Create no longer mints — the fixture mints `camp` first, best
+    // effort, exactly like the `authoring briefs` suite above.
+    const mint = (id: string) =>
+      ports
+        .getBriefStore(tenant)
+        .createCampaign(id)
+        .catch(() => undefined);
+    const createHandler = mount([{ method: "post", path: "/campaigns/briefs", handler: h.create }]);
+    const create = async (req: Request): Promise<Response> => {
+      try {
+        const body = (await req.clone().json()) as { id?: unknown };
+        if (typeof body.id === "string") await mint(body.id);
+      } catch {
+        // Not JSON, or no string id — the real handler answers its own 400.
+      }
+      return createHandler(req);
+    };
+    return {
+      create: () => create,
+      update: () => mount([{ method: "put", path: "/campaigns/briefs/:id", handler: h.update }]),
+    };
+  };
+
+  test("POST accepts a brief pinned to an org template in TemplateStorePort, with edited layers", async () => {
+    const findTemplate = vi.fn(() => Promise.resolve(orgRecord));
+    const { create } = await api({ findTemplate });
+    const res = await create()(
+      jsonReq("http://x/campaigns/briefs", "POST", brief({ template: orgTemplate() })),
+    );
+    expect(res.status).toBe(201);
+    expect(findTemplate).toHaveBeenCalledOnce();
+  });
+
+  test("PUT accepts a brief pinned to an org template, with edited layers", async () => {
+    const findTemplate = vi.fn(() => Promise.resolve(orgRecord));
+    const { create, update } = await api({ findTemplate });
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const res = await update()(
+      jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ template: orgTemplate() })),
+    );
+    expect(res.status).toBe(200);
+    expect(findTemplate).toHaveBeenCalledOnce();
+  });
+
+  test("POST refuses a missing or cross-org org template with 400 naming template.id, before any brief-store write", async () => {
+    const findTemplate = vi.fn(() => Promise.resolve(undefined)); // org B's store: org A's id is absent
+    const { create } = await api({ findTemplate });
+    const res = await create()(
+      jsonReq("http://x/campaigns/briefs", "POST", brief({ template: orgTemplate() })),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: `Campaign brief field "template.id" references unknown template "${ORG_ID}" (version 1).`,
+    });
+    expect(existsSync(join(dir, "briefs", "camp.yaml"))).toBe(false);
+  });
+
+  test("PUT refuses a missing or cross-org org template with 400, leaving the saved yaml untouched", async () => {
+    const findTemplate = vi.fn(() => Promise.resolve(undefined));
+    const { create, update } = await api({ findTemplate });
+    await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    const original = readFileSync(join(dir, "briefs", "camp.yaml"));
+    const res = await update()(
+      jsonReq("http://x/campaigns/briefs/camp", "PUT", brief({ template: orgTemplate() })),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: `Campaign brief field "template.id" references unknown template "${ORG_ID}" (version 1).`,
+    });
+    expect(readFileSync(join(dir, "briefs", "camp.yaml"))).toEqual(original);
+  });
+
+  test("POST refuses a version-mismatched pin with the SAME unknown-template message", async () => {
+    // the store's exact-match contract: an unknown version is undefined
+    const findTemplate = vi.fn((_id: string, version?: number) =>
+      Promise.resolve(version === 1 ? orgRecord : undefined),
+    );
+    const { create } = await api({ findTemplate });
+    const res = await create()(
+      jsonReq(
+        "http://x/campaigns/briefs",
+        "POST",
+        brief({ template: { ...orgTemplate(), version: 2 } }),
+      ),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: `Campaign brief field "template.id" references unknown template "${ORG_ID}" (version 2).`,
+    });
+  });
+
+  test("POST refuses a creativeType-mismatched pin with 400 naming template.id", async () => {
+    const findTemplate = vi.fn(() =>
+      Promise.resolve({ ...orgRecord, creativeType: "video" as const }),
+    );
+    const { create } = await api({ findTemplate });
+    const res = await create()(
+      jsonReq("http://x/campaigns/briefs", "POST", brief({ template: orgTemplate() })),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: `Campaign brief field "template.id" ("${ORG_ID}" version 1) has creativeType "video", which does not match brief template.creativeType "image-text".`,
+    });
+  });
+
+  test("a canonical template passes with zero findTemplate lookups", async () => {
+    const findTemplate = vi.fn(() => Promise.resolve(orgRecord));
+    const { create } = await api({ findTemplate });
+    const res = await create()(jsonReq("http://x/campaigns/briefs", "POST", brief()));
+    expect(res.status).toBe(201);
+    expect(findTemplate).not.toHaveBeenCalled();
+  });
 });

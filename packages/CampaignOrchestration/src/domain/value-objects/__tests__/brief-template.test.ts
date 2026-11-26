@@ -7,6 +7,7 @@ import {
   DEFAULT_FILL_ROLE,
   FILL_ROLES,
   isBriefTemplate,
+  isOrgTemplateId,
   layerEnabledProblem,
   layerFrameProblem,
   layerLinkProblem,
@@ -1437,5 +1438,116 @@ describe("layerSpanProblem and isBriefTemplate layer span (VT2)", () => {
         layers,
       }),
     ).toBe(true);
+  });
+});
+
+const ORG_ID = "tpl-123e4567-e89b-42d3-a456-426614174000";
+
+describe("isOrgTemplateId (RW-22)", () => {
+  test("accepts a valid lowercase tpl-<uuid>", () => {
+    expect(isOrgTemplateId(ORG_ID)).toBe(true);
+  });
+
+  test("refuses malformed org ids and ids of no shape", () => {
+    expect(isOrgTemplateId("tpl-")).toBe(false);
+    expect(isOrgTemplateId("tpl-123E4567-e89b-42d3-a456-426614174000")).toBe(false); // uppercase hex
+    expect(
+      isOrgTemplateId("tpl-123e4567-e89b-42d3-a456-426614174000-extra"), // extra segment
+    ).toBe(false);
+    expect(isOrgTemplateId("nope-123e4567-e89b-42d3-a456-426614174000")).toBe(false); // wrong prefix
+    // a canonical id is a third answer, distinct from both shapes above
+    expect(isOrgTemplateId("canonical-video")).toBe(false);
+  });
+
+  test("refuses wrong-length strings before any regex work", () => {
+    expect(isOrgTemplateId(`tpl-${"a".repeat(2000)}`)).toBe(false);
+    expect(isOrgTemplateId("tpl-123e4567")).toBe(false);
+  });
+
+  test("never throws on any unknown input", () => {
+    expect(isOrgTemplateId(null)).toBe(false);
+    expect(isOrgTemplateId(undefined)).toBe(false);
+    expect(isOrgTemplateId(42)).toBe(false);
+    expect(isOrgTemplateId(true)).toBe(false);
+    expect(isOrgTemplateId({ id: ORG_ID })).toBe(false);
+    expect(
+      isOrgTemplateId({
+        get toString() {
+          throw new Error("getter");
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isOrgTemplateId(
+        new Proxy(
+          {},
+          {
+            get: () => {
+              throw new Error("trap");
+            },
+          },
+        ),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("isBriefTemplate with an org template id (RW-22)", () => {
+  const orgTemplate = {
+    ...templateFromCanonical("short-video"),
+    id: ORG_ID,
+  };
+  const orgTemplateFor = (type: Parameters<typeof templateFromCanonical>[0]) => ({
+    ...templateFromCanonical(type),
+    id: ORG_ID,
+  });
+
+  test("accepts a valid org template for every campaign type", () => {
+    for (const type of CAMPAIGN_TYPES) {
+      expect(isBriefTemplate(orgTemplateFor(type))).toBe(true);
+    }
+  });
+
+  test("refuses a malformed org id", () => {
+    expect(isBriefTemplate({ ...orgTemplate, id: "tpl-" })).toBe(false);
+    expect(
+      isBriefTemplate({ ...orgTemplate, id: "tpl-123E4567-e89b-42d3-a456-426614174000" }),
+    ).toBe(false);
+  });
+
+  test("refuses an org template that fails structural rules", () => {
+    // a missing required layer (video templates need the video layer)
+    expect(isBriefTemplate({ ...orgTemplate, layers: orgTemplate.layers.slice(1) })).toBe(false);
+    // a non-array layers
+    expect(isBriefTemplate({ ...orgTemplate, layers: "no" })).toBe(false);
+  });
+
+  test("never throws on hostile input", () => {
+    expect(isBriefTemplate(null)).toBe(false);
+    expect(isBriefTemplate(undefined)).toBe(false);
+    expect(isBriefTemplate(42)).toBe(false);
+    expect(
+      isBriefTemplate({
+        get id() {
+          throw new Error("getter");
+        },
+        version: 1,
+        creativeType: "video",
+        unit: "standard-web",
+        layers: [],
+      }),
+    ).toBe(false);
+    expect(
+      isBriefTemplate(
+        new Proxy(
+          { id: ORG_ID, version: 1, creativeType: "video", unit: "standard-web", layers: [] },
+          {
+            get: () => {
+              throw new Error("trap");
+            },
+          },
+        ),
+      ),
+    ).toBe(false);
   });
 });
