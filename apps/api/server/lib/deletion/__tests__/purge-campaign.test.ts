@@ -550,8 +550,9 @@ describe("purge-campaign (D232, D246)", () => {
     }
 
     test("purge removes leftover published_clip public objects and records before deleteCampaignRows and leaves other campaigns' clips untouched", async () => {
+      const publicStore = new InMemoryObjectStore();
       const media = new PublicAdMediaStore({
-        store: new InMemoryObjectStore(),
+        store: publicStore,
         baseUrl: "https://media.test",
       });
       setPublicAdMediaClient(media);
@@ -588,9 +589,14 @@ describe("purge-campaign (D232, D246)", () => {
         [subject.campaignId],
       );
       expect(campaignLeft[0]!.n).toBe(0);
-      // The survivor's and the foreign org's clips are intact.
+      // The survivor's and the foreign org's clips are intact — and the
+      // subject's own public object is gone from the public store.
       expect(await clipCount("local", survivorId)).toBe(1);
       expect(await clipCount("other", foreignId)).toBe(1);
+      const localKeys = await publicStore.list("local/");
+      expect(localKeys).toHaveLength(1);
+      expect(localKeys[0]!.key.includes("a".repeat(64))).toBe(false);
+      expect(await publicStore.list("other/")).toHaveLength(1);
     });
 
     test("refuses purge with PublicMediaNotConfiguredError when leftover clips exist and public media is unconfigured", async () => {

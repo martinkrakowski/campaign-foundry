@@ -39,9 +39,16 @@ export type CampaignDeletionOutcome =
  *     leaves first, then its `published_clip` row; a failure here throws
  *     before the tombstone, leaving the request fully retryable.
  *  3. The tombstone transaction: `deleted_at` and the `deletion` row, the
- *     campaign row re-locked `for update` and re-checked live so two
- *     concurrent requests still answer one `requested` and one `gone` (the
- *     original single-transaction guarantee, kept).
+ *     campaign row re-locked `for update` and re-checked live AND jobless so
+ *     two concurrent requests still answer one `requested` and one `gone`
+ *     (the original single-transaction guarantee, kept) and a job that
+ *     became active in the gap is refused here rather than tombstoned
+ *     through — the same check/claim ordering as phase 1: every active
+ *     `job` row is written under the campaign row `for share`, which this
+ *     `for update` waits on, so a claim that committed after phase 1 is
+ *     visible by the time this transaction reads. The refusal skips the
+ *     pass-2 unpublish below, so a still-running job's own publishes are
+ *     never swept by the request that refused it.
  *
  * A failure at any step leaves neither `deleted_at` nor a `deletion` row.
  * After the tombstone commits, one more unpublish pass closes the window
@@ -78,13 +85,20 @@ export async function requestCampaignDeletion(
   await removeCampaignPublishedClips(db, request.orgId, checked.campaignId);
 
   const result = await db.transaction(async (tx) => {
-    const { rows } = await tx.query<{ id: string; deleted_at: Date | null }>(
-      `select id, deleted_at from campaign
+    const { rows } = await tx.query<{ id: string; slug: string; deleted_at: Date | null }>(
+      `select id, slug, deleted_at from campaign
          where org_id = $1 and id = $2::uuid for update`,
       [request.orgId, checked.campaignId],
     );
     const row = rows[0];
     if (row === undefined || row.deleted_at !== null) return { outcome: "gone" } as const;
+    // Phase 1 released the campaign lock, so a job may have claimed the
+    // campaign in the gap. Re-run the refusal under the re-taken `for update`
+    // (same check/claim ordering as the first transaction): a campaign with
+    // an active job is refused here — no tombstone, no `deletion` row, and
+    // the pass-2 unpublish below never runs.
+    const jobId = await activeJobId(tx, request.orgId, row.slug, row.id);
+    if (jobId !== undefined) return { outcome: "active-job", jobId } as const;
     await tx.query(
       `update campaign set deleted_at = now(), deleted_by = $3
          where org_id = $1 and id = $2::uuid`,

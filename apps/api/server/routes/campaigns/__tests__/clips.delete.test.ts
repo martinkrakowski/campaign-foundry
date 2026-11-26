@@ -35,6 +35,34 @@ const teamlessMember: TenantContext = {
 
 const BYTES = new Uint8Array([1, 2, 3, 4]);
 
+/** Every `PUBLIC_MEDIA_*` variable, the set `publicAdMediaClient()` builds from. */
+const PUBLIC_MEDIA_VARS = [
+  "PUBLIC_MEDIA_BUCKET",
+  "PUBLIC_MEDIA_BASE_URL",
+  "PUBLIC_MEDIA_ACCESS_KEY_ID",
+  "PUBLIC_MEDIA_SECRET_ACCESS_KEY",
+  "PUBLIC_MEDIA_ENDPOINT",
+  "PUBLIC_MEDIA_REGION",
+] as const;
+
+/** Delete every `PUBLIC_MEDIA_*` variable, returning their prior values. */
+function clearPublicMediaEnv(): Record<string, string | undefined> {
+  const saved: Record<string, string | undefined> = {};
+  for (const name of PUBLIC_MEDIA_VARS) {
+    saved[name] = process.env[name];
+    delete process.env[name];
+  }
+  return saved;
+}
+
+/** Restore the values `clearPublicMediaEnv` returned. */
+function restorePublicMediaEnv(saved: Record<string, string | undefined>): void {
+  for (const [name, value] of Object.entries(saved)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+}
+
 function mount(tenant: TenantContext = owner): WebCaller {
   return mountTenantRoute(handler, {
     method: "delete",
@@ -183,6 +211,10 @@ describe("DELETE /campaigns/:id/clips/:hash (PT-4k)", () => {
 
   test("returns 500 with fixed body when public media is unconfigured or store fails", async () => {
     const harness = await setupPgHarness();
+    // The "unconfigured" branch below assumes no public-media settings: with
+    // `PUBLIC_MEDIA_*` left in the environment the env-backed client would be
+    // built and attempt a real removal. Clear them and restore after.
+    const savedEnv = clearPublicMediaEnv();
     try {
       const campaign = await seedCampaign(harness.db, "local", "unconfigured");
       const hash = "e".repeat(64);
@@ -200,6 +232,7 @@ describe("DELETE /campaigns/:id/clips/:hash (PT-4k)", () => {
 
       // No PUBLIC_MEDIA_* settings: the ledger row exists, the unpublish is
       // refused, and the response names nothing about the configuration.
+      resetPublicAdMediaClient();
       const unconfigured = await del(mount(), campaign.id, hash);
       expect(unconfigured.status).toBe(500);
       expect(await unconfigured.json()).toEqual({ error: "Failed to unpublish clip." });
@@ -226,6 +259,7 @@ describe("DELETE /campaigns/:id/clips/:hash (PT-4k)", () => {
       // The record stays: the object removal failed first, retryable.
       expect(await clipCount(harness.db, "local", campaign.id)).toBe(1);
     } finally {
+      restorePublicMediaEnv(savedEnv);
       await harness.cleanup();
     }
   });

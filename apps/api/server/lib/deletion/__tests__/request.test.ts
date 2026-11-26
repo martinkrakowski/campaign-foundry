@@ -656,6 +656,59 @@ describe("request-campaign-deletion (D235, D234's tombstone half)", () => {
     expect(await store.list("local/")).toHaveLength(0);
   });
 
+  test("a job that becomes active between the two steps is refused at the tombstone, and nothing is unpublished or tombstoned", async () => {
+    const { media, store } = configuredMedia();
+    setPublicAdMediaClient(media);
+    const campaignId = await seedCampaign(db, "local", `camp-${randomUUID().slice(0, 8)}`);
+
+    // The check transaction (the first) passes, then — its lock released — a
+    // job claims the campaign in the gap. The tombstone transaction (the
+    // second) must re-run the refusal against that claim. The job row is
+    // planted inside the intercepted transaction the same way a claim writes
+    // it: under the campaign row's own lock.
+    let txCount = 0;
+    const wrapped: SqlClient = {
+      ...db,
+      transaction: (work) =>
+        db.transaction(async (tx) => {
+          txCount += 1;
+          if (txCount === 2) {
+            await tx.query(
+              `insert into job (id, org_id, campaign_id, status, lease_expires_at, created_at)
+                 values ('j-race', 'local', $1::uuid, 'running', now() + interval '60 seconds', now())`,
+              [campaignId],
+            );
+          }
+          return work(tx);
+        }),
+    };
+
+    const outcome = await requestCampaignDeletion(wrapped, {
+      orgId: "local",
+      campaignId,
+      requestedBy: "actor-1",
+      mayDelete: () => true,
+      graceHours: 0,
+    });
+    // The race's loser answers `active-job`, never `requested`.
+    expect(outcome).toEqual({ outcome: "active-job", jobId: "j-race" });
+
+    // Nothing was tombstoned and no deletion row was written.
+    const { rows: campaign } = await db.query<{ deleted_at: Date | null }>(
+      `select deleted_at from campaign where id = $1`,
+      [campaignId],
+    );
+    expect(campaign[0]!.deleted_at).toBeNull();
+    const { rows: count } = await db.query<{ n: number }>(
+      `select count(*)::int as n from deletion`,
+    );
+    expect(count[0]!.n).toBe(0);
+
+    // And no unpublish pass ran after the refusal: nothing was ever removed.
+    expect(await clipCount(db, "local", campaignId)).toBe(0);
+    expect(await store.list("local/")).toHaveLength(0);
+  });
+
   test("refuses delete request with PublicMediaNotConfiguredError when clips exist and public media is unconfigured", async () => {
     clearPublicMediaEnv();
     resetPublicAdMediaClient();
