@@ -8,4 +8,7 @@
  * it prevented, while the domain gained its own list beside it. Kept as a
  * `@/lib` module so existing importers do not need to reach into the package.
  */
-export { RATIO_VALUES as ASPECT_RATIOS } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+export {
+  RATIO_VALUES as ASPECT_RATIOS,
+  DEFAULT_RATIO_VALUES as DEFAULT_ASPECT_RATIOS,
+} from "@campaignfoundry/CampaignOrchestration/aspect-ratios";

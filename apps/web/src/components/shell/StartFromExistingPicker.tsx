@@ -2,7 +2,10 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { CampaignBrief } from "@campaignfoundry/CampaignOrchestration";
-import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import {
+  DEFAULT_RATIO_VALUES,
+  RATIO_VALUES,
+} from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { listBriefs, type BriefEntry } from "@/lib/briefs-api";
 import {
   OptionTile,
@@ -30,13 +33,14 @@ const CARD_WIDTH = "w-52";
 
 /** The brief's ratio axis narrowed to the domain's vocabulary, defensively —
  * the store's JSON is untrusted, so a value outside the union cannot reach
- * `PosterFrame`. Nothing known listed → every ratio, the planner's own default. */
+ * `PosterFrame`. Nothing known listed → the frozen unpinned default (3), the
+ * planner's own default for a brief that never pinned the axis. */
 function briefRatios(brief: CampaignBrief): readonly RatioOption[] {
   const requested = brief.variation?.axes?.ratio;
   const known = requested?.filter((value): value is RatioOption =>
     (RATIO_VALUES as readonly string[]).includes(value),
   );
-  return known !== undefined && known.length > 0 ? known : RATIO_VALUES;
+  return known !== undefined && known.length > 0 ? known : DEFAULT_RATIO_VALUES;
 }
 
 /** One brief card's picture: a frame per ratio at its true proportion. */
@@ -134,7 +138,7 @@ export function StartFromExistingPicker({
           preview={
             <PreviewPanel caption={messages.startFromBlankCaption}>
               <span className="flex items-center gap-2">
-                {RATIO_VALUES.map((ratio) => (
+                {DEFAULT_RATIO_VALUES.map((ratio) => (
                   <PosterFrame key={ratio} ratio={ratio} variant="pA" size={FRAME_SIZE} blank />
                 ))}
               </span>

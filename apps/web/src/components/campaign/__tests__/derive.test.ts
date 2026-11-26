@@ -22,6 +22,7 @@ import type { PlatformProfile } from "@campaignfoundry/Distribution/platform-pro
 import {
   addableKinds,
   canMoveLayer,
+  classicAdCount,
   findLegalInsertionIndex,
   htmlByteBudget,
   htmlWeightReading,
@@ -78,6 +79,26 @@ describe("derive.ts", () => {
 
     test("a mixed social+display selection stays static when no motion platform is selected", () => {
       expect(platformsToFormats(["instagram-feed", "google-display"])).toEqual(["static"]);
+    });
+  });
+
+  describe("classicAdCount (frozen ratio defaults)", () => {
+    test("an unpinned call divides by the frozen three-ratio default, not the four-ratio vocabulary", () => {
+      // 2 products × 3 ratios × 4 treatments — byte-identical to the pre-4:5 figure.
+      expect(classicAdCount(2, 4)).toBe(24);
+      // Sizes count beside the ratios (D113): 2 × (3 + 2) × 1.
+      expect(classicAdCount(2, 1, 2)).toBe(10);
+    });
+
+    test("a pinned one-ratio selection counts one canvas, not the default three", () => {
+      // A brief pinning `axes.ratio: ["4:5"]` passes its selection's length.
+      expect(classicAdCount(2, 1, 0, 1)).toBe(2);
+    });
+
+    test("zero or undefined treatments never multiply the count to zero", () => {
+      expect(classicAdCount(2, 0)).toBe(6);
+      expect(classicAdCount(2, undefined)).toBe(6);
+      expect(classicAdCount(2, 0, 0, 1)).toBe(2);
     });
   });
 

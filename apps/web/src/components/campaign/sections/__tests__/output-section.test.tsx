@@ -12,6 +12,7 @@ import {
 } from "../../editor-state";
 import * as messages from "../../messages";
 import { validateOutput } from "../../validate";
+import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 import { clickDestinationProblem } from "@campaignfoundry/CampaignOrchestration/click-destination";
 
 const state = (over: Partial<EditorState> = {}): EditorState => ({
@@ -107,5 +108,67 @@ describe("Formats — a creative type with no static/motion choice (D161, AR3)",
     render(<OutputSection state={state()} dispatch={vi.fn()} errors={{}} />);
     expect(screen.queryByText(messages.outputFormatFixedToHtml)).toBeNull();
     expect(screen.getByText(messages.formatStillMeta)).toBeTruthy();
+  });
+});
+
+describe("OutputSection — the motion-only exclusion line (4:5)", () => {
+  // No shipped platform packages motion at 1:1 or 16:9, so a host that did is
+  // expressed with two temporary table rows — the same lookup
+  // motionPackagedRatios reads, added and removed around each render.
+  const withMotionEverywhere = (run: () => void): void => {
+    const profiles = PLATFORM_PROFILES as Record<string, (typeof PLATFORM_PROFILES)[string]>;
+    const motionAt = (ratio: "1:1" | "16:9"): (typeof PLATFORM_PROFILES)[string] => ({
+      id: `motion-${ratio}`,
+      label: `Motion ${ratio}`,
+      ratio,
+      formats: ["motion"],
+      safeInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      maxBytes: 100 * 1024 * 1024,
+    });
+    profiles["motion-1:1"] = motionAt("1:1");
+    profiles["motion-16:9"] = motionAt("16:9");
+    try {
+      run();
+    } finally {
+      delete profiles["motion-1:1"];
+      delete profiles["motion-16:9"];
+    }
+  };
+
+  test("stays quiet on the frozen three defaults, and fires only once 4:5 is selected", () => {
+    withMotionEverywhere(() => {
+      const platforms = ["instagram-story", "motion-1:1", "motion-16:9"];
+      const motionOnly = {
+        formats: ["motion"] as EditorState["formats"],
+        platforms,
+        motion: ["ken-burns-in"] as EditorState["motion"],
+        duration: [4],
+      };
+      // Every ratio the frozen default names is packaged and the brief does not
+      // pin 4:5 — nothing it can draw is excluded, so the line stays quiet.
+      const { unmount } = render(
+        <OutputSection state={state(motionOnly)} dispatch={vi.fn()} errors={{}} />,
+      );
+      expect(
+        screen.queryByText(messages.ratioExcludedPackaged(["Square", "Tall", "Wide"])),
+      ).toBeNull();
+      unmount();
+
+      // Selecting 4:5 diverges from the frozen defaults: motion is not packaged
+      // for the pinned ratio, so the exclusion reason appears.
+      render(
+        <OutputSection
+          state={{
+            ...state(motionOnly),
+            variation: { ...state().variation, ratio: ["1:1", "9:16", "16:9", "4:5"] },
+          }}
+          dispatch={vi.fn()}
+          errors={{}}
+        />,
+      );
+      expect(
+        screen.getByText(messages.ratioExcludedPackaged(["Square", "Tall", "Wide"])),
+      ).toBeTruthy();
+    });
   });
 });

@@ -2,7 +2,11 @@
 
 import { useId } from "react";
 import type { Dispatch, ReactNode } from "react";
-import { RATIO_VALUES, resolveCanvas } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import {
+  DEFAULT_RATIO_VALUES,
+  RATIO_VALUES,
+  resolveCanvas,
+} from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import {
   AxisCard,
   Button,
@@ -136,6 +140,11 @@ function RatioAxis({
   const motionOnly = state.formats.includes("motion") && !state.formats.includes("static");
   const packaged = motionPackagedRatios(state);
   const motionRatios = RATIO_OPTIONS.filter((ratio) => packaged.has(ratio));
+  // The warning compares `packaged` against the frozen defaults plus the
+  // selection: a motion-only brief that does not pin `"4:5"` is not missing a
+  // canvas no platform packages, so the line stays quiet for it — while a brief
+  // that selects `"4:5"` still hears that motion cannot draw it.
+  const expectedRatios = new Set([...DEFAULT_RATIO_VALUES, ...state.variation.ratio]);
   const ratioFloorTotal = floor * drawable.length;
   // Mirrors the planner's refusal (perRatio × ratios it will draw > count), so
   // the coupling surfaces before the run instead of as a shortfall error after.
@@ -195,7 +204,7 @@ function RatioAxis({
           />
         ))}
       </div>
-      {motionOnly && packaged.size < RATIO_VALUES.length ? (
+      {motionOnly && [...expectedRatios].some((ratio) => !packaged.has(ratio)) ? (
         <div className="flex flex-wrap items-center gap-2 text-[11px] text-warning">
           <span>
             {motionRatios.length > 0

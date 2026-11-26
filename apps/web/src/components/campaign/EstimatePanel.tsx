@@ -6,7 +6,7 @@ import type { PlanResult, PlanVariant } from "@/lib/briefs-api";
 import { useVariationPlanResult } from "@/components/campaign/variation-plan";
 import { Eyebrow } from "@/components/ui";
 import { ratioDisplayName } from "@/components/campaign/display-names";
-import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { DEFAULT_RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { classicAdCount } from "@/components/campaign/derive";
 import * as messages from "@/components/campaign/messages";
 
@@ -67,9 +67,9 @@ function ClassicEstimate({ state }: { state: EditorState }) {
   }
   const sizeCount = state.sizes.length;
   const creatives = classicAdCount(products, state.treatments.length, sizeCount);
-  const perCanvas = creatives / (RATIO_VALUES.length + sizeCount);
+  const perCanvas = creatives / (DEFAULT_RATIO_VALUES.length + sizeCount);
   const canvases = [
-    ...RATIO_VALUES.map((ratio) => ({ label: ratioDisplayName(ratio), count: perCanvas })),
+    ...DEFAULT_RATIO_VALUES.map((ratio) => ({ label: ratioDisplayName(ratio), count: perCanvas })),
     // A requested display unit is a canvas the run will render too (D113) —
     // count it, or the sentence understates the deliverables it promises.
     ...state.sizes.map((size) => ({ label: size, count: perCanvas })),
