@@ -1,8 +1,14 @@
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { PublishedClipObjectMissingError } from "@campaignfoundry/CampaignOrchestration";
+import {
+  InMemoryObjectStore,
+  PublicAdMediaStore,
+} from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import type { SqlClient } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
+import { setPublicAdMediaClient, resetPublicAdMediaClient } from "../../object-store/index.js";
+import { requestCampaignDeletion } from "../../deletion/request.js";
 import {
   PgPublishedClipStore,
   PublishedClipRecordRefusedError,
@@ -35,8 +41,15 @@ describe("PgPublishedClipStore (PT-4k)", () => {
     );
   });
   afterEach(async () => {
+    resetPublicAdMediaClient();
     await db.end();
   });
+
+  /** An in-memory public media double plus the store its bytes land in. */
+  function configuredMedia(): { media: PublicAdMediaStore; store: InMemoryObjectStore } {
+    const store = new InMemoryObjectStore();
+    return { media: new PublicAdMediaStore({ store, baseUrl: "https://media.test" }), store };
+  }
 
   test("record find listForCampaign and remove round trip", async () => {
     const store = new PgPublishedClipStore(db);
@@ -141,6 +154,75 @@ describe("PgPublishedClipStore (PT-4k)", () => {
       key: "beta/bbb/0123.mp4",
       url: "https://pub/bbb.mp4",
     });
+  });
+
+  test("a cross-org record against another org's live campaign is refused, recording nothing", async () => {
+    const store = new PgPublishedClipStore(db);
+    // beta offers a clip against acme's LIVE campaign: the liveness CTE is
+    // scoped by `org_id = $1`, so beta's read neither sees nor locks acme's
+    // row — the record is refused, not silently accepted.
+    await expect(
+      store.record("beta", acmeCampaign, "beta/bbb/0123.mp4", "https://pub/bbb.mp4", "0123"),
+    ).rejects.toBeInstanceOf(PublishedClipRecordRefusedError);
+    expect(await store.find("beta", acmeCampaign, "0123")).toBeUndefined();
+    expect(await store.listForCampaign("beta", acmeCampaign)).toEqual([]);
+    expect(await store.listForCampaign("acme", acmeCampaign)).toEqual([]);
+  });
+
+  test("record winning before deletion leaves a row that requestCampaignDeletion removes", async () => {
+    // PGlite is single-connection (pglite-client.ts), so real lock contention
+    // between record()'s `for share` and the tombstone's `for update` is
+    // proven in pg-published-clip-store.concurrency.test.ts against real
+    // Postgres; here only the sequential outcomes are exercised.
+    const { media, store: mediaStore } = configuredMedia();
+    setPublicAdMediaClient(media);
+    const clipStore = new PgPublishedClipStore(db);
+
+    // The export wins: it publishes the public object and records while the
+    // campaign is live...
+    const hash = "a".repeat(64);
+    const published = await media.publish("acme", new Uint8Array([9, 8, 7]), hash);
+    expect(await clipStore.record("acme", acmeCampaign, published.key, published.url, hash)).toBe(
+      "recorded",
+    );
+    expect(await clipStore.find("acme", acmeCampaign, hash)).toBeDefined();
+    expect(await mediaStore.list("acme/")).toHaveLength(1);
+
+    // ...and the deletion's pass-2 unpublish removes both the row and the
+    // public object the row names — no orphan bytes, no orphan fact.
+    const outcome = await requestCampaignDeletion(db, {
+      orgId: "acme",
+      campaignId: acmeCampaign,
+      requestedBy: "actor-1",
+      mayDelete: () => true,
+      graceHours: 0,
+    });
+    expect(outcome).toEqual({ outcome: "requested", deletionId: expect.any(String) });
+    expect(await clipStore.find("acme", acmeCampaign, hash)).toBeUndefined();
+    expect(await clipStore.listForCampaign("acme", acmeCampaign)).toEqual([]);
+    expect(await mediaStore.list("acme/")).toHaveLength(0);
+  });
+
+  test("record after deletion commits refuses with PublishedClipRecordRefusedError", async () => {
+    const { media } = configuredMedia();
+    setPublicAdMediaClient(media);
+    const clipStore = new PgPublishedClipStore(db);
+
+    await requestCampaignDeletion(db, {
+      orgId: "acme",
+      campaignId: acmeCampaign,
+      requestedBy: "actor-1",
+      mayDelete: () => true,
+      graceHours: 0,
+    });
+
+    // The tombstone committed first: a late export must refuse, not record a
+    // published-clip fact for a campaign whose deletion has begun.
+    await expect(
+      clipStore.record("acme", acmeCampaign, "acme/aaa/0123.mp4", "https://pub/aaa.mp4", "0123"),
+    ).rejects.toBeInstanceOf(PublishedClipRecordRefusedError);
+    expect(await clipStore.find("acme", acmeCampaign, "0123")).toBeUndefined();
+    expect(await clipStore.listForCampaign("acme", acmeCampaign)).toEqual([]);
   });
 
   describe("PgPublishedClipStore object precondition", () => {
