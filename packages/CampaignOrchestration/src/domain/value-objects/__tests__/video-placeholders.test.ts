@@ -229,3 +229,14 @@ describe("refusePlaceholderPrefix", () => {
     expect(() => refusePlaceholderPrefix("alt", "")).not.toThrow();
   });
 });
+
+describe("findVideoPlaceholders only trusts a real src attribute (CFAR6 fix2)", () => {
+  test("data-src and other src-suffixed attributes on a video element are not scanned", () => {
+    const evil = "https://publish.invalid/evil/1x1/v9.mp4";
+    expect(findVideoPlaceholders(`<video data-src="${evil}"></video>`)).toEqual([]);
+    expect(findVideoPlaceholders(`<video poster-src="${evil}"></video>`)).toEqual([]);
+    expect(findVideoPlaceholders(`<video class="a" src="${evil}"></video>`)).toEqual([
+      "evil/1x1/v9.mp4",
+    ]);
+  });
+});

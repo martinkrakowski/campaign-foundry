@@ -155,7 +155,7 @@ export function findVideoPlaceholders(html: string): readonly string[] {
       `findVideoPlaceholders: html must be a string, got ${typeof html}`,
     );
   }
-  const videoSrcPattern = /<video\b[^>]*?\bsrc="([^"]*)"/g;
+  const videoSrcPattern = /<video\b[^>]*?\ssrc="([^"]*)"/g;
   const selectors: string[] = [];
   for (const match of html.matchAll(videoSrcPattern)) {
     const src = match[1]!;
