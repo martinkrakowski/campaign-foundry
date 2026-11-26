@@ -2122,7 +2122,7 @@ describe("parseBrief v2 fields", () => {
     expect(parsed.variation?.axes?.ratio).toEqual(["16:9", "1:1"]);
   });
 
-  test("a brief with no ratio key parses exactly as before — absent means every ratio", () => {
+  test("a brief with no ratio key parses exactly as before — absent resolves to the default ratios (1:1, 9:16, 16:9)", () => {
     const parsed = parseBrief(v2Brief);
     expect(parsed.variation?.axes?.ratio).toBeUndefined();
     expect(Object.keys(parsed.variation?.axes ?? {})).toEqual(Object.keys(v2Brief.variation.axes));

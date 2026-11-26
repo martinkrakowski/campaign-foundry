@@ -87,8 +87,10 @@ export function wantsHeadlinePool(brief: CampaignBrief): boolean {
  * - `motionRatios`: the ratios of the requested motion platforms (see
  *   `motionRatiosFor`), present only when the brief lists `output.platforms`.
  * - `ratios`: the brief's `variation.axes.ratio` selection, present only when
- *   the brief carries the axis (absent → every ratio). The parser has already
- *   bounded it to supported values; the policy re-checks.
+ *   the brief carries the axis. The parser has already bounded it to supported
+ *   values; the policy re-checks. When absent, the
+ *   policy resolves to the default ratios (`1:1`, `9:16`, `16:9`); `4:5` is
+ *   available only when pinned in `variation.axes.ratio`.
  */
 export async function planInputFor(
   scope: StorageScope,
