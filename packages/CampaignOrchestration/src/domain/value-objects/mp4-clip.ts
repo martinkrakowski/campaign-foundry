@@ -188,7 +188,8 @@ function requireFtyp(view: DataView, end: number, state: ParseState): void {
     throw new InvalidAdClipError("truncated", "ftyp payload below 8 bytes");
   }
   if (STANDARD_MP4_BRANDS.has(readFourCC(view, ftyp.headerEnd))) return;
-  for (let offset = ftyp.headerEnd + 4; offset + 4 <= ftyp.boxEnd; offset += 4) {
+  // major_brand is the first 4CC; minor_version follows, then compatible brands.
+  for (let offset = ftyp.headerEnd + 8; offset + 4 <= ftyp.boxEnd; offset += 4) {
     if (STANDARD_MP4_BRANDS.has(readFourCC(view, offset))) return;
   }
   throw new InvalidAdClipError("not-mp4", "no standard MP4 brand in ftyp");
@@ -214,6 +215,9 @@ function readMvhd(
   );
   const payloadStart = mvhd.headerEnd;
   const payloadSize = mvhd.boxEnd - payloadStart;
+  if (payloadSize < 1) {
+    throw new InvalidAdClipError("truncated", "mvhd payload has no version byte");
+  }
   const version = view.getUint8(payloadStart);
   let timescale: number;
   let duration: number;
@@ -253,11 +257,11 @@ function readMvhd(
 /**
  * Checks one `trak`: its `mdia` -> `hdlr` must say `vide`; non-video tracks
  * are ignored. A video track must carry `minf` -> `stbl` -> `stsd` with an
- * `avc1`/`avc3` sample entry that has an `avcC` child. Throws `not-mp4` for
- * missing `mdia`/`hdlr`, `truncated` for short boxes, and `not-h264` for
- * anything that is not H.264.
+ * `avc1`/`avc3` sample entry that has an `avcC` child. Returns `true` only
+ * when the track is a video track. Throws `not-mp4` for missing `mdia`/`hdlr`,
+ * `truncated` for short boxes, and `not-h264` for anything that is not H.264.
  */
-function checkVideoTrak(view: DataView, trak: BoxHeader, state: ParseState): void {
+function checkVideoTrak(view: DataView, trak: BoxHeader, state: ParseState): boolean {
   const mdia = requireChildBox(
     view,
     trak.headerEnd,
@@ -278,7 +282,8 @@ function checkVideoTrak(view: DataView, trak: BoxHeader, state: ParseState): voi
     throw new InvalidAdClipError("truncated", "hdlr box below 20 bytes");
   }
   const handlerType = readFourCC(view, hdlr.headerEnd + 8);
-  if (handlerType !== "vide") return;
+  // Non-video tracks are ignored, not counted as video tracks.
+  if (handlerType !== "vide") return false;
 
   const minf = requireChildBox(
     view,
@@ -331,6 +336,7 @@ function checkVideoTrak(view: DataView, trak: BoxHeader, state: ParseState): voi
   if (avcC === undefined) {
     throw new InvalidAdClipError("not-h264", "H.264 sample entry has no avcC child");
   }
+  return true;
 }
 
 /**
@@ -380,8 +386,7 @@ export function validateAdClip(bytes: Uint8Array): ValidatedAdClip {
     let trakOffset = moov.headerEnd;
     while (trakOffset < moov.boxEnd) {
       const trak = readBoxHeader(view, trakOffset, moov.boxEnd, state);
-      if (trak.type === "trak") {
-        checkVideoTrak(view, trak, state);
+      if (trak.type === "trak" && checkVideoTrak(view, trak, state)) {
         videoTrackCount += 1;
       }
       trakOffset = trak.boxEnd;
