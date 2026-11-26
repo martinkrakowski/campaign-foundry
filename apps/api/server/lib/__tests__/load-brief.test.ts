@@ -1917,14 +1917,19 @@ describe("parseBrief v2 fields", () => {
       /variation\.axes\.ratio.*must be an array/,
     ],
     [
+      "a null ratio list",
+      { ...valid, variation: { axes: { ratio: null } } },
+      /variation\.axes\.ratio.*must be an array/,
+    ],
+    [
       "an empty ratio list",
       { ...valid, variation: { axes: { ratio: [] } } },
       /variation\.axes\.ratio.*at least one/,
     ],
     [
       "an unsupported ratio value",
-      { ...valid, variation: { axes: { ratio: ["4:5"] } } },
-      /variation\.axes\.ratio.*"4:5"/,
+      { ...valid, variation: { axes: { ratio: ["4:3"] } } },
+      /variation\.axes\.ratio.*"4:3"/,
     ],
     [
       "a non-string ratio value",

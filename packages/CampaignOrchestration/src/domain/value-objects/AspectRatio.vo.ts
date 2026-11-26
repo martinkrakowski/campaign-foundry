@@ -1,5 +1,6 @@
 import { ok, err, type Result } from "@campaignfoundry/shared";
 import {
+  DEFAULT_RATIO_VALUES,
   RATIO_VALUES,
   nearestRatioForAspect,
   nearestSocialRatio,
@@ -36,6 +37,14 @@ export class AspectRatio {
   /** Every supported ratio — the full set produced for each product. */
   static all(): AspectRatio[] {
     return RATIO_VALUES.map((v) => {
+      const { width, height } = resolveCanvas({ ratio: v });
+      return new AspectRatio(v, width, height);
+    });
+  }
+
+  /** The default (frozen) ratios an unpinned brief resolves to. */
+  static defaults(): AspectRatio[] {
+    return DEFAULT_RATIO_VALUES.map((v) => {
       const { width, height } = resolveCanvas({ ratio: v });
       return new AspectRatio(v, width, height);
     });

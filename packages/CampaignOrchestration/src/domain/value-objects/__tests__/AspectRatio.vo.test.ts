@@ -29,7 +29,7 @@ describe("AspectRatio", () => {
   });
 
   test("all returns every supported ratio in display order", () => {
-    expect(AspectRatio.all().map((a) => a.value)).toEqual(["1:1", "9:16", "16:9"]);
+    expect(AspectRatio.all().map((a) => a.value)).toEqual(["1:1", "9:16", "16:9", "4:5"]);
   });
 
   test("slug replaces the colon with x for filesystem paths", () => {
