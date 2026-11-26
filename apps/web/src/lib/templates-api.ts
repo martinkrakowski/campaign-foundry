@@ -6,8 +6,14 @@ import {
   isBriefTemplate,
   type BriefTemplate,
 } from "@campaignfoundry/CampaignOrchestration/brief-template";
-import { ADVERTISING_UNITS } from "@campaignfoundry/CampaignOrchestration/advertising-units";
-import { CREATIVE_TYPES } from "@campaignfoundry/CampaignOrchestration/creative-types";
+import {
+  ADVERTISING_UNITS,
+  type AdvertisingUnit,
+} from "@campaignfoundry/CampaignOrchestration/advertising-units";
+import {
+  CREATIVE_TYPES,
+  type CreativeType,
+} from "@campaignfoundry/CampaignOrchestration/creative-types";
 import { LAYER_KINDS } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import { handleAuthError } from "./auth-errors";
 
@@ -70,10 +76,10 @@ function errorFrom(data: unknown, fallback: string): string {
   return fallback;
 }
 
-async function requestJson(url: string): Promise<unknown> {
+async function requestJson(url: string, init?: RequestInit): Promise<unknown> {
   let res: Response;
   try {
-    res = await fetch(url);
+    res = await fetch(url, init);
   } catch {
     throw new TemplatesApiError("Network error", 0);
   }
@@ -169,6 +175,65 @@ export async function listTemplates(): Promise<CreativeTemplate[]> {
  */
 export async function getTemplate(ref: string): Promise<CreativeTemplate> {
   const data = await requestJson(`${API}/campaigns/templates/${encodeURIComponent(ref)}`);
+  if (typeof data !== "object" || data === null) {
+    throw new TemplatesApiError("Invalid response", 200);
+  }
+  return asCreativeTemplate((data as { template?: unknown }).template);
+}
+
+/**
+ * The body a save sends — exactly the four fields the routes store, and nothing
+ * else: the server derives identity from the session, so no `briefId` or `orgId`
+ * ever rides the body.
+ */
+export interface SaveTemplateInput {
+  readonly name: string;
+  readonly unit: AdvertisingUnit;
+  readonly creativeType: CreativeType;
+  readonly layers: readonly CreativeTemplateLayer[];
+}
+
+/**
+ * CFRW22C — the write half of the library: a new template (a new slug, a new
+ * record) answers the stored record, and every failure throws exactly like the
+ * reads do — a 409 slug collision is a typed error, never a silent retry.
+ */
+export async function saveTemplate(input: SaveTemplateInput): Promise<CreativeTemplate> {
+  const data = await requestJson(`${API}/campaigns/templates`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: input.name,
+      unit: input.unit,
+      creativeType: input.creativeType,
+      layers: input.layers,
+    }),
+  });
+  if (typeof data !== "object" || data === null) {
+    throw new TemplatesApiError("Invalid response", 200);
+  }
+  return asCreativeTemplate((data as { template?: unknown }).template);
+}
+
+/**
+ * A new version of an owned org template: same body, same refusal set, PUT to
+ * the id the caller already owns. The id is percent-encoded as one path segment,
+ * the same way `getTemplate` encodes a `:ref`.
+ */
+export async function saveTemplateVersion(
+  id: string,
+  input: SaveTemplateInput,
+): Promise<CreativeTemplate> {
+  const data = await requestJson(`${API}/campaigns/templates/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: input.name,
+      unit: input.unit,
+      creativeType: input.creativeType,
+      layers: input.layers,
+    }),
+  });
   if (typeof data !== "object" || data === null) {
     throw new TemplatesApiError("Invalid response", 200);
   }

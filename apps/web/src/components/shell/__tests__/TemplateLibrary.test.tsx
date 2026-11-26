@@ -832,3 +832,27 @@ describe("the modal reloads on each open", () => {
     expect(screen.queryByRole("button", { name: "Render preview" })).toBeNull();
   });
 });
+
+/**
+ * CFRW22C — the editor's "Save as template" announces itself on this event, and
+ * the library reloads while it is open: a save from the editor is visible
+ * without a close and a reopen.
+ */
+describe("the library reloads on the editor's save (cf:templates-changed)", () => {
+  test("dispatching the event while open re-fetches the library and renders the new template", async () => {
+    mockLibrary({ templates: [] });
+    const user = userEvent.setup();
+    renderLibrary();
+    await open(user);
+    expect(await screen.findByText("No templates yet.")).toBeTruthy();
+    const templateCalls = () =>
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.filter(([url]) => String(url).includes("/campaigns/templates")).length;
+    const before = templateCalls();
+    mockLibrary({ templates: [housePromo] });
+    window.dispatchEvent(new CustomEvent("cf:templates-changed"));
+    await screen.findByRole("button", { name: /Alpha promo/ });
+    expect(templateCalls()).toBeGreaterThan(before);
+  });
+});
