@@ -5,7 +5,10 @@ import { objectStoreClient, publicAdMediaClient } from "../object-store/index.js
 import { orgPrefix } from "../object-store/object-keys.js";
 import { storageRoots } from "../run-environment.js";
 import { LOCAL_TENANT } from "../tenant.js";
-import { PublicMediaNotConfiguredError } from "@campaignfoundry/CampaignOrchestration";
+import {
+  PublicMediaNotConfiguredError,
+  type ObjectKey,
+} from "@campaignfoundry/CampaignOrchestration";
 import { recordFailure, type DeletionRow } from "./deletion-store.js";
 import { markPurged } from "./purge-campaign.js";
 import { requestCampaignDeletion } from "./request.js";
@@ -238,6 +241,23 @@ export async function purgeOrg(
   );
   if (clips[0]!.n > 0 && publicMedia === undefined) {
     throw new PublicMediaNotConfiguredError();
+  }
+  // The PUBLIC bytes leave BEFORE `deleteOrgRows` drops the `published_clip`
+  // ledger (PT-4k): those rows are the only record of which keys live on the
+  // public bucket, so removing the objects first keeps a failed delete
+  // retryable — the ledger still names the orphaned bytes. `removeOrg`
+  // sweeps the org prefix and a per-key `remove` covers each listed clip
+  // (belt and braces); both are idempotent. Any failure propagates while
+  // every row is intact, so a re-run finds and removes the strays.
+  if (publicMedia !== undefined) {
+    await publicMedia.removeOrg(orgId);
+    const { rows: keys } = await db.query<{ key: string }>(
+      `select key from published_clip where org_id = $1`,
+      [orgId],
+    );
+    for (const { key } of keys) {
+      await publicMedia.remove(key as ObjectKey);
+    }
   }
   await deleteOrgRows(db, orgId);
   await deleteOrgObjects(orgId);

@@ -6,7 +6,10 @@ import {
   InMemoryObjectStore,
   PublicAdMediaStore,
 } from "@campaignfoundry/CampaignOrchestration/infrastructure";
-import { PublicMediaNotConfiguredError } from "@campaignfoundry/CampaignOrchestration";
+import {
+  PublicMediaNotConfiguredError,
+  type PublicAdMediaPort,
+} from "@campaignfoundry/CampaignOrchestration";
 import {
   resetObjectStoreClient,
   resetPublicAdMediaClient,
@@ -434,8 +437,8 @@ describe("purgeOrg completion (PT-9m2, D241)", () => {
         [
           betaCampaignId,
           "0".repeat(64),
-          "acme/aaa/0123.mp4",
-          "https://media.test/acme/aaa/0123.mp4",
+          `acme/${"a".repeat(32)}/${"0".repeat(64)}.mp4`,
+          `https://media.test/acme/${"a".repeat(32)}/${"0".repeat(64)}.mp4`,
         ],
       );
     }
@@ -510,6 +513,65 @@ describe("purgeOrg completion (PT-9m2, D241)", () => {
       expect(await snapshot(db, "beta")).toEqual(beforeBeta);
       // deleteOrgObjects never ran either.
       expect(await objectSnapshot(store, "acme")).toEqual(beforeAcmeObj);
+    });
+
+    test("a failed public delete leaves the published_clip ledger intact so a retry finds the orphans", async () => {
+      await seedOrg(db, "acme", store);
+      await seedOrg(db, "beta", store);
+      const beforeBeta = await snapshot(db, "beta");
+
+      const { rows: betaCampaigns } = await db.query<{ id: string }>(
+        `select id::text as id from campaign where org_id = 'beta' order by id limit 1`,
+      );
+      const row = await drainPending("acme");
+      await seedPublishedClip(betaCampaigns[0]!.id);
+
+      const publicStore = new InMemoryObjectStore();
+      const publicMedia = new PublicAdMediaStore({
+        store: publicStore,
+        baseUrl: "https://media.test",
+      });
+      await publicMedia.publish("acme", BYTES, "0".repeat(64));
+      // The FIRST `removeOrg` fails: the public bytes are still there, and the
+      // purge must throw BEFORE dropping the `published_clip` ledger — that
+      // ledger is the only record of which public keys are orphaned.
+      let removeOrgCalls = 0;
+      setPublicAdMediaClient({
+        publish: publicMedia.publish.bind(publicMedia),
+        remove: publicMedia.remove.bind(publicMedia),
+        removeOrg: (orgId: string) => {
+          removeOrgCalls += 1;
+          if (removeOrgCalls === 1) return Promise.reject(new Error("public bucket unavailable"));
+          return publicMedia.removeOrg(orgId);
+        },
+        urlFor: publicMedia.urlFor.bind(publicMedia),
+      } satisfies PublicAdMediaPort);
+
+      const beforeAcme = await snapshot(db, "acme");
+      const beforeAcmeObj = await objectSnapshot(store, "acme");
+
+      await expect(
+        purgeOrg(db, "acme", { id: row.id, requestedBy: row.requestedBy }),
+      ).rejects.toThrow(/public bucket unavailable/);
+
+      // The ledger row survives AND nothing else of the org was deleted.
+      const { rows: clips } = await db.query<{ n: number }>(
+        `select count(*)::int as n from published_clip where org_id = 'acme'`,
+      );
+      expect(clips[0]!.n).toBe(1);
+      expect(await snapshot(db, "acme")).toEqual(beforeAcme);
+      expect(await objectSnapshot(store, "acme")).toEqual(beforeAcmeObj);
+      expect(await publicStore.list("acme/")).toHaveLength(1);
+      expect(await snapshot(db, "beta")).toEqual(beforeBeta);
+
+      // The retry succeeds and removes both the public objects and the rows.
+      const result = await purgeOrg(db, "acme", { id: row.id, requestedBy: row.requestedBy });
+      expect(result).toBe("purged");
+      const { rows: left } = await db.query<{ n: number }>(
+        `select count(*)::int as n from published_clip where org_id = 'acme'`,
+      );
+      expect(left[0]!.n).toBe(0);
+      expect(await publicStore.list("acme/")).toHaveLength(0);
     });
 
     test("a partially configured public media client throws before any row or object is freed", async () => {
