@@ -715,7 +715,7 @@ function TemplateDetail({
           */}
           {pinned === null ? (
             <p className="mr-auto text-[11px] text-text-muted">
-              This template cannot be used for a campaign yet — only the built-in ones can, for now.
+              This template cannot be used for a campaign yet.
             </p>
           ) : (
             <Button size="sm" onClick={() => onUseTemplate(pinned)}>

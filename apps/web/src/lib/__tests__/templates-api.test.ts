@@ -382,12 +382,43 @@ describe("pinnableTemplate", () => {
   });
 
   /**
-   * The finding this lane records rather than fixes: `BriefTemplate.id` is
-   * `CanonicalTemplateId`, so a library grown past the canonical three would
-   * serve records no brief can carry. Refused visibly, not cast through.
+   * An org-saved record (`tpl-` + lowercase uuid, RW-22) pins through the same
+   * `isBriefTemplate` guard a canonical record does — the pin carries the id
+   * and version the store actually holds.
    */
-  test("a record outside the canonical set is not pinnable", () => {
+  test("an org-saved record is pinnable and returns the pinned reference", () => {
+    const pinned = pinnableTemplate(
+      record({ id: "tpl-00000000-0000-4000-8000-000000000001", version: 2 }),
+    );
+    expect(pinned).toEqual({
+      id: "tpl-00000000-0000-4000-8000-000000000001",
+      version: 2,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers: CANONICAL_TEMPLATES["image-text"].layers,
+    });
+  });
+
+  /**
+   * `isOrgTemplateId` proves shape only: lowercase hex, exactly `tpl-` + a
+   * 36-char uuid, and nothing after it. A malformed id is refused `null`, not
+   * cast through to fail at the editor's restore boundary.
+   */
+  test("a malformed org id is not pinnable", () => {
+    expect(pinnableTemplate(record({ id: "tpl-" }))).toBeNull();
+    expect(pinnableTemplate(record({ id: "tpl-00000000-0000-4000-8000-00000000000A" }))).toBeNull();
+    expect(
+      pinnableTemplate(record({ id: "tpl-00000000-0000-4000-8000-000000000001-extra" })),
+    ).toBeNull();
     expect(pinnableTemplate(record({ id: "house-promo" }))).toBeNull();
+  });
+
+  test("an org-saved record whose layers fail the guard is not pinnable", () => {
+    expect(
+      pinnableTemplate(
+        record({ id: "tpl-00000000-0000-4000-8000-000000000001", version: 2, layers: [] }),
+      ),
+    ).toBeNull();
   });
 
   test("a canonical id whose creativeType disagrees with it is not pinnable", () => {
