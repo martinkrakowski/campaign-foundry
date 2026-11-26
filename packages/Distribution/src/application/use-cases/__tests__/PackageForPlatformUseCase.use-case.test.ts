@@ -270,11 +270,15 @@ describe("PackageForPlatformUseCase", () => {
     }
   });
 
-  test("keeps an earlier platform's writes when a later platform's store call fails", async () => {
+  test("keeps an earlier platform's writes when a later platform's store write fails", async () => {
     const store = fakeStore();
-    store.readAsset = vi.fn(async (relativePath: string) => {
-      if (relativePath.includes("16x9")) throw new Error("ENOENT: open '/abs/missing.png'");
-      return SMALL;
+    // A store WRITE failure is an infrastructure fault, not a refusal: the port
+    // has no delete, so earlier platforms' written files stay. (Refusals —
+    // unreadable assets among them — are resolved in the prepare phase, before
+    // any write, so they leave nothing behind.)
+    store.writePackaged = vi.fn(async (platformId: string, relativePath: string) => {
+      if (platformId === "x") throw new Error("ENOENT: open '/abs/missing.png'");
+      return `packages/camp/${platformId}/${relativePath}`;
     });
     const result = await exec(store, {
       assets: [asset(), asset({ aspectRatio: "16:9", outputPath: "alpha/16x9.png" })],
@@ -1241,6 +1245,128 @@ describe("PackageForPlatformUseCase — clip placeholder publishing (CFAR6C3)", 
         'Platform "html-banner": Asset not found: alpha/1x1/index.html',
       );
     }
+    expect(store.writePackaged).not.toHaveBeenCalled();
+    expect(store.writeManifest).not.toHaveBeenCalled();
+  });
+
+  // Prepare-then-write (CFAR6C3 fix): packaging resolves every asset of every
+  // platform BEFORE writing anything, so a refusal on a later asset or platform
+  // must leave zero packaged files and zero manifests — not the earlier ones.
+  const SECOND_BUNDLE_PATH = "alpha/1x1/take2/index.html";
+  const SECOND_FALLBACK_PATH = "alpha/1x1/take2/fallback.png";
+  const multiAssetStore = () => {
+    const store = fakeStore();
+    const bytesFor: Record<string, Uint8Array> = {
+      [BUNDLE_PATH]: new TextEncoder().encode("<!DOCTYPE html><html><body>plain</body></html>"),
+      [FALLBACK_PATH]: FALLBACK,
+      [SECOND_BUNDLE_PATH]: bundleWith(1, "alpha/1x1/v1.mp4"),
+      [SECOND_FALLBACK_PATH]: FALLBACK,
+    };
+    vi.mocked(store.readAsset).mockImplementation(async (p) => bytesFor[p]!);
+    return store;
+  };
+  const secondAsset = (): GeneratedAsset =>
+    html({
+      htmlBundlePath: SECOND_BUNDLE_PATH,
+      htmlFallbackPath: SECOND_FALLBACK_PATH,
+      variantIndex: 2,
+    });
+
+  test("a later asset's unpublished placeholder leaves zero packaged files and manifests", async () => {
+    const store = multiAssetStore();
+    const result = await exec(store, {
+      assets: [html(), secondAsset()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": CLIP_PROFILE },
+      publishClip: false,
+      clipPublisher: publisher,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toBe(
+        'Platform "html-banner": HTML asset alpha/v2 carries video clip placeholders but "publishClip" is not enabled — packaging would ship unresolvable placeholder URLs.',
+      );
+    }
+    expect(store.writePackaged).not.toHaveBeenCalled();
+    expect(store.writeManifest).not.toHaveBeenCalled();
+  });
+
+  test("a later asset's unsafe URL leaves zero packaged files and manifests", async () => {
+    const store = multiAssetStore();
+    const result = await exec(store, {
+      assets: [html(), secondAsset()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": CLIP_PROFILE },
+      publishClip: true,
+      clipPublisher: vi.fn(async (selector) =>
+        selector.includes("v1.mp4") ? "http://media.test/clip.mp4" : urlFor(selector),
+      ),
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toBe(
+        'Platform "html-banner": The clip publisher returned an unsafe URL for video placeholder "alpha/1x1/v1.mp4" — expected an absolute https URL with no whitespace, quotes, angle brackets or ampersands.',
+      );
+    }
+    expect(store.writePackaged).not.toHaveBeenCalled();
+    expect(store.writeManifest).not.toHaveBeenCalled();
+  });
+
+  test("a later asset's publisher failure leaves zero packaged files and manifests", async () => {
+    const store = multiAssetStore();
+    const result = await exec(store, {
+      assets: [html(), secondAsset()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": CLIP_PROFILE },
+      publishClip: true,
+      clipPublisher: vi.fn(async (selector) => {
+        if (selector.includes("v1.mp4")) throw new Error("the public bucket refused the publish");
+        return urlFor(selector);
+      }),
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toBe(
+        'Platform "html-banner": the public bucket refused the publish',
+      );
+    }
+    expect(store.writePackaged).not.toHaveBeenCalled();
+    expect(store.writeManifest).not.toHaveBeenCalled();
+  });
+
+  test("a later platform's refusal leaves zero packaged files and manifests for earlier platforms", async () => {
+    const second: PlatformProfile = { ...CLIP_PROFILE, id: "html-social", ratio: "9:16" };
+    const store = fakeStore();
+    const bytesFor: Record<string, Uint8Array> = {
+      [BUNDLE_PATH]: new TextEncoder().encode("<!DOCTYPE html><html><body>plain</body></html>"),
+      [FALLBACK_PATH]: FALLBACK,
+      "alpha/9x16/index.html": bundleWith(1, "alpha/9x16/v0.mp4"),
+      "alpha/9x16/fallback.png": FALLBACK,
+    };
+    vi.mocked(store.readAsset).mockImplementation(async (p) => bytesFor[p]!);
+    const result = await exec(store, {
+      assets: [
+        html(),
+        html({
+          aspectRatio: "9:16",
+          htmlBundlePath: "alpha/9x16/index.html",
+          htmlFallbackPath: "alpha/9x16/fallback.png",
+          variantIndex: 2,
+        }),
+      ],
+      platforms: ["html-banner", "html-social"],
+      profiles: { "html-banner": CLIP_PROFILE, "html-social": second },
+      publishClip: false,
+      clipPublisher: publisher,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toBe(
+        'Platform "html-social": HTML asset alpha/v2 carries video clip placeholders but "publishClip" is not enabled — packaging would ship unresolvable placeholder URLs.',
+      );
+    }
+    // The first platform packaged successfully in the old sequential flow —
+    // now nothing is written at all.
     expect(store.writePackaged).not.toHaveBeenCalled();
     expect(store.writeManifest).not.toHaveBeenCalled();
   });

@@ -126,6 +126,28 @@ export function withoutAbsolutePaths(message: string): string {
   return message.replace(/(^|[\s'"])(?:[A-Za-z]:)?(?:\/|\\)[^\s'"]+/g, "$1<path>");
 }
 
+/**
+ * Everything the write phase needs for one asset: its bytes are read, its clip
+ * placeholders are resolved, its validations have passed — only the packaged
+ * writes remain. The prepare phase resolves this for every asset of every
+ * platform before the write phase touches the store, so a refusal anywhere
+ * leaves zero packaged files and zero manifests behind.
+ */
+type PreparedItem =
+  | { kind: "static"; asset: PackageableAsset; bytes: Uint8Array }
+  | {
+      kind: "motion";
+      asset: PackageableAsset & { videoPath: string };
+      video: Uint8Array;
+      poster: Uint8Array;
+    }
+  | {
+      kind: "html";
+      asset: PackageableAsset & { htmlBundlePath: string; htmlFallbackPath: string };
+      bundle: Uint8Array;
+      fallback: Uint8Array;
+    };
+
 /** Motion rows carry an mp4; anything else (classic rows have no `format`) is a static. */
 const isMotionAsset = (
   asset: PackageableAsset,
@@ -149,6 +171,13 @@ const isHtmlAsset = (
  * size assets fails loudly — a successful empty manifest is the D8 dead end, not
  * a result. Store failures are caught per platform and returned as err; they
  * never throw.
+ *
+ * Packaging runs in two phases: every read, clip publication and validation
+ * for ALL platforms happens first (prepare), and only once every platform has
+ * been prepared does the write phase emit a single packaged file or manifest.
+ * A refusal anywhere — an unpublished placeholder, an unsafe URL, a publisher
+ * failure, an unreadable asset, on the first asset or the last platform —
+ * therefore leaves zero packaged files and zero manifests behind.
  */
 export class PackageForPlatformUseCase {
   constructor(
@@ -295,20 +324,27 @@ export class PackageForPlatformUseCase {
     // by several bundles, sizes or platforms is published once, and a second
     // execute() call starts a fresh export and publishes again.
     const publishedUrls = new Map<string, string>();
-    const platforms: PackagedPlatform[] = [];
+    // Prepare phase: resolve every asset of every platform — all reads, clip
+    // publications and validations — without writing anything. Any refusal here
+    // returns err before a single packaged file or manifest exists.
+    const preparedPlatforms: Array<{
+      platformId: string;
+      profile: PlatformProfile;
+      included: number;
+      excluded: number;
+      items: PreparedItem[];
+    }> = [];
     for (const { platformId, profile, eligible, selected } of selections) {
       try {
         const included = selected.length;
         const excluded = eligible.length - selected.length;
-        const items: PackageManifestItem[] = [];
+        const items: PreparedItem[] = [];
         for (const asset of selected) {
           items.push(
             isMotionAsset(asset)
-              ? await this.packageMotion(platformId, profile, asset)
+              ? await this.prepareMotion(asset)
               : isHtmlAsset(asset) && profile.formats.includes("html")
-                ? await this.packageHtml(
-                    platformId,
-                    profile,
+                ? await this.prepareHtml(
                     asset,
                     input.clickDestination,
                     input.publishClip ?? false,
@@ -318,14 +354,30 @@ export class PackageForPlatformUseCase {
                 : isHtmlAsset(asset) &&
                     profile.formats.includes("static") &&
                     profile.sizes !== undefined
-                  ? await this.packageStatic(platformId, profile, {
+                  ? await this.prepareStatic({
                       ...asset,
                       outputPath: asset.htmlFallbackPath,
                     })
-                  : await this.packageStatic(platformId, profile, asset),
+                  : await this.prepareStatic(asset),
           );
         }
+        preparedPlatforms.push({ platformId, profile, included, excluded, items });
+      } catch (error) {
+        return err(
+          new Error(`Platform "${platformId}": ${withoutAbsolutePaths(errorMessage(error))}`),
+        );
+      }
+    }
 
+    // Write phase: every platform prepared, so every refusal has already passed —
+    // writes happen only now, and a later platform can no longer refuse.
+    const platforms: PackagedPlatform[] = [];
+    for (const { platformId, profile, included, excluded, items } of preparedPlatforms) {
+      try {
+        const manifestItems: PackageManifestItem[] = [];
+        for (const prepared of items) {
+          manifestItems.push(await this.writePrepared(platformId, profile, prepared));
+        }
         const manifestPath = await this.store.writeManifest(platformId, {
           campaignId: input.campaignId,
           platformId,
@@ -334,9 +386,16 @@ export class PackageForPlatformUseCase {
           included,
           excluded,
           profile,
-          items,
+          items: manifestItems,
         });
-        platforms.push({ platformId, manifestPath, items, skipped, included, excluded });
+        platforms.push({
+          platformId,
+          manifestPath,
+          items: manifestItems,
+          skipped,
+          included,
+          excluded,
+        });
       } catch (error) {
         return err(
           new Error(`Platform "${platformId}": ${withoutAbsolutePaths(errorMessage(error))}`),
@@ -347,62 +406,29 @@ export class PackageForPlatformUseCase {
     return ok({ platforms });
   }
 
-  private async packageStatic(
-    platformId: string,
-    profile: PlatformProfile,
-    asset: PackageableAsset,
-  ): Promise<PackageManifestItem> {
-    const bytes = await this.store.readAsset(asset.outputPath);
-    const packagedPath = await this.store.writePackaged(platformId, asset.outputPath, bytes);
-    return {
-      productId: asset.productId,
-      // Exactly one of the two is defined on any real row (D113); undefined keys
-      // drop from the serialized manifest, so each item names its own family.
-      aspectRatio: asset.aspectRatio,
-      size: asset.size,
-      treatment: asset.treatment,
-      format: "static",
-      source: asset.outputPath,
-      packagedPath,
-      bytes: bytes.length,
-      checks: { size: bytes.length <= profile.maxBytes ? "pass" : "fail" },
-    };
+  /**
+   * Prepare phase, static: read the PNG. Nothing is written yet.
+   */
+  private async prepareStatic(asset: PackageableAsset): Promise<PreparedItem> {
+    return { kind: "static", asset, bytes: await this.store.readAsset(asset.outputPath) };
   }
 
   /**
-   * The mp4 is the item (size + duration checks); its poster rides along.
+   * Prepare phase, motion: read the mp4 and its poster. Nothing is written yet.
    */
-  private async packageMotion(
-    platformId: string,
-    profile: PlatformProfile,
+  private async prepareMotion(
     asset: PackageableAsset & { videoPath: string },
-  ): Promise<PackageManifestItem> {
+  ): Promise<PreparedItem> {
     const video = await this.store.readAsset(asset.videoPath);
     const poster = await this.store.readAsset(asset.outputPath);
-    const packagedPath = await this.store.writePackaged(platformId, asset.videoPath, video);
-    const posterPath = await this.store.writePackaged(platformId, asset.outputPath, poster);
-    const duration =
-      asset.durationSec !== undefined &&
-      (profile.maxDurationSec === undefined || asset.durationSec <= profile.maxDurationSec)
-        ? "pass"
-        : "fail";
-    return {
-      productId: asset.productId,
-      aspectRatio: asset.aspectRatio,
-      size: asset.size,
-      treatment: asset.treatment,
-      format: "motion",
-      source: asset.videoPath,
-      packagedPath,
-      posterPath,
-      ...(asset.durationSec !== undefined ? { durationSec: asset.durationSec } : {}),
-      bytes: video.length,
-      checks: { size: video.length <= profile.maxBytes ? "pass" : "fail", duration },
-    };
+    return { kind: "motion", asset, video, poster };
   }
 
   /**
-   * The bundle is the item (size check); its raster fallback rides along (D122).
+   * Prepare phase, html: read the bundle, run every validation, publish each
+   * placeholder selector and substitute the published URLs — all without
+   * writing anything.
+   *
    * Markup is never rasterised, so no pixel hash is recorded for it — verification
    * is structural (the bundle parses, references resolve, the fallback exists).
    *
@@ -412,15 +438,13 @@ export class PackageForPlatformUseCase {
    * the request did not ask to publish, a missing publisher, and an unsafe URL
    * each leave zero package files and zero manifests behind.
    */
-  private async packageHtml(
-    platformId: string,
-    profile: PlatformProfile,
+  private async prepareHtml(
     asset: PackageableAsset & { htmlBundlePath: string; htmlFallbackPath: string },
     briefDestination: string | undefined,
     publishClip: boolean,
     clipPublisher: ClipPublisher | undefined,
     publishedUrls: Map<string, string>,
-  ): Promise<PackageManifestItem> {
+  ): Promise<PreparedItem> {
     const bundle = await this.store.readAsset(asset.htmlBundlePath);
     const bundleText = new TextDecoder().decode(bundle);
     const destination = asset.clickDestination ?? briefDestination;
@@ -457,31 +481,89 @@ export class PackageForPlatformUseCase {
       updatedBundle = new TextEncoder().encode(updatedHtml);
     }
     const fallback = await this.store.readAsset(asset.htmlFallbackPath);
-    const packagedPath = await this.store.writePackaged(
-      platformId,
-      asset.htmlBundlePath,
-      updatedBundle,
-    );
-    const fallbackPath = await this.store.writePackaged(
-      platformId,
-      asset.htmlFallbackPath,
-      fallback,
-    );
-    // The budget is the unit's, and the unit a network measures is the package it
-    // uploads: `index.html` *and* its raster fallback. Counting the bundle alone
-    // would pass a unit whose fallback pushes it over (X14).
-    const unitBytes = updatedBundle.length + fallback.length;
-    return {
-      productId: asset.productId,
-      aspectRatio: asset.aspectRatio,
-      size: asset.size,
-      treatment: asset.treatment,
-      format: "html",
-      source: asset.htmlBundlePath,
-      packagedPath,
-      fallbackPath,
-      bytes: updatedBundle.length,
-      checks: { size: unitBytes <= profile.maxBytes ? "pass" : "fail" },
-    };
+    return { kind: "html", asset, bundle: updatedBundle, fallback };
+  }
+
+  /**
+   * Write phase: the writes for one prepared item — the only place the store
+   * is asked to write. Reached only after every platform has been prepared,
+   * so no refusal can leave a partially written package behind.
+   */
+  private async writePrepared(
+    platformId: string,
+    profile: PlatformProfile,
+    prepared: PreparedItem,
+  ): Promise<PackageManifestItem> {
+    switch (prepared.kind) {
+      case "static": {
+        const { asset, bytes } = prepared;
+        const packagedPath = await this.store.writePackaged(platformId, asset.outputPath, bytes);
+        return {
+          productId: asset.productId,
+          // Exactly one of the two is defined on any real row (D113); undefined keys
+          // drop from the serialized manifest, so each item names its own family.
+          aspectRatio: asset.aspectRatio,
+          size: asset.size,
+          treatment: asset.treatment,
+          format: "static",
+          source: asset.outputPath,
+          packagedPath,
+          bytes: bytes.length,
+          checks: { size: bytes.length <= profile.maxBytes ? "pass" : "fail" },
+        };
+      }
+      case "motion": {
+        const { asset, video, poster } = prepared;
+        const packagedPath = await this.store.writePackaged(platformId, asset.videoPath, video);
+        const posterPath = await this.store.writePackaged(platformId, asset.outputPath, poster);
+        const duration =
+          asset.durationSec !== undefined &&
+          (profile.maxDurationSec === undefined || asset.durationSec <= profile.maxDurationSec)
+            ? "pass"
+            : "fail";
+        return {
+          productId: asset.productId,
+          aspectRatio: asset.aspectRatio,
+          size: asset.size,
+          treatment: asset.treatment,
+          format: "motion",
+          source: asset.videoPath,
+          packagedPath,
+          posterPath,
+          ...(asset.durationSec !== undefined ? { durationSec: asset.durationSec } : {}),
+          bytes: video.length,
+          checks: { size: video.length <= profile.maxBytes ? "pass" : "fail", duration },
+        };
+      }
+      case "html": {
+        const { asset, bundle, fallback } = prepared;
+        const packagedPath = await this.store.writePackaged(
+          platformId,
+          asset.htmlBundlePath,
+          bundle,
+        );
+        const fallbackPath = await this.store.writePackaged(
+          platformId,
+          asset.htmlFallbackPath,
+          fallback,
+        );
+        // The budget is the unit's, and the unit a network measures is the package it
+        // uploads: `index.html` *and* its raster fallback. Counting the bundle alone
+        // would pass a unit whose fallback pushes it over (X14).
+        const unitBytes = bundle.length + fallback.length;
+        return {
+          productId: asset.productId,
+          aspectRatio: asset.aspectRatio,
+          size: asset.size,
+          treatment: asset.treatment,
+          format: "html",
+          source: asset.htmlBundlePath,
+          packagedPath,
+          fallbackPath,
+          bytes: bundle.length,
+          checks: { size: unitBytes <= profile.maxBytes ? "pass" : "fail" },
+        };
+      }
+    }
   }
 }
