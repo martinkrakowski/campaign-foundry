@@ -24,6 +24,11 @@ import {
 } from "../../domain/value-objects/AudioRights.vo.js";
 import { styleProblem } from "../../domain/value-objects/creative-style.js";
 import { assembleHtml } from "../../domain/value-objects/markup-assembler.js";
+import {
+  VIDEO_RENDER_PATTERN,
+  type VideoProps,
+} from "../../domain/value-objects/brief-template.js";
+import { collectVideoPlaceholderSources } from "../../domain/value-objects/video-placeholders.js";
 import { PipelineExecutionLog } from "../../domain/value-objects/PipelineExecutionLog.vo.js";
 import type { PipelineResult } from "../../domain/value-objects/PipelineResult.vo.js";
 import type { VariationPlan } from "../../domain/value-objects/VariationPlan.vo.js";
@@ -40,6 +45,17 @@ export const RE_ROLL_MODE_MISMATCH = {
   randomizedTargetsOnClassic:
     "The rejected creatives came from a randomized run, but the brief is now a classic campaign — the mode changed since that run, so they cannot be re-rolled; run the full campaign.",
 } as const;
+
+/**
+ * An enabled `video` layer renders only in variation mode (CFAR6C2): the
+ * classic path has no packaged renditions to resolve the layer's `render`
+ * selector against, so a classic brief asking for one is refused before any
+ * port runs. Variation mode instead emits the deterministic placeholder URL
+ * (`https://publish.invalid/<render>`) that publish-time tooling swaps.
+ */
+export const CLASSIC_VIDEO_LAYER_ERROR =
+  "A campaign brief with an enabled video layer requires variation mode — a classic run has no clip.";
+
 import type { AudioAssetPort } from "../ports/out/AudioAssetPort.js";
 import type { CompliancePort } from "../ports/out/CompliancePort.js";
 import type { CompositeRequest, CompositorPort, SafeInsets } from "../ports/out/CompositorPort.js";
@@ -983,6 +999,11 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
       htmlFallbackPath = `${basePath}/fallback.png`;
       htmlBundlePath = `${basePath}/index.html`;
       await this.deps.exporter.saveToDirectory(composite.image, htmlFallbackPath);
+      // The variation path resolves every enabled `video` layer's `render`
+      // selector to its deterministic placeholder URL (CFAR6C2). Absent when
+      // the template has no enabled `video` layer, so non-video bundles stay
+      // byte-identical to the pre-video assembler.
+      const videoSources = collectVideoPlaceholderSources(template.layers);
       const assembled = assembleHtml({
         layers: template.layers,
         headline: variant.headline ?? copy,
@@ -993,6 +1014,7 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
         // fallback. Layer markup does not interpolate it.
         tone: variant.tone,
         clickDestination,
+        ...(videoSources !== undefined ? { videoSources } : {}),
       });
       await this.deps.exporter.saveToDirectory(assembled.bytes, htmlBundlePath);
     }
@@ -1202,6 +1224,31 @@ export class GenerateCampaignUseCase implements CampaignPipelinePort {
           `Campaign brief template names creative type "${brief.template.creativeType}", which is not one of ${CREATIVE_TYPES.join(", ")}.`,
         ),
       );
+    }
+    // D134's video half (CFAR6C2): an `image-html` template with an enabled
+    // `video` layer is renderable only in variation mode — the classic run
+    // has no clip and no `videoSources` to resolve `render` against — and in
+    // variation mode every enabled layer's selector must be one the render
+    // pattern accepts, because the assembler will embed it verbatim in the
+    // bundle. Both refusals fire here, before any port runs, for the same
+    // defense-in-depth reason as every check above.
+    if (brief.template.creativeType === "image-html") {
+      const enabledVideoLayers = brief.template.layers.filter(
+        (layer) => layer.kind === "video" && layer.enabled !== false,
+      );
+      if (enabledVideoLayers.length > 0 && brief.mode !== "variation") {
+        return err(new Error(CLASSIC_VIDEO_LAYER_ERROR));
+      }
+      for (const layer of enabledVideoLayers) {
+        const render = (layer.props as VideoProps | undefined)?.render;
+        if (typeof render !== "string" || !VIDEO_RENDER_PATTERN.test(render)) {
+          return err(
+            new Error(
+              `Campaign brief video layer "${layer.id}" must carry a render selector matching <product>/<ratio>/v<n>.mp4 (e.g. "shoe/1x1/v0.mp4"); got ${JSON.stringify(render)}.`,
+            ),
+          );
+        }
+      }
     }
     // The brief's clickDestination (HL2, HL-D3) is parse-validated at the brief
     // boundary; enforce it here too through the SAME validator the parser calls —
