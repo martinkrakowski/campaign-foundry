@@ -6,8 +6,18 @@ import {
   TemplateVersionExistsError,
   templateProblem,
 } from "@campaignfoundry/CampaignOrchestration";
-import type { SqlClient } from "../db/sql-client.js";
-import type { WritableTemplateStorePort } from "./template-store.port.js";
+import type { SqlClient, SqlQuery } from "../db/sql-client.js";
+import {
+  MAX_TEMPLATES_PER_ORG,
+  MAX_VERSIONS_PER_TEMPLATE,
+  TemplateLimitExceededError,
+  byIdThenVersion,
+  paginateTemplates,
+  type PaginatedTemplateStorePort,
+  type TemplateListOptions,
+  type TemplateListPage,
+  type WritableTemplateStorePort,
+} from "./template-store.port.js";
 
 /** `error.code`, when `error` has one (pg and PGlite both attach the SQLSTATE as a string). */
 function pgErrorCode(error: unknown): string | undefined {
@@ -45,11 +55,6 @@ function cloneCanonical(id: string): CreativeTemplate | undefined {
   return canonical === undefined ? undefined : structuredClone(canonical);
 }
 
-/** id asc, then version asc — the ordering the merged read is served in. */
-function byIdThenVersion(a: CreativeTemplate, b: CreativeTemplate): number {
-  return a.id.localeCompare(b.id) || a.version - b.version;
-}
-
 /**
  * Org-scoped templates as rows (RW-22, D123), one org's: the store is built
  * for an org, so every statement is scoped to it and another org's templates
@@ -62,13 +67,17 @@ function byIdThenVersion(a: CreativeTemplate, b: CreativeTemplate): number {
  * record — an existing version is never overwritten, and the primary key is
  * the backstop if two writers race.
  */
-export class PgTemplateStore implements WritableTemplateStorePort {
+export class PgTemplateStore implements WritableTemplateStorePort, PaginatedTemplateStorePort {
   constructor(
     private readonly db: SqlClient,
     private readonly orgId: string,
   ) {}
 
   async listTemplates(): Promise<readonly CreativeTemplate[]> {
+    return (await this.listTemplatesPage()).templates;
+  }
+
+  async listTemplatesPage(options?: TemplateListOptions): Promise<TemplateListPage> {
     const { rows } = await this.db.query<TemplateRow>(
       `select id, version, name, unit, creative_type, layers
          from template
@@ -76,9 +85,26 @@ export class PgTemplateStore implements WritableTemplateStorePort {
         order by id, version`,
       [this.orgId],
     );
-    return [...Object.values(CANONICAL_TEMPLATES), ...rows.map(toTemplate)]
+    let skipped = 0;
+    const orgRows: CreativeTemplate[] = [];
+    for (const row of rows) {
+      try {
+        orgRows.push(toTemplate(row));
+      } catch (error) {
+        // A malformed persisted row is skipped and COUNTED, never served and
+        // never echoed: `skipped` is a number, and the error a bad row raises
+        // here carries only the validator's problem. `findTemplate` and
+        // `exists` still throw — a pinned id must fail loudly, not vanish
+        // from a page.
+        if (!(error instanceof InvalidTemplateError)) throw error;
+        skipped += 1;
+      }
+    }
+    const merged = [...Object.values(CANONICAL_TEMPLATES), ...orgRows]
       .map((t) => cloneCanonical(t.id) ?? t)
       .sort(byIdThenVersion);
+    const page = paginateTemplates(merged, options);
+    return { ...page, skipped };
   }
 
   async findTemplate(id: string, version?: number): Promise<CreativeTemplate | undefined> {
@@ -114,21 +140,68 @@ export class PgTemplateStore implements WritableTemplateStorePort {
       );
     }
     try {
-      await this.db.query(
-        `insert into template
-           (org_id, id, version, name, unit, creative_type, layers, created_by)
-         values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)`,
-        [
-          this.orgId,
-          template.id,
-          template.version,
-          template.name,
-          template.unit,
-          template.creativeType,
-          JSON.stringify(template.layers),
-          actor,
-        ],
-      );
+      // The caps are enforced by the INSERT itself, in ONE statement, and the
+      // statement runs inside an advisory-locked transaction (the same shape
+      // as `PgJobStore.lockOrg`): `pg_advisory_xact_lock` keyed on the ORG
+      // ONLY serializes every writer to an org behind each other, so the
+      // writer that queues second recounts on its own statement snapshot —
+      // taken after the incumbent committed — and refuses instead of
+      // overshooting either cap (`MAX_TEMPLATES_PER_ORG` for a new id,
+      // `MAX_VERSIONS_PER_TEMPLATE` for a new version of an existing id).
+      // Without the lock two concurrent saves both observe the same
+      // pre-insert counts and both admit: two DIFFERENT versions of the same
+      // id at `cap - 1` (neither conflicts on the primary key, so neither is
+      // saved by it) overshoot the version cap, and two DIFFERENT new ids at
+      // the distinct-id boundary overshoot the template cap. The lock must be
+      // org-wide, not keyed per (org, id), because BOTH caps are org-wide
+      // counts: the count and the insert have to be serialized per org for
+      // the recount to see the incumbent, whatever id it was writing.
+      // `hashtext` collisions only over-serialize across orgs. The lock is
+      // transaction-scoped, released at commit or rollback, so a save that
+      // throws never leaves it held. A client without `transaction` (a
+      // minimal test double) falls back to the bare statement: the caps are
+      // still enforced, only the per-org serialization is lost.
+      const insert = async (q: SqlQuery): Promise<void> => {
+        const { rows } = await q.query(
+          `insert into template
+             (org_id, id, version, name, unit, creative_type, layers, created_by)
+           select $1, $2, $3::int, $4, $5, $6, $7::jsonb, $8
+             from (
+               select count(distinct id)::int as distinct_ids,
+                      count(*) filter (where id = $2)::int as id_versions
+                 from template
+                where org_id = $1
+             ) counts
+            where (id_versions > 0 or distinct_ids < $9::int)
+              and id_versions < $10::int
+           returning id`,
+          [
+            this.orgId,
+            template.id,
+            template.version,
+            template.name,
+            template.unit,
+            template.creativeType,
+            JSON.stringify(template.layers),
+            actor,
+            MAX_TEMPLATES_PER_ORG,
+            MAX_VERSIONS_PER_TEMPLATE,
+          ],
+        );
+        // No RETURNING row means the cap predicate selected nothing to insert:
+        // an admission refusal, not a data error — the template itself is
+        // valid, the library is just full. The message is fixed and neutral;
+        // no row data travels with it.
+        if (rows.length === 0) throw new TemplateLimitExceededError();
+      };
+      if (typeof this.db.transaction === "function") {
+        await this.db.transaction(async (tx) => {
+          await tx.query("select pg_advisory_xact_lock(hashtext('template:' || $1))", [this.orgId]);
+          await insert(tx);
+        });
+      } else {
+        await insert(this.db);
+      }
     } catch (error) {
       // Two writers saving the same (org, id, version) race the primary key;
       // the loser sees a constraint violation, not a reason to 500 — the

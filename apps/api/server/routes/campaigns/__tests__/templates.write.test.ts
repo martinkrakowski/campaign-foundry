@@ -15,6 +15,10 @@ import type {
 } from "../../../lib/ports/template-store.port.js";
 import type { TenantContext } from "../../../lib/tenant.js";
 import { MAX_TEMPLATE_BODY_BYTES } from "../../../lib/template-write.js";
+import {
+  MAX_TEMPLATES_PER_ORG,
+  MAX_VERSIONS_PER_TEMPLATE,
+} from "../../../lib/ports/template-store.port.js";
 import listHandler from "../templates.get.js";
 import postHandler from "../templates.post.js";
 import byRefHandler from "../templates/[ref].get.js";
@@ -98,6 +102,24 @@ interface RouteBody {
 }
 
 const bodyOf = async (res: Response): Promise<RouteBody> => (await res.json()) as RouteBody;
+
+/** Insert a template row directly, the way previous saves would have. */
+async function seedRow(orgId: string, id: string, version: number): Promise<void> {
+  await harness.db.query(
+    `insert into template (org_id, id, version, name, unit, creative_type, layers, created_by)
+       values ($1, $2, $3::int, $4, $5, $6, $7::jsonb, $8)`,
+    [
+      orgId,
+      id,
+      version,
+      `Cap ${id} v${version}`,
+      "standard-web",
+      "image-text",
+      JSON.stringify(VALID_BODY.layers),
+      "u1",
+    ],
+  );
+}
 
 /**
  * A `ReadableStream` that records what the reader actually pulled from it:
@@ -518,6 +540,42 @@ describe("template write routes (POST /campaigns/templates, PUT /campaigns/templ
       expect((await bodyOf(res)).error).toBeTruthy();
     }
     expect(await rowCount()).toBe(0);
+  });
+
+  test("returns 422 when the per-org template cap is reached, and other orgs can still write", async () => {
+    for (let i = 0; i < MAX_TEMPLATES_PER_ORG; i += 1) {
+      await seedRow("local", `tpl-cap-${i}`, 1);
+    }
+    const before = await rowCount();
+
+    const res = await postJson(VALID_BODY);
+    expect(res.status).toBe(422);
+    expect((await bodyOf(res)).error).toBe("Template limit exceeded for this organization.");
+    expect(await rowCount()).toBe(before);
+
+    // The cap is per org: acme's library is empty and stays writable.
+    tenant = ADMIN_B;
+    const other = await postJson(VALID_BODY);
+    expect(other.status).toBe(201);
+    expect(await rowCount()).toBe(before + 1);
+  });
+
+  test("returns 422 when the per-template version cap is reached, and another id can still be created", async () => {
+    for (let v = 1; v <= MAX_VERSIONS_PER_TEMPLATE; v += 1) {
+      await seedRow("local", "tpl-cap", v);
+    }
+    const before = await rowCount();
+
+    const res = await putJson("tpl-cap", { ...VALID_BODY, name: "Version 21" });
+    expect(res.status).toBe(422);
+    expect((await bodyOf(res)).error).toBe("Template limit exceeded for this organization.");
+    expect(await rowCount()).toBe(before);
+
+    // The version cap binds one template id, not the org: a fresh id in the
+    // same org still saves.
+    const fresh = await postJson(VALID_BODY);
+    expect(fresh.status).toBe(201);
+    expect(await rowCount()).toBe(before + 1);
   });
 
   test("maps CanonicalTemplateCollisionError to 409", async () => {
