@@ -52,8 +52,17 @@ describe("resolvePinnedOrgTemplate on PGlite (RW-22)", () => {
     await seed(db, "local", storedTemplate({ version: 1, creativeType: "image-text" }));
     setTemplateStore(new PgTemplateStore(db, "local"));
 
+    // The brief carries its own edited layers, deliberately different from the
+    // stored row's: the pin resolves by id/version/creativeType, never layers.
     await expect(
-      resolvePinnedOrgTemplate(LOCAL_TENANT, pinned({ id: TEMPLATE_ID, version: 1 })),
+      resolvePinnedOrgTemplate(
+        LOCAL_TENANT,
+        pinned({
+          id: TEMPLATE_ID,
+          version: 1,
+          layers: [{ id: "brief-edited-layer", kind: "image" }],
+        }),
+      ),
     ).resolves.toBeUndefined();
   });
 
@@ -78,6 +87,8 @@ describe("resolvePinnedOrgTemplate on PGlite (RW-22)", () => {
       `Campaign brief field "template.id" references unknown template "${TEMPLATE_ID}" (version 1).`,
     );
     expect(errMissing).toBeInstanceOf(PinnedTemplateError);
+    expect((errMissing as PinnedTemplateError).statusCode).toBe(400);
+    expect((errMissing as Error).name).toBe("PinnedTemplateError");
     expect((errMissing as Error).message).toBe(
       `Campaign brief field "template.id" references unknown template "tpl-00000000-0000-4000-8000-000000000000" (version 1).`,
     );
