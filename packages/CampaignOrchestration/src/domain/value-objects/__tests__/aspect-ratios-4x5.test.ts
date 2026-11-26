@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, test, expect, vi } from "vitest";
 import { DEFAULT_RATIO_VALUES, RATIO_VALUES, nearestRatioForAspect } from "../aspect-ratios.js";
 import { AspectRatio } from "../AspectRatio.vo.js";
@@ -358,25 +355,5 @@ describe("GenerateCampaignUseCase keeps the frozen classic matrix and renders pi
     expect(d.imageGenerator.resolveBackground).not.toHaveBeenCalled();
     expect(d.proceduralGenerator.resolveBackground).not.toHaveBeenCalled();
     expect(d.compositor.compositeAsset).not.toHaveBeenCalled();
-  });
-});
-
-describe("the pinned fixture corpus agrees with the golden corpus (read-only cross-check)", () => {
-  test("the golden literals match the api stability test's fixtures on disk", () => {
-    const briefsDir = join(
-      dirname(fileURLToPath(import.meta.url)),
-      "..",
-      "..",
-      "..",
-      "..",
-      "..",
-      "..",
-      "briefs",
-    );
-    for (const file of ["sample-randomized.yaml", "sample-motion.yaml", "sample-pooled.yaml"]) {
-      expect(readFileSync(join(briefsDir, file), "utf8")).toContain(
-        `id: ${file.replace(".yaml", "")}`,
-      );
-    }
   });
 });

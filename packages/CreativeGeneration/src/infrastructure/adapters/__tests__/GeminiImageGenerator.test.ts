@@ -175,10 +175,19 @@ describe("GeminiImageGenerator", () => {
 
   test("maps 4:5 to Imagen's 3:4 and cover-fits the result to 1080x1350", async () => {
     // A REAL PNG: cover-fit decodes the bytes, so a stub like "hello" would throw.
-    const imagenPng = createCanvas(768, 1024)
-      .getContext("2d")
-      .canvas.toBuffer("image/png")
-      .toString("base64");
+    // The source is a patterned 768x1024 (3:4) — red outside the 4:5 crop at the
+    // top, green above the vertical midpoint, blue below it, yellow outside the
+    // crop at the bottom — so every cover-fit property is readable off the pixels.
+    const source = createCanvas(768, 1024).getContext("2d");
+    source.fillStyle = "#FF0000";
+    source.fillRect(0, 0, 768, 32); // top 32 rows — cropped away
+    source.fillStyle = "#00FF00";
+    source.fillRect(0, 32, 768, 480); // upper visible half
+    source.fillStyle = "#0000FF";
+    source.fillRect(0, 512, 768, 480); // lower visible half
+    source.fillStyle = "#FFFF00";
+    source.fillRect(0, 992, 768, 32); // bottom 32 rows — cropped away
+    const imagenPng = source.canvas.toBuffer("image/png").toString("base64");
     const generateImages = vi.fn(async (_args: GenArgs) => ({
       generatedImages: [{ image: { imageBytes: imagenPng } }],
     }));
@@ -191,6 +200,51 @@ describe("GeminiImageGenerator", () => {
     const img = await loadImage(Buffer.from(out.image));
     expect(img.width).toBe(1080);
     expect(img.height).toBe(1350);
+    const canvas = createCanvas(1080, 1350);
+    const canvasCtx = canvas.getContext("2d");
+    canvasCtx.drawImage(img, 0, 0);
+    const data = canvasCtx.getImageData(0, 0, 1080, 1350).data;
+    const pixel = (x: number, y: number): [number, number, number, number] => {
+      const i = (y * 1080 + x) * 4;
+      return [data[i], data[i + 1], data[i + 2], data[i + 3]];
+    };
+
+    // 768x1024 covers 1080x1350 at 1.40625x drawn at y = -45: exactly 32 source
+    // rows fall outside the crop, top and bottom. Bilinear filtering blends one
+    // pixel deep at each band edge, so edges assert channel dominance, not hex.
+    const isGreen = ([r, g, b, a]: readonly number[]) => a === 255 && g > 150 && r < 100 && b < 100;
+    const isBlue = ([r, g, b, a]: readonly number[]) => a === 255 && b > 150 && r < 100 && g < 100;
+
+    // Top edge is visible-source green — never the cropped red band, and never
+    // transparent. Contain-fit letterboxing or a shifted crop shows red here.
+    for (const x of [0, 540, 1079]) {
+      expect(isGreen(pixel(x, 0))).toBe(true);
+    }
+    // Bottom edge is visible-source blue — never the cropped yellow band.
+    for (const x of [0, 540, 1079]) {
+      expect(isBlue(pixel(x, 1349))).toBe(true);
+    }
+    // The centered crop puts the green/blue boundary exactly at output y = 675;
+    // a stretched or vertically shifted draw moves it.
+    expect(isGreen(pixel(540, 670))).toBe(true);
+    expect(isBlue(pixel(540, 680))).toBe(true);
+    // And nowhere on the canvas does a cropped band survive: zero red, zero
+    // yellow, zero transparency. Stretching 768x1024 straight to 1080x1350
+    // shows both cropped bands; contain-fit letterboxing shows transparency.
+    let red = 0;
+    let yellow = 0;
+    let transparent = 0;
+    for (let y = 0; y < 1350; y++) {
+      for (let x = 0; x < 1080; x++) {
+        const [r, g, b, a] = pixel(x, y);
+        if (a < 255) transparent++;
+        if (r > 200 && g < 100 && b < 100) red++;
+        if (r > 200 && g > 200 && b < 100) yellow++;
+      }
+    }
+    expect(red).toBe(0);
+    expect(yellow).toBe(0);
+    expect(transparent).toBe(0);
   });
 
   test("non-4:5 ratios pass through untouched with their own aspect ratio", async () => {

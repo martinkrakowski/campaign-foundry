@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, test, expect } from "vitest";
 import { parseBriefText } from "../load-brief.js";
 import { nodeCryptoPolicyHasher } from "@campaignfoundry/CampaignOrchestration/infrastructure";
-import { VariationPolicy } from "@campaignfoundry/CampaignOrchestration";
+import { VariationPolicy, DEFAULT_RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration";
 
 /**
  * D57 hash stability over the tracked sample fixtures (T4). The re-roll path
@@ -61,6 +61,11 @@ describe("policyHash is unchanged for every pre-anchor sample brief (D57)", () =
     if (!result.success) return;
     // The axis is absent from every fixture — the resolution must join nothing.
     expect(result.value.anchor).toEqual([]);
+    // The 4:5 axis joined the vocabulary without joining the defaults: every
+    // real fixture on disk still resolves to the original three ratios, so the
+    // golden hash above is the pre-4:5 value by construction, not by luck.
+    expect(result.value.ratios).toEqual([...DEFAULT_RATIO_VALUES]);
+    expect(result.value.ratios).not.toContain("4:5");
     expect(result.value.policyHash).toBe(GOLDEN_HASHES[file]);
   });
 
