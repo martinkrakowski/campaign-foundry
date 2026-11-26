@@ -7,6 +7,7 @@ import {
   TemplateWriteUnsupportedError,
 } from "@campaignfoundry/CampaignOrchestration";
 import { FsTemplateStore } from "../fs-template-store.js";
+import { InvalidTemplateCursorError, encodeTemplateCursor } from "../template-store.port.js";
 import { getTemplateStore, resetTemplateStore, setTemplateStore } from "../index.js";
 
 import { LOCAL_TENANT } from "../../tenant.js";
@@ -194,5 +195,65 @@ describe("FsTemplateStore", () => {
     );
     expect(declared).toEqual(["listTemplates", "findTemplate", "exists"]);
     expect(declared.filter((name) => /create|save|put|delete|write/i.test(name))).toEqual([]);
+  });
+});
+
+describe("FsTemplateStore.listTemplatesPage", () => {
+  const v1 = CANONICAL_TEMPLATES["image-text"];
+  const v2: CreativeTemplate = { ...v1, version: 2 };
+  const video = CANONICAL_TEMPLATES.video;
+
+  test("paginates in byIdThenVersion order when limit is given, traversing by nextCursor", async () => {
+    // Insertion order is [image-text v1, image-text v2, video]; the page
+    // order is by id then version — the same records, different order.
+    const store = new FsTemplateStore([v1, v2, video]);
+
+    const first = await store.listTemplatesPage({ limit: 1 });
+    expect(first.templates.map((t) => `${t.id}:${t.version}`)).toEqual(["canonical-image-text:1"]);
+    expect(first.skipped).toBe(0);
+    expect(first.nextCursor).toBeDefined();
+
+    const second = await store.listTemplatesPage({ limit: 1, cursor: first.nextCursor });
+    expect(second.templates.map((t) => `${t.id}:${t.version}`)).toEqual(["canonical-image-text:2"]);
+    expect(second.nextCursor).toBeDefined();
+
+    const third = await store.listTemplatesPage({ limit: 1, cursor: second.nextCursor });
+    expect(third.templates.map((t) => `${t.id}:${t.version}`)).toEqual(["canonical-video:1"]);
+    expect(third.nextCursor).toBeUndefined();
+
+    // A cursor past every record answers an empty page, never a rewind.
+    const past = await store.listTemplatesPage({
+      limit: 1,
+      cursor: encodeTemplateCursor({ id: "zzz", version: 1 }),
+    });
+    expect(past.templates).toEqual([]);
+    expect(past.nextCursor).toBeUndefined();
+  });
+
+  test("returns every record sorted with skipped 0 and no nextCursor when limit is omitted", async () => {
+    const store = new FsTemplateStore([v1, v2, video]);
+
+    const page = await store.listTemplatesPage();
+    expect(page.templates.map((t) => `${t.id}:${t.version}`)).toEqual([
+      "canonical-image-text:1",
+      "canonical-image-text:2",
+      "canonical-video:1",
+    ]);
+    expect(page.skipped).toBe(0);
+    expect(page.nextCursor).toBeUndefined();
+  });
+
+  test("an invalid cursor throws InvalidTemplateCursorError", async () => {
+    const store = new FsTemplateStore([v1]);
+
+    await expect(
+      store.listTemplatesPage({ limit: 1, cursor: "!!not-a-cursor!!" }),
+    ).rejects.toBeInstanceOf(InvalidTemplateCursorError);
+    await expect(
+      store.listTemplatesPage({
+        limit: 1,
+        cursor: Buffer.from("not json", "utf8").toString("base64url"),
+      }),
+    ).rejects.toBeInstanceOf(InvalidTemplateCursorError);
   });
 });

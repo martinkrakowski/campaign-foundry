@@ -9,6 +9,11 @@ import {
   TemplateVersionExistsError,
 } from "@campaignfoundry/CampaignOrchestration";
 import { PgTemplateStore } from "../pg-template-store.js";
+import {
+  MAX_TEMPLATES_PER_ORG,
+  MAX_VERSIONS_PER_TEMPLATE,
+  TemplateLimitExceededError,
+} from "../template-store.port.js";
 
 /** A valid org template to save: the canonical image-text seed under a new id. */
 function orgTemplate(overrides: Partial<CreativeTemplate> = {}): CreativeTemplate {
@@ -238,13 +243,139 @@ describe("PgTemplateStore (RW-22)", () => {
     expect((await acme.findTemplate("org-banner"))?.name).toBe("Acme Banner");
   });
 
-  test("a malformed persisted row on read throws InvalidTemplateError, not a corrupt record", async () => {
+  test("skips malformed stored rows in listTemplates and reports skipped count while findTemplate still throws", async () => {
     await seedRow(db, "local", orgTemplate());
     await db.query(`update template set layers = '"not-an-array"'::jsonb where id = 'org-banner'`);
 
     const store = new PgTemplateStore(db, "local");
     await expect(store.findTemplate("org-banner")).rejects.toBeInstanceOf(InvalidTemplateError);
-    await expect(store.listTemplates()).rejects.toBeInstanceOf(InvalidTemplateError);
     await expect(store.exists("org-banner")).rejects.toBeInstanceOf(InvalidTemplateError);
+
+    // The read no longer throws: the bad row is skipped and COUNTED — a
+    // number, never the row's content — and the valid templates plus the
+    // canonical library are still served.
+    const listed = await store.listTemplates();
+    expect(listed.map((t) => t.id)).toEqual([
+      "canonical-image-html",
+      "canonical-image-text",
+      "canonical-video",
+    ]);
+
+    const page = await store.listTemplatesPage();
+    expect(page.skipped).toBe(1);
+    expect(page.templates.map((t) => t.id)).toEqual([
+      "canonical-image-html",
+      "canonical-image-text",
+      "canonical-video",
+    ]);
+    expect(JSON.stringify(page)).not.toContain("not-an-array");
+  });
+
+  test("listTemplatesPage without a limit returns every merged template with nextCursor undefined", async () => {
+    await seedRow(db, "local", orgTemplate({ id: "org-banner", version: 2 }));
+    await seedRow(db, "local", orgTemplate({ id: "org-banner", version: 1 }));
+    await seedRow(db, "local", orgTemplate({ id: "org-alpha", version: 1 }));
+
+    const store = new PgTemplateStore(db, "local");
+    const page = await store.listTemplatesPage();
+    expect(page.templates.map((t) => `${t.id}:${t.version}`)).toEqual([
+      "canonical-image-html:1",
+      "canonical-image-text:1",
+      "canonical-video:1",
+      "org-alpha:1",
+      "org-banner:1",
+      "org-banner:2",
+    ]);
+    expect(page.skipped).toBe(0);
+    expect(page.nextCursor).toBeUndefined();
+  });
+
+  test("listTemplatesPage paginates in byIdThenVersion order through cursor and nextCursor", async () => {
+    await seedRow(db, "local", orgTemplate({ id: "org-banner", version: 1 }));
+    await seedRow(db, "local", orgTemplate({ id: "org-banner", version: 2 }));
+    const store = new PgTemplateStore(db, "local");
+
+    const first = await store.listTemplatesPage({ limit: 2 });
+    expect(first.templates.map((t) => `${t.id}:${t.version}`)).toEqual([
+      "canonical-image-html:1",
+      "canonical-image-text:1",
+    ]);
+    expect(first.nextCursor).toBeDefined();
+
+    const second = await store.listTemplatesPage({ limit: 2, cursor: first.nextCursor });
+    expect(second.templates.map((t) => `${t.id}:${t.version}`)).toEqual([
+      "canonical-video:1",
+      "org-banner:1",
+    ]);
+    expect(second.nextCursor).toBeDefined();
+
+    const third = await store.listTemplatesPage({ limit: 2, cursor: second.nextCursor });
+    expect(third.templates.map((t) => `${t.id}:${t.version}`)).toEqual(["org-banner:2"]);
+    expect(third.nextCursor).toBeUndefined();
+  });
+
+  test("refuses saving a new template id once MAX_TEMPLATES_PER_ORG is reached, isolated per org", async () => {
+    for (let i = 0; i < MAX_TEMPLATES_PER_ORG; i += 1) {
+      await seedRow(db, "local", orgTemplate({ id: `org-cap-${i}`, version: 1 }));
+    }
+    const store = new PgTemplateStore(db, "local");
+    await expect(
+      store.saveTemplate(orgTemplate({ id: "org-cap-new" }), "u1"),
+    ).rejects.toBeInstanceOf(TemplateLimitExceededError);
+    const { rows } = await db.query<{ n: number }>(
+      `select count(*)::int as n from template where org_id = 'local' and id = 'org-cap-new'`,
+    );
+    expect(rows[0]!.n).toBe(0);
+
+    // A new VERSION of an existing id is not blocked by the distinct-id cap.
+    await store.saveTemplate(orgTemplate({ id: "org-cap-0", version: 2 }), "u1");
+    expect(await store.exists("org-cap-0", 2)).toBe(true);
+
+    // Another org's rows never count against this org's cap: local's full
+    // library leaves acme free to save the very same new id.
+    const acme = new PgTemplateStore(db, "acme");
+    await acme.saveTemplate(orgTemplate({ id: "org-cap-new" }), "u2");
+    expect(await acme.exists("org-cap-new")).toBe(true);
+  });
+
+  test("refuses saving a new version once MAX_VERSIONS_PER_TEMPLATE is reached, without blocking other orgs", async () => {
+    for (let v = 1; v <= MAX_VERSIONS_PER_TEMPLATE; v += 1) {
+      await seedRow(db, "local", orgTemplate({ version: v }));
+    }
+    const store = new PgTemplateStore(db, "local");
+    await expect(
+      store.saveTemplate(orgTemplate({ version: MAX_VERSIONS_PER_TEMPLATE + 1 }), "u1"),
+    ).rejects.toBeInstanceOf(TemplateLimitExceededError);
+    const { rows } = await db.query<{ n: number }>(
+      `select count(*)::int as n from template where org_id = 'local' and id = 'org-banner'`,
+    );
+    expect(rows[0]!.n).toBe(MAX_VERSIONS_PER_TEMPLATE);
+
+    // The version cap is per template id: a different id in the same org
+    // still saves.
+    await store.saveTemplate(orgTemplate({ id: "org-other" }), "u1");
+    expect(await store.exists("org-other")).toBe(true);
+
+    // And another org holds its own versions of the same id, uncapped by
+    // this org's row count.
+    const acme = new PgTemplateStore(db, "acme");
+    await acme.saveTemplate(orgTemplate({ name: "Acme Banner" }), "u2");
+    expect(await acme.exists("org-banner")).toBe(true);
+  });
+
+  test("canonical templates do not count against the per-org cap", async () => {
+    for (let i = 0; i < MAX_TEMPLATES_PER_ORG - 1; i += 1) {
+      await seedRow(db, "local", orgTemplate({ id: `org-cap-${i}`, version: 1 }));
+    }
+    const store = new PgTemplateStore(db, "local");
+    // One org row short of the cap, plus the three ownerless canonical
+    // templates: the 50th ORG id still saves — the cap counts only this
+    // org's own rows, never the in-memory library.
+    await store.saveTemplate(orgTemplate({ id: "org-cap-last" }), "u1");
+    expect(await store.exists("org-cap-last")).toBe(true);
+
+    await expect(
+      store.saveTemplate(orgTemplate({ id: "org-cap-over" }), "u1"),
+    ).rejects.toBeInstanceOf(TemplateLimitExceededError);
   });
 });

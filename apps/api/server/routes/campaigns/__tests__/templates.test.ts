@@ -3,6 +3,11 @@ import { createApp, createRouter, toWebHandler, type EventHandler } from "h3";
 import { CANONICAL_TEMPLATES, type CreativeTemplate } from "@campaignfoundry/CampaignOrchestration";
 import { FsTemplateStore } from "../../../lib/ports/fs-template-store.js";
 import { setTemplateStore, resetTemplateStore } from "../../../lib/ports/index.js";
+import {
+  MAX_TEMPLATES_PAGE_SIZE,
+  encodeTemplateCursor,
+  type TemplateStorePort,
+} from "../../../lib/ports/template-store.port.js";
 import listHandler from "../templates.get.js";
 import byRefHandler from "../templates/[ref].get.js";
 
@@ -61,6 +66,147 @@ describe("GET /campaigns/templates", () => {
     const body = (await res.json()) as { error: string; templates?: unknown };
     expect(body.templates).toBeUndefined();
     expect(body.error).toMatch(/disk on fire/);
+  });
+
+  test("omitting limit returns every template with no nextCursor, past the page size", async () => {
+    // More templates than MAX_TEMPLATES_PAGE_SIZE: without a limit the whole
+    // library is served — the shape the web client reads — never capped at
+    // the page size.
+    const library: CreativeTemplate[] = Array.from(
+      { length: MAX_TEMPLATES_PAGE_SIZE + 5 },
+      (_, i) => ({
+        ...v1,
+        id: `tpl-${String(i).padStart(3, "0")}`,
+      }),
+    );
+    setTemplateStore(new FsTemplateStore(library));
+
+    const res = await get("/campaigns/templates");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      templates: CreativeTemplate[];
+      skipped: number;
+      nextCursor?: string;
+    };
+    expect(body.templates).toHaveLength(MAX_TEMPLATES_PAGE_SIZE + 5);
+    expect(body.skipped).toBe(0);
+    expect(body.nextCursor).toBeUndefined();
+  });
+
+  test("limit and cursor paginate across pages in byIdThenVersion order", async () => {
+    const b1: CreativeTemplate = { ...v1, id: "tpl-b", version: 1 };
+    const b2: CreativeTemplate = { ...v1, id: "tpl-b", version: 2 };
+    const a1: CreativeTemplate = { ...v1, id: "tpl-a", version: 1 };
+    const c1: CreativeTemplate = { ...v1, id: "tpl-c", version: 1 };
+    setTemplateStore(new FsTemplateStore([b1, b2, a1, c1]));
+
+    const first = await get("/campaigns/templates?limit=2");
+    expect(first.status).toBe(200);
+    const page1 = (await first.json()) as {
+      templates: CreativeTemplate[];
+      skipped: number;
+      nextCursor?: string;
+    };
+    expect(page1.templates.map((t) => `${t.id}:${t.version}`)).toEqual(["tpl-a:1", "tpl-b:1"]);
+    expect(page1.skipped).toBe(0);
+    expect(page1.nextCursor).toBeDefined();
+
+    const second = await get(
+      `/campaigns/templates?limit=2&cursor=${encodeURIComponent(page1.nextCursor!)}`,
+    );
+    expect(second.status).toBe(200);
+    const page2 = (await second.json()) as {
+      templates: CreativeTemplate[];
+      nextCursor?: string;
+    };
+    expect(page2.templates.map((t) => `${t.id}:${t.version}`)).toEqual(["tpl-b:2", "tpl-c:1"]);
+    expect(page2.nextCursor).toBeUndefined();
+
+    // A cursor past the last page answers an empty list, not a rewind.
+    const third = await get(
+      `/campaigns/templates?limit=2&cursor=${encodeURIComponent(encodeTemplateCursor({ id: "zzz", version: 1 }))}`,
+    );
+    const page3 = (await third.json()) as { templates: CreativeTemplate[] };
+    expect(page3.templates).toEqual([]);
+  });
+
+  test("surfaces skipped when the store reports skipped rows", async () => {
+    const pageStore = {
+      listTemplates: () => Promise.resolve([v1]),
+      findTemplate: () => Promise.resolve(undefined),
+      exists: () => Promise.resolve(false),
+      listTemplatesPage: () =>
+        Promise.resolve({ templates: [v1], skipped: 2, nextCursor: undefined }),
+    } as unknown as TemplateStorePort;
+    setTemplateStore(pageStore);
+
+    const res = await get("/campaigns/templates");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { skipped: number };
+    expect(body.skipped).toBe(2);
+  });
+
+  test("a store without listTemplatesPage is paginated over the plain list", async () => {
+    // Minimal test doubles (and any store predating the additive port):
+    // insertion order in, byIdThenVersion pagination out.
+    setTemplateStore({
+      listTemplates: () => Promise.resolve([other, v1, v2]),
+      findTemplate: () => Promise.resolve(undefined),
+      exists: () => Promise.resolve(false),
+    });
+
+    const res = await get("/campaigns/templates?limit=1");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { templates: CreativeTemplate[]; nextCursor?: string };
+    expect(body.templates.map((t) => `${t.id}:${t.version}`)).toEqual(["canonical-image-text:1"]);
+    expect(body.nextCursor).toBeDefined();
+  });
+
+  test.each(["0", "-1", "abc", "1.5", String(MAX_TEMPLATES_PAGE_SIZE + 1), ""])(
+    "a malformed or out-of-range limit (%s) is a 400",
+    async (bad) => {
+      setTemplateStore(new FsTemplateStore([v1]));
+
+      const res = await get(`/campaigns/templates?limit=${encodeURIComponent(bad)}`);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('Invalid "limit" query parameter.');
+    },
+  );
+
+  test("the page-size boundary limit is accepted", async () => {
+    setTemplateStore(new FsTemplateStore([v1]));
+
+    const res = await get(`/campaigns/templates?limit=${MAX_TEMPLATES_PAGE_SIZE}`);
+    expect(res.status).toBe(200);
+  });
+
+  test.each([
+    "!!not-a-cursor!!",
+    Buffer.from("not json", "utf8").toString("base64url"),
+    encodeTemplateCursor({ id: "", version: 1 }),
+    Buffer.from(JSON.stringify({ version: 1 }), "utf8").toString("base64url"),
+    Buffer.from(JSON.stringify({ id: "tpl-a" }), "utf8").toString("base64url"),
+    encodeTemplateCursor({ id: "tpl-a", version: 0 }),
+    encodeTemplateCursor({ id: "tpl-a", version: -1 }),
+    encodeTemplateCursor({ id: "tpl-a", version: 1.5 }),
+    "",
+  ])("refuses a malformed cursor (%s) with 400", async (bad) => {
+    setTemplateStore(new FsTemplateStore([v1]));
+
+    const res = await get(`/campaigns/templates?cursor=${encodeURIComponent(bad)}`);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('Invalid "cursor" query parameter.');
+  });
+
+  test("a well-formed cursor for an unknown position is accepted, not rejected", async () => {
+    setTemplateStore(new FsTemplateStore([v1]));
+
+    const res = await get(
+      `/campaigns/templates?cursor=${encodeURIComponent(encodeTemplateCursor({ id: "tpl-a", version: 1 }))}`,
+    );
+    expect(res.status).toBe(200);
   });
 });
 

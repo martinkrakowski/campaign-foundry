@@ -4,6 +4,7 @@ import {
   TemplateVersionExistsError,
   TemplateWriteUnsupportedError,
 } from "@campaignfoundry/CampaignOrchestration";
+import { TemplateLimitExceededError } from "./ports/template-store.port.js";
 import type { H3Event } from "h3";
 import type { TenantContext } from "./tenant.js";
 
@@ -198,6 +199,12 @@ export function respondTemplateWriteError(event: H3Event, error: unknown): { err
   if (error instanceof TemplateVersionExistsError) {
     setResponseStatus(event, 409);
     return { error: error.message };
+  }
+  if (error instanceof TemplateLimitExceededError) {
+    // The library is full — a write admission rule, not a data problem, so
+    // 422 rather than 400. The body is fixed and neutral, never row data.
+    setResponseStatus(event, 422);
+    return { error: "Template limit exceeded for this organization." };
   }
   if (error instanceof TemplateWriteUnsupportedError) {
     setResponseStatus(event, 501);

@@ -33,7 +33,12 @@ import { PgPublishedClipStore } from "./pg-published-clip-store.js";
 import type { BriefStorePort } from "./brief-store.port.js";
 import type { AssetStorePort } from "./asset-store.port.js";
 import type { PoolStorePort } from "./pool-store.port.js";
-import type { TemplateStorePort, WritableTemplateStorePort } from "./template-store.port.js";
+import type {
+  PaginatedTemplateStorePort,
+  TemplateListOptions,
+  TemplateStorePort,
+  WritableTemplateStorePort,
+} from "./template-store.port.js";
 import type { JobStorePort } from "./job-store.port.js";
 import type { ReportStorePort } from "./report-store.port.js";
 import type { OutputStorePort } from "./output-store.port.js";
@@ -206,17 +211,28 @@ const pools = new Registry<PoolStorePort>(
 // STORE_BACKEND=postgres the org layer adds writable, org-scoped templates in
 // Postgres (`template` table, RW-22); otherwise the registry is the read-only
 // canonical seed for every tenant, wrapped so a write refuses.
-const asWritableTemplateStore = (store: TemplateStorePort): WritableTemplateStorePort =>
-  "saveTemplate" in store && typeof store.saveTemplate === "function"
-    ? (store as WritableTemplateStorePort)
-    : {
-        listTemplates: () => store.listTemplates(),
-        findTemplate: (id, version) => store.findTemplate(id, version),
-        exists: (id, version) => store.exists(id, version),
-        saveTemplate: async () => {
-          throw new TemplateWriteUnsupportedError();
-        },
-      };
+const asWritableTemplateStore = (store: TemplateStorePort): WritableTemplateStorePort => {
+  if ("saveTemplate" in store && typeof store.saveTemplate === "function") {
+    return store as WritableTemplateStorePort;
+  }
+  const paginated = store as Partial<PaginatedTemplateStorePort>;
+  return {
+    listTemplates: () => store.listTemplates(),
+    findTemplate: (id, version) => store.findTemplate(id, version),
+    exists: (id, version) => store.exists(id, version),
+    // Additive pagination (CFRW22G): forwarded when the wrapped store serves
+    // it, so a paginated read never silently degrades to the unpaginated one.
+    ...(typeof paginated.listTemplatesPage === "function"
+      ? {
+          listTemplatesPage: (options?: TemplateListOptions) =>
+            paginated.listTemplatesPage!(options),
+        }
+      : {}),
+    saveTemplate: async () => {
+      throw new TemplateWriteUnsupportedError();
+    },
+  };
+};
 const templates = new Registry<WritableTemplateStorePort>(
   (t) => (storeBackend() === "postgres" ? PG + scopeTenant(t).orgId : "canonical"),
   (key) =>

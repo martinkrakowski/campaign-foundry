@@ -1,6 +1,13 @@
 import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration";
 import type { CreativeTemplate } from "@campaignfoundry/CampaignOrchestration";
-import type { TemplateStorePort } from "./template-store.port.js";
+import {
+  byIdThenVersion,
+  paginateTemplates,
+  type PaginatedTemplateStorePort,
+  type TemplateListOptions,
+  type TemplateListPage,
+  type TemplateStorePort,
+} from "./template-store.port.js";
 
 /**
  * Read-only template store seeded from the canonical templates (D123).
@@ -14,7 +21,7 @@ import type { TemplateStorePort } from "./template-store.port.js";
  * duplicate (id, version) pair refuses to start: the store cannot know which
  * record is authoritative, so it must not pick one by array order.
  */
-export class FsTemplateStore implements TemplateStorePort {
+export class FsTemplateStore implements TemplateStorePort, PaginatedTemplateStorePort {
   private readonly versionsById: ReadonlyMap<string, readonly CreativeTemplate[]>;
 
   constructor(seed: readonly CreativeTemplate[] = Object.values(CANONICAL_TEMPLATES)) {
@@ -42,6 +49,18 @@ export class FsTemplateStore implements TemplateStorePort {
 
   async listTemplates(): Promise<readonly CreativeTemplate[]> {
     return [...this.versionsById.values()].flat();
+  }
+
+  /**
+   * The same records, paginated. `listTemplates` stays in canonical insertion
+   * order (the library page's declared order), so this sorts its own copy —
+   * the seed is frozen, never reordered — into `byIdThenVersion` order and
+   * lets the shared helpers slice it. No stored row can be malformed here
+   * (the seed is checked at construction), so `skipped` is 0.
+   */
+  async listTemplatesPage(options?: TemplateListOptions): Promise<TemplateListPage> {
+    const sorted = [...this.versionsById.values()].flat().sort(byIdThenVersion);
+    return paginateTemplates(sorted, options);
   }
 
   async findTemplate(id: string, version?: number): Promise<CreativeTemplate | undefined> {

@@ -7,7 +7,17 @@ import {
   templateProblem,
 } from "@campaignfoundry/CampaignOrchestration";
 import type { SqlClient } from "../db/sql-client.js";
-import type { WritableTemplateStorePort } from "./template-store.port.js";
+import {
+  MAX_TEMPLATES_PER_ORG,
+  MAX_VERSIONS_PER_TEMPLATE,
+  TemplateLimitExceededError,
+  byIdThenVersion,
+  paginateTemplates,
+  type PaginatedTemplateStorePort,
+  type TemplateListOptions,
+  type TemplateListPage,
+  type WritableTemplateStorePort,
+} from "./template-store.port.js";
 
 /** `error.code`, when `error` has one (pg and PGlite both attach the SQLSTATE as a string). */
 function pgErrorCode(error: unknown): string | undefined {
@@ -45,11 +55,6 @@ function cloneCanonical(id: string): CreativeTemplate | undefined {
   return canonical === undefined ? undefined : structuredClone(canonical);
 }
 
-/** id asc, then version asc — the ordering the merged read is served in. */
-function byIdThenVersion(a: CreativeTemplate, b: CreativeTemplate): number {
-  return a.id.localeCompare(b.id) || a.version - b.version;
-}
-
 /**
  * Org-scoped templates as rows (RW-22, D123), one org's: the store is built
  * for an org, so every statement is scoped to it and another org's templates
@@ -62,13 +67,17 @@ function byIdThenVersion(a: CreativeTemplate, b: CreativeTemplate): number {
  * record — an existing version is never overwritten, and the primary key is
  * the backstop if two writers race.
  */
-export class PgTemplateStore implements WritableTemplateStorePort {
+export class PgTemplateStore implements WritableTemplateStorePort, PaginatedTemplateStorePort {
   constructor(
     private readonly db: SqlClient,
     private readonly orgId: string,
   ) {}
 
   async listTemplates(): Promise<readonly CreativeTemplate[]> {
+    return (await this.listTemplatesPage()).templates;
+  }
+
+  async listTemplatesPage(options?: TemplateListOptions): Promise<TemplateListPage> {
     const { rows } = await this.db.query<TemplateRow>(
       `select id, version, name, unit, creative_type, layers
          from template
@@ -76,9 +85,26 @@ export class PgTemplateStore implements WritableTemplateStorePort {
         order by id, version`,
       [this.orgId],
     );
-    return [...Object.values(CANONICAL_TEMPLATES), ...rows.map(toTemplate)]
+    let skipped = 0;
+    const orgRows: CreativeTemplate[] = [];
+    for (const row of rows) {
+      try {
+        orgRows.push(toTemplate(row));
+      } catch (error) {
+        // A malformed persisted row is skipped and COUNTED, never served and
+        // never echoed: `skipped` is a number, and the error a bad row raises
+        // here carries only the validator's problem. `findTemplate` and
+        // `exists` still throw — a pinned id must fail loudly, not vanish
+        // from a page.
+        if (!(error instanceof InvalidTemplateError)) throw error;
+        skipped += 1;
+      }
+    }
+    const merged = [...Object.values(CANONICAL_TEMPLATES), ...orgRows]
       .map((t) => cloneCanonical(t.id) ?? t)
       .sort(byIdThenVersion);
+    const page = paginateTemplates(merged, options);
+    return { ...page, skipped };
   }
 
   async findTemplate(id: string, version?: number): Promise<CreativeTemplate | undefined> {
@@ -114,10 +140,30 @@ export class PgTemplateStore implements WritableTemplateStorePort {
       );
     }
     try {
-      await this.db.query(
+      // The caps are enforced by the INSERT itself, in ONE statement: the
+      // counts are read and the row is written under the same statement, so
+      // the minimal `SqlClient` (a bare `query`, no `transaction`) still
+      // works. Under READ COMMITTED two concurrent writers at `cap - 1` can
+      // both observe `cap - 1` — the overshoot is bounded by the concurrent
+      // in-flight writers at the boundary — while concurrent writes to the
+      // same (org_id, id, version) still race the primary key (23505 below).
+      // A new id counts against the distinct-id cap only when it is one
+      // (`distinct_ids < cap`); a further version of an existing id counts
+      // against the per-template version cap (`id_versions < cap`), and the
+      // canonical library — ownerless, not rows here — counts for neither.
+      const { rows } = await this.db.query(
         `insert into template
            (org_id, id, version, name, unit, creative_type, layers, created_by)
-         values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)`,
+         select $1, $2, $3::int, $4, $5, $6, $7::jsonb, $8
+           from (
+             select count(distinct id)::int as distinct_ids,
+                    count(*) filter (where id = $2)::int as id_versions
+               from template
+              where org_id = $1
+           ) counts
+          where (id_versions > 0 or distinct_ids < $9::int)
+            and id_versions < $10::int
+         returning id`,
         [
           this.orgId,
           template.id,
@@ -127,8 +173,15 @@ export class PgTemplateStore implements WritableTemplateStorePort {
           template.creativeType,
           JSON.stringify(template.layers),
           actor,
+          MAX_TEMPLATES_PER_ORG,
+          MAX_VERSIONS_PER_TEMPLATE,
         ],
       );
+      // No RETURNING row means the cap predicate selected nothing to insert:
+      // an admission refusal, not a data error — the template itself is
+      // valid, the library is just full. The message is fixed and neutral;
+      // no row data travels with it.
+      if (rows.length === 0) throw new TemplateLimitExceededError();
     } catch (error) {
       // Two writers saving the same (org, id, version) race the primary key;
       // the loser sees a constraint violation, not a reason to 500 — the
