@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import {
   campaignTypePromptSentence,
   type AspectRatio,
@@ -79,7 +80,9 @@ export class GeminiImageGenerator implements ImageGeneratorPort {
             prompt,
             config: {
               numberOfImages: 1,
-              aspectRatio: ratio.value,
+              // Imagen has no 4:5; its nearest is 3:4, cover-fitted to the exact
+              // 4:5 canvas below so the pixels are never distorted.
+              aspectRatio: ratio.value === "4:5" ? "3:4" : ratio.value,
               // The SDK is explicit that this is client-only: aborting stops us
               // WAITING, it does not stop the service, and the usage is still
               // billed. That is the right trade here anyway — the point is to
@@ -90,6 +93,9 @@ export class GeminiImageGenerator implements ImageGeneratorPort {
           });
           const imageBytes = response.generatedImages?.[0]?.image?.imageBytes;
           if (!imageBytes) throw new Error("Imagen returned no image data");
+          if (ratio.value === "4:5") {
+            return this.coverFit(Buffer.from(imageBytes, "base64"), ratio);
+          }
           return Buffer.from(imageBytes, "base64");
         },
         "imagen",
@@ -107,6 +113,18 @@ export class GeminiImageGenerator implements ImageGeneratorPort {
       }
       throw new Error(message);
     }
+  }
+
+  /** Cover-fit the generated image to the exact ratio dimensions (no distortion). */
+  private async coverFit(bytes: Uint8Array, ratio: AspectRatio): Promise<Uint8Array> {
+    const image = await loadImage(Buffer.from(bytes));
+    const canvas = createCanvas(ratio.width, ratio.height);
+    const ctx = canvas.getContext("2d");
+    const scale = Math.max(ratio.width / image.width, ratio.height / image.height);
+    const w = image.width * scale;
+    const h = image.height * scale;
+    ctx.drawImage(image, (ratio.width - w) / 2, (ratio.height - h) / 2, w, h);
+    return canvas.toBuffer("image/png");
   }
 
   /** Build a text-to-image prompt personalized to the product and campaign. */

@@ -61,6 +61,7 @@ const RATIO_LABELS: Record<(typeof RATIO_VALUES)[number], string> = {
   "1:1": "Square",
   "9:16": "Tall",
   "16:9": "Wide",
+  "4:5": "Portrait",
 };
 
 export function ratioDisplayName(ratio: string): string {

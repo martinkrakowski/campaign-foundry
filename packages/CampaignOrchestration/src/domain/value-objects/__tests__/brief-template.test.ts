@@ -1270,9 +1270,9 @@ describe("layerFrameProblem and isBriefTemplate layer frame (D130)", () => {
   });
 
   test("refuses byFamily keys that are not real ratios or sizes", () => {
-    expect(layerFrameProblem({ ...frame, byFamily: { ratio: { "4:5": { h: 0.2 } } } })).toEqual({
-      path: '.byFamily.ratio["4:5"]',
-      must: 'be one of "1:1", "9:16", "16:9"',
+    expect(layerFrameProblem({ ...frame, byFamily: { ratio: { "4:3": { h: 0.2 } } } })).toEqual({
+      path: '.byFamily.ratio["4:3"]',
+      must: 'be one of "1:1", "9:16", "16:9", "4:5"',
       value: { h: 0.2 },
     });
     expect(layerFrameProblem({ ...frame, byFamily: { size: { "970x250": { h: 0.2 } } } })).toEqual({

@@ -1,4 +1,5 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import {
   AspectRatio,
   type BackgroundCachePort,
@@ -170,6 +171,40 @@ describe("GeminiImageGenerator", () => {
     expect(generateImages.mock.calls[1][0].prompt).toBe(
       'Premium social-advertising hero background for the subject "Hydra Bottle". Audience: Urban. Market/region: DE. Evoke the brand accent colour #1473E6. Cinematic, photographic, high production value, with clean negative space toward the bottom for a headline. Absolutely no text, words, letters, logos or watermarks in the image. Campaign type: paid social advertising across feeds, stories and reels.',
     );
+  });
+
+  test("maps 4:5 to Imagen's 3:4 and cover-fits the result to 1080x1350", async () => {
+    // A REAL PNG: cover-fit decodes the bytes, so a stub like "hello" would throw.
+    const imagenPng = createCanvas(768, 1024)
+      .getContext("2d")
+      .canvas.toBuffer("image/png")
+      .toString("base64");
+    const generateImages = vi.fn(async (_args: GenArgs) => ({
+      generatedImages: [{ image: { imageBytes: imagenPng } }],
+    }));
+    const out = await new GeminiImageGenerator({
+      apiKey: "k",
+      client: { models: { generateImages } },
+    }).resolveBackground(product, ratio("4:5"), ctx);
+
+    expect(generateImages.mock.calls[0][0].config.aspectRatio).toBe("3:4");
+    const img = await loadImage(Buffer.from(out.image));
+    expect(img.width).toBe(1080);
+    expect(img.height).toBe(1350);
+  });
+
+  test("non-4:5 ratios pass through untouched with their own aspect ratio", async () => {
+    for (const value of ["1:1", "9:16", "16:9"] as const) {
+      const generateImages = vi.fn(async (_args: GenArgs) => ({
+        generatedImages: [{ image: { imageBytes: Buffer.from("hello").toString("base64") } }],
+      }));
+      const out = await new GeminiImageGenerator({
+        apiKey: "k",
+        client: { models: { generateImages } },
+      }).resolveBackground(product, ratio(value), ctx);
+      expect(generateImages.mock.calls[0][0].config.aspectRatio).toBe(value);
+      expect(Buffer.from(out.image).toString()).toBe("hello");
+    }
   });
 });
 
