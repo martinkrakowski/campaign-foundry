@@ -424,6 +424,27 @@ describe("PgTemplateStore (RW-22)", () => {
     expect(third.nextCursor).toBeUndefined();
   });
 
+  test("listTemplates rethrows a non-InvalidTemplateError a row raises while decoding", async () => {
+    // A corrupted row that explodes on column access — not a validator
+    // refusal — is not skippable: the SAME error propagates, because a page
+    // must never silently shrink over an infrastructure failure.
+    const failure = new Error("row decode blew up");
+    const badRow = {
+      get id(): string {
+        throw failure;
+      },
+    };
+    const fake = {
+      async query() {
+        return { rows: [badRow] };
+      },
+    } as unknown as SqlClient;
+    const store = new PgTemplateStore(fake, "local");
+
+    await expect(store.listTemplatesPage()).rejects.toBe(failure);
+    await expect(store.listTemplates()).rejects.toBe(failure);
+  });
+
   test("refuses saving a new template id once MAX_TEMPLATES_PER_ORG is reached, isolated per org", async () => {
     for (let i = 0; i < MAX_TEMPLATES_PER_ORG; i += 1) {
       await seedRow(db, "local", orgTemplate({ id: `org-cap-${i}`, version: 1 }));
