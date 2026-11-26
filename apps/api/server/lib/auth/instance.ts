@@ -4,7 +4,7 @@ import { betterAuth } from "better-auth";
 import pg from "pg";
 import { projectRoot } from "@campaignfoundry/shared";
 import { authSettings, databaseSettings } from "../config.js";
-import { AUTH_POOL_MAX, databaseConfig } from "../db/database-config.js";
+import { databaseConfig, poolBudget } from "../db/database-config.js";
 import { poolOptions } from "../db/pg-client.js";
 import { authOptions } from "./options.js";
 import { LogMailer } from "./log-mailer.js";
@@ -27,14 +27,17 @@ function isHttps(origin: string): boolean {
 }
 
 /**
- * Better Auth's own connection pool (PT-1a, Finding 3). Sized to AUTH_POOL_MAX (2),
- * an explicit small cap rather than DATABASE_POOL_MAX, so the store pool (up to 13)
- * and Better Auth's pool (2) together never exceed the Aiven service's 15-connection
- * budget (MAX_POOL). Total per process: DATABASE_POOL_MAX + AUTH_POOL_MAX <= MAX_POOL.
+ * Better Auth's own connection pool (PT-1a, Finding 3). Sized to AUTH_POOL_MAX
+ * (2 by default), an explicit small cap rather than DATABASE_POOL_MAX, so the
+ * store pool and Better Auth's pool together never exceed the per-process
+ * ceiling (DATABASE_POOL_CEILING). Total per process:
+ * DATABASE_POOL_MAX + AUTH_POOL_MAX <= DATABASE_POOL_CEILING.
  */
 function pool(): pg.Pool {
-  const config = databaseConfig(databaseSettings(), readCa);
-  const p = new pg.Pool(poolOptions({ ...config, max: AUTH_POOL_MAX }));
+  const settings = databaseSettings();
+  const config = databaseConfig(settings, readCa);
+  const { authPoolMax } = poolBudget(settings);
+  const p = new pg.Pool(poolOptions({ ...config, max: authPoolMax }));
   p.on("error", (error) => {
     console.warn(`[auth] an idle connection failed: ${error.message}`);
   });
