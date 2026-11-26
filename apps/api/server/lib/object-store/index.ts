@@ -1,6 +1,7 @@
-import { objectStoreSettings } from "../config.js";
+import { objectStoreSettings, publicMediaSettings } from "../config.js";
 import { S3ObjectStore } from "./S3ObjectStore.js";
-import type { ObjectStorePort } from "@campaignfoundry/CampaignOrchestration";
+import { PublicAdMediaStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
+import type { ObjectStorePort, PublicAdMediaPort } from "@campaignfoundry/CampaignOrchestration";
 
 let shared: ObjectStorePort | undefined;
 
@@ -47,4 +48,47 @@ export function setObjectStoreClient(client: ObjectStorePort): void {
 /** Forget the object store (the next `objectStoreClient()` builds one from the environment). */
 export function resetObjectStoreClient(): void {
   shared = undefined;
+}
+
+let publicShared: PublicAdMediaPort | undefined;
+
+/**
+ * The process's public ad-media client (PT-4k), or `undefined` when the
+ * deployment has no `PUBLIC_MEDIA_*` settings — never a not-configured error,
+ * because "no public media" is a supported shape of a deployment, not a
+ * misconfiguration.
+ *
+ * Built from `PUBLIC_MEDIA_*` alone and NEVER from `objectStoreClient()`: the
+ * two buckets have different credentials and different endpoints, and a client
+ * that borrowed the private store's would publish campaign assets to a URL
+ * anyone can fetch. Memoised for the process like `objectStoreClient()`.
+ */
+export function publicAdMediaClient(): PublicAdMediaPort | undefined {
+  if (publicShared !== undefined) return publicShared;
+  const settings = publicMediaSettings();
+  if (settings === undefined) return undefined;
+  publicShared = new PublicAdMediaStore({
+    store: new S3ObjectStore({
+      settings: {
+        endpoint: settings.endpoint,
+        publicEndpoint: settings.baseUrl,
+        region: settings.region,
+        bucket: settings.bucket,
+        accessKeyId: settings.accessKeyId,
+        secretAccessKey: settings.secretAccessKey,
+      },
+    }),
+    baseUrl: settings.baseUrl,
+  });
+  return publicShared;
+}
+
+/** Install a public media client for every caller (a test's double). */
+export function setPublicAdMediaClient(client: PublicAdMediaPort): void {
+  publicShared = client;
+}
+
+/** Forget the public media client (the next `publicAdMediaClient()` re-reads the environment). */
+export function resetPublicAdMediaClient(): void {
+  publicShared = undefined;
 }

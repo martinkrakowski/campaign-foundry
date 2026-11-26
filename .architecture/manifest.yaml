@@ -204,12 +204,14 @@ bounded_contexts:
             - InputAssetPort
             - ObjectStorePort
             - PlatformProfilePort
+            - PublicAdMediaPort
             - SceneAssetPort
             - VideoCompositorPort
       infrastructure:
         adapters:
           - InMemoryObjectStore
           - NodeCryptoPolicyHasher
+          - PublicAdMediaStore
     generator:
       eslint:
         template: |

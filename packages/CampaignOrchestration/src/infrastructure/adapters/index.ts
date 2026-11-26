@@ -2,3 +2,4 @@
 
 export * from "./InMemoryObjectStore.js";
 export * from "./NodeCryptoPolicyHasher.js";
+export * from "./PublicAdMediaStore.js";
