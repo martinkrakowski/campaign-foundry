@@ -1,9 +1,8 @@
-# Staging (k3s on the LAN node)
+# Staging
 
-Campaign Foundry's staging environment runs on the owner's k3s node `midnight`
-(`ssh m`), reachable only on the local network or the VPN, at
-**https://campaign-foundry.midnight.lan** (TLS from the cluster's own issuer,
-`midnight-ca`). Production hosting is still open
+Campaign Foundry's staging environment runs on a k3s node reachable only on the
+local network or the VPN, over HTTPS (TLS from the cluster's own issuer).
+Production hosting is still open
 (`docs/planning/2026-09-24_platform-and-tenancy.md`, §7 "What the owner is deciding"); this is not it.
 
 ## What runs (namespace `campaign-foundry-staging`)

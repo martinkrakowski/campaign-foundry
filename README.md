@@ -187,9 +187,9 @@ runs in-process.
 With `STORE_BACKEND=fs` (the default) nothing below is needed: the file stores keep
 every record and no database is touched. To run on PostgreSQL instead:
 
-- **Connection (developer tunnel).** Set `DATABASE_URL` in `.env.local` (never
-  committed). Once the production database is provisioned, a developer reaches it
-  through a tunnel — the database has no public endpoint — with `DATABASE_URL`,
+- **Connection (developer tunnel).** Set `STORE_BACKEND=postgres` and
+  `DATABASE_URL` in `.env.local` (never committed). Once the production database
+  is provisioned, a developer reaches it through a tunnel with `DATABASE_URL`,
   `DATABASE_CA_PATH` and `DATABASE_POOL_MAX` set in `.env.local`. No values or
   hostnames live in this repository.
 - **CA certificate.** `DATABASE_CA_PATH` points at the server's CA certificate (PEM)
