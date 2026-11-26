@@ -26,6 +26,7 @@ import {
   objectStoreSettings,
   outputRoot,
   purgeGraceHours,
+  purgeReconcile,
   storeBackend,
 } from "../config.js";
 
@@ -92,6 +93,27 @@ describe("storeBackend (PT-3)", () => {
     expect(storeBackend()).toBe("postgres");
     process.env.STORE_BACKEND = "mysql";
     expect(() => storeBackend()).toThrow('STORE_BACKEND must be "fs" or "postgres", not "mysql".');
+  });
+});
+
+describe("purgeReconcile", () => {
+  const saved = process.env.PURGE_RECONCILE;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.PURGE_RECONCILE;
+    else process.env.PURGE_RECONCILE = saved;
+  });
+
+  test("is on unless PURGE_RECONCILE says off, and refuses anything else", () => {
+    delete process.env.PURGE_RECONCILE;
+    expect(purgeReconcile()).toBe(true);
+    for (const value of ["", "on"]) {
+      process.env.PURGE_RECONCILE = value;
+      expect(purgeReconcile()).toBe(true);
+    }
+    process.env.PURGE_RECONCILE = "off";
+    expect(purgeReconcile()).toBe(false);
+    process.env.PURGE_RECONCILE = "maybe";
+    expect(() => purgeReconcile()).toThrow('PURGE_RECONCILE must be "on" or "off".');
   });
 });
 
