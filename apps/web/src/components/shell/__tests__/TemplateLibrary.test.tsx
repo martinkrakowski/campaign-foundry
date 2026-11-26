@@ -71,6 +71,17 @@ const housePromo: CreativeTemplate = {
   version: 2,
 };
 
+/**
+ * An org-saved record (RW-22): the store's own `tpl-` id, not a canonical one,
+ * pinning through the same `isBriefTemplate` guard a canonical record does.
+ */
+const orgPromo: CreativeTemplate = {
+  ...CANONICAL_TEMPLATES["image-text"],
+  id: "tpl-00000000-0000-4000-8000-000000000001",
+  name: "Org Promo",
+  version: 2,
+};
+
 const PNG = new Uint8Array([137, 80, 78, 71]);
 
 const pngResponse = () =>
@@ -732,10 +743,9 @@ describe("Use this template (TM4)", () => {
   });
 
   /**
-   * The finding this lane records rather than fixes: `BriefTemplate.id` is
-   * `CanonicalTemplateId`, so a record outside the canonical set is not
-   * representable as a pin. Refused visibly, with the reason, rather than cast
-   * through to fail at the editor's restore boundary.
+   * The house-promo record is outside both the canonical set and the org-id
+   * shape, so no campaign can pin it. Refused visibly, with the reason, rather
+   * than cast through to fail at the editor's restore boundary.
    */
   /**
    * Review on #478. The verb used to render `disabled` here, with a guard in
@@ -757,6 +767,27 @@ describe("Use this template (TM4)", () => {
     expect(screen.queryByRole("button", { name: "Use this template" })).toBeNull();
     expect(screen.getByText(/cannot be used for a campaign yet/)).toBeTruthy();
     expect(screen.getByTestId("pinned").textContent).toBe("canonical-image-text@1");
+  });
+
+  /**
+   * An org-saved record (RW-22) pins through the same guard a canonical record
+   * does: `tpl-<uuid>@version`, both halves, onto the shell's active campaign,
+   * and the modal closes.
+   */
+  test("an org-saved template pins its tpl- id@version, and closes the modal", async () => {
+    mockLibrary({ templates: [orgPromo] });
+    const user = userEvent.setup();
+    renderLibrary();
+    expect(screen.getByTestId("pinned").textContent).toBe("canonical-image-text@1");
+    await open(user);
+    await user.click(await screen.findByRole("button", { name: /Org Promo/ }));
+    await user.click(await screen.findByRole("button", { name: "Use this template" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("pinned").textContent).toBe(
+        "tpl-00000000-0000-4000-8000-000000000001@2",
+      ),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   /**
@@ -830,5 +861,29 @@ describe("the modal reloads on each open", () => {
     // The detail view did not survive the close: the listing is what reopens.
     expect(await screen.findByRole("button", { name: /Canonical Image & Text/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Render preview" })).toBeNull();
+  });
+});
+
+/**
+ * CFRW22C — the editor's "Save as template" announces itself on this event, and
+ * the library reloads while it is open: a save from the editor is visible
+ * without a close and a reopen.
+ */
+describe("the library reloads on the editor's save (cf:templates-changed)", () => {
+  test("dispatching the event while open re-fetches the library and renders the new template", async () => {
+    mockLibrary({ templates: [] });
+    const user = userEvent.setup();
+    renderLibrary();
+    await open(user);
+    expect(await screen.findByText("No templates yet.")).toBeTruthy();
+    const templateCalls = () =>
+      vi
+        .mocked(globalThis.fetch)
+        .mock.calls.filter(([url]) => String(url).includes("/campaigns/templates")).length;
+    const before = templateCalls();
+    mockLibrary({ templates: [housePromo] });
+    window.dispatchEvent(new CustomEvent("cf:templates-changed"));
+    await screen.findByRole("button", { name: /Alpha promo/ });
+    expect(templateCalls()).toBeGreaterThan(before);
   });
 });

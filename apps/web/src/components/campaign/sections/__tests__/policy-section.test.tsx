@@ -4,10 +4,12 @@ import userEvent from "@testing-library/user-event";
 import type { CopyPool } from "@campaignfoundry/CampaignOrchestration";
 import { PolicySection } from "../PolicySection";
 import * as messages from "../../messages";
+import { PLATFORM_PROFILES } from "@campaignfoundry/Distribution/platform-profiles";
 import { axisProductSize, maxMinDistance } from "../../validate";
 import {
   initialEditorState,
   editorReducer,
+  toBrief,
   LAYOUT_OPTIONS,
   TONE_OPTIONS,
   BACKGROUND_OPTIONS,
@@ -445,7 +447,7 @@ describe("PolicySection — aspect ratio panels", () => {
 
   test("the floor is one setting: the same ≥ N each on every panel, and 'no floor' when unset", () => {
     const { unmount } = render(<PolicySection state={state()} dispatch={vi.fn()} errors={{}} />);
-    expect(screen.getAllByText("≥ 1 each")).toHaveLength(3);
+    expect(screen.getAllByText("≥ 1 each")).toHaveLength(4);
     unmount();
 
     render(
@@ -455,7 +457,7 @@ describe("PolicySection — aspect ratio panels", () => {
         errors={{}}
       />,
     );
-    expect(screen.getAllByText("no floor")).toHaveLength(3);
+    expect(screen.getAllByText("no floor")).toHaveLength(4);
   });
 
   test("the constraint readout binds the floor to the selection and turns red when it cannot fit", () => {
@@ -571,6 +573,81 @@ describe("PolicySection — aspect ratio panels", () => {
     // so once, naming the remedy, rather than shouting on every panel.
     expect(screen.getByText(messages.ratioExcludedNone())).toBeTruthy();
     expect(screen.getByRole("button", { name: messages.turnOnStillImages })).toBeTruthy();
+  });
+
+  test("the axis offers all four vocabulary ratios, and toggling 4:5 ON serializes all four", async () => {
+    const user = userEvent.setup();
+    const dispatch = vi.fn();
+    render(<PolicySection state={state()} dispatch={dispatch} errors={{}} />);
+    for (const ratio of ["1:1", "9:16", "16:9", "4:5"]) {
+      expect(within(ratioFieldset()).getByRole("button", { name: ratio })).toBeTruthy();
+    }
+    await user.click(within(ratioFieldset()).getByRole("button", { name: "4:5" }));
+    expect(dispatch).toHaveBeenCalledWith({ type: "toggleRatio", value: "4:5" });
+    // The reducer orders against the full vocabulary, so toggling "4:5" ON from
+    // the frozen defaults serializes ALL FOUR ratios — the axis is a draw pool,
+    // not a pin on the one ratio clicked.
+    const toggled = editorReducer(state(), { type: "toggleRatio", value: "4:5" });
+    expect(toggled.variation.ratio).toEqual(["1:1", "9:16", "16:9", "4:5"]);
+    expect(toBrief(toggled).variation?.axes?.ratio).toEqual(["1:1", "9:16", "16:9", "4:5"]);
+  });
+
+  test("motion-only with every default ratio packaged stays quiet while 4:5 is unpinned", () => {
+    // No shipped platform packages motion at 1:1 or 16:9, so a host that did is
+    // expressed with two temporary table rows — the same lookup
+    // motionPackagedRatios reads, added and removed around the render.
+    const motionAt = (ratio: "1:1" | "16:9"): (typeof PLATFORM_PROFILES)[string] => ({
+      id: `motion-${ratio}`,
+      label: `Motion ${ratio}`,
+      ratio,
+      formats: ["motion"],
+      safeInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      maxBytes: 100 * 1024 * 1024,
+    });
+    const profiles = PLATFORM_PROFILES as Record<string, (typeof PLATFORM_PROFILES)[string]>;
+    profiles["motion-1:1"] = motionAt("1:1");
+    profiles["motion-16:9"] = motionAt("16:9");
+    try {
+      const platforms = ["instagram-story", "motion-1:1", "motion-16:9"];
+      const motionOnly = {
+        formats: ["motion"] as EditorState["formats"],
+        platforms,
+        motion: ["ken-burns-in"] as EditorState["motion"],
+        duration: [4],
+      };
+      const { unmount } = render(
+        <PolicySection state={state(motionOnly)} dispatch={vi.fn()} errors={{}} />,
+      );
+      // Every ratio the frozen default names is packaged, so nothing is excluded:
+      // the amber line stays quiet even though 4:5 is not (the old
+      // `packaged.size < RATIO_VALUES.length` test would have fired).
+      expect(
+        screen.queryByText(messages.ratioExcludedPackaged(["Square", "Tall", "Wide"])),
+      ).toBeNull();
+      unmount();
+
+      // The moment "4:5" joins the selection the warning fires — motion is not
+      // packaged for the ratio the brief now pins.
+      render(
+        <PolicySection
+          state={{
+            ...state(motionOnly),
+            variation: {
+              ...state().variation,
+              ratio: ["1:1", "9:16", "16:9", "4:5"],
+            },
+          }}
+          dispatch={vi.fn()}
+          errors={{}}
+        />,
+      );
+      expect(
+        screen.getByText(messages.ratioExcludedPackaged(["Square", "Tall", "Wide"])),
+      ).toBeTruthy();
+    } finally {
+      delete profiles["motion-1:1"];
+      delete profiles["motion-16:9"];
+    }
   });
 
   test("the coverage-per-ratio stepper sits inside the ratio fieldset, beside its effect", async () => {

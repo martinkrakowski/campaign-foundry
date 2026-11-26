@@ -18,6 +18,8 @@ const KEYS = [
   "DATABASE_URL",
   "DATABASE_CA_PATH",
   "DATABASE_POOL_MAX",
+  "AUTH_POOL_MAX",
+  "DATABASE_POOL_CEILING",
 ] as const;
 
 describe("auth() (PT-1a)", () => {
@@ -243,6 +245,51 @@ describe("auth() (PT-1a)", () => {
       const p = authPool();
       expect(p).toBeDefined();
       expect(p?.options.max).toBe(AUTH_POOL_MAX);
+    });
+
+    test("is sized to AUTH_POOL_MAX when set, within the ceiling", () => {
+      process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+      process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+      process.env.AUTH_POOL_MAX = "4";
+      process.env.DATABASE_POOL_MAX = "5";
+
+      auth();
+      expect(authPool()?.options.max).toBe(4);
+    });
+
+    test("is capped at AUTH_POOL_MAX (2) when it is unset", () => {
+      process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+      process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+
+      auth();
+      expect(authPool()?.options.max).toBe(2);
+    });
+
+    test("refuses an invalid AUTH_POOL_MAX and leaves the pool unbuilt", () => {
+      process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+      process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+      process.env.AUTH_POOL_MAX = "many";
+
+      expect(() => auth()).toThrow(
+        'AUTH_POOL_MAX must be a whole number of at least 1, not "many".',
+      );
+      expect(authPool()).toBeUndefined();
+    });
+
+    test("refuses an over-budget pool pair and leaves the pool unbuilt", () => {
+      process.env.BETTER_AUTH_SECRET = "s".repeat(32);
+      process.env.WEB_ORIGIN = "http://127.0.0.1:3000";
+      process.env.DATABASE_URL = "postgres://user:pass@localhost:5432/db";
+      process.env.DATABASE_POOL_MAX = "14";
+      process.env.AUTH_POOL_MAX = "4";
+
+      expect(() => auth()).toThrow(
+        "DATABASE_POOL_MAX (14) + AUTH_POOL_MAX (4) exceeds DATABASE_POOL_CEILING (15).",
+      );
+      expect(authPool()).toBeUndefined();
     });
 
     test("handles idle connection errors with console.warn (Finding 3)", () => {

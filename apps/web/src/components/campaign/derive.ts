@@ -1,4 +1,7 @@
-import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import {
+  DEFAULT_RATIO_VALUES,
+  RATIO_VALUES,
+} from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import {
   DISPLAY_SIZE_VALUES,
   type DisplaySize,
@@ -74,6 +77,10 @@ export function platformsToSizes(platforms: readonly string[]): DisplaySize[] {
  * a stored brief, so the absent-or-empty distinction is the caller's: pass the length
  * when the key exists, `undefined` when a brief simply has no treatments block.
  *
+ * Unpinned calls default to the frozen `DEFAULT_RATIO_VALUES` length (3), so
+ * pre-change estimates are byte-stable; a brief that pins `axes.ratio` (e.g.
+ * `["4:5"]`) passes its selection's length instead.
+ *
  * This is the estimate's local truth for a classic draft (D31): the planner refuses
  * classic briefs, so the editor derives the deliverables count instead of asking.
  */
@@ -81,12 +88,13 @@ export function classicAdCount(
   products: number,
   treatments: number | undefined,
   sizes = 0,
+  ratios: number = DEFAULT_RATIO_VALUES.length,
 ): number {
   // A brief with no treatments still renders one creative per cell: the use case
   // substitutes DEFAULT_TREATMENT when the list is absent *or* empty
   // (GenerateCampaignUseCase.use-case.ts:163). `?? 1` only catches undefined, so an
   // empty array would otherwise multiply the whole estimate to zero.
-  return products * (RATIO_VALUES.length + sizes) * Math.max(1, treatments ?? 1);
+  return products * (ratios + sizes) * Math.max(1, treatments ?? 1);
 }
 
 /** Kind → layer count for a template's layer list — the arithmetic both

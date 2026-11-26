@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { projectRoot } from "@campaignfoundry/shared";
 import type { ObjectStorePort } from "@campaignfoundry/CampaignOrchestration";
-import { databaseSettings, objectStore } from "../server/lib/config.js";
+import { databaseSettings, objectStore, purgeReconcile } from "../server/lib/config.js";
 import { databaseConfig, type DatabaseConfig } from "../server/lib/db/database-config.js";
 import { pgClient } from "../server/lib/db/pg-client.js";
 import type { SqlClient } from "../server/lib/db/sql-client.js";
@@ -484,11 +484,7 @@ export const SWEEP_RECONCILE_MAX_CANDIDATES = 100;
  * cache expiry has no switch.
  */
 export function reconcileSwitch(): boolean {
-  loadEnv();
-  const value = process.env.PURGE_RECONCILE;
-  if (value === undefined || value === "" || value === "on") return true;
-  if (value === "off") return false;
-  throw new Error(`PURGE_RECONCILE must be "on" or "off".`);
+  return purgeReconcile();
 }
 
 function reason(error: unknown): string {
@@ -514,6 +510,16 @@ export async function housekeeping(
   let objects: ObjectStorePort | undefined;
   let orgIds: readonly string[] | undefined;
   let failed = 0;
+  // Parsed once, before setup, and never thrown here: a malformed
+  // PURGE_RECONCILE must still reach the failure accounting below (the sweep's
+  // exit code) rather than abort the process before the cache step is counted.
+  let reconcileEnabled = true;
+  let reconcileError: unknown;
+  try {
+    reconcileEnabled = reconcileSwitch();
+  } catch (error) {
+    reconcileError = error;
+  }
   try {
     objects = objectStoreClient();
     orgIds = await orgsToVisit(db, undefined, "sweep");
@@ -523,8 +529,8 @@ export async function housekeeping(
     // counted as failed (A1). When PURGE_RECONCILE=off the reconcile step would
     // have been skipped, so it is not counted as a failure here — only the
     // cache step is.
-    if (process.env.PURGE_RECONCILE !== "off") {
-      log(`  reconcile failed (${reason(error)})`);
+    if (reconcileEnabled !== false) {
+      log(`  reconcile failed (${reason(reconcileError ?? error)})`);
       failed++;
     } else {
       log("  Reconcile skipped: PURGE_RECONCILE=off.");
@@ -534,7 +540,9 @@ export async function housekeeping(
     return failed;
   }
   try {
-    if (reconcileSwitch()) {
+    if (reconcileError !== undefined) {
+      throw reconcileError;
+    } else if (reconcileEnabled) {
       const { applied } = await reconcileOrgs(db, objects, orgIds, {
         apply: true,
         now,

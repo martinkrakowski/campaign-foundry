@@ -85,6 +85,17 @@ describe("SidebarContent — the Aspects readout derives per run mode", () => {
     await user.click(screen.getByRole("button", { name: "Switch" }));
     expect(screen.getByText(ALL_RATIOS)).toBeTruthy();
   });
+
+  test("a brief pinning the 4:5 axis reads exactly that ratio", async () => {
+    const user = userEvent.setup();
+    renderWithRun(
+      createElement(BriefSwitcher, {
+        brief: { ...BASE, mode: "variation", variation: { axes: { ratio: ["4:5"] } } },
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Switch" }));
+    expect(screen.getByText("4:5")).toBeTruthy();
+  });
 });
 
 /**

@@ -9,6 +9,7 @@ import {
 } from "@campaignfoundry/CampaignOrchestration/brief-template";
 import { CANONICAL_TEMPLATES } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import { DISPLAY_SIZE_VALUES } from "@campaignfoundry/CampaignOrchestration/display-sizes";
+import { DEFAULT_RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { timelineProblem } from "@campaignfoundry/CampaignOrchestration/copy-timeline";
 import { axisProductSize, validateTimeline } from "../validate";
 import { platformsToFormats } from "../derive";
@@ -1232,9 +1233,9 @@ describe("normalizeDraftState via a round trip (PT-5d)", () => {
 
     const restored = roundTripDraft(legacyDraft);
     expect(restored).not.toBeNull();
-    // Absent means every ratio — the same semantics toBrief already gives an
-    // absent `axes.ratio` on the brief itself.
-    expect(restored?.variation.ratio).toEqual([...RATIO_OPTIONS]);
+    // Absent means the frozen three-ratio default — the same semantics toBrief
+    // already gives an absent `axes.ratio` on the brief itself.
+    expect(restored?.variation.ratio).toEqual([...DEFAULT_RATIO_VALUES]);
     expect(() => toBrief(restored as EditorState)).not.toThrow();
   });
 
@@ -1709,7 +1710,7 @@ describe("normalizeDraftState repairs (PT-5d, cont.)", () => {
       variation: { ...state.variation, ratio: "9:16", layout: 42 },
     };
     const restored = roundTripDraft(corrupt) as EditorState;
-    expect(restored.variation.ratio).toEqual([...RATIO_OPTIONS]);
+    expect(restored.variation.ratio).toEqual([...DEFAULT_RATIO_VALUES]);
     expect(restored.variation.layout).toEqual([...LAYOUT_OPTIONS]);
     expect(restored.formats).toEqual(["static"]);
     // toggleOrdered runs `.includes` and `.filter` on the list — the failure the

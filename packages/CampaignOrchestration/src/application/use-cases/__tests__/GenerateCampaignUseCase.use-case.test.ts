@@ -1,5 +1,5 @@
 import { describe, test, expect, vi } from "vitest";
-import { RATIO_VALUES } from "../../../domain/value-objects/aspect-ratios.js";
+import { DEFAULT_RATIO_VALUES } from "../../../domain/value-objects/aspect-ratios.js";
 import type { ImageGeneratorPort } from "../../ports/out/ImageGeneratorPort.js";
 import { err, ok } from "@campaignfoundry/shared";
 import { createHash } from "node:crypto";
@@ -2484,7 +2484,7 @@ describe("GenerateCampaignUseCase — the generative region reaches the port (D1
     // Each ratio cell asks for itself. This is the byte-identical path, and it
     // is asserted here so the framed expectation above cannot be read as "the
     // derivation runs everywhere".
-    expect(asked(d)).toEqual([...RATIO_VALUES]);
+    expect(asked(d)).toEqual([...DEFAULT_RATIO_VALUES]);
   });
 
   test("the variation path derives it too", async () => {

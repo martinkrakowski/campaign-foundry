@@ -7,6 +7,7 @@ import { CampaignGoneError } from "../../lib/ports/job-store.port.js";
 import { getBriefStore, getUsageStore } from "../../lib/ports/index.js";
 import { getRunDelivery } from "../../lib/ports/run-delivery-registry.js";
 import { parseBrief, parseRegenerateOnly } from "../../lib/load-brief.js";
+import { PinnedTemplateError, resolvePinnedOrgTemplate } from "../../lib/pinned-template.js";
 import {
   ALLOWED_IMAGE_MODELS,
   imageProviderChain,
@@ -66,6 +67,22 @@ export default defineEventHandler(async (event) => {
   } catch (error) {
     setResponseStatus(event, 400);
     return { error: error instanceof Error ? error.message : "Invalid campaign brief" };
+  }
+
+  // RW-22: an org-saved template pin is resolved against the tenant's
+  // TemplateStorePort before the run is accepted — before the environment
+  // read, the quota read and the claim, so a refused pin leaves nothing
+  // behind. Generation renders from the brief's already-materialised
+  // `template.layers`; no later version is ever read here. A
+  // PinnedTemplateError is a 400; a store failure rethrows as a 500.
+  try {
+    await resolvePinnedOrgTemplate(requestTenant(event), brief.template);
+  } catch (error) {
+    if (error instanceof PinnedTemplateError) {
+      setResponseStatus(event, 400);
+      return { error: error.message };
+    }
+    throw error;
   }
 
   // `?model=` is untrusted — only allow the curated model ids, else 400. Without

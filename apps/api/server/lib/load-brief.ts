@@ -22,6 +22,7 @@ import {
   SAFE_ID_PATTERN,
   TONE_VALUES,
   isAlpha2,
+  isOrgTemplateId,
   isPaletteShift,
   isSupportedBriefSchemaVersion,
   normalizeRegion,
@@ -45,7 +46,6 @@ import {
   type BriefTemplate,
   type CampaignBrief,
   type CampaignType,
-  type CanonicalTemplateId,
   type CopyTimeline,
   type CreativeTemplateLayer,
   type CreativeType,
@@ -204,12 +204,13 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
       `Campaign brief field "template" must be an object; got ${JSON.stringify(value)}.`,
     );
   }
-  if (
-    typeof value.id !== "string" ||
-    !(CANONICAL_TEMPLATE_IDS as readonly string[]).includes(value.id)
-  ) {
+  const isCanonical =
+    typeof value.id === "string" &&
+    (CANONICAL_TEMPLATE_IDS as readonly string[]).includes(value.id);
+  const isOrg = isOrgTemplateId(value.id);
+  if (!isCanonical && !isOrg) {
     throw new Error(
-      `Campaign brief field "template.id" must be one of ${CANONICAL_TEMPLATE_IDS.map((t) => `"${t}"`).join(", ")}; got ${JSON.stringify(value.id)}.`,
+      `Campaign brief field "template.id" must be one of ${CANONICAL_TEMPLATE_IDS.map((t) => `"${t}"`).join(", ")} or an org template id ("tpl-<uuid>"); got ${JSON.stringify(value.id)}.`,
     );
   }
   if (
@@ -221,7 +222,7 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
     );
   }
   const canonical = CANONICAL_TEMPLATES[value.creativeType as CreativeType];
-  if (canonical.id !== value.id) {
+  if (isCanonical && canonical.id !== value.id) {
     throw new Error(
       `Campaign brief field "template.creativeType" must match canonical template "${value.id}"; got ${JSON.stringify(value.creativeType)}.`,
     );
@@ -460,7 +461,7 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
   }
 
   return {
-    id: value.id as CanonicalTemplateId,
+    id: value.id as BriefTemplate["id"],
     version: value.version as number,
     creativeType: value.creativeType as CreativeType,
     unit: value.unit as AdvertisingUnit,

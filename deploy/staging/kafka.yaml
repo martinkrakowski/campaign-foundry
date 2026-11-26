@@ -1,6 +1,6 @@
-# Kafka (D174d: production uses Aiven Kafka), run by Strimzi in KRaft mode, one
+# Kafka (D174d: production uses a managed Kafka), run by Strimzi in KRaft mode, one
 # combined controller+broker. The only listener is TLS with client-certificate
-# authentication, the same shape as Aiven's, so PT-6's code targets one
+# authentication, the same shape as a managed Kafka, so PT-6's code targets one
 # connection model. Authorization is `simple`: a client may do only what its
 # KafkaUser's ACLs allow. PT-6b3 grants the app its run-request topic and its
 # consumer group; the API publishes and, with KAFKA_CONSUME=true, consumes.

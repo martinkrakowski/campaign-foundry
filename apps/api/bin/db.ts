@@ -11,8 +11,8 @@ import { loadEnv } from "../server/lib/env.js";
 
 /**
  * The operator's database commands (PT-3). They run against whatever
- * `DATABASE_URL` names — the owner's Aiven service in practice — so they are the
- * operator's to run, never a test's.
+ * `DATABASE_URL` names — the configured PostgreSQL service in practice — so they
+ * are the operator's to run, never a test's.
  *
  *   yarn db:ping      one connection, `select version()`, closed
  *   yarn db:migrate   apply the migrations the database has not seen

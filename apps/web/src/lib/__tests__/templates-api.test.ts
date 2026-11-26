@@ -9,8 +9,11 @@ import {
   latestPerId,
   listTemplates,
   pinnableTemplate,
+  saveTemplate,
+  saveTemplateVersion,
   templateRef,
   versionsOf,
+  type SaveTemplateInput,
 } from "../templates-api";
 
 const json = (body: unknown, status = 200) =>
@@ -189,6 +192,139 @@ describe("getTemplate", () => {
   });
 });
 
+/**
+ * CFRW22C — the write half of the library. The body a save sends is exactly
+ * `{ name, unit, creativeType, layers }` — the editor's look, verbatim, with no
+ * identity field: the server derives `orgId` from the session and the slug from
+ * the name, so the client's job is to refuse to send what it does not own.
+ */
+describe("saveTemplate and saveTemplateVersion", () => {
+  const saveInput = {
+    name: "House promo",
+    unit: "standard-web",
+    creativeType: "image-text",
+    layers: CANONICAL_TEMPLATES["image-text"].layers,
+  } satisfies SaveTemplateInput;
+
+  test("saveTemplate posts the exact body to the list route and returns the parsed record", async () => {
+    const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
+    vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+      const raw = init?.body;
+      calls.push({
+        url: String(url),
+        method: (init?.method ?? "GET").toUpperCase(),
+        ...(typeof raw === "string" ? { body: JSON.parse(raw) as Record<string, unknown> } : {}),
+      });
+      return Promise.resolve(
+        json({ template: record({ id: "house-promo", name: "House promo" }) }, 201),
+      );
+    });
+    const saved = await saveTemplate(saveInput);
+    expect(calls).toEqual([
+      {
+        url: "/api/pipeline/campaigns/templates",
+        method: "POST",
+        body: {
+          name: "House promo",
+          unit: "standard-web",
+          creativeType: "image-text",
+          layers: CANONICAL_TEMPLATES["image-text"].layers,
+        },
+      },
+    ]);
+    expect(saved.id).toBe("house-promo");
+    expect(saved.name).toBe("House promo");
+  });
+
+  test("saveTemplateVersion puts to the percent-encoded id route and returns the parsed record", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    vi.mocked(globalThis.fetch).mockImplementation((url, init) => {
+      calls.push({ url: String(url), method: (init?.method ?? "GET").toUpperCase() });
+      return Promise.resolve(json({ template: record({ version: 3 }) }, 200));
+    });
+    const saved = await saveTemplateVersion("house promo@2", saveInput);
+    expect(calls).toEqual([
+      { url: "/api/pipeline/campaigns/templates/house%20promo%402", method: "PUT" },
+    ]);
+    expect(saved.version).toBe(3);
+  });
+
+  test("throws TemplatesApiError on 400, 403, 409, and 501 with the server message", async () => {
+    for (const status of [400, 403, 409, 501] as const) {
+      mockFetch(() => json({ error: `Refused (${status})` }, status));
+      await expect(saveTemplate(saveInput)).rejects.toMatchObject({
+        name: "TemplatesApiError",
+        status,
+        message: `Refused (${status})`,
+      });
+      await expect(saveTemplateVersion("house-promo", saveInput)).rejects.toMatchObject({
+        name: "TemplatesApiError",
+        status,
+        message: `Refused (${status})`,
+      });
+    }
+  });
+
+  test("a refusal with no usable error message falls back to naming the status", async () => {
+    for (const body of [null, { error: "" }, { error: 7 }]) {
+      mockFetch(() => json(body, 400));
+      await expect(saveTemplate(saveInput)).rejects.toMatchObject({
+        message: "Request failed (HTTP 400)",
+      });
+      await expect(saveTemplateVersion("house-promo", saveInput)).rejects.toMatchObject({
+        message: "Request failed (HTTP 400)",
+      });
+    }
+  });
+
+  test("network failure throws status 0", async () => {
+    vi.mocked(globalThis.fetch).mockRejectedValue(new Error("offline"));
+    await expect(saveTemplate(saveInput)).rejects.toMatchObject({
+      status: 0,
+      message: "Network error",
+    });
+    await expect(saveTemplateVersion("house-promo", saveInput)).rejects.toMatchObject({
+      status: 0,
+      message: "Network error",
+    });
+  });
+
+  test("stream failure throws", async () => {
+    mockFetch(
+      () =>
+        ({
+          ok: true,
+          status: 201,
+          text: () => Promise.reject(new Error("stream broke")),
+        }) as unknown as Response,
+    );
+    await expect(saveTemplate(saveInput)).rejects.toMatchObject({ status: 201 });
+    await expect(saveTemplateVersion("house-promo", saveInput)).rejects.toMatchObject({
+      status: 201,
+    });
+  });
+
+  test("refuses malformed 201 response (null, missing template, non-array or empty layers, null layer)", async () => {
+    const malformed: unknown[] = [
+      "x",
+      null,
+      {},
+      { template: { ...record(), layers: {} } },
+      { template: record({ layers: [] }) },
+      { template: { ...record(), layers: [null] } },
+    ];
+    for (const body of malformed) {
+      mockFetch(() => json(body, 201));
+      await expect(saveTemplate(saveInput)).rejects.toMatchObject({
+        message: "Invalid response",
+      });
+      await expect(saveTemplateVersion("house-promo", saveInput)).rejects.toMatchObject({
+        message: "Invalid response",
+      });
+    }
+  });
+});
+
 describe("latestPerId", () => {
   /**
    * T-D2/T3. The versions are fed in a deliberately non-monotonic order: a
@@ -246,12 +382,43 @@ describe("pinnableTemplate", () => {
   });
 
   /**
-   * The finding this lane records rather than fixes: `BriefTemplate.id` is
-   * `CanonicalTemplateId`, so a library grown past the canonical three would
-   * serve records no brief can carry. Refused visibly, not cast through.
+   * An org-saved record (`tpl-` + lowercase uuid, RW-22) pins through the same
+   * `isBriefTemplate` guard a canonical record does — the pin carries the id
+   * and version the store actually holds.
    */
-  test("a record outside the canonical set is not pinnable", () => {
+  test("an org-saved record is pinnable and returns the pinned reference", () => {
+    const pinned = pinnableTemplate(
+      record({ id: "tpl-00000000-0000-4000-8000-000000000001", version: 2 }),
+    );
+    expect(pinned).toEqual({
+      id: "tpl-00000000-0000-4000-8000-000000000001",
+      version: 2,
+      creativeType: "image-text",
+      unit: "standard-web",
+      layers: CANONICAL_TEMPLATES["image-text"].layers,
+    });
+  });
+
+  /**
+   * `isOrgTemplateId` proves shape only: lowercase hex, exactly `tpl-` + a
+   * 36-char uuid, and nothing after it. A malformed id is refused `null`, not
+   * cast through to fail at the editor's restore boundary.
+   */
+  test("a malformed org id is not pinnable", () => {
+    expect(pinnableTemplate(record({ id: "tpl-" }))).toBeNull();
+    expect(pinnableTemplate(record({ id: "tpl-00000000-0000-4000-8000-00000000000A" }))).toBeNull();
+    expect(
+      pinnableTemplate(record({ id: "tpl-00000000-0000-4000-8000-000000000001-extra" })),
+    ).toBeNull();
     expect(pinnableTemplate(record({ id: "house-promo" }))).toBeNull();
+  });
+
+  test("an org-saved record whose layers fail the guard is not pinnable", () => {
+    expect(
+      pinnableTemplate(
+        record({ id: "tpl-00000000-0000-4000-8000-000000000001", version: 2, layers: [] }),
+      ),
+    ).toBeNull();
   });
 
   test("a canonical id whose creativeType disagrees with it is not pinnable", () => {

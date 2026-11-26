@@ -1,8 +1,13 @@
 import { describe, test, expect, vi } from "vitest";
-import { DEFAULT_POOL_MAX, MAX_POOL, AUTH_POOL_MAX, databaseConfig } from "../database-config.js";
+import {
+  DEFAULT_POOL_MAX,
+  MAX_POOL,
+  AUTH_POOL_MAX,
+  databaseConfig,
+  poolBudget,
+} from "../database-config.js";
 
-const remote =
-  "postgres://avnadmin:s3cr%40t@db.example.aivencloud.com:12194/defaultdb?sslmode=require";
+const remote = "postgres://app_user:s3cr%40t@db.example.test:12194/defaultdb?sslmode=require";
 const noCa = (): string => {
   throw new Error("no CA should be read");
 };
@@ -11,9 +16,9 @@ describe("databaseConfig (D174a)", () => {
   test("a remote database is reached over TLS that verifies its certificate against the given CA", () => {
     const readCa = vi.fn(() => "-----BEGIN CERTIFICATE-----");
     expect(databaseConfig({ url: remote, caPath: "certs/ca.pem" }, readCa)).toEqual({
-      host: "db.example.aivencloud.com",
+      host: "db.example.test",
       port: 12194,
-      user: "avnadmin",
+      user: "app_user",
       password: "s3cr@t",
       database: "defaultdb",
       ssl: { ca: "-----BEGIN CERTIFICATE-----", rejectUnauthorized: true },
@@ -25,7 +30,7 @@ describe("databaseConfig (D174a)", () => {
   test("a remote database without a CA is refused, naming the setting and never the password", () => {
     const run = () => databaseConfig({ url: remote }, noCa);
     expect(run).toThrow(/DATABASE_CA_PATH is not set/);
-    expect(run).toThrow(/db\.example\.aivencloud\.com/);
+    expect(run).toThrow(/db\.example\.test/);
     expect(run).not.toThrow(/s3cr/);
   });
 
@@ -64,8 +69,74 @@ describe("databaseConfig (D174a)", () => {
     const local = "postgres://me@localhost/cf";
     expect(databaseConfig({ url: local, poolMax: "13" }, noCa).max).toBe(13);
     expect(() => databaseConfig({ url: local, poolMax: "14" }, noCa)).toThrow(
-      /DATABASE_POOL_MAX must be a whole number from 1 to 13 \(allowing 2 connections for auth within the service's 15 capacity\)/,
+      `DATABASE_POOL_MAX (14) + AUTH_POOL_MAX (2) exceeds DATABASE_POOL_CEILING (15).`,
     );
+  });
+
+  test("unset or empty poolMax, authPoolMax and poolCeiling all return their defaults", () => {
+    const local = "postgres://me@localhost/cf";
+    expect(poolBudget({})).toEqual({ poolMax: 5, authPoolMax: 2, ceiling: 15 });
+    expect(poolBudget({ poolMax: "", authPoolMax: "", poolCeiling: "" })).toEqual({
+      poolMax: 5,
+      authPoolMax: 2,
+      ceiling: 15,
+    });
+    expect(databaseConfig({ url: local }, noCa).max).toBe(DEFAULT_POOL_MAX);
+  });
+
+  test("a custom DATABASE_POOL_CEILING is honoured, freeing room for a larger store pool", () => {
+    const local = "postgres://me@localhost/cf";
+    expect(poolBudget({ poolMax: "28", poolCeiling: "30" })).toEqual({
+      poolMax: 28,
+      authPoolMax: 2,
+      ceiling: 30,
+    });
+    expect(databaseConfig({ url: local, poolMax: "28", poolCeiling: "30" }, noCa).max).toBe(28);
+  });
+
+  test("a custom AUTH_POOL_MAX + DATABASE_POOL_MAX within the ceiling is honoured", () => {
+    const local = "postgres://me@localhost/cf";
+    expect(poolBudget({ poolMax: "3", authPoolMax: "4" })).toEqual({
+      poolMax: 3,
+      authPoolMax: 4,
+      ceiling: 15,
+    });
+    expect(databaseConfig({ url: local, poolMax: "3", authPoolMax: "4" }, noCa).max).toBe(3);
+  });
+
+  test("an over-budget pair is refused, against the default ceiling and a custom one", () => {
+    const local = "postgres://me@localhost/cf";
+    expect(() => poolBudget({ poolMax: "14", authPoolMax: "2" })).toThrow(
+      `DATABASE_POOL_MAX (14) + AUTH_POOL_MAX (2) exceeds DATABASE_POOL_CEILING (15).`,
+    );
+    expect(() => poolBudget({ poolMax: "28", authPoolMax: "3", poolCeiling: "30" })).toThrow(
+      `DATABASE_POOL_MAX (28) + AUTH_POOL_MAX (3) exceeds DATABASE_POOL_CEILING (30).`,
+    );
+    expect(() => databaseConfig({ url: local, poolMax: "14" }, noCa)).toThrow(/exceeds/);
+  });
+
+  test("non-integer or < 1 DATABASE_POOL_CEILING is refused", () => {
+    for (const bad of ["0", "-1", "2.5", "many", "   "]) {
+      expect(() => poolBudget({ poolCeiling: bad })).toThrow(
+        `DATABASE_POOL_CEILING must be a whole number of at least 1, not "${bad}".`,
+      );
+    }
+  });
+
+  test("non-integer or < 1 AUTH_POOL_MAX is refused", () => {
+    for (const bad of ["0", "-1", "1.5", "many", "   "]) {
+      expect(() => poolBudget({ authPoolMax: bad })).toThrow(
+        `AUTH_POOL_MAX must be a whole number of at least 1, not "${bad}".`,
+      );
+    }
+  });
+
+  test("non-integer or < 1 DATABASE_POOL_MAX is refused", () => {
+    for (const bad of ["0", "-1", "2.5", "many", "   "]) {
+      expect(() => poolBudget({ poolMax: bad })).toThrow(
+        `DATABASE_POOL_MAX must be a whole number of at least 1, not "${bad}".`,
+      );
+    }
   });
 
   test("a missing, malformed or incomplete URL is refused", () => {

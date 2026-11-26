@@ -6,8 +6,14 @@ import {
   isBriefTemplate,
   type BriefTemplate,
 } from "@campaignfoundry/CampaignOrchestration/brief-template";
-import { ADVERTISING_UNITS } from "@campaignfoundry/CampaignOrchestration/advertising-units";
-import { CREATIVE_TYPES } from "@campaignfoundry/CampaignOrchestration/creative-types";
+import {
+  ADVERTISING_UNITS,
+  type AdvertisingUnit,
+} from "@campaignfoundry/CampaignOrchestration/advertising-units";
+import {
+  CREATIVE_TYPES,
+  type CreativeType,
+} from "@campaignfoundry/CampaignOrchestration/creative-types";
 import { LAYER_KINDS } from "@campaignfoundry/CampaignOrchestration/layer-kinds";
 import { handleAuthError } from "./auth-errors";
 
@@ -70,10 +76,10 @@ function errorFrom(data: unknown, fallback: string): string {
   return fallback;
 }
 
-async function requestJson(url: string): Promise<unknown> {
+async function requestJson(url: string, init?: RequestInit): Promise<unknown> {
   let res: Response;
   try {
-    res = await fetch(url);
+    res = await fetch(url, init);
   } catch {
     throw new TemplatesApiError("Network error", 0);
   }
@@ -175,6 +181,65 @@ export async function getTemplate(ref: string): Promise<CreativeTemplate> {
   return asCreativeTemplate((data as { template?: unknown }).template);
 }
 
+/**
+ * The body a save sends — exactly the four fields the routes store, and nothing
+ * else: the server derives identity from the session, so no `briefId` or `orgId`
+ * ever rides the body.
+ */
+export interface SaveTemplateInput {
+  readonly name: string;
+  readonly unit: AdvertisingUnit;
+  readonly creativeType: CreativeType;
+  readonly layers: readonly CreativeTemplateLayer[];
+}
+
+/**
+ * CFRW22C — the write half of the library: a new template (a new slug, a new
+ * record) answers the stored record, and every failure throws exactly like the
+ * reads do — a 409 slug collision is a typed error, never a silent retry.
+ */
+export async function saveTemplate(input: SaveTemplateInput): Promise<CreativeTemplate> {
+  const data = await requestJson(`${API}/campaigns/templates`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: input.name,
+      unit: input.unit,
+      creativeType: input.creativeType,
+      layers: input.layers,
+    }),
+  });
+  if (typeof data !== "object" || data === null) {
+    throw new TemplatesApiError("Invalid response", 200);
+  }
+  return asCreativeTemplate((data as { template?: unknown }).template);
+}
+
+/**
+ * A new version of an owned org template: same body, same refusal set, PUT to
+ * the id the caller already owns. The id is percent-encoded as one path segment,
+ * the same way `getTemplate` encodes a `:ref`.
+ */
+export async function saveTemplateVersion(
+  id: string,
+  input: SaveTemplateInput,
+): Promise<CreativeTemplate> {
+  const data = await requestJson(`${API}/campaigns/templates/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: input.name,
+      unit: input.unit,
+      creativeType: input.creativeType,
+      layers: input.layers,
+    }),
+  });
+  if (typeof data !== "object" || data === null) {
+    throw new TemplatesApiError("Invalid response", 200);
+  }
+  return asCreativeTemplate((data as { template?: unknown }).template);
+}
+
 /** The pinned spelling of a record — `id@version`, the `:ref` the routes take. */
 export function templateRef(template: CreativeTemplate): string {
   return `${template.id}@${template.version}`;
@@ -210,15 +275,12 @@ export function versionsOf(templates: readonly CreativeTemplate[], id: string): 
  * The library record as a brief's pinned template (D123), or `null` when the
  * record cannot be one.
  *
- * `null` is a real answer, not a defensive branch. `BriefTemplate.id` is
- * `CanonicalTemplateId` and `isBriefTemplate` additionally requires
- * `CANONICAL_TEMPLATES[creativeType].id === id`, so **only a canonical record
- * is pinnable today** — a library grown beyond the canonical three would serve
- * records no brief can carry. `FsTemplateStore` is seeded from
- * `CANONICAL_TEMPLATES` and nothing else, so every record the live library
- * serves passes; the refusal exists so an un-pinnable record is refused
- * visibly rather than cast through and half-applied at the editor's restore
- * boundary.
+ * `null` is a real answer, not a defensive branch. `isBriefTemplate` accepts a
+ * record whose id is canonical and matches its `creativeType`, or org-saved
+ * (`tpl-` + a lowercase uuid, RW-22); any other id, or a record whose layer
+ * structure fails the guard, is not a brief's pinned reference and returns
+ * `null`. The refusal exists so an un-pinnable record is refused visibly
+ * rather than cast through and half-applied at the editor's restore boundary.
  *
  * The guard is `isBriefTemplate` itself — the same one both storage boundaries
  * use — never a second copy of its rules here.

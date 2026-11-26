@@ -6,7 +6,7 @@ import { SidebarShell } from "./SidebarShell";
 import { useEditorPanels, usePanelSink } from "@/lib/editor-panels-context";
 import { useRun } from "@/lib/run-context";
 import { useCreateCampaign } from "@/lib/create-campaign-context";
-import { RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
+import { DEFAULT_RATIO_VALUES } from "@campaignfoundry/CampaignOrchestration/aspect-ratios";
 import { useGuardedNavigation } from "@/lib/use-guarded-navigation";
 import { listAssets, formatBytes, type AssetEntry } from "@/lib/briefs-api";
 import { campaignRoute } from "@/lib/campaign-route";
@@ -122,10 +122,10 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       // `length`, not `??`: the ratio axis is the one axis DESIGN.md §5 allows to be
       // emptied, so `[]` is a legal saved state — and `[].join(", ")` is "", which
       // would render the Aspects field blank rather than falling back.
-      return ratios?.length ? ratios.join(", ") : RATIO_VALUES.join(", ");
+      return ratios?.length ? ratios.join(", ") : DEFAULT_RATIO_VALUES.join(", ");
     }
     // classic brief or undefined mode
-    return RATIO_VALUES.join(", ");
+    return DEFAULT_RATIO_VALUES.join(", ");
   })();
   const [assets, setAssets] = useState<AssetEntry[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);

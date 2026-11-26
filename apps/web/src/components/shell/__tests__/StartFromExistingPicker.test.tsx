@@ -28,6 +28,16 @@ const unknownRatios = {
     mode: "brief",
     targetRegion: "US",
     products: [{ id: "a" }],
+    variation: { axes: { ratio: ["21:9"] } },
+  },
+};
+const pinned45 = {
+  file: "portrait-pin.yaml",
+  brief: {
+    id: "portrait-pin",
+    mode: "variation",
+    targetRegion: "FR",
+    products: [{ id: "a" }],
     variation: { axes: { ratio: ["4:5"] } },
   },
 };
@@ -112,7 +122,7 @@ describe("StartFromExistingPicker (W2 / D71)", () => {
     ).toBeTruthy();
   });
 
-  test("a brief whose ratios lie outside the domain falls back to every ratio, not to an empty picture", async () => {
+  test("a brief whose ratios lie outside the domain falls back to the frozen default, not to an empty picture", async () => {
     route([unknownRatios]);
     render(<StartFromExistingPicker selectedId={null} onSelect={vi.fn()} />);
 
@@ -121,6 +131,15 @@ describe("StartFromExistingPicker (W2 / D71)", () => {
     expect(
       within(odd).getByText(messages.startFromRatioCaption(["1:1", "9:16", "16:9"])),
     ).toBeTruthy();
+  });
+
+  test("a brief pinning the 4:5 axis renders exactly that one frame", async () => {
+    route([pinned45]);
+    render(<StartFromExistingPicker selectedId={null} onSelect={vi.fn()} />);
+
+    const pinned = await screen.findByRole("button", { name: "portrait-pin" });
+    expect(pinned.querySelectorAll("svg.shrink-0").length).toBe(1);
+    expect(within(pinned).getByText(messages.startFromRatioCaption(["4:5"]))).toBeTruthy();
   });
 
   test("nothing in the rail loops — the only animation class is the exempt check badge (D88/D96)", async () => {

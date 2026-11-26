@@ -110,6 +110,10 @@ import {
 } from "./PreviewDock";
 import { previewDockProps, previewRailKey } from "./preview-props";
 import { LayerStack } from "./LayerStack";
+import { SaveTemplateDialog, saveTemplateBlockedReason } from "./SaveTemplateDialog";
+// The leaf, never the barrel: the id vocabulary rides the same rule as the
+// type vocabulary above (the barrel pulls node modules into the browser bundle).
+import { CANONICAL_TEMPLATE_IDS } from "@campaignfoundry/CampaignOrchestration/creative-templates";
 import {
   layerStackKey,
   layerStackProps,
@@ -791,7 +795,10 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
    */
   const [validation, setValidation] = useState<ValidationSnapshot | null>(null);
   /** Generate's credit-spending confirm (SG-D10, after `CommandBar.tsx:164`). */
+  /** Generate's confirm — raised by the Generate press, taken down by its answer. */
   const [runConfirmOpen, setRunConfirmOpen] = useState(false);
+  /** CFRW22C — the "Save as template" dialog's own open state, beside the dialogs above. */
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   /**
    * TS2 — the committed second, published out of `PlayheadHost` by
    * `PlayheadPublisher`. Only the committed one: see that component for why the
@@ -1220,6 +1227,12 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
   const existingIds = useMemo(() => briefs.map((b) => b.brief.id), [briefs]);
   const errors = useMemo(() => validateState(state, existingIds), [state, existingIds]);
   const warnings = useMemo(() => validateWarnings(state), [state]);
+  // CFRW22C — the "Save as template" gate: no layers at all, or unsaved
+  // validation errors, and the rail's button refuses with the reason shown.
+  const saveTemplateReason = saveTemplateBlockedReason(
+    state.template.layers.length > 0,
+    isDirtySinceSave(state) && getTotalErrorCount(errors) > 0,
+  );
   // Not a boolean: the section that blocks is what the refusal needs to scroll to, and
   // deriving it here keeps "is it blocked" and "where" from disagreeing. null = valid.
   // PE1: the blocking section AND the keys that block it, from one derivation.
@@ -2400,6 +2413,23 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
           selectedLayerId={pickedLayerId}
           onSelectLayer={pickLayer}
         />
+        {/* CFRW22C — the save action lives under the stack it saves. A gate
+            (no layers, or unsaved validation errors) refuses with the reason
+            beside the button, never a silent disabled control. */}
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={saveTemplateReason !== null}
+          aria-describedby={saveTemplateReason !== null ? "save-template-reason" : undefined}
+          onClick={() => setSaveTemplateOpen(true)}
+        >
+          Save as template
+        </Button>
+        {saveTemplateReason !== null ? (
+          <p id="save-template-reason" className="text-[11px] text-text-muted">
+            {saveTemplateReason}
+          </p>
+        ) : null}
       </div>
     ),
     [
@@ -2440,6 +2470,9 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
       // render each. `rs.json`'s eighth mutation dropped `draftBrief` from this
       // list to prove the rail could go stale; after this lane that mutation IS
       // the correct list, which is reported rather than re-authored.
+      // CFRW22C — the save action's gate: a reason the rail must republish
+      // when it appears or clears, or the button would stay stale.
+      saveTemplateReason,
     ],
   );
 
@@ -3650,6 +3683,23 @@ export function BriefEditor({ briefId: routeId }: { briefId?: string }) {
         cancelLabel={messages.confirmCancel}
         onConfirm={runValidatedBrief}
         onClose={() => setRunConfirmOpen(false)}
+      />
+
+      {/* Save as template — CFRW22C: the rail's button opens it; the dialog owns
+           its own refusals (blank name, no layers, refused writes) and the
+           success reload rides the cf:templates-changed event the library
+           listens for. The org-ownership readout is derived, never stored:
+           a canonical id is not the org's to version. */}
+      <SaveTemplateDialog
+        open={saveTemplateOpen}
+        onClose={() => setSaveTemplateOpen(false)}
+        templateId={state.template.id}
+        unit={state.template.unit}
+        creativeType={state.template.creativeType}
+        layers={state.template.layers}
+        isOwnedOrgTemplate={
+          !(CANONICAL_TEMPLATE_IDS as readonly string[]).includes(state.template.id)
+        }
       />
 
       {/* Save as dialog — PT-5c1 (D177, D178): a NAME, not an id. The server

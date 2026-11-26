@@ -937,6 +937,32 @@ describe("sweep housekeeping (bin/purge.ts)", () => {
     );
   });
 
+  test("housekeeping with malformed PURGE_RECONCILE and a setup failure counts both steps as failed without throwing", async () => {
+    process.env.OBJECT_STORE = "s3";
+    setObjectStoreClient(memory);
+    process.env.PURGE_RECONCILE = "maybe";
+    const log: string[] = [];
+
+    const realQuery = db.query.bind(db);
+    vi.spyOn(db, "query").mockImplementation(async (text, params) => {
+      if (typeof text === "string" && text.startsWith("select id from org")) {
+        throw new Error("org lookup boom");
+      }
+      return realQuery(text, params);
+    });
+
+    const failed = await housekeeping(
+      db,
+      (l) => log.push(l),
+      () => NOW,
+    );
+    expect(failed).toBe(2);
+    expect(log).toContain(`  reconcile failed (PURGE_RECONCILE must be "on" or "off".)`);
+    expect(log).toContain(
+      "  cache expiry failed (setup failed: store client or org list unavailable)",
+    );
+  });
+
   test("sweep housekeeping reconciles exactly SWEEP_RECONCILE_MAX_CANDIDATES orphans across two orgs without failing", async () => {
     expect(SWEEP_RECONCILE_MAX_CANDIDATES).toBe(100);
     process.env.OBJECT_STORE = "s3";
