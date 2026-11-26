@@ -23,6 +23,7 @@ export * from "./LogEntry.vo.js";
 export * from "./markup-assembler.js";
 export * from "./motion-tracks.js";
 export * from "./MotionKind.vo.js";
+export * from "./mp4-clip.js";
 export * from "./palette-shift.js";
 export * from "./PipelineExecutionLog.vo.js";
 export * from "./PipelineResult.vo.js";
