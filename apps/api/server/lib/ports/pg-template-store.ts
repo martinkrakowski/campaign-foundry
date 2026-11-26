@@ -142,22 +142,25 @@ export class PgTemplateStore implements WritableTemplateStorePort, PaginatedTemp
     try {
       // The caps are enforced by the INSERT itself, in ONE statement, and the
       // statement runs inside an advisory-locked transaction (the same shape
-      // as `PgJobStore.lockOrg`): `pg_advisory_xact_lock` keyed on the org
-      // AND template id serializes concurrent writers to the SAME template,
-      // so the writer that queues second recounts on its own statement
-      // snapshot — taken after the incumbent committed — and refuses instead
-      // of overshooting `MAX_VERSIONS_PER_TEMPLATE` by one. Without the lock
-      // two concurrent saves of DIFFERENT versions of the same id at
-      // `cap - 1` both observe `cap - 1` (neither conflicts on the primary
-      // key, so neither is saved by it) and both admit. The lock is scoped
-      // per (org, id): writes to different templates never queue behind each
-      // other, and `hashtext` collisions only over-serialize. The lock is
+      // as `PgJobStore.lockOrg`): `pg_advisory_xact_lock` keyed on the ORG
+      // ONLY serializes every writer to an org behind each other, so the
+      // writer that queues second recounts on its own statement snapshot —
+      // taken after the incumbent committed — and refuses instead of
+      // overshooting either cap (`MAX_TEMPLATES_PER_ORG` for a new id,
+      // `MAX_VERSIONS_PER_TEMPLATE` for a new version of an existing id).
+      // Without the lock two concurrent saves both observe the same
+      // pre-insert counts and both admit: two DIFFERENT versions of the same
+      // id at `cap - 1` (neither conflicts on the primary key, so neither is
+      // saved by it) overshoot the version cap, and two DIFFERENT new ids at
+      // the distinct-id boundary overshoot the template cap. The lock must be
+      // org-wide, not keyed per (org, id), because BOTH caps are org-wide
+      // counts: the count and the insert have to be serialized per org for
+      // the recount to see the incumbent, whatever id it was writing.
+      // `hashtext` collisions only over-serialize across orgs. The lock is
       // transaction-scoped, released at commit or rollback, so a save that
-      // throws never leaves it held. The overshoot that remains under READ
-      // COMMITTED is bounded by concurrent writers to DIFFERENT ids at the
-      // distinct-id boundary. A client without `transaction` (a minimal test
-      // double) falls back to the bare statement: the caps are still
-      // enforced, only the same-id serialization is lost.
+      // throws never leaves it held. A client without `transaction` (a
+      // minimal test double) falls back to the bare statement: the caps are
+      // still enforced, only the per-org serialization is lost.
       const insert = async (q: SqlQuery): Promise<void> => {
         const { rows } = await q.query(
           `insert into template
@@ -193,10 +196,7 @@ export class PgTemplateStore implements WritableTemplateStorePort, PaginatedTemp
       };
       if (typeof this.db.transaction === "function") {
         await this.db.transaction(async (tx) => {
-          await tx.query("select pg_advisory_xact_lock(hashtext('template:' || $1 || ':' || $2))", [
-            this.orgId,
-            template.id,
-          ]);
+          await tx.query("select pg_advisory_xact_lock(hashtext('template:' || $1))", [this.orgId]);
           await insert(tx);
         });
       } else {

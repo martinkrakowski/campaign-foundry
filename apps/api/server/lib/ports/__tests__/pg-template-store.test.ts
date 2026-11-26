@@ -499,7 +499,11 @@ describe("PgTemplateStore (RW-22)", () => {
     expect(rows.filter((r) => r.id === "org-banner")).toHaveLength(MAX_VERSIONS_PER_TEMPLATE);
   });
 
-  test("two concurrent saves of different versions on PGlite admit exactly one at cap - 1", async () => {
+  test("sequential saves at cap - 1: the first of two new versions admits, the second refuses", async () => {
+    // Not a concurrency test: PGlite is a single connection, so the two saves
+    // serialize on the connection itself and nothing here can race. The
+    // two-connection proof that concurrent saves admit exactly one lives in
+    // pg-template-store.concurrency.test.ts, against a real server.
     const store = new PgTemplateStore(db, "local");
     for (let v = 1; v < MAX_VERSIONS_PER_TEMPLATE; v += 1) {
       await seedRow(db, "local", orgTemplate({ version: v }));
