@@ -6,6 +6,9 @@ import {
   PublishedClipStoreUnavailableError,
 } from "../fs-published-clip-store.js";
 import { LOCAL_TENANT } from "../../tenant.js";
+import { resetDatabase, setDatabase } from "../../db/database.js";
+import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
+import { PgPublishedClipStore } from "../pg-published-clip-store.js";
 
 describe("FsPublishedClipStore (PT-4k): the public-media ledger is Postgres-only", () => {
   const store = new FsPublishedClipStore();
@@ -89,5 +92,22 @@ describe("the registry builds FsPublishedClipStore when STORE_BACKEND is not pos
 
     resetPublishedClipStore();
     expect(getPublishedClipStore(LOCAL_TENANT)).toBeInstanceOf(FsPublishedClipStore);
+  });
+
+  test("STORE_BACKEND=postgres builds the database-backed ledger, which answers where the fs store refuses", async () => {
+    const db = await migratedDatabase();
+    setDatabase(db);
+    process.env.STORE_BACKEND = "postgres";
+    try {
+      resetPublishedClipStore();
+      const store = getPublishedClipStore(LOCAL_TENANT);
+      expect(store).toBeInstanceOf(PgPublishedClipStore);
+      const campaignId = "00000000-0000-4000-8000-000000000000";
+      await expect(store.find("local", campaignId, "0123")).resolves.toBeUndefined();
+      await expect(store.listForCampaign("local", campaignId)).resolves.toEqual([]);
+    } finally {
+      resetDatabase();
+      await db.end();
+    }
   });
 });
