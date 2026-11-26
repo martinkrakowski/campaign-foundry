@@ -110,7 +110,7 @@ export const CREATIVE_TYPE_RULES: Readonly<Record<CreativeType, CreativeTypeRule
   },
   "image-html": {
     unit: "standard-web",
-    accepts: ["image", "logo", "static-text", "shade", "accent", "fill"],
+    accepts: ["image", "video", "logo", "static-text", "shade", "accent", "fill"],
     required: ["image", "static-text"],
     // Same caps as image-text for the kinds both renderers treat as one:
     // the compositor draws a single copy layer, and shade/accent/logo are

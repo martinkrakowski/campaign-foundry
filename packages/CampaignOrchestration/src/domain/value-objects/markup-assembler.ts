@@ -32,6 +32,7 @@ import type { Style } from "./creative-style.js";
 import type { CreativeTemplateLayer } from "./creative-templates.js";
 import { isLinkableKind } from "./creative-types.js";
 import type { ToneKind } from "./Treatment.vo.js";
+import type { VideoProps } from "./brief-template.js";
 
 /** HTML-escape user-authored strings for the HTML text / quoted-attribute contexts (HL-D7). */
 export function escapeHtml(value: string): string {
@@ -107,6 +108,18 @@ export interface AssembleHtmlOptions {
   readonly profile?: { readonly maxBytes: number };
   /** Relative path to the image a picture layer emits (defaults to "fallback.png"). */
   readonly fallbackImageSrc?: string;
+  /**
+   * The packaged video renditions a `video` layer resolves against (D134's
+   * video half): the layer's `render` selector names a key here. Absent — or
+   * missing the selector — is a refusal at assembly time.
+   */
+  readonly videoSources?: Readonly<Record<string, string>>;
+  /**
+   * Preview mode: a `video` layer emits nothing (the editor's preview shows
+   * the poster raster instead), so neither `render` nor `videoSources` is
+   * required. Only the web preview reads pass this.
+   */
+  readonly videoPreview?: true;
 }
 
 export interface AssembledHtml {
@@ -229,6 +242,36 @@ export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
       const nav = hasClick ? CLICK_OPEN : "";
       const hiddenSpan = `<span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0);">${copy}</span>`;
       layerMarkup.push(`<button type="button" style="${box}"${nav}>${hiddenSpan}</button>`);
+      continue;
+    }
+    // The video layer (D134's video half): the packaged rendition autoplaying
+    // muted over the poster raster. In preview mode it emits nothing — the
+    // editor's preview shows the raster — so neither a render selector nor
+    // videoSources is required there.
+    if (layer.kind === "video") {
+      if (options.videoPreview === true) continue;
+      const props = layer.props as VideoProps | undefined;
+      const render =
+        typeof props?.render === "string" && props.render.length > 0 ? props.render : undefined;
+      if (render === undefined) {
+        throw new Error(`assembleHtml: video layer "${layer.id}" is missing a render selector`);
+      }
+      const videoUrl = options.videoSources?.[render];
+      if (videoUrl === undefined) {
+        throw new Error(
+          `assembleHtml: video layer "${layer.id}" has no entry in videoSources for "${render}"`,
+        );
+      }
+      if (!isAbsoluteUrl(videoUrl)) {
+        throw new Error(
+          `assembleHtml: videoSources["${render}"] must be an absolute http(s) URL, got ${JSON.stringify(videoUrl)}`,
+        );
+      }
+      const box = layerBoxStyle(layer, options.canvas, width, height);
+      const loopAttr = props !== undefined && "loop" in props && props.loop === true ? " loop" : "";
+      layerMarkup.push(
+        `<div style="${box}"><video src="${escapeHtml(videoUrl)}" muted autoplay playsinline${loopAttr} poster="${src}"></video></div>`,
+      );
     }
   }
 
