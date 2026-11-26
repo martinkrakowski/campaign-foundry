@@ -275,15 +275,12 @@ export function versionsOf(templates: readonly CreativeTemplate[], id: string): 
  * The library record as a brief's pinned template (D123), or `null` when the
  * record cannot be one.
  *
- * `null` is a real answer, not a defensive branch. `BriefTemplate.id` is
- * `CanonicalTemplateId` and `isBriefTemplate` additionally requires
- * `CANONICAL_TEMPLATES[creativeType].id === id`, so **only a canonical record
- * is pinnable today** — a library grown beyond the canonical three would serve
- * records no brief can carry. `FsTemplateStore` is seeded from
- * `CANONICAL_TEMPLATES` and nothing else, so every record the live library
- * serves passes; the refusal exists so an un-pinnable record is refused
- * visibly rather than cast through and half-applied at the editor's restore
- * boundary.
+ * `null` is a real answer, not a defensive branch. `isBriefTemplate` accepts a
+ * record whose id is canonical and matches its `creativeType`, or org-saved
+ * (`tpl-` + a lowercase uuid, RW-22); any other id, or a record whose layer
+ * structure fails the guard, is not a brief's pinned reference and returns
+ * `null`. The refusal exists so an un-pinnable record is refused visibly
+ * rather than cast through and half-applied at the editor's restore boundary.
  *
  * The guard is `isBriefTemplate` itself — the same one both storage boundaries
  * use — never a second copy of its rules here.
