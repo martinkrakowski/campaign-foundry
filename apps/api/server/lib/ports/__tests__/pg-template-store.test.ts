@@ -194,6 +194,40 @@ describe("PgTemplateStore (RW-22)", () => {
     spy.mockRestore();
   });
 
+  test("saveTemplate maps every 23505 error shape to TemplateVersionExistsError and rethrows the rest unchanged", async () => {
+    // Every shape an error can take when the insert rejects: pg attaches
+    // SQLSTATE as a string, but the mapping must survive a non-object, null,
+    // a missing `code`, an `undefined` one, and a numeric one (String(23505)).
+    const failures: Array<{ failure: unknown; exists: boolean }> = [
+      { failure: "constraint failed", exists: false },
+      { failure: null, exists: false },
+      { failure: new Error("no code"), exists: false },
+      { failure: Object.assign(new Error("code undefined"), { code: undefined }), exists: false },
+      { failure: Object.assign(new Error("numeric sqlstate"), { code: 23505 }), exists: true },
+      { failure: Object.assign(new Error("string sqlstate"), { code: "23505" }), exists: true },
+    ];
+    for (const { failure, exists } of failures) {
+      const fake = {
+        query: vi.fn().mockRejectedValue(failure),
+      } as unknown as SqlClient;
+      const store = new PgTemplateStore(fake, "local");
+
+      const thrown = await store.saveTemplate(orgTemplate(), "u1").then(
+        () => {
+          throw new Error("saveTemplate should have rejected");
+        },
+        (error: unknown) => error,
+      );
+      if (exists) {
+        expect(thrown, `expected TemplateVersionExistsError for ${String(failure)}`).toBeInstanceOf(
+          TemplateVersionExistsError,
+        );
+      } else {
+        expect(thrown, `expected the same error for ${String(failure)}`).toBe(failure);
+      }
+    }
+  });
+
   test("the same id and version in two orgs are independent rows", async () => {
     const store = new PgTemplateStore(db, "local");
     await store.saveTemplate(orgTemplate(), "u1");
