@@ -12,6 +12,9 @@
 # Anything else is refused, so a stray `--help` or typo never deploys.
 set -eu
 
+echo "deploy.sh is retired: staging is promoted through the platform repository (see .github/workflows/build-image.yml)" >&2
+exit 1
+
 CONFIRMED=no
 for arg in "$@"; do
   case "$arg" in
