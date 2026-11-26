@@ -716,6 +716,18 @@ describe("parseBrief", () => {
         );
       });
 
+      test("a video layer's loop must be a boolean", () => {
+        expect(() =>
+          parseBrief({
+            ...valid,
+            type: "display-ad",
+            template: withVideo({ render: "hero/1x1/v1.mp4", loop: "yes" }),
+          }),
+        ).toThrow(
+          'Campaign brief field "template.layers[5].props.loop" must be a boolean; got "yes".',
+        );
+      });
+
       test("a video layer's props refuse src and poster", () => {
         expect(() =>
           parseBrief({ ...valid, type: "display-ad", template: withVideo({ src: "x.mp4" }) }),
