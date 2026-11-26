@@ -23,8 +23,8 @@
     },
     {
       "file": "apps/api/server/lib/deletion/reconcile.ts",
-      "before": "if (options.maxCandidates !== undefined && candidates > options.maxCandidates) {",
-      "after": "if (false) {",
+      "before": "if (options.maxCandidates !== undefined && candidates > options.maxCandidates) {\n    throw new Error(\n      `reconcile refused",
+      "after": "if (false) {\n    throw new Error(\n      `reconcile refused",
       "because": "the circuit breaker removed: a plan far over the cap is applied. The test asks for an apply with a cap of 2 against three orphan prefixes and asserts it rejects and the store is unchanged, so the rejects assertion fails.",
       "command": [
         "yarn",
@@ -61,8 +61,8 @@
     },
     {
       "file": "apps/api/server/lib/deletion/reconcile.ts",
-      "before": "for (const plan of plans) options.onPlan?.(plan);",
-      "after": "void plans;",
+      "before": "for (const plan of plans) options.onPlan?.(plan);\n  if (!options.apply) return { plans, applied: { prefixes",
+      "after": "void plans;\n  if (!options.apply) return { plans, applied: { prefixes",
       "because": "the plan is never reported, so an apply deletes with no record of what it set out to delete. The test collects plan and delete events in one array and asserts both plan events precede the first store call, so expect(events).toEqual(...) fails on that assertion line.",
       "command": [
         "yarn",

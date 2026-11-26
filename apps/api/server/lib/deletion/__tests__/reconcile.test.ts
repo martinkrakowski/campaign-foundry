@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
-import type { ListedObject, ObjectStorePort } from "@campaignfoundry/CampaignOrchestration";
+import {
+  InMemoryObjectStore,
+  PublicAdMediaStore,
+} from "@campaignfoundry/CampaignOrchestration/infrastructure";
+import type {
+  ListedObject,
+  ObjectStorePort,
+  PublicAdMediaPort,
+} from "@campaignfoundry/CampaignOrchestration";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import type { SqlClient, SqlQuery } from "../../db/sql-client.js";
 import { campaignPrefix, inputKey } from "../../object-store/object-keys.js";
@@ -8,13 +15,24 @@ import {
   ORPHAN_MIN_AGE_MS,
   ROW_QUERY_CHUNK,
   applyReconcilePlan,
+  applyPublicMediaReconcilePlan,
   describePlan,
+  describePublicMediaPlan,
+  describePublicMediaStep,
   describeStep,
+  planPublicMediaReconcile,
   planReconcile,
   reconcileOrgs,
+  reconcilePublicMediaOrgs,
+  type PublicMediaReconcileStep,
   type ReconcilePlan,
   type ReconcileStep,
 } from "../reconcile.js";
+import { PublishedClipObjectMissingError } from "@campaignfoundry/CampaignOrchestration";
+import {
+  PgPublishedClipStore,
+  publishedClipLockName,
+} from "../../ports/pg-published-clip-store.js";
 
 const uuidN = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
 
@@ -758,5 +776,331 @@ describe("reconcile (D239)", () => {
     await planReconcile(sqlWithEvents, paged, ORG, NOW);
     expect(calls.length).toBe(2);
     expect(events).toEqual(["page", "page", "page", "query", "query"]);
+  });
+});
+
+describe("public-media reconcile (D239)", () => {
+  let db: SqlClient;
+  let clock: number;
+  let publicStore: InMemoryObjectStore;
+  let media: PublicAdMediaStore;
+
+  const HASH = "a".repeat(64);
+
+  async function seedClipRow(orgId: string, campaignId: string, key: string): Promise<void> {
+    const existing = await db.query<{ id: string }>(`select id from campaign where id = $1::uuid`, [
+      campaignId,
+    ]);
+    if (existing.rows.length === 0) {
+      await db.query(`insert into campaign (id, org_id, slug) values ($1::uuid, $2, $3)`, [
+        campaignId,
+        orgId,
+        `camp-${campaignId.slice(0, 8)}`,
+      ]);
+    }
+    await db.query(
+      `insert into published_clip (org_id, campaign_id, content_hash, key, url)
+       values ($1, $2::uuid, $3, $4, $5)`,
+      [orgId, campaignId, HASH, key, `https://media.test/${key}`],
+    );
+  }
+
+  beforeEach(async () => {
+    clock = NOW;
+    db = await migratedDatabase();
+    publicStore = new InMemoryObjectStore({ now: () => clock });
+    media = new PublicAdMediaStore({ store: publicStore, baseUrl: "https://media.test" });
+    await db.query(`insert into org (id, name) values ('acme', 'Acme')`);
+  }, 30_000);
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await db.end();
+  });
+
+  test("keeps a fresh orphan object within the D239 grace window and removes it once older", async () => {
+    clock = NOW - 30 * 60_000;
+    const fresh = await media.publish(ORG, new Uint8Array([1]), HASH);
+    clock = NOW - 2 * 3_600_000;
+    const old = await media.publish(ORG, new Uint8Array([2]), "b".repeat(64));
+    clock = NOW;
+
+    // Fresh (30 minutes old): kept by an applying reconcile.
+    await reconcilePublicMediaOrgs(db, media, [ORG], { apply: true, now: () => NOW });
+    expect(await publicStore.get(fresh.key)).toBeDefined();
+    expect(await publicStore.get(old.key)).toBeUndefined();
+
+    // 31 minutes later the fresh orphan is past the window: a candidate.
+    await reconcilePublicMediaOrgs(db, media, [ORG], {
+      apply: true,
+      now: () => NOW + 31 * 60_000,
+    });
+    expect(await publicStore.get(fresh.key)).toBeUndefined();
+    expect(await publicStore.list(`${ORG}/`)).toHaveLength(0);
+  });
+
+  test("never deletes a public object whose published_clip row exists, even when old", async () => {
+    const C1 = "c1c1c1c1-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+    clock = NOW - 5 * 3_600_000;
+    const published = await media.publish(ORG, new Uint8Array([1]), HASH);
+    clock = NOW;
+    await seedClipRow(ORG, C1, published.key);
+
+    const result = await reconcilePublicMediaOrgs(db, media, [ORG], {
+      apply: true,
+      now: () => NOW,
+    });
+    expect(result.applied).toEqual({ deleted: 0, skipped: 0 });
+    expect(result.plans[0].keys).toEqual([]);
+    expect(await publicStore.get(published.key)).toBeDefined();
+  });
+
+  test("skips a key whose published_clip row appeared before apply", async () => {
+    clock = NOW - 5 * 3_600_000;
+    const published = await media.publish(ORG, new Uint8Array([1]), HASH);
+    clock = NOW;
+
+    const plan = await planPublicMediaReconcile(db, media, ORG, NOW);
+    expect(plan.keys).toEqual([published.key]);
+
+    // The record() the crash interrupted lands between the plan and the apply.
+    const C1 = "c1c1c1c1-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+    await seedClipRow(ORG, C1, published.key);
+
+    const steps: PublicMediaReconcileStep[] = [];
+    const result = await applyPublicMediaReconcilePlan(db, media, plan, (s) => steps.push(s));
+    expect(result).toEqual({ deleted: 0, skipped: 1 });
+    expect(steps).toEqual([{ kind: "public-clip", key: published.key, outcome: "skipped" }]);
+    expect(await publicStore.get(published.key)).toBeDefined();
+  });
+
+  test("a publisher paused past the grace window cannot record the object reconcile removed", async () => {
+    clock = NOW - 5 * 3_600_000;
+    const published = await media.publish(ORG, new Uint8Array([1]), HASH);
+    clock = NOW;
+
+    // The publisher stalls between publish() and record(); reconcile runs to
+    // completion in the meantime and removes the then-unrecorded object.
+    const result = await reconcilePublicMediaOrgs(db, media, [ORG], {
+      apply: true,
+      now: () => NOW,
+    });
+    expect(result.applied).toEqual({ deleted: 1, skipped: 0 });
+    expect(await publicStore.get(published.key)).toBeUndefined();
+
+    // The publisher wakes and records, re-checking the object under the lock.
+    const campaignId = "c1c1c1c1-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+    await db.query(`insert into campaign (id, org_id, slug) values ($1::uuid, $2, 'camp-race')`, [
+      campaignId,
+      ORG,
+    ]);
+    const ledger = new PgPublishedClipStore(db);
+    await expect(
+      ledger.record(ORG, campaignId, published.key, published.url, HASH, () =>
+        media.exists(published.key),
+      ),
+    ).rejects.toBeInstanceOf(PublishedClipObjectMissingError);
+
+    // No ledger row names the removed object.
+    expect(await ledger.listForCampaign(ORG, campaignId)).toEqual([]);
+  });
+
+  test("a record that commits before the apply wins: reconcile skips the key and the object stays", async () => {
+    clock = NOW - 5 * 3_600_000;
+    const published = await media.publish(ORG, new Uint8Array([1]), HASH);
+    clock = NOW;
+
+    const plan = await planPublicMediaReconcile(db, media, ORG, NOW);
+    const campaignId = "c1c1c1c1-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+    await db.query(`insert into campaign (id, org_id, slug) values ($1::uuid, $2, 'camp-race')`, [
+      campaignId,
+      ORG,
+    ]);
+    await expect(
+      new PgPublishedClipStore(db).record(ORG, campaignId, published.key, published.url, HASH, () =>
+        media.exists(published.key),
+      ),
+    ).resolves.toBe("recorded");
+
+    await expect(applyPublicMediaReconcilePlan(db, media, plan)).resolves.toEqual({
+      deleted: 0,
+      skipped: 1,
+    });
+    expect(await publicStore.get(published.key)).toBeDefined();
+  });
+
+  test("the removal happens inside one transaction that first takes the key's advisory lock", async () => {
+    clock = NOW - 5 * 3_600_000;
+    const published = await media.publish(ORG, new Uint8Array([1]), HASH);
+    clock = NOW;
+    const plan = await planPublicMediaReconcile(db, media, ORG, NOW);
+
+    const events: string[] = [];
+    const watched: SqlClient = {
+      ...db,
+      transaction: (work) =>
+        db.transaction(async (tx) => {
+          events.push("begin");
+          const result = await work({
+            query: async (text: string, params?: readonly unknown[]) => {
+              if (text.includes("pg_advisory_xact_lock")) {
+                events.push(`lock:${String(params?.[0])}`);
+              } else if (text.includes("from published_clip")) {
+                events.push("check");
+              }
+              return tx.query(text, params);
+            },
+            exec: (text: string) => tx.exec(text),
+          });
+          events.push("commit");
+          return result;
+        }),
+    };
+    const removing: PublicAdMediaPort = {
+      publish: (...args) => media.publish(...args),
+      remove: async (key) => {
+        events.push("remove");
+        await media.remove(key);
+      },
+      removeOrg: (orgId) => media.removeOrg(orgId),
+      listPages: (orgId) => media.listPages(orgId),
+      exists: (key) => media.exists(key),
+      urlFor: (key) => media.urlFor(key),
+    };
+
+    await applyPublicMediaReconcilePlan(watched, removing, plan);
+    expect(events).toEqual([
+      "begin",
+      `lock:${publishedClipLockName(ORG, published.key)}`,
+      "check",
+      "remove",
+      "commit",
+    ]);
+  });
+
+  test("aborts without deleting on a malformed or cross-org key", async () => {
+    for (const badKey of [
+      `${ORG}/${"a".repeat(32)}/not-a-hash.mp4`,
+      `${ORG}/${"a".repeat(32)}/${HASH}.png`,
+      `other-org/${"a".repeat(32)}/${HASH}.mp4`,
+    ]) {
+      const stub = {
+        listPages: async function* () {
+          yield [{ key: badKey, size: 1, lastModified: new Date(NOW - 5 * 3_600_000) }];
+        },
+        remove: vi.fn(async () => {}),
+      } as unknown as PublicAdMediaPort;
+
+      await expect(
+        reconcilePublicMediaOrgs(db, stub, [ORG], { apply: true, now: () => NOW }),
+      ).rejects.toThrow("public-media reconcile aborted, nothing deleted");
+      expect(stub.remove).not.toHaveBeenCalled();
+    }
+
+    // A valid orphan plus a bad key: all orgs are planned before the first delete.
+    const stub = {
+      listPages: async function* () {
+        yield [
+          {
+            key: `acme/${"a".repeat(32)}/${HASH}.mp4`,
+            size: 1,
+            lastModified: new Date(NOW - 5 * 3_600_000),
+          },
+        ];
+        yield [
+          {
+            key: `${ORG}/${"a".repeat(32)}/bad.mp4`,
+            size: 1,
+            lastModified: new Date(NOW - 5 * 3_600_000),
+          },
+        ];
+      },
+      remove: vi.fn(async () => {}),
+    } as unknown as PublicAdMediaPort;
+    await expect(
+      reconcilePublicMediaOrgs(db, stub, ["acme", ORG], { apply: true, now: () => NOW }),
+    ).rejects.toThrow("public-media reconcile aborted, nothing deleted");
+    expect(stub.remove).not.toHaveBeenCalled();
+  });
+
+  test("refuses when candidates exceed maxCandidates and deletes nothing", async () => {
+    clock = NOW - 5 * 3_600_000;
+    await media.publish(ORG, new Uint8Array([1]), HASH);
+    await media.publish(ORG, new Uint8Array([2]), "b".repeat(64));
+    await media.publish("acme", new Uint8Array([3]), "c".repeat(64));
+    clock = NOW;
+
+    let threw: string | undefined;
+    try {
+      await reconcilePublicMediaOrgs(db, media, [ORG, "acme"], {
+        apply: true,
+        now: () => NOW,
+        maxCandidates: 2,
+      });
+    } catch (e) {
+      threw = e instanceof Error ? e.message : String(e);
+    }
+    expect(threw).toMatch(/exceed the cap of 2/);
+    expect(threw).not.toContain(HASH);
+    expect(await publicStore.list("acme/")).toHaveLength(1);
+    expect(await publicStore.list(`${ORG}/`)).toHaveLength(2);
+
+    const dry = await reconcilePublicMediaOrgs(db, media, [ORG, "acme"], {
+      apply: false,
+      now: () => NOW,
+      maxCandidates: 0,
+    });
+    expect(dry.plans.flatMap((p) => p.keys)).toHaveLength(3);
+    expect(dry.applied).toEqual({ deleted: 0, skipped: 0 });
+
+    const applied = await reconcilePublicMediaOrgs(db, media, [ORG, "acme"], {
+      apply: true,
+      now: () => NOW,
+      maxCandidates: 3,
+    });
+    expect(applied.applied).toEqual({ deleted: 3, skipped: 0 });
+    expect(await publicStore.list("acme/")).toHaveLength(0);
+    expect(await publicStore.list(`${ORG}/`)).toHaveLength(0);
+  });
+
+  test("reads rows in chunks and reports each plan before the first delete", async () => {
+    expect(ROW_QUERY_CHUNK).toBe(500);
+    clock = NOW - 5 * 3_600_000;
+    for (let i = 0; i < 501; i++) {
+      await media.publish(ORG, new Uint8Array([1]), i.toString(16).padStart(64, "0"));
+    }
+    clock = NOW;
+    const { sql, calls } = recording(db);
+    const plan = await planPublicMediaReconcile(sql, media, ORG, NOW);
+    expect(plan.keys).toHaveLength(501);
+    expect(calls.length).toBe(2);
+    expect((calls[0].params[1] as string[]).length).toBe(500);
+    expect((calls[1].params[1] as string[]).length).toBe(1);
+
+    const events: string[] = [];
+    await reconcilePublicMediaOrgs(db, media, [ORG], {
+      apply: true,
+      now: () => NOW,
+      onPlan: (p) => events.push(`plan ${p.orgId} ${p.keys.length}`),
+      onStep: (s) => events.push(`step ${s.outcome}`),
+    });
+    expect(events[0]).toBe(`plan ${ORG} 501`);
+    expect(events.filter((e) => e === "step deleted")).toHaveLength(501);
+    expect(await publicStore.list(`${ORG}/`)).toHaveLength(0);
+  });
+
+  test("describes a plan and a step as the lines the CLI logs", () => {
+    expect(
+      describePublicMediaPlan({ orgId: ORG, keys: [`${ORG}/${"a".repeat(32)}/${HASH}.mp4`] }),
+    ).toEqual([
+      `  public media org ${ORG}: 1 orphan clip(s)`,
+      `    public clip ${ORG}/${"a".repeat(32)}/${HASH}.mp4`,
+    ]);
+    expect(describePublicMediaStep({ kind: "public-clip", key: "k1", outcome: "deleted" })).toBe(
+      "  deleted public-clip k1",
+    );
+    expect(describePublicMediaStep({ kind: "public-clip", key: "k2", outcome: "skipped" })).toBe(
+      "  skipped public-clip k2 (a row appeared)",
+    );
   });
 });

@@ -1,5 +1,6 @@
 import {
   PublishAdClipUseCase,
+  PublishedClipObjectMissingError,
   PublicMediaNotConfiguredError,
 } from "@campaignfoundry/CampaignOrchestration";
 import {
@@ -216,6 +217,8 @@ export default defineEventHandler(async (event) => {
   // selector. The org comes from the authenticated tenant, never from the body:
   // a request body is untrusted input, not a tenancy decision.
   let clipPublisher: ClipPublisher | undefined;
+  // Set when a clip's public object vanished before its record could be written.
+  let republishNeeded = false;
   if (publishClip && publishAdClipUseCase !== undefined && target !== undefined) {
     clipPublisher = async (selector: string): Promise<string> => {
       const renderKey = renderObjectKey(
@@ -223,12 +226,17 @@ export default defineEventHandler(async (event) => {
         target.slug,
         `${target.slug}/${selector}`,
       );
-      const { url } = await publishAdClipUseCase.execute({
-        orgId: scope.orgId,
-        campaignId: target.campaignId,
-        renderKey,
-      });
-      return url;
+      try {
+        const { url } = await publishAdClipUseCase.execute({
+          orgId: scope.orgId,
+          campaignId: target.campaignId,
+          renderKey,
+        });
+        return url;
+      } catch (error) {
+        if (error instanceof PublishedClipObjectMissingError) republishNeeded = true;
+        throw error;
+      }
     };
   }
 
@@ -244,6 +252,15 @@ export default defineEventHandler(async (event) => {
     ...(publishClip ? { publishClip: true, clipPublisher } : {}),
   });
   if (!result.success) {
+    if (republishNeeded) {
+      // The clip's public object was removed between publishing and recording
+      // it; nothing was packaged. Running the export again publishes it afresh.
+      setResponseStatus(event, 409);
+      return {
+        error:
+          "A published clip was removed before it could be recorded; republish needed — run the export again.",
+      };
+    }
     setResponseStatus(event, 422);
     return { error: result.error.message };
   }

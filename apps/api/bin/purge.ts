@@ -16,8 +16,13 @@ import {
 } from "../server/lib/deletion/deletion-store.js";
 import {
   describePlan,
+  describePublicMediaPlan,
+  describePublicMediaStep,
   describeStep,
   reconcileOrgs,
+  reconcilePublicMediaOrgs,
+  type PublicMediaReconcilePlan,
+  type PublicMediaReconcileStep,
   type ReconcilePlan,
   type ReconcileStep,
 } from "../server/lib/deletion/reconcile.js";
@@ -26,7 +31,7 @@ import { purgeCampaign } from "../server/lib/deletion/purge-campaign.js";
 import { purgeOrg, requestOrgDeletion } from "../server/lib/deletion/purge-org.js";
 import { expireOrgTombstones, ORG_RETENTION } from "../server/lib/deletion/expire-org.js";
 import { LOCAL_TENANT } from "../server/lib/tenant.js";
-import { objectStoreClient } from "../server/lib/object-store/index.js";
+import { objectStoreClient, publicAdMediaClient } from "../server/lib/object-store/index.js";
 
 export const USAGE = "usage: yarn purge:sweep [-- --dry-run]";
 
@@ -415,6 +420,19 @@ function reconcileLogging(log: (line: string) => void): {
   };
 }
 
+/** The same two hooks for the public-media reconcile's own plan and steps. */
+function publicMediaLogging(log: (line: string) => void): {
+  onPlan: (plan: PublicMediaReconcilePlan) => void;
+  onStep: (step: PublicMediaReconcileStep) => void;
+} {
+  return {
+    onPlan: (plan) => {
+      for (const line of describePublicMediaPlan(plan)) log(line);
+    },
+    onStep: (step) => log(describePublicMediaStep(step)),
+  };
+}
+
 export async function runReconcile(
   args: readonly string[],
   open: () => SqlClient = connect,
@@ -426,7 +444,8 @@ export async function runReconcile(
   const objects = store();
   const db = open();
   try {
-    const { applied } = await reconcileOrgs(db, objects, await orgsToVisit(db, org, "reconcile"), {
+    const orgIds = await orgsToVisit(db, org, "reconcile");
+    const { applied } = await reconcileOrgs(db, objects, orgIds, {
       apply,
       now,
       ...reconcileLogging(log),
@@ -436,6 +455,19 @@ export async function runReconcile(
         ? `  Deleted ${applied.prefixes} prefix(es) and ${applied.inputs} input(s); skipped ${applied.skipped}.`
         : "  Dry run: nothing deleted. Re-run with --apply to delete.",
     );
+    const media = publicAdMediaClient();
+    if (media !== undefined) {
+      const { applied } = await reconcilePublicMediaOrgs(db, media, orgIds, {
+        apply,
+        now,
+        ...publicMediaLogging(log),
+      });
+      log(
+        apply
+          ? `  Public media: deleted ${applied.deleted} clip(s); skipped ${applied.skipped}.`
+          : "  Public media dry run: nothing deleted. Re-run with --apply to delete.",
+      );
+    }
   } finally {
     await db.end();
   }
@@ -558,6 +590,27 @@ export async function housekeeping(
   } catch (error) {
     failed++;
     log(`  reconcile failed (${reason(error)})`);
+  }
+  // The public-media reconcile shares the reconcile switch: when the private
+  // reconcile was refused or skipped by the switch, the public one is too.
+  try {
+    if (reconcileError === undefined && reconcileEnabled) {
+      const media = publicAdMediaClient();
+      if (media !== undefined) {
+        const { applied } = await reconcilePublicMediaOrgs(db, media, orgIds, {
+          apply: true,
+          now,
+          maxCandidates: SWEEP_RECONCILE_MAX_CANDIDATES,
+          ...publicMediaLogging(log),
+        });
+        log(
+          `  Public media reconcile: deleted ${applied.deleted} clip(s); skipped ${applied.skipped}.`,
+        );
+      }
+    }
+  } catch (error) {
+    failed++;
+    log(`  public-media reconcile failed (${reason(error)})`);
   }
   try {
     const { deleted } = await expireCache(objects, orgIds, {

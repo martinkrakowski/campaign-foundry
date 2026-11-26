@@ -23,11 +23,30 @@ export interface PublishedClipRecord {
  * its ledger have different lifetimes: the store holds bytes, the record holds
  * facts, and a use case that removes bytes must not silently rewrite facts.
  */
+/**
+ * Thrown by `record` when its `objectStillPublished` precondition answers
+ * false: the object the caller published is gone (a reconcile pass removed it
+ * while the caller paused), so no ledger row may name it.
+ */
+export class PublishedClipObjectMissingError extends Error {
+  constructor() {
+    super("The published clip object no longer exists; refusing to record it.");
+    this.name = "PublishedClipObjectMissingError";
+  }
+}
+
 export interface PublishedClipRecordPort {
   /**
    * Record `(orgId, campaignId) -> key/url` for `contentHash`. Returns
    * `"recorded"` when this call inserted the row, `"exists"` when a record
    * for the same content hash was already present.
+   *
+   * When `objectStillPublished` is given, the adapter evaluates it while
+   * holding the same per-key lock a public-media reconcile takes around its
+   * ledger check and removal, and throws `PublishedClipObjectMissingError`
+   * (writing nothing) if it answers false. Record and reconcile are thereby
+   * mutually exclusive on the key: either the row commits first and the
+   * reconcile skips the key, or the removal came first and the record refuses.
    */
   record(
     orgId: string,
@@ -35,6 +54,7 @@ export interface PublishedClipRecordPort {
     key: ObjectKey,
     url: string,
     contentHash: string,
+    objectStillPublished?: () => Promise<boolean>,
   ): Promise<"recorded" | "exists">;
 
   /** The recorded clip for `contentHash` under `(orgId, campaignId)`, if any. */

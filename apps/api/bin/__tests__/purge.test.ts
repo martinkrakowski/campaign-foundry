@@ -2,13 +2,21 @@ import { describe, test, expect, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
+import type { PublicAdMediaPort } from "@campaignfoundry/CampaignOrchestration";
 import { USAGE, connect, main, sweep, MAX_CLAIMS_PER_SWEEP } from "../purge.js";
-import { emptyDatabase } from "../../server/lib/db/__tests__/pglite-client.js";
+import { emptyDatabase, migratedDatabase } from "../../server/lib/db/__tests__/pglite-client.js";
 import type { SqlClient } from "../../server/lib/db/sql-client.js";
 import type { DeletionRow } from "../../server/lib/deletion/deletion-store.js";
 import { claimDue, listDue, recordFailure } from "../../server/lib/deletion/deletion-store.js";
 import { purgeCampaign } from "../../server/lib/deletion/purge-campaign.js";
 import { purgeOrg } from "../../server/lib/deletion/purge-org.js";
+import {
+  resetObjectStoreClient,
+  resetPublicAdMediaClient,
+  setObjectStoreClient,
+  setPublicAdMediaClient,
+} from "../../server/lib/object-store/index.js";
 
 /** No test below inspects the database: `claim`/`purge` are injected stubs and
  *  `recordFailure`/`claimDue`/`purgeCampaign`/`purgeOrg` are module-level mocks, so a
@@ -570,6 +578,47 @@ describe("purge CLI (PT-9g3, D231)", () => {
 
       expect(after).not.toHaveBeenCalled();
       expect(db.end).toHaveBeenCalled();
+    });
+
+    test("main sweep counts a public-media reconcile failure as a housekeeping step", async () => {
+      const savedObjectStore = process.env.OBJECT_STORE;
+      process.env.OBJECT_STORE = "s3";
+      const objects = new InMemoryObjectStore();
+      setObjectStoreClient(objects);
+      const failing = {
+        publish: async () => {
+          throw new Error("not used here");
+        },
+        remove: async () => {},
+        removeOrg: async () => {},
+        urlFor: (key: string) => `https://media.test/${key}`,
+        exists: async () => true,
+        listPages: async function* () {
+          throw new Error("public bucket down");
+        },
+      } satisfies PublicAdMediaPort;
+      setPublicAdMediaClient(failing);
+      const db = await migratedDatabase();
+      const open = vi.fn(() => db);
+      const lines: string[] = [];
+      try {
+        // No `after` is injected: the real housekeeping runs, its reconcile and
+        // cache steps succeed over the empty store, and the failing public-media
+        // reconcile is counted.
+        vi.mocked(claimDue).mockResolvedValueOnce(undefined);
+        await expect(main("sweep", false, open, (l) => lines.push(l))).rejects.toThrow(
+          "1 housekeeping step(s) failed; see the lines above.",
+        );
+        expect(lines).toContain("  public-media reconcile failed (public bucket down)");
+        expect(lines).toContain("  Reconcile: deleted 0 prefix(es) and 0 input(s); skipped 0.");
+        expect(lines).toContain("  Cache expiry: deleted 0 object(s).");
+      } finally {
+        // `main` already closed the connection in its own `finally`.
+        resetPublicAdMediaClient();
+        resetObjectStoreClient();
+        if (savedObjectStore === undefined) delete process.env.OBJECT_STORE;
+        else process.env.OBJECT_STORE = savedObjectStore;
+      }
     });
 
     test("main refuses an unknown or missing command", async () => {

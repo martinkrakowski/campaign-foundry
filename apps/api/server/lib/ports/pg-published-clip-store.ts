@@ -1,4 +1,8 @@
-import type { ObjectKey, PublishedClipRecordPort } from "@campaignfoundry/CampaignOrchestration";
+import {
+  PublishedClipObjectMissingError,
+  type ObjectKey,
+  type PublishedClipRecordPort,
+} from "@campaignfoundry/CampaignOrchestration";
 import type { SqlClient } from "../db/sql-client.js";
 import type { PublishedClipRecord } from "@campaignfoundry/CampaignOrchestration";
 
@@ -14,6 +18,11 @@ export class PublishedClipRecordRefusedError extends Error {
     super("Refusing to record a published clip for a campaign that is not live.");
     this.name = "PublishedClipRecordRefusedError";
   }
+}
+
+/** The advisory-lock name that serialises one public key's record against its reconcile. */
+export function publishedClipLockName(orgId: string, key: string): string {
+  return `published_clip:${orgId}:${key}`;
 }
 
 /**
@@ -44,17 +53,28 @@ export class PgPublishedClipStore implements PublishedClipRecordPort {
     key: ObjectKey,
     url: string,
     contentHash: string,
+    objectStillPublished?: () => Promise<boolean>,
   ): Promise<"recorded" | "exists"> {
-    const { rows } = await this.db.query<{ key: string }>(
-      `insert into published_clip (org_id, campaign_id, content_hash, key, url)
-       select $1, $2::uuid, $3, $4, $5
-       where exists (
-         select 1 from campaign where id = $2::uuid and deleted_at is null
-       )
-       on conflict (org_id, campaign_id, content_hash) do nothing
-       returning key`,
-      [orgId, campaignId, contentHash, key, url],
-    );
+    const { rows } = await this.db.transaction(async (tx) => {
+      // The same per-key lock a public-media reconcile holds around its ledger
+      // check and removal: the two never interleave on one key.
+      await tx.query(`select pg_advisory_xact_lock(hashtextextended($1, 0))`, [
+        publishedClipLockName(orgId, key),
+      ]);
+      if (objectStillPublished !== undefined && !(await objectStillPublished())) {
+        throw new PublishedClipObjectMissingError();
+      }
+      return tx.query<{ key: string }>(
+        `insert into published_clip (org_id, campaign_id, content_hash, key, url)
+         select $1, $2::uuid, $3, $4, $5
+         where exists (
+           select 1 from campaign where id = $2::uuid and deleted_at is null
+         )
+         on conflict (org_id, campaign_id, content_hash) do nothing
+         returning key`,
+        [orgId, campaignId, contentHash, key, url],
+      );
+    });
     if (rows.length > 0) return "recorded";
     // Nothing inserted: either the content hash is already recorded or the
     // campaign is not live (tombstoned or absent) — the `where exists` gate

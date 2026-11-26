@@ -200,22 +200,36 @@ export type FakePublicAdMedia = PublicAdMediaPort & {
  */
 export const fakePublicAdMedia = (opts: FakePublicAdMediaOptions = {}): FakePublicAdMedia => {
   const removed: string[] = [];
+  const published = new Map<string, string>();
   let seq = 0;
   const port = {
     publish: vi.fn(async (orgId: string, _bytes: Uint8Array, contentHash: string) => {
       if (opts.publishFails) throw opts.publishFails;
       seq += 1;
       const key = `org/${orgId}/${String(seq).padStart(32, "0")}/${contentHash}.mp4`;
+      published.set(key, orgId);
       return { key, url: `https://media.example.invalid/${key}` };
     }),
     remove: vi.fn(async (key: string) => {
       if (opts.removeFails) throw opts.removeFails;
       removed.push(key);
+      published.delete(key);
     }),
     removeOrg: vi.fn(async (orgId: string) => {
       removed.push(`org/${orgId}/*`);
+      for (const [key, owner] of published) {
+        if (owner === orgId) published.delete(key);
+      }
     }),
+    exists: vi.fn(async (key: string) => published.has(key)),
     urlFor: vi.fn((key: string) => `https://media.example.invalid/${key}`),
+    listPages: vi.fn(async function* (orgId: string) {
+      for (const [key, owner] of published) {
+        if (owner === orgId) {
+          yield [{ key, size: 1, lastModified: new Date() }];
+        }
+      }
+    }),
   } satisfies PublicAdMediaPort;
   return Object.assign(port, { removed });
 };

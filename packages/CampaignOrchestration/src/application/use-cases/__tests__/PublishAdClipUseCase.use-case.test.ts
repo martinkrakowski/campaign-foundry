@@ -137,6 +137,7 @@ describe("PublishAdClipUseCase", () => {
       record.key,
       record.url,
       sha256(validAdClipBytes()),
+      expect.any(Function),
     );
     expect(record.url).toBe(`https://media.example.invalid/${record.key}`);
   });
@@ -389,6 +390,34 @@ describe("PublishAdClipUseCase", () => {
     await expect(execute(deps)).rejects.toThrow(PublishedClipRecordConflictError);
     // The object this call created is removed — the only remove there is.
     expect(publicAdMedia.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands record a precondition that reports whether the published object still exists", async () => {
+    const publicAdMedia = fakePublicAdMedia();
+    let seen: (() => Promise<boolean>) | undefined;
+    const publishedClipRecord = {
+      ...fakePublishedClipRecord(),
+      record: vi.fn(
+        async (
+          _o: string,
+          _c: string,
+          _k: string,
+          _u: string,
+          _h: string,
+          stillThere?: () => Promise<boolean>,
+        ) => {
+          seen = stillThere;
+          return "recorded" as const;
+        },
+      ),
+    };
+    const { deps } = makeDeps({ publicAdMedia, publishedClipRecord });
+    const record = await execute(deps);
+
+    expect(seen).toBeDefined();
+    expect(await seen!()).toBe(true);
+    await publicAdMedia.remove(record.key);
+    expect(await seen!()).toBe(false);
   });
 
   it("never writes to the private objectStore", async () => {

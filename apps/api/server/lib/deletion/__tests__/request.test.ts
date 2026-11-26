@@ -151,6 +151,8 @@ function failingMedia(): PublicAdMediaPort {
       throw new Error("boom");
     },
     urlFor: (key) => `https://media.test/${key}`,
+    listPages: async function* () {},
+    exists: async () => true,
   };
 }
 
