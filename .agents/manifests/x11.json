@@ -106,8 +106,8 @@
     },
     {
       "file": "packages/CampaignOrchestration/src/domain/value-objects/brief-template.ts",
-      "before": "  const creativeType = raw.creativeType as CreativeType;\n  if (CANONICAL_TEMPLATES[creativeType].id !== raw.id) return false;",
-      "after": "  const creativeType = raw.creativeType as CreativeType;",
+      "before": "    const creativeType = raw.creativeType as CreativeType;\n    // The id↔creativeType pairing only makes sense for the canonical table —\n    // an org template's own id never names a row in it.\n    if (isCanonical && CANONICAL_TEMPLATES[creativeType].id !== id) return false;",
+      "after": "    const creativeType = raw.creativeType as CreativeType;",
       "because": "The API pins the id to the type's canonical template (D124); without the match check the guard admits `canonical-video` naming `image-text` — each field legal alone, a draft the API refuses together.",
       "command": [
         "yarn",

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { SqlClient } from "../../db/sql-client.js";
 import { migratedDatabase } from "../../db/__tests__/pglite-client.js";
 import {
@@ -179,6 +179,19 @@ describe("PgTemplateStore (RW-22)", () => {
       `select t::text as row from template t where id = 'org-banner'`,
     );
     expect(after).toEqual(before);
+  });
+
+  test("a store error that is NOT the 23505 race rethrows unchanged, not TemplateVersionExistsError", async () => {
+    const store = new PgTemplateStore(db, "local");
+    // A real pg failure the primary key does not describe — e.g. a lost
+    // connection (SQLSTATE 08006). Only 23505 means "the first row already
+    // exists"; everything else must reach the caller as itself.
+    const failure = Object.assign(new Error("connection refused"), { code: "08006" });
+    const spy = vi.spyOn(db, "query").mockRejectedValueOnce(failure);
+
+    await expect(store.saveTemplate(orgTemplate(), "u1")).rejects.toBe(failure);
+    expect(spy).toHaveBeenCalledOnce();
+    spy.mockRestore();
   });
 
   test("the same id and version in two orgs are independent rows", async () => {
