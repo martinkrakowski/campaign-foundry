@@ -107,6 +107,7 @@ const fakeMedia = (): PublicAdMediaPort & { publish: Mock } => ({
   remove: vi.fn(async () => {}),
   removeOrg: vi.fn(async () => {}),
   urlFor: (key: ObjectKey) => `https://media.test/${key}`,
+  listPages: async function* () {},
 });
 
 /** Every `PUBLIC_MEDIA_*` variable, the set `publicAdMediaClient()` builds from. */

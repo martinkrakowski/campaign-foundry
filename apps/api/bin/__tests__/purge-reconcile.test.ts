@@ -1,6 +1,10 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
+import {
+  InMemoryObjectStore,
+  PublicAdMediaStore,
+} from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import { ObjectBackgroundCache } from "@campaignfoundry/CreativeGeneration";
+import type { PublicAdMediaPort } from "@campaignfoundry/CampaignOrchestration";
 import { migratedDatabase } from "../../server/lib/db/__tests__/pglite-client.js";
 import type { SqlClient } from "../../server/lib/db/sql-client.js";
 import {
@@ -18,7 +22,9 @@ import {
 } from "../purge.js";
 import {
   resetObjectStoreClient,
+  resetPublicAdMediaClient,
   setObjectStoreClient,
+  setPublicAdMediaClient,
 } from "../../server/lib/object-store/index.js";
 import { campaignPrefix, inputKey } from "../../server/lib/object-store/object-keys.js";
 
@@ -69,6 +75,7 @@ describe("reconcile CLI (bin/purge.ts)", () => {
     await db.end();
     restoreEnv();
     resetObjectStoreClient();
+    resetPublicAdMediaClient();
     vi.restoreAllMocks();
   });
 
@@ -377,6 +384,94 @@ describe("reconcile CLI (bin/purge.ts)", () => {
     expect(await memory.list("org/acme/campaign/")).toHaveLength(0);
     expect(endSpy).toHaveBeenCalledTimes(1);
   });
+
+  test("public-media reconcile CLI dry run keeps an orphaned public object", async () => {
+    process.env.OBJECT_STORE = "s3";
+    memory = new InMemoryObjectStore({ now: () => clock });
+    const publicObjects = new InMemoryObjectStore({ now: () => clock });
+    const media = new PublicAdMediaStore({ store: publicObjects, baseUrl: "https://media.test" });
+    setPublicAdMediaClient(media);
+
+    clock = NOW - 5 * HOUR;
+    const orphan = await media.publish(ORG, new Uint8Array([1]), D1);
+    clock = NOW;
+
+    const open = vi.fn(() => db);
+    const log: string[] = [];
+    await runReconcile(
+      [],
+      open,
+      (l) => log.push(l),
+      () => memory,
+      () => NOW,
+    );
+
+    expect(log).toContain(`  public media org local: 1 orphan clip(s)`);
+    expect(log).toContain(`    public clip ${orphan.key}`);
+    expect(log[log.length - 1]).toBe(
+      "  Public media dry run: nothing deleted. Re-run with --apply to delete.",
+    );
+    expect(await publicObjects.get(orphan.key)).toBeDefined();
+  });
+
+  test("public-media reconcile CLI apply removes an orphaned public object", async () => {
+    process.env.OBJECT_STORE = "s3";
+    memory = new InMemoryObjectStore({ now: () => clock });
+    const publicObjects = new InMemoryObjectStore({ now: () => clock });
+    const media = new PublicAdMediaStore({ store: publicObjects, baseUrl: "https://media.test" });
+    setPublicAdMediaClient(media);
+
+    clock = NOW - 5 * HOUR;
+    const orphan = await media.publish(ORG, new Uint8Array([1]), D1);
+    clock = NOW;
+
+    const open = vi.fn(() => db);
+    const log: string[] = [];
+    await runReconcile(
+      ["--org", "local", "--apply"],
+      open,
+      (l) => log.push(l),
+      () => memory,
+      () => NOW,
+    );
+
+    expect(log).toContain(`  deleted public-clip ${orphan.key}`);
+    expect(log[log.length - 1]).toBe("  Public media: deleted 1 clip(s); skipped 0.");
+    expect(await publicObjects.get(orphan.key)).toBeUndefined();
+  });
+
+  test("public-media reconcile CLI keeps a published object whose ledger row exists", async () => {
+    process.env.OBJECT_STORE = "s3";
+    memory = new InMemoryObjectStore({ now: () => clock });
+    const publicObjects = new InMemoryObjectStore({ now: () => clock });
+    const media = new PublicAdMediaStore({ store: publicObjects, baseUrl: "https://media.test" });
+    setPublicAdMediaClient(media);
+
+    clock = NOW - 5 * HOUR;
+    const published = await media.publish(ORG, new Uint8Array([1]), D1);
+    clock = NOW;
+    const { rows } = await db.query<{ id: string }>(
+      `insert into campaign (org_id, slug) values ($1, $2) returning id`,
+      [ORG, "with-clip"],
+    );
+    await db.query(
+      `insert into published_clip (org_id, campaign_id, content_hash, key, url)
+       values ($1, $2::uuid, $3, $4, $5)`,
+      [ORG, rows[0]!.id, D1, published.key, `https://media.test/${published.key}`],
+    );
+
+    const log: string[] = [];
+    await runReconcile(
+      ["--org", "local", "--apply"],
+      vi.fn(() => db),
+      (l) => log.push(l),
+      () => memory,
+      () => NOW,
+    );
+
+    expect(log).toContain("  Public media: deleted 0 clip(s); skipped 0.");
+    expect(await publicObjects.get(published.key)).toBeDefined();
+  });
 });
 
 describe("cache CLI (bin/purge.ts)", () => {
@@ -558,6 +653,8 @@ describe("sweep housekeeping (bin/purge.ts)", () => {
   let endSpy: ReturnType<typeof vi.spyOn>;
   let memory: InMemoryObjectStore;
   let clock: number;
+  let publicObjects: InMemoryObjectStore;
+  let publicMedia: PublicAdMediaStore;
 
   beforeEach(async () => {
     clock = NOW;
@@ -565,6 +662,8 @@ describe("sweep housekeeping (bin/purge.ts)", () => {
     endSpy = vi.spyOn(db, "end").mockResolvedValue(undefined);
     await db.query(`insert into org (id, name) values ('acme', 'Acme')`);
     memory = new InMemoryObjectStore({ now: () => clock });
+    publicObjects = new InMemoryObjectStore({ now: () => clock });
+    publicMedia = new PublicAdMediaStore({ store: publicObjects, baseUrl: "https://media.test" });
   }, 30_000);
 
   afterEach(async () => {
@@ -572,6 +671,7 @@ describe("sweep housekeeping (bin/purge.ts)", () => {
     await db.end();
     restoreEnv();
     resetObjectStoreClient();
+    resetPublicAdMediaClient();
     vi.restoreAllMocks();
   });
 
@@ -1038,5 +1138,135 @@ describe("sweep housekeeping (bin/purge.ts)", () => {
     expect(remaining).toEqual(
       [`${inputKey(ORG, youngLiveId, A2)}`, `${campaignPrefix(ORG, C2)}inputs/${A2}`].sort(),
     );
+  });
+
+  test("sweep housekeeping removes an old public-media orphan and keeps a fresh one", async () => {
+    process.env.OBJECT_STORE = "s3";
+    setObjectStoreClient(memory);
+    setPublicAdMediaClient(publicMedia);
+    delete process.env.PURGE_RECONCILE;
+
+    const fresh = await publicMedia.publish(ORG, new Uint8Array([1]), D1);
+    clock = NOW - 5 * HOUR;
+    const old = await publicMedia.publish(ORG, new Uint8Array([2]), D2);
+    clock = NOW;
+
+    const log: string[] = [];
+    await expect(
+      housekeeping(
+        db,
+        (l) => log.push(l),
+        () => NOW,
+      ),
+    ).resolves.toBe(0);
+    expect(log).toContain(`  public media org local: 1 orphan clip(s)`);
+    expect(log).toContain(`    public clip ${old.key}`);
+    expect(log).toContain(`  deleted public-clip ${old.key}`);
+    expect(log).toContain("  Public media reconcile: deleted 1 clip(s); skipped 0.");
+    expect(await publicObjects.get(old.key)).toBeUndefined();
+    expect(await publicObjects.get(fresh.key)).toBeDefined();
+  });
+
+  test("sweep housekeeping skips the public-media reconcile with PURGE_RECONCILE=off", async () => {
+    process.env.OBJECT_STORE = "s3";
+    setObjectStoreClient(memory);
+    setPublicAdMediaClient(publicMedia);
+    process.env.PURGE_RECONCILE = "off";
+
+    clock = NOW - 5 * HOUR;
+    const orphan = await publicMedia.publish(ORG, new Uint8Array([1]), D1);
+    clock = NOW;
+
+    const log: string[] = [];
+    await expect(
+      housekeeping(
+        db,
+        (l) => log.push(l),
+        () => NOW,
+      ),
+    ).resolves.toBe(0);
+    expect(log.some((l) => l.includes("public media"))).toBe(false);
+    expect(await publicObjects.get(orphan.key)).toBeDefined();
+    // The private reconcile is skipped with the same switch: its skip line is logged.
+    expect(log).toContain("  Reconcile skipped: PURGE_RECONCILE=off.");
+  });
+
+  test("sweep housekeeping refuses a public-media reconcile past the candidate cap and still expires the cache", async () => {
+    process.env.OBJECT_STORE = "s3";
+    setObjectStoreClient(memory);
+    setPublicAdMediaClient(publicMedia);
+    delete process.env.PURGE_RECONCILE;
+
+    clock = NOW - 5 * HOUR;
+    for (let i = 0; i <= 100; i++) {
+      await publicMedia.publish(ORG, new Uint8Array([1]), i.toString(16).padStart(64, "0"));
+    }
+    clock = NOW - 40 * DAY;
+    await memory.put(`org/${ORG}/cache/${D1}.png`, PNG);
+    clock = NOW;
+
+    const log: string[] = [];
+    await expect(
+      housekeeping(
+        db,
+        (l) => log.push(l),
+        () => NOW,
+      ),
+    ).resolves.toBe(1);
+    expect(log).toContain(
+      "  public-media reconcile failed (public-media reconcile refused, nothing deleted: 101 candidates exceed the cap of 100.)",
+    );
+    expect(log).toContain("  Cache expiry: deleted 1 object(s).");
+    expect(await publicObjects.list(`${ORG}/`)).toHaveLength(101);
+  });
+
+  test("sweep housekeeping counts a public-media reconcile failure without blocking expireCache", async () => {
+    process.env.OBJECT_STORE = "s3";
+    setObjectStoreClient(memory);
+    setPublicAdMediaClient(publicMedia);
+    delete process.env.PURGE_RECONCILE;
+
+    const failing = {
+      publish: async () => {
+        throw new Error("not used here");
+      },
+      remove: async () => {},
+      removeOrg: async () => {},
+      urlFor: (key: string) => `https://media.test/${key}`,
+      listPages: async function* () {
+        throw new Error("public bucket down");
+      },
+    } satisfies PublicAdMediaPort;
+    setPublicAdMediaClient(failing);
+    clock = NOW - 40 * DAY;
+    await memory.put(`org/${ORG}/cache/${D1}.png`, PNG);
+    clock = NOW;
+
+    const log: string[] = [];
+    await expect(
+      housekeeping(
+        db,
+        (l) => log.push(l),
+        () => NOW,
+      ),
+    ).resolves.toBe(1);
+    expect(log).toContain("  public-media reconcile failed (public bucket down)");
+    expect(log).toContain("  Cache expiry: deleted 1 object(s).");
+  });
+
+  test("sweep housekeeping runs no public-media reconcile without a configured client", async () => {
+    process.env.OBJECT_STORE = "s3";
+    setObjectStoreClient(memory);
+    delete process.env.PURGE_RECONCILE;
+
+    const log: string[] = [];
+    await expect(
+      housekeeping(
+        db,
+        (l) => log.push(l),
+        () => NOW,
+      ),
+    ).resolves.toBe(0);
+    expect(log.some((l) => l.includes("public media"))).toBe(false);
   });
 });

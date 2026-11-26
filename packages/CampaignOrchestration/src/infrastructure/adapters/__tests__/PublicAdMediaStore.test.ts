@@ -171,4 +171,29 @@ describe("PublicAdMediaStore", () => {
     await media.removeOrg("org-b");
     expect(await objects.get(b.key)).toBeUndefined();
   });
+
+  test("listPages lists only that org's published objects", async () => {
+    const { media, objects } = store();
+    const a = await media.publish(ORG, BYTES, HASH);
+    const b = await media.publish("org-b", BYTES, HASH);
+    const pages: string[][] = [];
+    for await (const page of media.listPages(ORG)) {
+      pages.push(page.map((o) => o.key));
+    }
+    expect(pages).toEqual([[a.key]]);
+    await media.remove(a.key);
+    expect(await objects.get(b.key)).toBeDefined();
+    const empty: string[][] = [];
+    for await (const page of media.listPages(ORG)) empty.push(page.map((o) => o.key));
+    expect(empty).toEqual([]);
+  });
+
+  test("refuses an invalid org id on listPages without listing", async () => {
+    const { media } = store();
+    for (const orgId of ["", " ", "/org-x", "org/x", "..", ".org-x", "o".repeat(129)]) {
+      await expect(async () => {
+        for await (const _page of media.listPages(orgId)) void _page;
+      }).rejects.toBeInstanceOf(InvalidPublicAdMediaInputError);
+    }
+  });
 });

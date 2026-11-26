@@ -1,4 +1,4 @@
-import type { ObjectKey } from "./ObjectStorePort.js";
+import type { ListedObject, ObjectKey } from "./ObjectStorePort.js";
 
 /**
  * PublicAdMediaPort — outbound port for the PUBLIC ad-media bucket (PT-4k).
@@ -64,6 +64,15 @@ export interface PublicAdMediaPort {
 
   /** Remove every published object under `orgId/`; idempotent. */
   removeOrg(orgId: string): Promise<void>;
+
+  /**
+   * The published objects under `orgId/`, one page at a time, so a caller that
+   * only counts or filters never holds the whole listing — the reconcile pass
+   * that finds a public object orphaned by a crash between `publish` and the
+   * ledger record (D239). The prefix is the caller's responsibility here, not
+   * `assertObjectKey`'s: `orgId` is an org id, not a key.
+   */
+  listPages(orgId: string): AsyncIterable<readonly ListedObject[]>;
 
   /** The public URL for `key`, on the configured base URL. */
   urlFor(key: ObjectKey): string;

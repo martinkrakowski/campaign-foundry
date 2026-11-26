@@ -661,6 +661,7 @@ describe("purge-campaign (D232, D246)", () => {
           throw new Error("boom");
         },
         urlFor: (key) => `https://media.test/${key}`,
+        listPages: async function* () {},
       };
       setPublicAdMediaClient(failing);
       const { campaignId, deletionId } = await seedPurgeSubject(

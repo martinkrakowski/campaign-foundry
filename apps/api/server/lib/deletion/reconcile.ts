@@ -3,6 +3,7 @@ import {
   type ListedObject,
   type ObjectKey,
   type ObjectStorePort,
+  type PublicAdMediaPort,
 } from "@campaignfoundry/CampaignOrchestration";
 import type { SqlQuery } from "../db/sql-client.js";
 import { campaignPrefix, inputKey, orgCampaignsPrefix } from "../object-store/object-keys.js";
@@ -304,4 +305,180 @@ export async function reconcileOrgs(
     skipped += counts.skipped;
   }
   return { plans, applied: { prefixes, inputs, skipped } };
+}
+
+/**
+ * The shape of a PUBLIC ad-media key: `{org}/{32-hex-random}/{64-hex-hash}.mp4`
+ * — the same three segments `PublicAdMediaStore` mints, spelled out here so a
+ * listed key that does not match is an abort, never a delete.
+ */
+const PUBLIC_MEDIA_KEY_PATTERN =
+  /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}\/[0-9a-f]{32}\/[0-9a-f]{64}\.mp4$/;
+
+/** What the public-media reconcile WOULD delete for one org. */
+export interface PublicMediaReconcilePlan {
+  readonly orgId: string;
+  /** Public keys with no `published_clip` row, older than `ORPHAN_MIN_AGE_MS`. */
+  readonly keys: readonly ObjectKey[];
+}
+
+/** One public candidate's outcome, reported as it happens. */
+export interface PublicMediaReconcileStep {
+  readonly kind: "public-clip";
+  readonly key: ObjectKey;
+  readonly outcome: "deleted" | "skipped";
+}
+
+export interface PublicMediaReconcileResult {
+  readonly plans: readonly PublicMediaReconcilePlan[];
+  readonly applied: { readonly deleted: number; readonly skipped: number };
+}
+
+export interface PublicMediaReconcileOptions {
+  readonly apply: boolean;
+  readonly now: () => number;
+  /** Once per org, in order, after EVERY org is planned and before the first delete. */
+  readonly onPlan?: (plan: PublicMediaReconcilePlan) => void;
+  /** After each delete that completed, and for each candidate skipped because a row had appeared. */
+  readonly onStep?: (step: PublicMediaReconcileStep) => void;
+  /**
+   * Refuse, before the first delete and only when applying, when the plans of
+   * ALL orgs hold more candidates than this. Absent means no cap.
+   */
+  readonly maxCandidates?: number;
+}
+
+/** Why `key` may not be acted on, or undefined when it is a candidate's shape. */
+function publicKeyProblem(key: ObjectKey, orgId: string): string | undefined {
+  if (!key.startsWith(`${orgId}/`)) {
+    return "a listed key is outside the org's own prefix";
+  }
+  if (objectKeyProblem(key) !== undefined) {
+    return "a listed key is outside the object key alphabet";
+  }
+  if (!PUBLIC_MEDIA_KEY_PATTERN.test(key)) {
+    return "a listed key is outside the published key shape";
+  }
+  return undefined;
+}
+
+/**
+ * D239, read only: the public objects of ONE org that a crash between
+ * `publish()` and the ledger `record()` orphaned. Streams the listing page by
+ * page, validates EVERY key on ANY page before deciding anything (an odd key
+ * aborts before anything is decided), keeps only objects older than
+ * `ORPHAN_MIN_AGE_MS` — an in-flight publish is never a candidate — and then
+ * reads `published_clip` for the keys that remain, at most `ROW_QUERY_CHUNK`
+ * at a time. The plan holds only keys the ledger does not know.
+ */
+export async function planPublicMediaReconcile(
+  db: SqlQuery,
+  media: PublicAdMediaPort,
+  orgId: string,
+  now: number,
+): Promise<PublicMediaReconcilePlan> {
+  const candidates: ObjectKey[] = [];
+  for await (const page of media.listPages(orgId)) {
+    for (const object of page) {
+      const problem = publicKeyProblem(object.key, orgId);
+      if (problem !== undefined) {
+        throw new Error(`public-media reconcile aborted, nothing deleted: ${problem}.`);
+      }
+      if (now - object.lastModified.getTime() > ORPHAN_MIN_AGE_MS) candidates.push(object.key);
+    }
+  }
+
+  const orphaned: ObjectKey[] = [];
+  for (let start = 0; start < candidates.length; start += ROW_QUERY_CHUNK) {
+    const chunk = candidates.slice(start, start + ROW_QUERY_CHUNK);
+    const { rows } = await db.query<{ key: string }>(
+      `select key from published_clip where org_id = $1 and key = any($2::text[])`,
+      [orgId, chunk],
+    );
+    const recorded = new Set(rows.map((row) => row.key));
+    for (const key of chunk) {
+      if (!recorded.has(key)) orphaned.push(key);
+    }
+  }
+  return { orgId, keys: orphaned };
+}
+
+/** The lines the reconcile logs for one org's public-media plan. */
+export function describePublicMediaPlan(plan: PublicMediaReconcilePlan): string[] {
+  return [
+    `  public media org ${plan.orgId}: ${plan.keys.length} orphan clip(s)`,
+    ...plan.keys.map((key) => `    public clip ${key}`),
+  ];
+}
+
+/** The line logged for one public step, as it completes. */
+export function describePublicMediaStep(step: PublicMediaReconcileStep): string {
+  return step.outcome === "deleted"
+    ? `  deleted ${step.kind} ${step.key}`
+    : `  skipped ${step.kind} ${step.key} (a row appeared)`;
+}
+
+/**
+ * Delete what the public-media plan names, re-checking each candidate's ledger
+ * row first: a row that appeared between the plan and the apply — a publish
+ * that finished while the reconciler ran — is skipped, never deleted.
+ * `onStep` hears each outcome AFTER it happened, so an interrupted run leaves a
+ * record of exactly what was removed.
+ */
+export async function applyPublicMediaReconcilePlan(
+  db: SqlQuery,
+  media: PublicAdMediaPort,
+  plan: PublicMediaReconcilePlan,
+  onStep?: (step: PublicMediaReconcileStep) => void,
+): Promise<{ deleted: number; skipped: number }> {
+  let deleted = 0;
+  let skipped = 0;
+  for (const key of plan.keys) {
+    const { rows } = await db.query(`select 1 from published_clip where org_id = $1 and key = $2`, [
+      plan.orgId,
+      key,
+    ]);
+    if (rows.length > 0) {
+      skipped++;
+      onStep?.({ kind: "public-clip", key, outcome: "skipped" });
+      continue;
+    }
+    await media.remove(key);
+    deleted++;
+    onStep?.({ kind: "public-clip", key, outcome: "deleted" });
+  }
+  return { deleted, skipped };
+}
+
+/**
+ * Plan EVERY org first, report each plan, then (only when `apply`) delete: one
+ * odd key in any org aborts before the first delete anywhere, and so does a
+ * total over `maxCandidates`. Dry run is the default of every caller; nothing
+ * is deleted unless `apply` is the literal `true`.
+ */
+export async function reconcilePublicMediaOrgs(
+  db: SqlQuery,
+  media: PublicAdMediaPort,
+  orgIds: readonly string[],
+  options: PublicMediaReconcileOptions,
+): Promise<PublicMediaReconcileResult> {
+  const plans: PublicMediaReconcilePlan[] = [];
+  for (const orgId of orgIds)
+    plans.push(await planPublicMediaReconcile(db, media, orgId, options.now()));
+  for (const plan of plans) options.onPlan?.(plan);
+  if (!options.apply) return { plans, applied: { deleted: 0, skipped: 0 } };
+  const candidates = plans.reduce((sum, plan) => sum + plan.keys.length, 0);
+  if (options.maxCandidates !== undefined && candidates > options.maxCandidates) {
+    throw new Error(
+      `public-media reconcile refused, nothing deleted: ${candidates} candidates exceed the cap of ${options.maxCandidates}.`,
+    );
+  }
+  let deleted = 0;
+  let skipped = 0;
+  for (const plan of plans) {
+    const counts = await applyPublicMediaReconcilePlan(db, media, plan, options.onStep);
+    deleted += counts.deleted;
+    skipped += counts.skipped;
+  }
+  return { plans, applied: { deleted, skipped } };
 }

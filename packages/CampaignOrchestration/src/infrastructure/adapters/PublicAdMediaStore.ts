@@ -1,6 +1,7 @@
 import { randomBytes as nodeRandomBytes } from "node:crypto";
 import {
   assertObjectKey,
+  type ListedObject,
   type ObjectKey,
   type ObjectStorePort,
   PUBLIC_AD_MEDIA_HASH_PATTERN,
@@ -86,6 +87,11 @@ export class PublicAdMediaStore implements PublicAdMediaPort {
   async removeOrg(orgId: string): Promise<void> {
     this.assertOrgId(orgId);
     await this.store.deletePrefix(`${orgId}/`);
+  }
+
+  async *listPages(orgId: string): AsyncIterable<readonly ListedObject[]> {
+    this.assertOrgId(orgId);
+    yield* this.store.listPages(`${orgId}/`);
   }
 
   urlFor(key: ObjectKey): string {
