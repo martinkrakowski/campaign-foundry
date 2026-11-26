@@ -36,6 +36,7 @@ import {
   layerTimeFieldProblem,
   layerTracksProblem,
   outputFamilyProblem,
+  refusePlaceholderPrefix,
   satisfiesOrderConstraints,
   styleProblem,
   templateFromCanonical,
@@ -359,6 +360,14 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
       throw new Error(
         `Campaign brief field "template.layers[${i}].props${propsProblem.path}" must ${propsProblem.must}; got ${JSON.stringify(propsProblem.value)}.`,
       );
+    }
+    // CFAR6 fix2: the placeholder prefix is the assembler's own token. An
+    // image layer's `alt` is brief-authored text the assembler emits into the
+    // bundle's `alt` attribute, so a brief that names the prefix in it is
+    // refused here with the field named.
+    const alt = (layer.props as Record<string, unknown> | undefined)?.alt;
+    if (typeof alt === "string") {
+      refusePlaceholderPrefix(`Campaign brief field "template.layers[${i}].props.alt"`, alt);
     }
 
     // AR2 — `elements` is not a layer field. The key is refused wherever it
@@ -994,6 +1003,9 @@ function validateCopy(record: Record<string, unknown>, enforceCapabilities: bool
     if (typeof beat.text !== "string") {
       throw new Error(`Campaign brief field "copy.timeline.beats[${i}].text" must be a string.`);
     }
+    // CFAR6 fix2: the placeholder prefix is the assembler's own token; a beat's
+    // text is brief-authored copy and is refused with the field named.
+    refusePlaceholderPrefix(`Campaign brief field "copy.timeline.beats[${i}].text"`, beat.text);
     // VE5a: an optional per-beat background — an asset path, the same kind of
     // reference a product's `inputAsset` holds. Shape only; the scene cap (VE-D10)
     // is `timelineProblem`'s, so the API and the editor refuse the same thing.
@@ -1239,6 +1251,15 @@ export function parseBrief(data: unknown, opts: ParseBriefOptions = {}): Campaig
       throw new Error(
         `Campaign brief field "${field}" must be a string or null; got ${JSON.stringify(value)}.`,
       );
+    }
+    // CFAR6 fix2: the publish placeholder prefix is the assembler's own token.
+    // The campaign copy reaches every bundle's headline, so a brief that names
+    // the prefix in its copy is refused here with the field named — the
+    // placeholder URL would otherwise route text through the publish path.
+    if (field === "campaignMessage" || field === "localizedMessage") {
+      if (typeof value === "string") {
+        refusePlaceholderPrefix(`Campaign brief field "${field}"`, value);
+      }
     }
   }
   // The brief id is the campaign's persisted-report filename (per-campaign reload), so

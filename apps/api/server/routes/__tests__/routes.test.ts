@@ -1339,7 +1339,13 @@ describe("POST /campaigns/package", () => {
     expect(error).not.toMatch(/(?:^|[\s'"])\//);
   });
 
-  test("a failed later platform does not mix the earlier platform's directory", async () => {
+  test("a failed later platform writes nothing — the earlier platform's directory is not created", async () => {
+    // Prepare-then-write (CFAR6C3 fix2): every platform is prepared before any
+    // write, so a refusal on the LAST platform leaves zero packaged files and
+    // zero manifests behind — the earlier platform's directory does not exist
+    // at all, which is stronger than "does not mix". The premise of the old
+    // write-as-you-go assertion (the earlier platform's files existing) is
+    // outdated; the atomicity is the deliberate behaviour.
     seedPng("alpha/1x1.png");
     seedReport([reportAsset(), reportAsset({ aspectRatio: "16:9", outputPath: "alpha/16x9.png" })]);
     const res = await call({ campaignId: "camp", platforms: ["instagram-feed", "x"] });
@@ -1347,8 +1353,9 @@ describe("POST /campaigns/package", () => {
     const { error } = (await res.json()) as { error: string };
     expect(error).toMatch(/^Platform "x":/);
     expect(error).not.toContain(dir);
-    expect(existsSync(resolve(dir, "packages/camp/instagram-feed/manifest.json"))).toBe(true);
-    expect(existsSync(resolve(dir, "packages/camp/instagram-feed/alpha/1x1.png"))).toBe(true);
+    expect(existsSync(resolve(dir, "packages/camp/instagram-feed/manifest.json"))).toBe(false);
+    expect(existsSync(resolve(dir, "packages/camp/instagram-feed/alpha/1x1.png"))).toBe(false);
+    expect(existsSync(resolve(dir, "packages/camp/instagram-feed"))).toBe(false);
     expect(existsSync(resolve(dir, "packages/camp/x"))).toBe(false);
   });
 

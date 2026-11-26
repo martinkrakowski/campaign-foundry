@@ -1,11 +1,44 @@
 import { describe, test, expect, vi, beforeEach } from "vitest";
+import { createHash } from "node:crypto";
 import type { GeneratedAsset } from "@campaignfoundry/CampaignOrchestration";
-import { PUBLISH_PLACEHOLDER_URL_PREFIX } from "@campaignfoundry/CampaignOrchestration";
+import {
+  BRIEF_SCHEMA_VERSION,
+  CANONICAL_TEMPLATES,
+  DEFAULT_CAMPAIGN_TYPE,
+  GenerateCampaignUseCase,
+  PublishAdClipUseCase,
+  templateFromCanonical,
+  type BriefTemplate,
+  type CampaignBrief,
+  type CompositeRequest,
+  type GenerateCampaignDeps,
+  type ObjectKey,
+  type Product,
+  type VideoCompositorPort,
+  PUBLISH_PLACEHOLDER_URL_PREFIX,
+} from "@campaignfoundry/CampaignOrchestration";
+import { InMemoryObjectStore } from "@campaignfoundry/CampaignOrchestration/infrastructure";
 import type { DisplaySize } from "@campaignfoundry/CampaignOrchestration/display-sizes";
+import {
+  fakeAudioAssets,
+  fakeCompliance,
+  fakeCompositor,
+  fakeImageGenerator,
+  fakePlan,
+  fakePlanner,
+  fakePublicAdMedia,
+  fakePublishedClipRecord,
+  fakeSceneAssets,
+  fakeVariant,
+  fakeVideoCompositor,
+  recordingExporter,
+} from "../../../../../CampaignOrchestration/src/application/use-cases/__tests__/_fakes.js";
 import {
   PackageForPlatformUseCase,
   withoutAbsolutePaths,
 } from "../PackageForPlatformUseCase.use-case.js";
+import { ObjectPackageStore } from "../../../infrastructure/adapters/ObjectPackageStore.js";
+import { renderObjectKey } from "../../../infrastructure/adapters/ObjectExporter.js";
 import type { PackageManifest, PackageStorePort } from "../../ports/out/PackageStorePort.js";
 import {
   platformProfile,
@@ -1000,6 +1033,39 @@ describe("PackageForPlatformUseCase — clip placeholder publishing (CFAR6C3)", 
     publisher.mockClear();
   });
 
+  test("brief-authored text carrying the placeholder prefix publishes nothing extra (CFAR6 fix2)", async () => {
+    // The bundle is the assembler's own output: the real video src placeholder,
+    // plus a headline, an alt and a clickTag declaration whose text carries
+    // the prefix. The finder scans ONLY the emitted video src — so only the
+    // real selector is published, and the text tokens are substituted nowhere.
+    const evil = `${PUBLISH_PLACEHOLDER_URL_PREFIX}evil/1x1/v9.mp4`;
+    const bundle = new TextEncoder().encode(
+      `<!DOCTYPE html><html><head><script>var clickTag = "https://example.com/?u=${evil}";</script></head>` +
+        `<body><img src="fallback.png" alt="${evil}" />` +
+        `<span>Shop ${evil}</span>` +
+        `<video src="${PUBLISH_PLACEHOLDER_URL_PREFIX}alpha/1x1/v0.mp4" muted autoplay playsinline poster="fallback.png"></video></body></html>`,
+    );
+    const store = htmlStore(bundle);
+    const result = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": CLIP_PROFILE },
+      publishClip: true,
+      clipPublisher: publisher,
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    // Only the slot's own clip was published — never the prefix in the text.
+    expect(publisher).toHaveBeenCalledTimes(1);
+    expect(publisher).toHaveBeenCalledWith("alpha/1x1/v0.mp4");
+    const written = store.packaged.find((p) => p.relativePath === BUNDLE_PATH)!;
+    const htmlText = new TextDecoder().decode(written.bytes);
+    // The real token is substituted; the brief-authored text tokens survive as text.
+    expect(htmlText).toContain(urlFor("alpha/1x1/v0.mp4"));
+    expect(htmlText).toContain(evil);
+    expect(htmlText).not.toContain(`${PUBLISH_PLACEHOLDER_URL_PREFIX}alpha/1x1/v0.mp4`);
+  });
+
   test("publishClip false refuses a bundle that still carries placeholders, before any write", async () => {
     const store = htmlStore(bundleWith(1, "alpha/1x1/v0.mp4"));
     const result = await exec(store, {
@@ -1369,5 +1435,344 @@ describe("PackageForPlatformUseCase — clip placeholder publishing (CFAR6C3)", 
     // now nothing is written at all.
     expect(store.writePackaged).not.toHaveBeenCalled();
     expect(store.writeManifest).not.toHaveBeenCalled();
+  });
+});
+
+/** ISO BMFF box helpers — a tiny well-formed mp4 the clip validator accepts. */
+const u32 = (n: number): number[] => [
+  (n >>> 24) & 0xff,
+  (n >>> 16) & 0xff,
+  (n >>> 8) & 0xff,
+  n & 0xff,
+];
+
+const type4 = (value: string): number[] => {
+  const out: number[] = [];
+  for (let i = 0; i < 4; i++) out.push(i < value.length ? value.charCodeAt(i) : 0x20);
+  return out;
+};
+
+/** ISO BMFF box: header + payload. */
+function box(type: string, payload: number[]): number[] {
+  return [...u32(payload.length + 8), ...type4(type), ...payload];
+}
+
+function ftyp(): number[] {
+  return box("ftyp", [...type4("isom"), ...u32(0), ...["isom", "mp41"].map(type4).flat()]);
+}
+
+/** `mvhd` FullBox payload, version 0: version+flags, creation, modification, timescale, duration. */
+function mvhd(timescale: number, duration: number): number[] {
+  return box("mvhd", [
+    0,
+    0,
+    0,
+    0, // version 0 + flags
+    0,
+    0,
+    0,
+    0, // creation
+    0,
+    0,
+    0,
+    0, // modification
+    ...u32(timescale),
+    ...u32(duration),
+  ]);
+}
+
+function hdlr(handler: string): number[] {
+  return box("hdlr", [0, 0, 0, 0, 0, 0, 0, 0, ...type4(handler), ...new Array<number>(12).fill(0)]);
+}
+
+/** Visual sample entry (`avc1`/`avc3`/`hvc1`): 78 fixed bytes + child boxes. */
+function sampleEntry(type: string, children: number[][]): number[] {
+  return box(type, [...new Array<number>(78).fill(0), ...children.flat()]);
+}
+
+function avcC(): number[] {
+  // Minimal plausible AVCDecoderConfigurationRecord; the validator only
+  // requires the box type to be present.
+  return box("avcC", [1, 100, 0, 28, 255, 225, 0, 24, 103, 100, 0, 40, 172, 52, 193]);
+}
+
+function stsd(entry: number[]): number[] {
+  return box("stsd", [0, 0, 0, 0, ...u32(1), ...entry]);
+}
+
+function stbl(children: number[][]): number[] {
+  return box("stbl", children.flat());
+}
+
+function minf(children: number[][]): number[] {
+  return box("minf", children.flat());
+}
+
+function mdia(children: number[][]): number[] {
+  return box("mdia", children.flat());
+}
+
+function trak(children: number[][]): number[] {
+  return box("trak", children.flat());
+}
+
+function videoTrak(entryType: string): number[] {
+  return trak([
+    mdia([
+      hdlr("vide"),
+      minf([stbl([stsd(sampleEntry(entryType, entryType.startsWith("avc") ? [avcC()] : []))])]),
+    ]),
+  ]);
+}
+
+function moov(children: number[][]): number[] {
+  return box("moov", children.flat());
+}
+
+/** ftyp + moov(mvhd + one `<entryType>` video trak). */
+function clipBytes(
+  entryType: string,
+  opts?: { timescale?: number; duration?: number },
+): Uint8Array {
+  return new Uint8Array([
+    ...ftyp(),
+    ...moov([mvhd(opts?.timescale ?? 600, opts?.duration ?? 600), videoTrak(entryType)]),
+  ]);
+}
+
+/** A tiny well-formed H.264 clip — passes `validateAdClip`. */
+function tinyClip(opts?: { timescale?: number; duration?: number }): Uint8Array {
+  return clipBytes("avc1", opts);
+}
+
+describe("generate → export through PackageForPlatformUseCase (CFAR6-slot, end to end)", () => {
+  /**
+   * The whole chain with in-memory stores only (CFAR6-slot): generate a
+   * TWO-RATIO run, then the REAL export path `POST /campaigns/package` runs —
+   * `PackageForPlatformUseCase` over `ObjectPackageStore`, reading renders and
+   * bundles from the same in-memory object store the generate run saved to,
+   * and publishing every bundle's placeholder selectors through the route's
+   * `PublishAdClipUseCase` wiring. No network: the public bucket and the
+   * ledger are the same fakes the use case's own tests use.
+   */
+  const ORG = "local";
+  const CAMPAIGN = "0b9e6c1e-1111-4222-8333-444455556666";
+  const RENDER_PREFIX = `org/${ORG}/campaign/${CAMPAIGN}/renders/`;
+  const PACKAGE_PREFIX = `org/${ORG}/campaign/${CAMPAIGN}/packages/`;
+  const SEGMENT = "camp";
+
+  const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
+
+  /** Two byte-distinct valid clips, one per ratio, so publishes are tellable apart. */
+  const clipFor = (ratio: string): Uint8Array =>
+    tinyClip({ duration: ratio === "1:1" ? 600 : 1200 });
+
+  const videoTemplate = (render: string): BriefTemplate => ({
+    ...CANONICAL_TEMPLATES["image-html"],
+    id: "canonical-image-html",
+    layers: [
+      ...CANONICAL_TEMPLATES["image-html"].layers,
+      { id: "video-1", kind: "video", props: { render } },
+    ],
+  });
+
+  /** A video port handing each slot its own ratio's clip bytes. */
+  const ratioClipVideoCompositor = (): VideoCompositorPort => ({
+    ...fakeVideoCompositor(),
+    compositeVideo: vi.fn(async (request: CompositeRequest) => ({
+      video: clipFor(request.canvas.ratio ?? "1:1"),
+      poster: new Uint8Array([4, 5, 6]),
+      sampledFrames: [new Uint8Array([1]), new Uint8Array([2])],
+      logoApplied: true,
+    })),
+  });
+
+  const product = (id: string, over: Partial<Product> = {}): Product => ({
+    id,
+    name: id,
+    primaryColor: "#1473E6",
+    logoPath: `assets/inputs/${id}.png`,
+    ...over,
+  });
+
+  const baseBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief => ({
+    schemaVersion: BRIEF_SCHEMA_VERSION,
+    template: templateFromCanonical(over.type ?? DEFAULT_CAMPAIGN_TYPE),
+    id: SEGMENT,
+    targetRegion: "DE",
+    targetAudience: "audience",
+    campaignMessage: "Hello",
+    products: [product("alpha")],
+    ...over,
+  });
+
+  const variationBrief = (over: Partial<CampaignBrief> = {}): CampaignBrief =>
+    baseBrief({ mode: "variation", variation: { count: 3, seed: 42 }, ...over });
+
+  const generateDeps = (over: Partial<GenerateCampaignDeps> = {}): GenerateCampaignDeps => ({
+    imageGenerator: fakeImageGenerator(),
+    proceduralGenerator: fakeImageGenerator(),
+    planner: fakePlanner(),
+    compositor: fakeCompositor(),
+    videoCompositor: fakeVideoCompositor(),
+    sceneAssets: fakeSceneAssets(),
+    audioAssets: fakeAudioAssets(),
+    compliance: fakeCompliance(),
+    exporter: recordingExporter(),
+    now: () => new Date("2026-01-01T00:00:00.000Z"),
+    ...over,
+  });
+
+  /** Generate a two-ratio, one-product run, capturing every saved bundle's bytes. */
+  const generateTwoRatios = async (render: string) => {
+    const d = generateDeps({
+      planner: fakePlanner(
+        fakePlan([fakeVariant(), fakeVariant({ index: 1, aspectRatio: "9:16" })]),
+      ),
+      videoCompositor: ratioClipVideoCompositor(),
+    });
+    const captures: Array<{ path: string; data: Uint8Array }> = [];
+    const inner = d.exporter.saveToDirectory.bind(d.exporter);
+    d.exporter.saveToDirectory = vi.fn(async (buf: Uint8Array, path: string) => {
+      captures.push({ path, data: buf });
+      await inner(buf, path);
+    });
+    const result = await new GenerateCampaignUseCase(d).execute(
+      variationBrief({ products: [product("alpha")], template: videoTemplate(render) }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error("generate failed");
+    const bundleHtml = (selector: string): string => {
+      const bundle = captures.find(
+        (c) => c.path === `camp/alpha/${selector.replace(/\.mp4$/, "")}/index.html`,
+      );
+      expect(bundle).toBeDefined();
+      return new TextDecoder().decode(bundle!.data);
+    };
+    return { result, captures, bundleHtml };
+  };
+
+  /** A 1:1 and a 9:16 social-shaped profile that declare `html` — no shipped profile does yet; the test registers them. */
+  const HTML_PROFILES: Record<string, PlatformProfile> = {
+    "html-banner": {
+      id: "html-banner",
+      label: "HTML Banner",
+      ratio: "1:1",
+      formats: ["html"],
+      safeInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      maxBytes: 8 * 1024 * 1024,
+    },
+    "html-story": {
+      id: "html-story",
+      label: "HTML Story",
+      ratio: "9:16",
+      formats: ["html"],
+      safeInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      maxBytes: 8 * 1024 * 1024,
+    },
+  };
+
+  /**
+   * The export side, wired exactly as `POST /campaigns/package` does: every
+   * generated file uploaded under the campaign's render prefix (campaign
+   * segment dropped, what `renderObjectKey` does), the two clips on top, and
+   * `PackageForPlatformUseCase` over `ObjectPackageStore` publishing each
+   * distinct selector through `PublishAdClipUseCase`.
+   */
+  const exportThroughPackageUseCase = async (
+    generated: Awaited<ReturnType<typeof generateTwoRatios>>,
+  ) => {
+    const store = new InMemoryObjectStore();
+    for (const { path, data } of generated.captures) {
+      await store.put(`${RENDER_PREFIX}${path.slice(`${SEGMENT}/`.length)}` as ObjectKey, data);
+    }
+    await store.put(`${RENDER_PREFIX}alpha/1x1/v0.mp4` as ObjectKey, clipFor("1:1"));
+    await store.put(`${RENDER_PREFIX}alpha/9x16/v1.mp4` as ObjectKey, clipFor("9:16"));
+    const media = fakePublicAdMedia();
+    const ledger = fakePublishedClipRecord();
+    const publish = new PublishAdClipUseCase({
+      objectStore: store,
+      publicAdMedia: media,
+      publishedClipRecord: ledger,
+      sha256,
+    });
+    const packageStore = new ObjectPackageStore(store, {
+      renderPrefix: RENDER_PREFIX,
+      packagePrefix: PACKAGE_PREFIX,
+      campaignSegment: SEGMENT,
+    });
+    const urls: Record<string, string> = {};
+    const clipPublisher = async (selector: string): Promise<string> => {
+      const renderKey = renderObjectKey(RENDER_PREFIX, SEGMENT, `${SEGMENT}/${selector}`);
+      const published = await publish.execute({ orgId: ORG, campaignId: CAMPAIGN, renderKey });
+      urls[selector] = published.url;
+      return published.url;
+    };
+    const packaged = await new PackageForPlatformUseCase(
+      packageStore,
+      (id) => HTML_PROFILES[id] ?? platformProfile(id),
+    ).execute({
+      campaignId: SEGMENT,
+      assets: generated.result.value.assets,
+      platforms: ["html-banner", "html-story"],
+      packagedAt: "2026-01-01T00:00:00.000Z",
+      publishClip: true,
+      clipPublisher,
+    });
+    expect(packaged.success).toBe(true);
+    if (!packaged.success) throw new Error(packaged.error.message);
+    return { packaged, media, ledger, urls, store };
+  };
+
+  /** The packaged bundle bytes for one slot, read back from the store. */
+  const packagedBundleHtml = async (store: InMemoryObjectStore, slot: string): Promise<string> => {
+    const listed = await store.list(`${PACKAGE_PREFIX}` as ObjectKey);
+    const key = listed.map((o) => o.key).find((k) => k.endsWith(`files/${slot}/index.html`));
+    expect(key).toBeDefined();
+    const object = await store.get(key!);
+    expect(object).toBeDefined();
+    return new TextDecoder().decode(object!.bytes);
+  };
+
+  test("a TWO-RATIO run publishes two DISTINCT clips, and each packaged bundle references its own", async () => {
+    const generated = await generateTwoRatios("alpha/1x1/v0.mp4");
+    const { packaged, media, ledger, urls, store } = await exportThroughPackageUseCase(generated);
+
+    // Both slots' placeholders were found and published — one per slot, the
+    // slot's own selector even though every slot's render names the 1:1 clip.
+    expect(Object.keys(urls).sort()).toEqual(["alpha/1x1/v0.mp4", "alpha/9x16/v1.mp4"]);
+    expect(media.publish).toHaveBeenCalledTimes(2);
+    const hashes = vi.mocked(media.publish).mock.calls.map(([, , hash]) => hash as string);
+    expect(hashes).toHaveLength(2);
+    expect(new Set(hashes).size).toBe(2);
+    expect(hashes).toContain(sha256(clipFor("1:1")));
+    expect(hashes).toContain(sha256(clipFor("9:16")));
+    expect(urls["alpha/1x1/v0.mp4"]).not.toBe(urls["alpha/9x16/v1.mp4"]);
+    expect(await ledger.listForCampaign(ORG, CAMPAIGN)).toHaveLength(2);
+
+    // Each packaged bundle carries ITS OWN published URL and no placeholder
+    // prefix — the substitution happened on the real export path.
+    const bundleOne = await packagedBundleHtml(store, "alpha/1x1/v0");
+    const bundleNine = await packagedBundleHtml(store, "alpha/9x16/v1");
+    expect(bundleOne).toContain(urls["alpha/1x1/v0.mp4"]);
+    expect(bundleNine).toContain(urls["alpha/9x16/v1.mp4"]);
+    expect(bundleOne).not.toContain(PUBLISH_PLACEHOLDER_URL_PREFIX);
+    expect(bundleNine).not.toContain(PUBLISH_PLACEHOLDER_URL_PREFIX);
+    expect(bundleOne).not.toContain(urls["alpha/9x16/v1.mp4"]);
+    expect(bundleNine).not.toContain(urls["alpha/1x1/v0.mp4"]);
+  });
+
+  test("a render selector pointing at another mp4 of the campaign cannot make a bundle publish that other clip", async () => {
+    // Every slot's render names the 1:1 clip — the OTHER slot's clip for the
+    // 9:16 variant. The placeholder must still be the slot's own, so the
+    // 9:16 bundle publishes the 9:16 clip bytes and nothing else.
+    const generated = await generateTwoRatios("alpha/1x1/v0.mp4");
+    const { media } = await exportThroughPackageUseCase(generated);
+
+    const published = vi.mocked(media.publish).mock.calls.map(([, bytes]) => bytes as Uint8Array);
+    expect(published).toHaveLength(2);
+    expect(sha256(published[0]!)).toBe(sha256(clipFor("1:1")));
+    expect(sha256(published[1]!)).toBe(sha256(clipFor("9:16")));
+    expect(sha256(published[1]!)).not.toBe(sha256(clipFor("1:1")));
   });
 });

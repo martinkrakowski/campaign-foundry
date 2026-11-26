@@ -639,7 +639,11 @@ describe("request-campaign-deletion (D235, D234's tombstone half)", () => {
     await seedClip(db, media, "local", campaignId, "a".repeat(64));
 
     // Intercept the `listForCampaign` select: before answering its SECOND
-    // invocation (pass 2), a concurrent export publishes one more clip.
+    // invocation (pass 2), a concurrent export publishes one more clip. The
+    // export's record() ran while the campaign was still live (CFAR6-record:
+    // a tombstoned campaign refuses a record), so the seed publishes the
+    // public object and inserts the ledger row directly — the row an export
+    // that raced the tombstone would have committed just after pass 1 read.
     const LIST_SQL = "from published_clip where org_id = $1 and campaign_id = $2::uuid";
     let listCalls = 0;
     const wrapped: SqlClient = {
@@ -648,7 +652,17 @@ describe("request-campaign-deletion (D235, D234's tombstone half)", () => {
         if (text.includes(LIST_SQL)) {
           listCalls += 1;
           if (listCalls === 2) {
-            await seedClip(db, media, "local", campaignId, "e".repeat(64));
+            // The export's record() ran while the campaign was still live
+            // (CFAR6-record: a tombstoned campaign refuses a record), so the
+            // seed publishes the public object and inserts the ledger row the
+            // record would have committed — with the object's own key, so the
+            // removal below unpublishes the object the row names.
+            const published = await media.publish("local", CLIP_BYTES, "e".repeat(64));
+            await db.query(
+              `insert into published_clip (org_id, campaign_id, content_hash, key, url)
+                 values ($1, $2::uuid, $3, $4, $5)`,
+              ["local", campaignId, "e".repeat(64), published.key, published.url],
+            );
           }
         }
         return db.query(text, params);

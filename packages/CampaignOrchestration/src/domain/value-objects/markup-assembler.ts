@@ -33,6 +33,7 @@ import type { CreativeTemplateLayer } from "./creative-templates.js";
 import { isLinkableKind } from "./creative-types.js";
 import type { ToneKind } from "./Treatment.vo.js";
 import type { VideoProps } from "./brief-template.js";
+import { refusePlaceholderPrefix } from "./video-placeholders.js";
 
 /** HTML-escape user-authored strings for the HTML text / quoted-attribute contexts (HL-D7). */
 export function escapeHtml(value: string): string {
@@ -213,12 +214,28 @@ export function assembleHtml(options: AssembleHtmlOptions): AssembledHtml {
         `assembleHtml: clickDestination must be an absolute http(s) URL, got ${JSON.stringify(destination)}`,
       );
     }
+    // CFAR6 fix2: the clickTag is brief-authored text; the placeholder prefix
+    // is the assembler's own token. Refused with the field named.
+    refusePlaceholderPrefix("clickDestination", destination);
     scriptSection = `\n    <script>var ${CLICK_TAG_VARIABLE} = ${escapeScriptJson(JSON.stringify(destination))};</script>`;
   }
   const hasClick = scriptSection !== "";
   const fallbackImageSrc = options.fallbackImageSrc ?? "fallback.png";
   const src = escapeHtml(fallbackImageSrc);
   const copy = escapeHtml(options.headline ?? "");
+  // CFAR6 fix2: the placeholder prefix is the assembler's own token — the only
+  // thing that may carry it into a bundle is the `<video src>` the assembler
+  // itself emits. Brief-authored text (the headline and every layer's `alt`)
+  // naming it is refused here as well as at the brief boundary, so a
+  // programmatic brief that bypasses the parser cannot route copy through the
+  // publish path either.
+  refusePlaceholderPrefix("headline", options.headline ?? "");
+  for (const layer of options.layers) {
+    const props = layer.props;
+    if (props !== undefined && "alt" in props && typeof props.alt === "string") {
+      refusePlaceholderPrefix("alt", props.alt);
+    }
+  }
 
   const layerMarkup: string[] = [];
   for (const layer of options.layers) {

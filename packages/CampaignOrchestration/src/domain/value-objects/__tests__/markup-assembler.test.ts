@@ -2,6 +2,10 @@ import { describe, expect, test } from "vitest";
 import { defaultLayerRect } from "../creative-geometry.js";
 import type { CreativeTemplateLayer } from "../creative-templates.js";
 import { assembleHtml, type AssembleHtmlOptions } from "../markup-assembler.js";
+import {
+  BriefPlaceholderPrefixError,
+  PUBLISH_PLACEHOLDER_URL_PREFIX,
+} from "../video-placeholders.js";
 
 const base = (over: Partial<AssembleHtmlOptions> = {}): AssembleHtmlOptions => ({
   layers: [],
@@ -106,6 +110,50 @@ describe("assembleHtml", () => {
     const declaration = /var clickTag = (".*");/.exec(result.html);
     expect(declaration).not.toBeNull();
     expect(JSON.parse(declaration![1] as string)).toBe(destination);
+  });
+
+  test("a headline carrying the publish placeholder prefix is refused, naming the field (CFAR6 fix2)", () => {
+    expect(() =>
+      assembleHtml(base({ headline: `Shop ${PUBLISH_PLACEHOLDER_URL_PREFIX}shoe/1x1/v0.mp4` })),
+    ).toThrow(BriefPlaceholderPrefixError);
+    expect(() =>
+      assembleHtml(base({ headline: `Shop ${PUBLISH_PLACEHOLDER_URL_PREFIX}shoe/1x1/v0.mp4` })),
+    ).toThrowError(/headline/);
+  });
+
+  test("an image layer's alt carrying the publish placeholder prefix is refused, naming the field", () => {
+    expect(() =>
+      assembleHtml(
+        base({
+          layers: [
+            layer({
+              id: "picture",
+              kind: "image",
+              props: { alt: PUBLISH_PLACEHOLDER_URL_PREFIX + "shoe/1x1/v0.mp4" },
+            }),
+          ],
+        }),
+      ),
+    ).toThrow(BriefPlaceholderPrefixError);
+    expect(() =>
+      assembleHtml(
+        base({
+          layers: [
+            layer({
+              id: "picture",
+              kind: "image",
+              props: { alt: PUBLISH_PLACEHOLDER_URL_PREFIX + "shoe/1x1/v0.mp4" },
+            }),
+          ],
+        }),
+      ),
+    ).toThrowError(/alt/);
+  });
+
+  test("a headline that merely mentions the prefix host without the constant is accepted", () => {
+    expect(() =>
+      assembleHtml(base({ headline: "Shop https://publish.example.invalid/clip.mp4" })),
+    ).not.toThrow();
   });
 
   test("an over-budget bundle names the budget and the overage", () => {

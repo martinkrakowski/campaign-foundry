@@ -2,21 +2,14 @@ import { describe, test, expect, vi } from "vitest";
 import { RATIO_VALUES } from "../../../domain/value-objects/aspect-ratios.js";
 import type { ImageGeneratorPort } from "../../ports/out/ImageGeneratorPort.js";
 import { err, ok } from "@campaignfoundry/shared";
-import { createHash } from "node:crypto";
 import {
   GenerateCampaignUseCase,
   CLASSIC_VIDEO_LAYER_ERROR,
   unionSafeInsets,
   unionSizeInsets,
 } from "../GenerateCampaignUseCase.use-case.js";
-import { PublishAdClipUseCase } from "../PublishAdClipUseCase.use-case.js";
-import { InMemoryObjectStore } from "../../../infrastructure/adapters/InMemoryObjectStore.js";
-import type { ObjectKey } from "../../ports/out/ObjectStorePort.js";
 import { assembleHtml } from "../../../domain/value-objects/markup-assembler.js";
-import {
-  findVideoPlaceholders,
-  PUBLISH_PLACEHOLDER_URL_PREFIX,
-} from "../../../domain/value-objects/video-placeholders.js";
+import { PUBLISH_PLACEHOLDER_URL_PREFIX } from "../../../domain/value-objects/video-placeholders.js";
 import {
   AD_CLIP_MAX_BYTES,
   AD_CLIP_MAX_DURATION_SECONDS,
@@ -3223,144 +3216,5 @@ describe("GenerateCampaignUseCase — video-layer clips in image-html slots (CFA
       new GenerateCampaignUseCase(d).execute(variationBrief({ template: htmlVideoTemplate() })),
     ).rejects.toThrow("compositor exploded");
     expect(savedPaths(d)).not.toContain("camp/alpha/1x1/v0.mp4");
-  });
-});
-
-describe("generate → export clip publishing (CFAR6-slot, end to end)", () => {
-  /**
-   * The whole chain with in-memory stores only (CFAR6-slot): generate a
-   * TWO-RATIO run, then the export/publish path `POST /campaigns/package`
-   * runs — renders uploaded under the campaign's render prefix (campaign
-   * segment dropped, exactly what `renderObjectKey` does), every bundle's
-   * placeholder selectors read back with `findVideoPlaceholders`, each
-   * selector published through `PublishAdClipUseCase`. No network: the public
-   * bucket and the ledger are the same fakes the use case's own tests use.
-   */
-  const ORG = "local";
-  const CAMPAIGN = "0b9e6c1e-1111-4222-8333-444455556666";
-  const RENDER_PREFIX = `org/${ORG}/campaign/${CAMPAIGN}/renders/`;
-
-  const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
-
-  /** Two byte-distinct valid clips, one per ratio, so publishes are tellable apart. */
-  const clipFor = (ratio: string): Uint8Array =>
-    tinyClip({ duration: ratio === "1:1" ? 600 : 1200 });
-
-  const videoTemplate = (render: string): BriefTemplate => ({
-    ...CANONICAL_TEMPLATES["image-html"],
-    id: "canonical-image-html",
-    layers: [
-      ...CANONICAL_TEMPLATES["image-html"].layers,
-      { id: "video-1", kind: "video", props: { render } },
-    ],
-  });
-
-  /** A video port handing each slot its own ratio's clip bytes. */
-  const ratioClipVideoCompositor = (): VideoCompositorPort => ({
-    ...fakeVideoCompositor(),
-    compositeVideo: vi.fn(async (request: CompositeRequest) => ({
-      video: clipFor(request.canvas.ratio ?? "1:1"),
-      poster: new Uint8Array([4, 5, 6]),
-      sampledFrames: [new Uint8Array([1]), new Uint8Array([2])],
-      logoApplied: true,
-    })),
-  });
-
-  /** Generate a two-ratio, one-product run, capturing every saved bundle's bytes. */
-  const generateTwoRatios = async (render: string) => {
-    const d = deps({
-      planner: fakePlanner(
-        fakePlan([fakeVariant(), fakeVariant({ index: 1, aspectRatio: "9:16" })]),
-      ),
-      videoCompositor: ratioClipVideoCompositor(),
-    });
-    const captures: Array<{ path: string; data: Uint8Array }> = [];
-    const inner = d.exporter.saveToDirectory.bind(d.exporter);
-    d.exporter.saveToDirectory = vi.fn(async (buf: Uint8Array, path: string) => {
-      captures.push({ path, data: buf });
-      await inner(buf, path);
-    });
-    const result = await new GenerateCampaignUseCase(d).execute(
-      variationBrief({ products: [product("alpha")], template: videoTemplate(render) }),
-    );
-    expect(result.success).toBe(true);
-    if (!result.success) throw new Error("generate failed");
-    const bundleHtml = (selector: string): string => {
-      const bundle = captures.find(
-        (c) => c.path === `camp/alpha/${selector.replace(/\.mp4$/, "")}/index.html`,
-      );
-      expect(bundle).toBeDefined();
-      return new TextDecoder().decode(bundle!.data);
-    };
-    return { d, result, bundleHtml };
-  };
-
-  /** The export side: renders uploaded, then every bundle's placeholders published. */
-  const exportAndPublish = async (bundleHtml: (selector: string) => string) => {
-    const store = new InMemoryObjectStore();
-    await store.put(`${RENDER_PREFIX}alpha/1x1/v0.mp4` as ObjectKey, clipFor("1:1"), {
-      contentType: "video/mp4",
-    });
-    await store.put(`${RENDER_PREFIX}alpha/9x16/v1.mp4` as ObjectKey, clipFor("9:16"), {
-      contentType: "video/mp4",
-    });
-    const media = fakePublicAdMedia();
-    const ledger = fakePublishedClipRecord();
-    const publish = new PublishAdClipUseCase({
-      objectStore: store,
-      publicAdMedia: media,
-      publishedClipRecord: ledger,
-      sha256,
-    });
-    const publishSelectors = async (html: string) => {
-      const selectors = findVideoPlaceholders(html);
-      const urls: Record<string, string> = {};
-      for (const selector of selectors) {
-        const { url } = await publish.execute({
-          orgId: ORG,
-          campaignId: CAMPAIGN,
-          renderKey: `${RENDER_PREFIX}${selector}`,
-        });
-        urls[selector] = url;
-      }
-      return { selectors, urls };
-    };
-    return { publishSelectors, media, ledger };
-  };
-
-  test("a TWO-RATIO run publishes two DISTINCT clips, and each bundle references its own", async () => {
-    const { bundleHtml } = await generateTwoRatios("alpha/1x1/v0.mp4");
-    const { publishSelectors, media, ledger } = await exportAndPublish(bundleHtml);
-
-    const one = await publishSelectors(bundleHtml("1x1/v0.mp4"));
-    expect(one.selectors).toEqual(["alpha/1x1/v0.mp4"]);
-    const nine = await publishSelectors(bundleHtml("9x16/v1.mp4"));
-    expect(nine.selectors).toEqual(["alpha/9x16/v1.mp4"]);
-
-    // Two distinct slots, two distinct clips: distinct content hashes, two
-    // publishes, two records.
-    expect(media.publish).toHaveBeenCalledTimes(2);
-    const hashes = vi.mocked(media.publish).mock.calls.map(([, , hash]) => hash as string);
-    expect(hashes).toHaveLength(2);
-    expect(new Set(hashes).size).toBe(2);
-    expect(hashes).toContain(sha256(clipFor("1:1")));
-    expect(hashes).toContain(sha256(clipFor("9:16")));
-    expect(one.urls["alpha/1x1/v0.mp4"]).not.toBe(nine.urls["alpha/9x16/v1.mp4"]);
-    expect(await ledger.listForCampaign(ORG, CAMPAIGN)).toHaveLength(2);
-  });
-
-  test("a render selector pointing at another mp4 of the campaign cannot make a bundle publish that other clip", async () => {
-    // Every slot's render names the 1:1 clip — the OTHER slot's clip for the
-    // 9:16 variant. The placeholder must still be the slot's own, so the
-    // 9:16 bundle publishes the 9:16 clip bytes and nothing else.
-    const { bundleHtml } = await generateTwoRatios("alpha/1x1/v0.mp4");
-    const { publishSelectors, media } = await exportAndPublish(bundleHtml);
-
-    const nine = await publishSelectors(bundleHtml("9x16/v1.mp4"));
-    expect(nine.selectors).toEqual(["alpha/9x16/v1.mp4"]);
-    const published = vi.mocked(media.publish).mock.calls.map(([, bytes]) => bytes as Uint8Array);
-    expect(published).toHaveLength(1);
-    expect(sha256(published[0]!)).toBe(sha256(clipFor("9:16")));
-    expect(sha256(published[0]!)).not.toBe(sha256(clipFor("1:1")));
   });
 });

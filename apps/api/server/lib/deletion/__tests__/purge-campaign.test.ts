@@ -533,14 +533,20 @@ describe("purge-campaign (D232, D246)", () => {
       );
     }
 
-    /** Seed a tombstoned campaign, its deletion row, and one published clip. */
+    /**
+     * Seed a tombstoned campaign, its deletion row, and one published clip.
+     * The clip is recorded while the campaign is LIVE, then the tombstone
+     * lands (CFAR6-record): `record()` refuses a non-live campaign, so the
+     * ledger row must be seeded in the order an export that raced the deletion
+     * would have produced — publish first, tombstone after.
+     */
     async function seedPurgeSubject(
       media: PublicAdMediaPort,
       orgId: string,
       slug: string,
       hash: string,
     ): Promise<{ campaignId: string; deletionId: string }> {
-      const campaignId = await seedCampaign(db, orgId, slug, { tombstoned: true });
+      const campaignId = await seedCampaign(db, orgId, slug);
       const published = await media.publish(orgId, CLIP_BYTES, hash);
       await new PgPublishedClipStore(db).record(
         orgId,
@@ -549,6 +555,7 @@ describe("purge-campaign (D232, D246)", () => {
         published.url,
         hash,
       );
+      await db.query(`update campaign set deleted_at = now() where id = $1::uuid`, [campaignId]);
       const { rows } = await db.query<{ id: string }>(
         `insert into deletion (org_id, kind, subject, requested_by, not_before)
            values ($1, 'campaign', $2, 'tester', now()) returning id`,

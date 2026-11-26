@@ -29,6 +29,34 @@ export class InvalidVideoSelectorError extends Error {
   }
 }
 
+/**
+ * A brief-authored free-text field carries the publish placeholder prefix
+ * (CFAR6 fix2). The prefix is the assembler's own token — the only thing that
+ * may ever carry it into a bundle is the `<video src>` the assembler itself
+ * emits. A headline, alt or clickTag that names it is a brief trying to route
+ * text through the publish path, so it is refused with the field named, never
+ * silently stripped.
+ */
+export class BriefPlaceholderPrefixError extends Error {
+  constructor(field: string) {
+    super(
+      `${field} must not contain the video placeholder prefix "${PUBLISH_PLACEHOLDER_URL_PREFIX}" — a placeholder URL belongs to the assembler's own video markup, never to brief-authored text.`,
+    );
+    this.name = "BriefPlaceholderPrefixError";
+  }
+}
+
+/**
+ * Refuse a brief-authored free-text value that carries the publish placeholder
+ * prefix. `field` names the field in the error — the caller spells it the way
+ * its own messages do (`template.layers[0].props.alt`, `campaignMessage`, …).
+ */
+export function refusePlaceholderPrefix(field: string, value: string): void {
+  if (typeof value === "string" && value.includes(PUBLISH_PLACEHOLDER_URL_PREFIX)) {
+    throw new BriefPlaceholderPrefixError(field);
+  }
+}
+
 /** A placeholder token found in generated HTML is not a valid selector. */
 export class InvalidVideoPlaceholderError extends Error {
   constructor(message: string) {
@@ -100,13 +128,26 @@ export function collectVideoPlaceholderSources(
 }
 
 /**
- * The `render` selectors whose placeholders appear in generated HTML, in
- * order of first appearance, deduped. The complement of
- * {@link collectVideoPlaceholderSources} — publish-time tooling reads the
- * bundle, finds every placeholder, and swaps it. Malformed tokens (a wrong
- * prefix tail, a selector the render pattern refuses) throw rather than
- * returning a partial list, and non-string input is a refusal, not an
- * empty scan.
+ * The `render` selectors whose placeholders appear in the `<video src>`
+ * attributes a bundle carries, in order of first appearance, deduped. The
+ * complement of {@link collectVideoPlaceholderSources} — publish-time tooling
+ * reads the bundle, finds every placeholder, and swaps it. Malformed tokens (a
+ * wrong prefix tail, a selector the render pattern refuses) throw rather than
+ * returning a partial list, and non-string input is a refusal, not an empty
+ * scan.
+ *
+ * **Only the `src` of a `<video>` element is scanned — never the whole
+ * bundle (CFAR6 fix2).** Headline, alt and clickTag text are brief-authored,
+ * so a bundle-wide scan let a brief that put a placeholder URL in its copy
+ * have that OTHER clip published. The assembler HTML-escapes every
+ * brief-authored interpolation (HL-D7), so brief text cannot inject a literal
+ * `<video` tag or a `src` attribute into the markup — an escaped
+ * `&lt;video src=…` in text, or a placeholder URL in an `alt`, a `clickTag`
+ * declaration or a link, is not a video element and is never scanned. The
+ * scan is therefore a strict, parser-free read of the exact shape the
+ * assembler emits: `<video` … `src="…"`, with the token's vocabulary
+ * (`[a-z0-9-]`, `/`, `.`) excluding whitespace, quotes, angle brackets and
+ * `&`, so the attribute value ends exactly at the closing quote.
  */
 export function findVideoPlaceholders(html: string): readonly string[] {
   if (typeof html !== "string") {
@@ -114,14 +155,12 @@ export function findVideoPlaceholders(html: string): readonly string[] {
       `findVideoPlaceholders: html must be a string, got ${typeof html}`,
     );
   }
-  // Prefix, then every non-delimiter character. The render pattern's
-  // vocabulary (`[a-z0-9-]`, `/`, `.`) excludes whitespace, quotes, angle
-  // brackets and `&`, so a placeholder inside an attribute ends exactly at
-  // the closing quote and a bare one at whitespace or end of string.
-  const tokenPattern = /https:\/\/publish\.invalid\/([^\s"'<>&]*)/g;
+  const videoSrcPattern = /<video\b[^>]*?\bsrc="([^"]*)"/g;
   const selectors: string[] = [];
-  for (const match of html.matchAll(tokenPattern)) {
-    const selector = match[1];
+  for (const match of html.matchAll(videoSrcPattern)) {
+    const src = match[1]!;
+    if (!src.startsWith(PUBLISH_PLACEHOLDER_URL_PREFIX)) continue;
+    const selector = src.slice(PUBLISH_PLACEHOLDER_URL_PREFIX.length);
     if (selector === "" || !VIDEO_RENDER_PATTERN.test(selector)) {
       throw new InvalidVideoPlaceholderError(
         `findVideoPlaceholders: malformed video placeholder token ${JSON.stringify(selector)} after ${PUBLISH_PLACEHOLDER_URL_PREFIX}`,

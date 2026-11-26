@@ -19,6 +19,8 @@
  * 3. Absent destination means no `clickTag` variable is emitted in the unit.
  */
 
+import { PUBLISH_PLACEHOLDER_URL_PREFIX } from "./video-placeholders.js";
+
 /**
  * The standard ad server click-tracking variable name (HL-D3).
  *
@@ -83,6 +85,17 @@ export interface ClickDestinationProblem {
  */
 export function clickDestinationProblem(destination: unknown): ClickDestinationProblem | undefined {
   if (destination === undefined) return undefined;
+  if (typeof destination === "string" && destination.includes(PUBLISH_PLACEHOLDER_URL_PREFIX)) {
+    // CFAR6 fix2: the clickTag is brief-authored text, and the placeholder
+    // prefix is the assembler's own token — a destination naming it is a brief
+    // trying to route text through the publish path. Refused with the field
+    // named, never silently stripped.
+    return {
+      field: "clickDestination",
+      must: `not contain the video placeholder prefix "${PUBLISH_PLACEHOLDER_URL_PREFIX}"`,
+      value: destination,
+    };
+  }
   if (typeof destination !== "string" || !isAbsoluteUrl(destination)) {
     return {
       field: "clickDestination",
