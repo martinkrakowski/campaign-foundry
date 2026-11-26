@@ -200,7 +200,18 @@ export function TemplateLibrary() {
     // `cf:templates-changed`); a save from the editor is then visible without a
     // close and a reopen. The listener rides the same effect as the open load,
     // and its cleanup removes it exactly when the modal closes.
+    /**
+     * A save from the editor can fire `cf:templates-changed` while the open
+     * load is still in flight. The two fetches then race, and the older one
+     * can settle *last* — repainting the refreshed list with stale entries
+     * (or resurrecting the spinner with an old error). So each load takes a
+     * token, and a settle only paints if its token is still the newest one;
+     * `active` stays as the unmount guard. The same reasoning as
+     * `renderAbort` above: ordering is decided by identity, not by the abort.
+     */
+    let loadToken = 0;
     const load = () => {
+      const token = ++loadToken;
       setEntries(null);
       setError(false);
       setBriefs(null);
@@ -212,11 +223,11 @@ export function TemplateLibrary() {
       (async () => {
         try {
           const templates = await listTemplates();
-          /* istanbul ignore next -- `active` is the unmount-race guard; false only if the modal closes mid-fetch */
-          if (active) setEntries(templates);
+          /* istanbul ignore next -- `active`/`token` guard a stale settle; false only on close mid-fetch or a superseded load */
+          if (active && token === loadToken) setEntries(templates);
         } catch {
           /* istanbul ignore next -- same unmount-race guard on the error path */
-          if (active) setError(true);
+          if (active && token === loadToken) setError(true);
         }
       })();
       // Provenance (T-D5) rides the same open. It is a brief-store read, not a
@@ -225,8 +236,8 @@ export function TemplateLibrary() {
       (async () => {
         try {
           const listed = await listBriefs();
-          /* istanbul ignore next -- unmount-race guard */
-          if (active) setBriefs(listed);
+          /* istanbul ignore next -- unmount-race / superseded-load guard */
+          if (active && token === loadToken) setBriefs(listed);
         } catch {
           /* provenance stays unknown; the detail view says so rather than claiming none */
         }
