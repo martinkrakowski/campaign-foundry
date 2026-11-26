@@ -1,5 +1,6 @@
-import { describe, test, expect, vi } from "vitest";
+import { describe, test, expect, vi, beforeEach } from "vitest";
 import type { GeneratedAsset } from "@campaignfoundry/CampaignOrchestration";
+import { PUBLISH_PLACEHOLDER_URL_PREFIX } from "@campaignfoundry/CampaignOrchestration";
 import type { DisplaySize } from "@campaignfoundry/CampaignOrchestration/display-sizes";
 import {
   PackageForPlatformUseCase,
@@ -67,6 +68,8 @@ const exec = (
     include: string[];
     capabilities: { motion: boolean };
     clickDestination?: string;
+    publishClip?: boolean;
+    clipPublisher?: (selector: string) => Promise<string>;
     /**
      * Profile lookup override for platforms `platformProfile` does not know —
      * how a test registers a profile that declares `html` (none ships one yet,
@@ -935,5 +938,310 @@ describe("PackageForPlatformUseCase — shipped html5 display profiles (X14)", (
       "alpha/300x250/index.html",
     ]);
     expect(platform.items.every((i) => i.format === "html")).toBe(true);
+  });
+});
+
+describe("PackageForPlatformUseCase — clip placeholder publishing (CFAR6C3)", () => {
+  const HTML_MAX_BYTES = 150 * 1024;
+  const CLIP_PROFILE: PlatformProfile = {
+    id: "html-banner",
+    label: "HTML Banner",
+    ratio: "1:1",
+    formats: ["html"],
+    safeInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    maxBytes: HTML_MAX_BYTES,
+  };
+  const html = (over: Partial<GeneratedAsset> = {}): GeneratedAsset =>
+    asset({
+      productId: "alpha",
+      aspectRatio: "1:1",
+      outputPath: "alpha/1x1.png",
+      format: "html",
+      htmlBundlePath: "alpha/1x1/index.html",
+      htmlFallbackPath: "alpha/1x1/fallback.png",
+      variantIndex: 1,
+      ...over,
+    });
+  const BUNDLE_PATH = "alpha/1x1/index.html";
+  const FALLBACK_PATH = "alpha/1x1/fallback.png";
+  const FALLBACK = new Uint8Array(8);
+  const urlFor = (selector: string): string => `https://media.test/${selector}`;
+
+  /** A store serving the given bundle for the html path and a small fallback. */
+  const htmlStore = (bundle: Uint8Array, fallback: Uint8Array = FALLBACK) => {
+    const store = fakeStore();
+    const bytesFor: Record<string, Uint8Array> = {
+      [BUNDLE_PATH]: bundle,
+      [FALLBACK_PATH]: fallback,
+    };
+    vi.mocked(store.readAsset).mockImplementation(
+      async (relativePath: string) => bytesFor[relativePath]!,
+    );
+    return store;
+  };
+
+  /** A bundle whose body carries each selector's placeholder `src` once. */
+  const bundleWith = (repeat: number, ...selectors: string[]): Uint8Array =>
+    new TextEncoder().encode(
+      `<!DOCTYPE html><html><body>${selectors
+        .map((selector) =>
+          `<video src="${PUBLISH_PLACEHOLDER_URL_PREFIX}${selector}"></video>`.repeat(repeat),
+        )
+        .join("")}</body></html>`,
+    );
+
+  const publisher = vi.fn(async (selector: string) => urlFor(selector));
+
+  beforeEach(() => {
+    publisher.mockClear();
+  });
+
+  test("publishClip false refuses a bundle that still carries placeholders, before any write", async () => {
+    const store = htmlStore(bundleWith(1, "alpha/1x1/v0.mp4"));
+    const result = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": CLIP_PROFILE },
+      clipPublisher: publisher,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toBe(
+        'Platform "html-banner": HTML asset alpha/v1 carries video clip placeholders but "publishClip" is not enabled — packaging would ship unresolvable placeholder URLs.',
+      );
+    }
+    expect(publisher).not.toHaveBeenCalled();
+    expect(store.writePackaged).not.toHaveBeenCalled();
+    expect(store.writeManifest).not.toHaveBeenCalled();
+  });
+
+  test("a bundle without placeholders packages normally with the flag false, and the publisher is never called", async () => {
+    const store = htmlStore(
+      new TextEncoder().encode("<!DOCTYPE html><html><body>still</body></html>"),
+    );
+    const result = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": CLIP_PROFILE },
+      publishClip: false,
+      clipPublisher: publisher,
+    });
+    expect(result.success).toBe(true);
+    expect(publisher).not.toHaveBeenCalled();
+    expect(store.packaged.map((p) => p.relativePath)).toEqual([BUNDLE_PATH, FALLBACK_PATH]);
+  });
+
+  test("publishClip true without a clip publisher refuses with zero writes", async () => {
+    const store = htmlStore(bundleWith(1, "alpha/1x1/v0.mp4"));
+    const result = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": CLIP_PROFILE },
+      publishClip: true,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toBe(
+        'Platform "html-banner": "publishClip" is enabled but no clip publisher was provided.',
+      );
+    }
+    expect(store.writePackaged).not.toHaveBeenCalled();
+    expect(store.writeManifest).not.toHaveBeenCalled();
+  });
+
+  test("substitutes each distinct placeholder's published URL once, unescaped, with zero placeholders left", async () => {
+    const bundle = bundleWith(2, "alpha/1x1/v0.mp4", "alpha/9x16/v1.mp4");
+    const store = htmlStore(bundle);
+    const result = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": CLIP_PROFILE },
+      publishClip: true,
+      clipPublisher: publisher,
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    // One publish per DISTINCT selector, despite the token appearing twice.
+    expect(publisher).toHaveBeenCalledTimes(2);
+    expect(publisher).toHaveBeenNthCalledWith(1, "alpha/1x1/v0.mp4");
+    expect(publisher).toHaveBeenNthCalledWith(2, "alpha/9x16/v1.mp4");
+
+    const written = store.packaged.find((p) => p.relativePath === BUNDLE_PATH)!;
+    const htmlText = new TextDecoder().decode(written.bytes);
+    expect(htmlText).toContain(urlFor("alpha/1x1/v0.mp4"));
+    expect(htmlText).toContain(urlFor("alpha/9x16/v1.mp4"));
+    expect(htmlText).not.toContain("publish.invalid");
+
+    const item = result.value.platforms[0].items[0];
+    expect(item.bytes).toBe(written.bytes.length);
+    // The substituted unit fits the 150 KiB cap the shipped profiles declare.
+    expect(item.checks).toEqual({ size: "pass" });
+  });
+
+  test("the size check re-measures the SUBSTITUTED bundle, recording fail but still packaging (HTML_MAX_BYTES)", async () => {
+    // The stored bundle is small; the published URLs are what push the unit over.
+    const bundle = bundleWith(1, "alpha/1x1/v0.mp4");
+    const longUrl = `https://media.test/${"a".repeat(HTML_MAX_BYTES)}`;
+    const store = htmlStore(bundle);
+    const result = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": CLIP_PROFILE },
+      publishClip: true,
+      clipPublisher: vi.fn(async () => longUrl),
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.value.platforms[0].items[0].checks).toEqual({ size: "fail" });
+    // A fail is recorded, not a refusal — both files were still written.
+    expect(store.packaged.map((p) => p.relativePath)).toEqual([BUNDLE_PATH, FALLBACK_PATH]);
+  });
+
+  test("publishes a selector used by two assets on two platforms exactly once per export", async () => {
+    const second: PlatformProfile = { ...CLIP_PROFILE, id: "html-social", ratio: "9:16" };
+    const store = fakeStore();
+    const bundles: Record<string, Uint8Array> = {
+      "alpha/1x1/index.html": bundleWith(1, "alpha/1x1/v0.mp4"),
+      "alpha/1x1/fallback.png": FALLBACK,
+      "alpha/9x16/index.html": bundleWith(1, "alpha/1x1/v0.mp4"),
+      "alpha/9x16/fallback.png": FALLBACK,
+    };
+    vi.mocked(store.readAsset).mockImplementation(async (p) => bundles[p]!);
+    const result = await exec(store, {
+      assets: [
+        html(),
+        html({
+          aspectRatio: "9:16",
+          htmlBundlePath: "alpha/9x16/index.html",
+          htmlFallbackPath: "alpha/9x16/fallback.png",
+          variantIndex: 2,
+        }),
+      ],
+      platforms: ["html-banner", "html-social"],
+      profiles: { "html-banner": CLIP_PROFILE, "html-social": second },
+      publishClip: true,
+      clipPublisher: publisher,
+    });
+    expect(result.success).toBe(true);
+    expect(publisher).toHaveBeenCalledTimes(1);
+    expect(publisher).toHaveBeenCalledWith("alpha/1x1/v0.mp4");
+    for (const written of store.packaged.filter((p) => p.relativePath.endsWith("index.html"))) {
+      expect(new TextDecoder().decode(written.bytes)).toContain(urlFor("alpha/1x1/v0.mp4"));
+    }
+  });
+
+  test("a second export publishes again — the per-export cache does not outlive execute()", async () => {
+    const store = htmlStore(bundleWith(1, "alpha/1x1/v0.mp4"));
+    const first = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": CLIP_PROFILE },
+      publishClip: true,
+      clipPublisher: publisher,
+    });
+    const second = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": CLIP_PROFILE },
+      publishClip: true,
+      clipPublisher: publisher,
+    });
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(publisher).toHaveBeenCalledTimes(2);
+  });
+
+  test("refuses every URL the safe-https pattern rejects, before any write", async () => {
+    const unsafe = [
+      "http://media.test/clip.mp4",
+      'https://media.test/clip.mp4?x="',
+      "https://media.test/a b.mp4",
+      "https://media.test/<b>",
+      "https://media.test/a&b",
+      "",
+      null,
+    ];
+    for (const bad of unsafe) {
+      const store = htmlStore(bundleWith(1, "alpha/1x1/v0.mp4"));
+      const result = await exec(store, {
+        assets: [html()],
+        platforms: ["html-banner"],
+        profiles: { "html-banner": CLIP_PROFILE },
+        publishClip: true,
+        clipPublisher: vi.fn(async () => bad as string),
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.message).toBe(
+          'Platform "html-banner": The clip publisher returned an unsafe URL for video placeholder "alpha/1x1/v0.mp4" — expected an absolute https URL with no whitespace, quotes, angle brackets or ampersands.',
+        );
+      }
+      expect(store.writePackaged).not.toHaveBeenCalled();
+      expect(store.writeManifest).not.toHaveBeenCalled();
+    }
+  });
+
+  test("refuses when the publisher throws, wrapping the message for the platform", async () => {
+    const store = htmlStore(bundleWith(1, "alpha/1x1/v0.mp4"));
+    const result = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": CLIP_PROFILE },
+      publishClip: true,
+      clipPublisher: vi.fn(async () => {
+        throw new Error("the public bucket refused the publish");
+      }),
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toBe(
+        'Platform "html-banner": the public bucket refused the publish',
+      );
+    }
+    expect(store.writePackaged).not.toHaveBeenCalled();
+    expect(store.writeManifest).not.toHaveBeenCalled();
+  });
+
+  test("refuses a malformed placeholder token with the finder's message, before any write", async () => {
+    const store = htmlStore(
+      new TextEncoder().encode(`<video src="${PUBLISH_PLACEHOLDER_URL_PREFIX}"></video>`),
+    );
+    const result = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": CLIP_PROFILE },
+      publishClip: true,
+      clipPublisher: publisher,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toContain('Platform "html-banner": findVideoPlaceholders:');
+      expect(result.error.message).toContain("malformed video placeholder token");
+    }
+    expect(publisher).not.toHaveBeenCalled();
+    expect(store.writePackaged).not.toHaveBeenCalled();
+    expect(store.writeManifest).not.toHaveBeenCalled();
+  });
+
+  test("refuses when the bundle cannot be read, before any write", async () => {
+    const store = fakeStore();
+    vi.mocked(store.readAsset).mockRejectedValue(
+      new Error("Asset not found: alpha/1x1/index.html"),
+    );
+    const result = await exec(store, {
+      assets: [html()],
+      platforms: ["html-banner"],
+      profiles: { "html-banner": CLIP_PROFILE },
+      publishClip: true,
+      clipPublisher: publisher,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toBe(
+        'Platform "html-banner": Asset not found: alpha/1x1/index.html',
+      );
+    }
+    expect(store.writePackaged).not.toHaveBeenCalled();
+    expect(store.writeManifest).not.toHaveBeenCalled();
   });
 });

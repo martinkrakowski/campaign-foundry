@@ -1,7 +1,9 @@
 import {
   assetIdentity,
   CLICK_TAG_VARIABLE,
+  findVideoPlaceholders,
   isExpired,
+  PUBLISH_PLACEHOLDER_URL_PREFIX,
   parseExpiresOnMs,
   type AudioRights,
 } from "@campaignfoundry/CampaignOrchestration";
@@ -44,6 +46,41 @@ export interface PackageableAsset {
   readonly audioRights?: AudioRights;
 }
 
+/**
+ * Publishes ONE video placeholder selector to the public bucket and answers the
+ * published `https://` URL. The composition root wires it to
+ * `PublishAdClipUseCase`; packaging knows nothing about how publication happens.
+ */
+export type ClipPublisher = (selector: string) => Promise<string>;
+
+/** The bundle carries video placeholders but the request did not ask to publish. */
+export class UnpublishedClipPlaceholderError extends Error {
+  constructor(assetDescription: string) {
+    super(
+      `${assetDescription} carries video clip placeholders but "publishClip" is not enabled — packaging would ship unresolvable placeholder URLs.`,
+    );
+    this.name = "UnpublishedClipPlaceholderError";
+  }
+}
+
+/** Publishing was requested but no `clipPublisher` was injected. */
+export class MissingClipPublisherError extends Error {
+  constructor() {
+    super('"publishClip" is enabled but no clip publisher was provided.');
+    this.name = "MissingClipPublisherError";
+  }
+}
+
+/** The publisher answered something that is not a safe `https://` URL. */
+export class InvalidPublishedClipUrlError extends Error {
+  constructor(selector: string) {
+    super(
+      `The clip publisher returned an unsafe URL for video placeholder ${JSON.stringify(selector)} — expected an absolute https URL with no whitespace, quotes, angle brackets or ampersands.`,
+    );
+    this.name = "InvalidPublishedClipUrlError";
+  }
+}
+
 export interface PackageForPlatformInput {
   readonly campaignId: string;
   readonly assets: readonly PackageableAsset[];
@@ -61,6 +98,14 @@ export interface PackageForPlatformInput {
   readonly capabilities?: PlatformCapabilities;
   /** The brief's click destination URL (HL2, HL-D3). */
   readonly clickDestination?: string;
+  /**
+   * Publish each video clip placeholder in stored HTML bundles (CFAR6C3) by
+   * substituting the published public URL. Default `false`: a bundle that still
+   * carries placeholders is refused rather than shipped unresolvable.
+   */
+  readonly publishClip?: boolean;
+  /** Publishes one placeholder selector to the public bucket; required when `publishClip` is true. */
+  readonly clipPublisher?: ClipPublisher;
 }
 
 export interface PackagedPlatform {
@@ -246,6 +291,10 @@ export class PackageForPlatformUseCase {
     }
 
     const skipped = input.skipped ?? 0;
+    // One publish per DISTINCT selector per export (CFAR6C3): the same clip used
+    // by several bundles, sizes or platforms is published once, and a second
+    // execute() call starts a fresh export and publishes again.
+    const publishedUrls = new Map<string, string>();
     const platforms: PackagedPlatform[] = [];
     for (const { platformId, profile, eligible, selected } of selections) {
       try {
@@ -257,7 +306,15 @@ export class PackageForPlatformUseCase {
             isMotionAsset(asset)
               ? await this.packageMotion(platformId, profile, asset)
               : isHtmlAsset(asset) && profile.formats.includes("html")
-                ? await this.packageHtml(platformId, profile, asset, input.clickDestination)
+                ? await this.packageHtml(
+                    platformId,
+                    profile,
+                    asset,
+                    input.clickDestination,
+                    input.publishClip ?? false,
+                    input.clipPublisher,
+                    publishedUrls,
+                  )
                 : isHtmlAsset(asset) &&
                     profile.formats.includes("static") &&
                     profile.sizes !== undefined
@@ -348,25 +405,63 @@ export class PackageForPlatformUseCase {
    * The bundle is the item (size check); its raster fallback rides along (D122).
    * Markup is never rasterised, so no pixel hash is recorded for it — verification
    * is structural (the bundle parses, references resolve, the fallback exists).
+   *
+   * Video placeholders (CFAR6C2) are resolved here — never at assemble time — so
+   * the stored bundle stays the source of truth and publication happens once per
+   * export. Every refusal below happens BEFORE any packaged write: placeholders
+   * the request did not ask to publish, a missing publisher, and an unsafe URL
+   * each leave zero package files and zero manifests behind.
    */
   private async packageHtml(
     platformId: string,
     profile: PlatformProfile,
     asset: PackageableAsset & { htmlBundlePath: string; htmlFallbackPath: string },
-    briefDestination?: string,
+    briefDestination: string | undefined,
+    publishClip: boolean,
+    clipPublisher: ClipPublisher | undefined,
+    publishedUrls: Map<string, string>,
   ): Promise<PackageManifestItem> {
     const bundle = await this.store.readAsset(asset.htmlBundlePath);
+    const bundleText = new TextDecoder().decode(bundle);
     const destination = asset.clickDestination ?? briefDestination;
-    if (destination !== undefined) {
-      const bundleText = new TextDecoder().decode(bundle);
-      if (!bundleText.includes(CLICK_TAG_VARIABLE)) {
-        throw new Error(
-          `HTML asset ${assetIdentity(asset)} has clickDestination but bundle is missing "${CLICK_TAG_VARIABLE}" variable declaration.`,
-        );
+    if (destination !== undefined && !bundleText.includes(CLICK_TAG_VARIABLE)) {
+      throw new Error(
+        `HTML asset ${assetIdentity(asset)} has clickDestination but bundle is missing "${CLICK_TAG_VARIABLE}" variable declaration.`,
+      );
+    }
+    // Malformed placeholder tokens throw here (CFAR6C2), before anything is written.
+    const placeholders = findVideoPlaceholders(bundleText);
+    let updatedBundle = bundle;
+    if (placeholders.length > 0) {
+      if (!publishClip) {
+        throw new UnpublishedClipPlaceholderError(`HTML asset ${assetIdentity(asset)}`);
       }
+      if (clipPublisher === undefined) throw new MissingClipPublisherError();
+      let updatedHtml = bundleText;
+      for (const selector of placeholders) {
+        let url = publishedUrls.get(selector);
+        if (url === undefined) {
+          url = await clipPublisher(selector);
+          // Unescaped substitution means the URL is the one thing standing
+          // between a placeholder and the markup, so anything carrying a
+          // delimiter, a scheme other than https, or non-string nonsense is
+          // refused rather than escaped around.
+          if (typeof url !== "string" || !/^https:\/\/[^\s"'<>&]+$/.test(url)) {
+            throw new InvalidPublishedClipUrlError(selector);
+          }
+          publishedUrls.set(selector, url);
+        }
+        // Unescaped, byte-for-byte token replacement — no HTML re-assembly.
+        updatedHtml = updatedHtml.replaceAll(`${PUBLISH_PLACEHOLDER_URL_PREFIX}${selector}`, url);
+      }
+      updatedBundle = new TextEncoder().encode(updatedHtml);
     }
     const fallback = await this.store.readAsset(asset.htmlFallbackPath);
-    const packagedPath = await this.store.writePackaged(platformId, asset.htmlBundlePath, bundle);
+    const packagedPath = await this.store.writePackaged(
+      platformId,
+      asset.htmlBundlePath,
+      updatedBundle,
+    );
     const fallbackPath = await this.store.writePackaged(
       platformId,
       asset.htmlFallbackPath,
@@ -375,7 +470,7 @@ export class PackageForPlatformUseCase {
     // The budget is the unit's, and the unit a network measures is the package it
     // uploads: `index.html` *and* its raster fallback. Counting the bundle alone
     // would pass a unit whose fallback pushes it over (X14).
-    const unitBytes = bundle.length + fallback.length;
+    const unitBytes = updatedBundle.length + fallback.length;
     return {
       productId: asset.productId,
       aspectRatio: asset.aspectRatio,
@@ -385,7 +480,7 @@ export class PackageForPlatformUseCase {
       source: asset.htmlBundlePath,
       packagedPath,
       fallbackPath,
-      bytes: bundle.length,
+      bytes: updatedBundle.length,
       checks: { size: unitBytes <= profile.maxBytes ? "pass" : "fail" },
     };
   }
