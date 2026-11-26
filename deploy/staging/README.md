@@ -24,6 +24,13 @@ Object storage is SeaweedFS on this node (D201, replacing D174c's Backblaze B2,
 which waits for production). Versioning and object lock stay **off**
 (seaweedfs#8073): staging must behave like the cloud bucket it will become.
 
+**Public ad media (PT-4k).** `PUBLIC_MEDIA_BUCKET` and `PUBLIC_MEDIA_BASE_URL`
+require a dedicated public-read bucket/prefix, separate from `S3_BUCKET`, that
+serves unguessable, immutable, org-prefixed keys
+(`/{org}/{128-bit-random}/{content-hash}.mp4`) over plain URLs — the private
+bucket stays presigned-only, and nothing published there is readable without a
+signature.
+
 ## One-time setup (cluster-wide; done 2026-09-25)
 
 **Kubeconfig (2026-10-01):** every command here, and `deploy.sh`, uses a private copy at `~/.kube/config` on midnight (`0600`, owned by the operator), never the cluster-admin `/etc/rancher/k3s/k3s.yaml`, which is being moved to `0600 root`. One-time:
