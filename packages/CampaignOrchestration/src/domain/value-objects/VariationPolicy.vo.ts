@@ -302,7 +302,6 @@ export class VariationPolicy {
     // Frozen defaults: an absent axis resolves to the pre-"4:5" vocabulary so
     // `policyHash` and classic matrices stay stable when the vocabulary grows.
     const defaultRatios = AspectRatio.defaults().map((ratio) => ratio.value);
-    const motionRatios = unique(input.motionRatios ?? defaultRatios);
     const ratiosResult = requireRatios(input.ratios, allRatios);
     if (!ratiosResult.success) return ratiosResult;
     // The author's selection narrows first, then the motion filter: a motion-only
@@ -312,6 +311,16 @@ export class VariationPolicy {
     // requested ratio, since its non-motion ratios are legitimately the stills
     // the static format requested.
     const requested = unique(ratiosResult.value ?? defaultRatios);
+    // When the caller supplies no `motionRatios` (no `output.platforms`), motion
+    // is resolved from the ratio axis itself: the frozen defaults keep
+    // `policyHash` byte-stable for unpinned briefs and for briefs pinning
+    // subsets of them, while a pinned ratio outside the defaults (such as
+    // `4:5`) is appended so motion may be drawn for it too.
+    const pinnedExtras = requested.filter((ratio) => !defaultRatios.includes(ratio));
+    const motionRatios =
+      input.motionRatios !== undefined
+        ? unique(input.motionRatios)
+        : unique([...defaultRatios, ...pinnedExtras]);
     const ratios =
       motionEnabled && !mixStatic
         ? requested.filter((ratio) => motionRatios.includes(ratio))

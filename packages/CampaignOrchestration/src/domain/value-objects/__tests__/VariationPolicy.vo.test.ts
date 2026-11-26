@@ -19,6 +19,7 @@ import {
   type PolicyHasher,
 } from "../VariationPolicy.vo.js";
 import type { CopyTimeline } from "../CopyTimeline.vo.js";
+import { enumerateAxes } from "../../../application/use-cases/PlanCapacity.js";
 import { nodeCryptoPolicyHasher } from "../../../infrastructure/index.js";
 
 const fromBrief = (
@@ -705,6 +706,83 @@ describe("VariationPolicy headline axis", () => {
       if (result.success) return;
       expect(result.error.message).toMatch(
         /requests only "motion" but none of output\.platforms package it/,
+      );
+    });
+  });
+
+  describe("motion on a pinned non-default ratio when no platforms are supplied", () => {
+    const motionOnly = (ratios: PlanInput["ratios"], motionRatios: PlanInput["motionRatios"]) =>
+      fromBrief(
+        brief({
+          variation: { count: 4, axes: { motion: ["ken-burns-in"], duration: [4] } },
+          output: { formats: ["motion"] },
+        }),
+        { ratios, motionRatios },
+      );
+
+    test("a motion-only brief pinning 4:5 with absent motionRatios draws motion at 4:5", () => {
+      const result = motionOnly(["4:5"], undefined);
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.value.ratios).toEqual(["4:5"]);
+      expect(result.value.motionRatios).toEqual(["1:1", "9:16", "16:9", "4:5"]);
+      const axes = enumerateAxes(result.value);
+      const at45 = axes.filter((axis) => axis.aspectRatio === "4:5");
+      expect(at45.length).toBeGreaterThan(0);
+      expect(at45.every((axis) => axis.motion === "ken-burns-in" && axis.durationSec === 4)).toBe(
+        true,
+      );
+    });
+
+    test("a motion-only brief pinning 4:5 with platforms packaging only 9:16 is still refused", () => {
+      const result = motionOnly(["4:5"], ["9:16"]);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.message).toBe(
+          'output.formats requests only "motion", which the requested platforms package at [9:16], but variation.axes.ratio selects [4:5] — select one of those ratios or add the static format.',
+        );
+      }
+    });
+  });
+
+  describe("policyHash stability when absent motionRatios resolve from the pinned ratio axis", () => {
+    const motionOnly = (ratios: PlanInput["ratios"]) =>
+      brief({
+        variation: { count: 4, axes: { motion: ["ken-burns-in"], duration: [4] } },
+        output: { formats: ["motion"] },
+      });
+
+    test.each([
+      [
+        "pinning [9:16]",
+        ["9:16"] as const,
+        "983cb9f9a388dc57796a2db2501dc19ca423ef970745b7a6399462804eac8470",
+      ],
+      [
+        "pinning [1:1, 16:9]",
+        ["1:1", "16:9"] as const,
+        "8156ef43a732aaa476558da86a73a2c57c5749a63da9864a633e90644a4dd136",
+      ],
+    ] as const)(
+      "%s keeps its recorded policyHash with absent motionRatios",
+      (_label, ratios, expected) => {
+        const result = fromBrief(motionOnly(undefined), { ratios: [...ratios] });
+        expect(result.success).toBe(true);
+        if (!result.success) return;
+        expect(result.value.ratios).toEqual([...ratios]);
+        expect(result.value.motionRatios).toEqual(["1:1", "9:16", "16:9"]);
+        expect(result.value.policyHash).toBe(expected);
+      },
+    );
+
+    test("an unpinned motion-only brief still resolves motionRatios to the frozen defaults and keeps its golden policyHash", () => {
+      const result = fromBrief(motionOnly(undefined));
+      expect(result.success).toBe(true);
+      if (!result.success) return;
+      expect(result.value.ratios).toEqual(["1:1", "9:16", "16:9"]);
+      expect(result.value.motionRatios).toEqual(["1:1", "9:16", "16:9"]);
+      expect(result.value.policyHash).toBe(
+        "0da0c9f58a584d2d67c5da9c9983acc1217640f433d4f0c1ef6068a7552717e6",
       );
     });
   });
