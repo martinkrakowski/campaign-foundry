@@ -1,6 +1,6 @@
 # Waves service on midnight — one status page for every project
 
-> **Architecture & Development Plan** · 2026-10-01 · status: **r5, deploy-early order; `waves.midnight.lan` resolves (10.10.0.10, Traefik 404 until the ingress exists)** (owner request: "move the wave-status page over to midnight, and host it on k3s … ALL projects can update it. Each project would register itself … User loads https://waves.midnight.lan and sees all projects and their respective lanes."). **r2** folds in Fable's plan review (3 blockers, 5 bugs, 4 suggestions).
+> **Architecture & Development Plan** · 2026-10-01 · status: **SUPERSEDED (2026-11-25): the host this plan targets is retired.** **r5, deploy-early order; `waves.midnight.lan` resolves (10.10.0.10, Traefik 404 until the ingress exists)** (owner request: "move the wave-status page over to midnight, and host it on k3s … ALL projects can update it. Each project would register itself … User loads https://waves.midnight.lan and sees all projects and their respective lanes."). **r2** folds in Fable's plan review (3 blockers, 5 bugs, 4 suggestions).
 
 ## 0. What this plan answers
 
