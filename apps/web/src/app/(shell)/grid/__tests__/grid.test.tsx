@@ -1391,3 +1391,27 @@ describe("GridPage — a signed-URL refresh keeps the reviewer's filters (PT-4g3
     expect(tileSrc()).toContain("v=rev-2");
   });
 });
+
+describe("GridPage — html rows carrying a video path (CFAR6E)", () => {
+  test("an html asset with videoPath renders as a static img tile, never a motion video", async () => {
+    const html = served(
+      makeAsset({
+        format: "html",
+        videoPath: "alpha/1x1/v0.mp4",
+        variantIndex: 0,
+        treatment: "headline-bottom-bold",
+      }),
+    );
+    seedPersistedRun([html]);
+    const { container } = renderWithRun(<GridPage />);
+    const img = await screen.findByRole("img", {
+      name: "alpha @ 1:1 · v0 · headline-bottom-bold",
+    });
+    expect(img.getAttribute("src")).toBe(html.outputUrl);
+    expect(container.querySelector("video")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Download .MP4" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Download .PNG" }).getAttribute("href")).toBe(
+      html.outputDownloadUrl,
+    );
+  });
+});

@@ -896,3 +896,26 @@ describe("ExportPage — a signed-URL refresh does not refetch packages (PT-4g3 
     expect(packageReadsFor("seed")).toBe(seedBaseline);
   });
 });
+
+describe("ExportPage — html rows carrying a video path (CFAR6E)", () => {
+  test("an approved html asset with videoPath exports as Download .PNG, not Download .MP4", async () => {
+    seedDecisions({ "alpha/v0": "approved" });
+    const html = makeAsset({
+      format: "html",
+      videoPath: "alpha/1x1/v0.mp4",
+      variantIndex: 0,
+    });
+    // D204: URLs are minted per response, so the fixture says which backend's.
+    const assets = [{ ...html, ...s3Urls(html) }];
+    seedPersistedRun(assets);
+    mockPipelineApi({
+      report: { halted: false, assets, log: { entries: [], campaignId: "seed" } },
+      packages: () => json({ platforms: [] }, 404),
+    });
+    renderWithRun(<ExportPage />);
+    const png = await screen.findByRole("link", { name: "Download .PNG" });
+    // The D212 download field, not a path the page builds.
+    expect(png.getAttribute("href")).toBe(assets[0].outputDownloadUrl);
+    expect(screen.queryByRole("link", { name: "Download .MP4" })).toBeNull();
+  });
+});

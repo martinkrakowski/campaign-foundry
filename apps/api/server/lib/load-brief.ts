@@ -31,6 +31,7 @@ import {
   layerFrameProblem,
   layerLinkProblem,
   layerPropsProblem,
+  videoLayerProblem,
   layerSpanProblem,
   layerTimeFieldProblem,
   layerTracksProblem,
@@ -343,8 +344,17 @@ export function validateTemplate(value: unknown, type?: CampaignType): BriefTemp
     // D134 — a layer's own props, when present, must be its kind's. Structural,
     // never lenient (the `validateSizes` convention): the decision is the
     // domain's `layerPropsProblem`, shared with `isBriefTemplate` so the two
-    // boundaries cannot drift — only the message shape is local.
-    const propsProblem = layerPropsProblem(layer.kind as LayerKind, layer.props);
+    // boundaries cannot drift — only the message shape is local. A `video`
+    // layer's props shape depends on the creative type, so the domain's
+    // `videoLayerProblem` decides first and `layerPropsProblem` never sees it.
+    const propsProblem =
+      layer.kind === "video"
+        ? videoLayerProblem(
+            value.creativeType as CreativeType,
+            layer.kind as LayerKind,
+            layer.props,
+          )
+        : layerPropsProblem(layer.kind as LayerKind, layer.props);
     if (propsProblem !== undefined) {
       throw new Error(
         `Campaign brief field "template.layers[${i}].props${propsProblem.path}" must ${propsProblem.must}; got ${JSON.stringify(propsProblem.value)}.`,

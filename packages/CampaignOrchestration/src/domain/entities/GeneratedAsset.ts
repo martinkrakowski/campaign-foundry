@@ -66,7 +66,11 @@ export interface GeneratedAsset {
   readonly size?: DisplaySize;
   /** Relative path of the saved PNG (the poster, for motion), e.g. "hydra-bottle/1x1.png". */
   readonly outputPath: string;
-  /** Relative path of the saved mp4. Motion variants only; static/classic omit it. */
+  /**
+   * Relative path of the saved mp4. Motion variants carry it, and so do
+   * `image-html` slots whose template has an enabled `video` layer (CFAR6E).
+   * Static/classic rows and video-layer-free html slots omit it.
+   */
   readonly videoPath?: string;
   /** Relative path of the assembled HTML bundle. HTML units only; others omit it. */
   readonly htmlBundlePath?: string;
