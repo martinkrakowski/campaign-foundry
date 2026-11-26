@@ -125,7 +125,7 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
 
     expect(CREATIVE_TYPE_RULES["image-html"]).toEqual({
       unit: "standard-web",
-      accepts: ["image", "logo", "static-text", "shade", "accent", "fill"],
+      accepts: ["image", "video", "logo", "static-text", "shade", "accent", "fill"],
       required: ["image", "static-text"],
       maxOf: { logo: 1, shade: 1, accent: 1 },
       sharedBudgets: [{ kinds: ["static-text"], max: 1 }],
@@ -160,7 +160,7 @@ describe("creative types and compatibility rules (D119, D124, D131)", () => {
   test("isLinkableKind reads the table: image-html image and static-text only (D165)", () => {
     expect(isLinkableKind("image-html", "image")).toBe(true);
     expect(isLinkableKind("image-html", "static-text")).toBe(true);
-    for (const kind of ["logo", "shade", "accent", "fill"] as const) {
+    for (const kind of ["logo", "video", "shade", "accent", "fill"] as const) {
       expect(isLinkableKind("image-html", kind), kind).toBe(false);
     }
     for (const kind of CREATIVE_TYPE_RULES["image-text"].accepts) {
