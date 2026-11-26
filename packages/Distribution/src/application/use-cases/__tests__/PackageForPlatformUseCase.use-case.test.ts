@@ -1537,6 +1537,8 @@ function clipBytes(
   return new Uint8Array([
     ...ftyp(),
     ...moov([mvhd(opts?.timescale ?? 600, opts?.duration ?? 600), videoTrak(entryType)]),
+    // Faststart: moov precedes mdat.
+    ...box("mdat", [0, 0, 0, 0]),
   ]);
 }
 

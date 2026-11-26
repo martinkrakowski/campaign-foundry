@@ -82,7 +82,20 @@ const validAdClipBytes = (): Uint8Array => {
   const entry = concat([u32(8 + 78 + avcC.length), ascii("avc1"), new Uint8Array(78), avcC]);
   const stsd = box("stsd", new Uint8Array(4), u32(1), entry);
   const moov = box("moov", mvhd, box("trak", box("mdia", hdlr, box("minf", box("stbl", stsd)))));
-  return concat([ftyp, moov]);
+  // Faststart: moov precedes mdat.
+  return concat([ftyp, moov, box("mdat", new Uint8Array(4))]);
+};
+
+/** The same clip with `mdat` before `moov` — refused as `not-faststart`. */
+const nonFaststartAdClipBytes = (): Uint8Array => {
+  const ftyp = box("ftyp", ascii("isom"), u32(0), ascii("isom"));
+  const mvhd = box("mvhd", concat([new Uint8Array(12), u32(1000), u32(1000)]));
+  const hdlr = box("hdlr", new Uint8Array(8), ascii("vide"));
+  const avcC = box("avcC", new Uint8Array(4));
+  const entry = concat([u32(8 + 78 + avcC.length), ascii("avc1"), new Uint8Array(78), avcC]);
+  const stsd = box("stsd", new Uint8Array(4), u32(1), entry);
+  const moov = box("moov", mvhd, box("trak", box("mdia", hdlr, box("minf", box("stbl", stsd)))));
+  return concat([ftyp, box("mdat", new Uint8Array(4)), moov]);
 };
 
 /** A recording double for the public bucket — the publisher's observable edge. */
@@ -336,6 +349,28 @@ describe("POST /campaigns/package — publishClip (CFAR6C3)", () => {
     expect(res.status).toBe(422);
     const body = (await res.json()) as { error: string };
     expect(body.error).toContain(`Platform "${PLATFORM}":`);
+    expect(await store.list(`org/local/campaign/${CAMPAIGN}/packages/`)).toEqual([]);
+  });
+
+  test("refuses non-faststart clip with 422 without publishing or writing packages", async () => {
+    await seedCampaign(harness.db);
+    await seedReport(harness.db);
+    const prefix = renderPrefix("local", CAMPAIGN);
+    await store.put(`${prefix}alpha/1x1/index.html`, new TextEncoder().encode(BUNDLE_HTML), {
+      contentType: "text/html",
+    });
+    await store.put(`${prefix}alpha/1x1/fallback.png`, PNG, { contentType: "image/png" });
+    // The clip the placeholder names has mdat before moov: the publisher's
+    // use case refuses it as not-faststart, packaging refuses, nothing is written.
+    await store.put(`${prefix}${SELECTOR}`, nonFaststartAdClipBytes(), {
+      contentType: "video/mp4",
+    });
+
+    const res = await call({ campaignId: SLUG, platforms: [PLATFORM], publishClip: true });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain(`Platform "${PLATFORM}":`);
+    expect(media.publish).not.toHaveBeenCalled();
     expect(await store.list(`org/local/campaign/${CAMPAIGN}/packages/`)).toEqual([]);
   });
 

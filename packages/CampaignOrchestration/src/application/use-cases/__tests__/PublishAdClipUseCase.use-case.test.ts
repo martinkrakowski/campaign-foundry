@@ -37,11 +37,11 @@ const box = (type: string, ...payload: readonly Uint8Array[]): Uint8Array => {
 };
 
 /**
- * A minimal clip `validateAdClip` accepts: `ftyp` branded `isom`, a `moov`
- * with a 1-second v0 `mvhd`, and one video `trak` whose `stsd` carries an
- * `avc1` entry with an `avcC` child.
+ * The box pieces of a minimal clip `validateAdClip` accepts: `ftyp` branded
+ * `isom`, a `moov` with a 1-second v0 `mvhd`, and one video `trak` whose
+ * `stsd` carries an `avc1` entry with an `avcC` child, plus an `mdat`.
  */
-const validAdClipBytes = (): Uint8Array => {
+const clipPieces = (): { ftyp: Uint8Array; moov: Uint8Array; mdat: Uint8Array } => {
   const ftyp = box("ftyp", ascii("isom"), u32(0), ascii("isom"));
   const mvhdPayload = concat([
     new Uint8Array(12), // version 0 + flags + ctime + mtime
@@ -63,7 +63,19 @@ const validAdClipBytes = (): Uint8Array => {
   const mdia = box("mdia", hdlr, minf);
   const trak = box("trak", mdia);
   const moov = box("moov", mvhd, trak);
-  return concat([ftyp, moov]);
+  return { ftyp, moov, mdat: box("mdat", new Uint8Array(4)) };
+};
+
+/** Faststart: ftyp -> moov -> mdat. */
+const validAdClipBytes = (): Uint8Array => {
+  const { ftyp, moov, mdat } = clipPieces();
+  return concat([ftyp, moov, mdat]);
+};
+
+/** Non-faststart: ftyp -> mdat -> moov — the same bytes, mdat moved first. */
+const nonFaststartAdClipBytes = (): Uint8Array => {
+  const { ftyp, moov, mdat } = clipPieces();
+  return concat([ftyp, mdat, moov]);
 };
 
 const ORG = "acme";
@@ -227,6 +239,21 @@ describe("PublishAdClipUseCase", () => {
     const publicAdMedia = deps.publicAdMedia!;
 
     await expect(execute(deps)).rejects.toThrow(InvalidAdClipError);
+    expect(publicAdMedia.publish).not.toHaveBeenCalled();
+    expect(deps.publishedClipRecord.record).not.toHaveBeenCalled();
+  });
+
+  it("refuses non-faststart clip as not-faststart without publishing or recording", async () => {
+    const { deps } = makeDeps({ objectStore: fakeObjectStore(nonFaststartAdClipBytes()) });
+    const publicAdMedia = deps.publicAdMedia!;
+
+    const error = await execute(deps).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(InvalidAdClipError);
+    expect((error as InvalidAdClipError).reason).toBe("not-faststart");
+    // No public object and no ledger row.
     expect(publicAdMedia.publish).not.toHaveBeenCalled();
     expect(deps.publishedClipRecord.record).not.toHaveBeenCalled();
   });
