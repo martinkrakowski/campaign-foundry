@@ -110,14 +110,9 @@ describe.skipIf(!url)("PgTemplateStore races two real connections at the cap (fi
       let settled = false;
       const saveB = store
         .saveTemplate(orgTemplate({ id: `blocked-${randomUUID().slice(0, 8)}`, version: 1 }), "u1")
-        .then(
-          () => {
-            settled = true;
-          },
-          () => {
-            settled = true;
-          },
-        );
+        .finally(() => {
+          settled = true;
+        });
       await new Promise((resolve) => setTimeout(resolve, 400));
       expect(settled).toBe(false);
 
