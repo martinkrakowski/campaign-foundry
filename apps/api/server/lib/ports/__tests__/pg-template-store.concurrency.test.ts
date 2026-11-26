@@ -143,6 +143,14 @@ describe.skipIf(!url)("PgTemplateStore races two real connections at the cap (fi
     // fresh ids at the boundary and then deletes the admitted row, putting the
     // org back at MAX - 1 for the next round.
     const store = new PgTemplateStore(db, orgId);
+    // The blocking test above leaves its saved template behind: trim the org
+    // back to exactly MAX - 1 so round 0 starts at the boundary.
+    await db.query(
+      `delete from template where org_id = $1 and id not in (
+         select id from (select distinct id from template where org_id = $1 order by id limit $2) keep
+       )`,
+      [orgId, MAX_TEMPLATES_PER_ORG - 1],
+    );
     for (let round = 0; round < 20; round += 1) {
       const idA = `racer-a-${round}-${randomUUID().slice(0, 8)}`;
       const idB = `racer-b-${round}-${randomUUID().slice(0, 8)}`;
